@@ -8,6 +8,9 @@ mod detached_tests;
 pub mod display;
 pub mod error;
 pub mod graph;
+mod incremental;
+#[cfg(test)]
+mod incremental_tests;
 pub mod nodes;
 mod scatter;
 pub mod schema;
@@ -32,7 +35,9 @@ use arora_types::{
     value::{ConversionError, StructureField, Value},
 };
 use error::BehaviorTreeError;
-use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
+use schema::{
+    CallExpression, Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
+};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -130,9 +135,10 @@ impl BehaviorTree {
     /// tree's error first, then the sinks'.
     fn tick_root(
         &self,
-        root: &TickId,
+        root: &TickLink,
         caller: &mut dyn CallBridge,
     ) -> Result<Status, BehaviorTreeError> {
+        root.function.incremental.begin_tick();
         self.detached.begin_tick();
         let status = root.tick(caller);
         let variables = self.variables.borrow();
@@ -242,18 +248,29 @@ fn selected_source(expression: &Expression) -> &Expression {
 /// Move `held`'s value into `cell` when both are tree-local, leaving `held`
 /// the value `cell` had.
 fn take_local(cell: &VariableCell, held: &VariableCell) {
-    if let (VariableCell::Local(cell), VariableCell::Local(held)) = (cell, held) {
-        cell.swap(held);
+    if matches!(
+        (cell, held),
+        (VariableCell::Local(_), VariableCell::Local(_))
+    ) {
+        let value = cell.get();
+        cell.set_opt(held.get());
+        held.set_opt(value);
     }
 }
 
 pub struct BehaviorTreeRuntime<'a> {
     caller: &'a mut dyn CallBridge,
-    tick: TickId,
+    tick: TickLink,
     tree: &'a BehaviorTree,
 }
 
 impl<'a> BehaviorTreeRuntime<'a> {
+    /// Enable incremental ticking. A skipped node emits no trace line. Changing
+    /// this flag invalidates the cache; a fresh lowering starts entirely dirty.
+    pub fn set_incremental(&self, enabled: bool) {
+        self.tick.function.incremental.set_enabled(enabled);
+    }
+
     pub fn setup(
         tree: &'a BehaviorTree,
         functions: &FunctionIndex,
@@ -276,7 +293,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
 /// [`unregister`](Self::unregister)ed when the lowering is replaced — without
 /// it, every re-lowering would leak its callables in the engine.
 pub struct LoweredTree {
-    root: TickId,
+    root: TickLink,
     callables: Vec<CallableId>,
     /// Keeps the tree's shared cells alive for the registered tick functions.
     tree: BehaviorTree,
@@ -305,6 +322,17 @@ pub fn lower_behavior_tree(
 }
 
 impl LoweredTree {
+    /// Enable incremental ticking (off by default). Clean children and a clean
+    /// root return their cached status without engine dispatch or trace output.
+    /// Running nodes are polled each tick; module leaves require `_on_change`
+    /// to cache terminal results (see [`schema::_ON_CHANGE_PARAM_ID`]). Store
+    /// reads are compared at each tick's start. Detached pulls precede a reader's
+    /// clean check, and sinks still run after the root. A write by a later node
+    /// invalidates an earlier reader for the next tick. No halt is introduced.
+    pub fn set_incremental(&self, enabled: bool) {
+        self.root.function.incremental.set_enabled(enabled);
+    }
+
     /// Tick the tree **once**: every reactive pass drills through the ready
     /// children and returns the root's status — [`Status::Running`] means "see
     /// you next tick", never "spin".
@@ -335,9 +363,12 @@ fn register_ticks(
     functions: &FunctionIndex,
     caller: &mut dyn CallBridge,
     trace: bool,
-) -> Result<(TickId, Vec<CallableId>), BehaviorTreeError> {
+) -> Result<(TickLink, Vec<CallableId>), BehaviorTreeError> {
     tree.lower_detached(functions)?;
     let mut callables = Vec::new();
+    let incremental = Rc::new(incremental::Incremental::default());
+    #[cfg(test)]
+    incremental.set_enabled(incremental_tests::existing_tests_enabled());
     let root = setup_tick_function(
         tree.root.clone(),
         &tree.node_index,
@@ -353,6 +384,8 @@ fn register_ticks(
             TraceTick::No
         },
         &mut callables,
+        incremental,
+        None,
     );
     match root {
         Ok(root) => Ok((root, callables)),
@@ -405,13 +438,52 @@ fn setup_tick_function(
     // Every callable registered on behalf of this (sub)tree, collected so the
     // registration can be undone when the lowering is replaced.
     callables: &mut Vec<CallableId>,
-) -> Result<TickId, BehaviorTreeError> {
+    incremental: Rc<incremental::Incremental>,
+    parent: Option<std::rc::Weak<incremental::State>>,
+) -> Result<TickLink, BehaviorTreeError> {
+    let pulls = detached.pulls(&node.id);
+    let state = Rc::new(incremental::State {
+        dirty: std::cell::Cell::new(true),
+        status: std::cell::Cell::new(None),
+        parent,
+        cacheable: incremental::cacheable(&node),
+        pulls: pulls.is_some(),
+    });
+    incremental.states.borrow_mut().push(Rc::downgrade(&state));
+    let mut reads = Vec::new();
+    for (parameter, expression) in &node.arguments {
+        detached::cells_read(
+            expression,
+            &variables.borrow(),
+            &node_arg_variables,
+            &mut reads,
+        );
+        reads.extend(
+            node_arg_variables
+                .get(&NodeParameterId {
+                    node: node.id,
+                    parameter: *parameter,
+                })
+                .cloned(),
+        );
+    }
+    let mut seen = HashSet::new();
+    reads.retain(|cell| seen.insert(cell.identity()));
+    for cell in &reads {
+        cell.subscribe(&state);
+        if matches!(cell, VariableCell::Stored(_)) {
+            let mut stored = incremental.stored.borrow_mut();
+            if !stored.iter().any(|held| held.identity() == cell.identity()) {
+                stored.push(cell.clone());
+            }
+        }
+    }
     let nof_children = node
         .children
         .as_ref()
         .map(|children| children.len())
         .unwrap_or(0);
-    let mut children_ticks: Vec<TickId> = Vec::with_capacity(nof_children);
+    let mut children_ticks: Vec<TickLink> = Vec::with_capacity(nof_children);
     if let Some(children) = &node.children {
         for child_id in children {
             let child_node = node_index
@@ -432,32 +504,41 @@ fn setup_tick_function(
                 caller,
                 trace,
                 callables,
+                incremental.clone(),
+                Some(Rc::downgrade(&state)),
             )?;
             children_ticks.push(tick_function_with_id);
         }
     }
-    let tick_function: Rc<dyn Callable> = Rc::new(TickFunction {
+    let tick_function = Rc::new(TickFunction {
+        state,
+        incremental,
+        reads,
         node: node.clone(),
         function: functions.get(&node.function).cloned(),
         calls: Rc::new(call_signatures(&node, functions)?),
         argument_order: crate::display::ordered(&node.arguments, functions.get(&node.function))
             .into_iter()
             .map(|(parameter, _)| parameter)
+            .filter(|parameter| *parameter != _ON_CHANGE_PARAM_ID)
             .collect(),
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
-        pulls: detached.pulls(&node.id),
+        pulls,
         detached,
         outputs: outputs.get(&node.id).cloned(),
         children: children_ticks,
         trace,
     });
-    let callable_id = caller.arora_register_callable(tick_function);
+    let callable_id = caller.arora_register_callable(tick_function.clone());
     let tick = TickId {
         callable_id: callable_id.id,
     };
     callables.push(callable_id);
-    Ok(tick)
+    Ok(TickLink {
+        id: tick,
+        function: tick_function,
+    })
 }
 
 /// Whether `function` is a node this crate ticks natively — a control node, a
@@ -491,7 +572,7 @@ fn tick_builtin(
     caller: &mut dyn CallBridge,
     scope: Scope,
     outputs: Option<&Outputs>,
-    child_tick_ids: &[TickId],
+    child_tick_ids: &[TickLink],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
     // An argument's value: a call or a selection is computed, a selection
@@ -779,7 +860,7 @@ fn tick(
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     detached: (&Detached, Option<&[usize]>),
     outputs: Option<&Outputs>,
-    child_tick_ids: &[TickId],
+    child_tick_ids: &[TickLink],
     node: Rc<Node>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
@@ -795,6 +876,7 @@ fn tick(
     };
     // The detached nodes the node reads are brought up to date first.
     if let (detached, Some(pulls)) = detached {
+        let _detached = incremental::Visit::detached();
         detached.pull(
             pulls,
             Scope {
@@ -884,7 +966,10 @@ fn tick(
         call.args.push(StructureField {
             id: *first_parameter_id,
             value: Box::new(Value::array_of_type::<TickId>(
-                child_tick_ids.iter().copied().map(Value::from).collect(),
+                child_tick_ids
+                    .iter()
+                    .map(|child| Value::from(child.id))
+                    .collect(),
             )),
         })
     }
@@ -1042,8 +1127,24 @@ impl Tickable for CallableId {
     }
 }
 
-/// The usual Tickable object in behavior trees, which is also Callable.
+/// A child edge that can check its cache before entering engine dispatch.
+struct TickLink {
+    id: TickId,
+    function: Rc<TickFunction>,
+}
+impl Tickable for TickLink {
+    fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
+        if let Some(status) = self.function.cached(caller)? {
+            return Ok(status);
+        }
+        self.id.tick(caller)
+    }
+}
+
 struct TickFunction {
+    state: Rc<incremental::State>,
+    reads: Vec<VariableCell>,
+    incremental: Rc<incremental::Incremental>,
     node: Rc<Node>,
     /// The module function the node calls, resolved against the device's
     /// index when the tree was lowered; `None` for a function the index did
@@ -1064,13 +1165,54 @@ struct TickFunction {
     pulls: Option<Rc<[usize]>>,
     /// Where the node writes, for an `Unpack` or a `Scatter` node.
     outputs: Option<Outputs>,
-    children: Vec<TickId>,
+    children: Vec<TickLink>,
     trace: TraceTick,
+}
+
+impl TickFunction {
+    fn cached(&self, caller: &mut dyn CallBridge) -> Result<Option<Status>, BehaviorTreeError> {
+        if !self.incremental.enabled.get() {
+            return Ok(None);
+        }
+        for cell in &self.reads {
+            if matches!(cell, VariableCell::Stored(_)) {
+                cell.observe();
+            }
+        }
+        // Pulls precede the clean check, including when a parent checks a child
+        // without dispatch. A changed port can invalidate this very visit.
+        if let Some(pulls) = self.pulls.as_deref() {
+            let _detached = incremental::Visit::detached();
+            self.detached.pull(
+                pulls,
+                Scope {
+                    variables: &self.locals.borrow(),
+                    node_parameters_variables: &self.node_arg_variables,
+                    calls: &self.calls,
+                },
+                caller,
+            )?;
+        }
+        if self.state.cacheable && !self.state.dirty.get() {
+            Ok(self
+                .state
+                .status
+                .get()
+                .filter(|status| *status != Status::Running))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 impl Tickable for TickFunction {
     fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
-        tick(
+        if let Some(status) = self.cached(caller)? {
+            return Ok(status);
+        }
+        self.state.dirty.set(false);
+        let _visit = incremental::Visit::enter(&self.state);
+        let result = tick(
             caller,
             self.function.as_ref(),
             &self.calls,
@@ -1082,7 +1224,15 @@ impl Tickable for TickFunction {
             &self.children,
             self.node.clone(),
             self.trace,
-        )
+        );
+        if !self.state.cacheable {
+            self.incremental.observe_writes();
+        }
+        self.state.status.set(result.as_ref().ok().copied());
+        if self.state.dirty.get() {
+            self.state.mark();
+        }
+        result
     }
 }
 

@@ -88,7 +88,7 @@ use crate::nodes::{
     SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID, SET_STR_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID,
     UNPACK_OUT_PARAM_IDS, UNSET_STR_FUNCTION_ID, UNSET_STR_VARIABLE_PARAM_ID,
 };
-use crate::schema::{Expression, Node, NodeParameterId, _RET_PARAM_ID};
+use crate::schema::{Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 use crate::variable::VariableCell;
 use crate::{
     argument_value, compute_expression, expression_call_signatures, is_interpreter_function_id,
@@ -167,14 +167,11 @@ fn inconsistent(message: String) -> BehaviorTreeError {
 
 /// The identity of a cell: two clones of one cell are the same cell.
 fn cell_id(cell: &VariableCell) -> usize {
-    match cell {
-        VariableCell::Local(cell) => Rc::as_ptr(cell) as *const () as usize,
-        VariableCell::Stored(slot) => Rc::as_ptr(slot) as *const () as usize,
-    }
+    cell.identity()
 }
 
 /// The cells `expression` reads, at any depth.
-fn cells_read(
+pub(crate) fn cells_read(
     expression: &Expression,
     variables: &HashMap<Uuid, VariableCell>,
     node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
@@ -357,7 +354,7 @@ impl Detached {
                 for (parameter, argument) in
                     crate::display::ordered(&node.arguments, Some(signature))
                 {
-                    if parameter == _RET_PARAM_ID {
+                    if parameter == _RET_PARAM_ID || parameter == _ON_CHANGE_PARAM_ID {
                         continue;
                     }
                     let Some(declared) = signature.function.parameters.get(&parameter) else {
@@ -416,7 +413,7 @@ impl Detached {
                 crate::display::ordered(&node.arguments, signature)
                     .into_iter()
                     .map(|(parameter, _)| parameter)
-                    .filter(|parameter| *parameter != _RET_PARAM_ID)
+                    .filter(|parameter| ![_RET_PARAM_ID, _ON_CHANGE_PARAM_ID].contains(parameter))
                     .collect::<Vec<_>>(),
             );
         }

@@ -12,6 +12,13 @@ pub const _RET_PARAM_ID: Uuid = Uuid::from_bytes([
     0x5f, 0x72, 0x65, 0x74, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ]);
 
+/// Reserved `_on_change` argument: a literal `true` opts a module leaf into
+/// incremental caching. Its status and outputs stand until a read changes;
+/// `Running` is still polled every tick. This argument is never sent to a module.
+/// The promise is that keeping a terminal result is valid until an input changes;
+/// it is not a purity check. Nested call expressions always disable caching.
+pub const _ON_CHANGE_PARAM_ID: Uuid = uuid::uuid!("5f6f6e5f-6368-416e-8765-000000000000");
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Variable {
     name: String,

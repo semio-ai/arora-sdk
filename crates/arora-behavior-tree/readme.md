@@ -109,3 +109,29 @@ if the communication with the client is absolutely dropped.
 It also favors reproducibility, parallelization, reusability and scalability.
 In this particular case, it also favors introspectability,
 since states are meant to be accessible in the behavior tree.
+
+## Incremental ticks
+
+`LoweredTree::set_incremental(true)` (or the same method on
+`BehaviorTreeRuntime`) enables an opt-in executor that keeps terminal statuses
+and skips clean child ticks before engine dispatch. The default is off. A clean
+root makes no indirect dispatch; `Running` nodes and their ancestors are polled
+every tick. A skipped node emits no trace line. A new lowering starts dirty.
+
+Native controls and value computations can cache. Module leaves run on every
+visit unless their `arguments` contain
+`schema::_ON_CHANGE_PARAM_ID: Expression::Value(Value::Boolean(true))`.
+This reserved `_on_change` argument stays in the tree, never in a module call.
+It promises that a terminal status and its outputs remain valid until a read
+changes. Mutable argument cells count as reads. A node containing a nested call
+expression always runs, preserving the nested call's effects and call-site state.
+
+Writes advance a cell's version only when its value changes and invalidate its
+readers and their ancestors. A node's own write does not invalidate its current
+visit; a later writer invalidates an earlier reader for the next tick. Store
+values are read live and compared at tick boundaries to detect external writes.
+This comparison and the polling scan are linear in the lowered tree's store
+cells and attached paths; a settled tree avoids dispatch, not all bookkeeping.
+Detached inputs are pulled before a reader's cache check, and detached sinks
+still publish after the root. Control order and the absence of halt stay the
+same.

@@ -6,20 +6,57 @@
 //! agnostic of any concrete store — the runtime supplies the resolver. Values
 //! are `Option<Value>` because a store key may legitimately be absent.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::incremental::State;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 
 use arora_types::data::Slot;
 use arora_types::value::Value;
 
 /// A behavior-tree variable cell. Cloning shares the same underlying cell, so
-/// two nodes bound to the same `{var}` read and write one place.
+/// two nodes bound to the same `{var}` read and write one place. A version
+/// advances when an observed value changes, notifying every attached reader.
+/// Store handles are read live; incremental ticks also observe outside writes.
 #[derive(Clone)]
 pub enum VariableCell {
     /// A tree-local scratch cell (no store backing).
-    Local(Rc<RefCell<Option<Value>>>),
+    Local(Rc<LocalCell>),
     /// A handle into the host data store, resolved once at build.
-    Stored(Rc<dyn Slot>),
+    Stored(Rc<StoredCell>),
+}
+
+/// Shared local storage and its change metadata. Writes go through `VariableCell`.
+pub struct LocalCell {
+    value: RefCell<Option<Value>>,
+    changes: Changes,
+}
+/// Shared store handle and the last value observed by this tree.
+pub struct StoredCell {
+    slot: Box<dyn Slot>,
+    changes: Changes,
+}
+#[derive(Default)]
+struct Changes {
+    version: Cell<u64>,
+    seen: RefCell<Option<Value>>,
+    readers: RefCell<Vec<Weak<State>>>,
+}
+impl Changes {
+    fn observe(&self, value: Option<Value>) {
+        if *self.seen.borrow() == value {
+            return;
+        }
+        *self.seen.borrow_mut() = value;
+        self.version.set(self.version.get().wrapping_add(1));
+        self.readers.borrow_mut().retain(|reader| {
+            if let Some(reader) = reader.upgrade() {
+                reader.written();
+                true
+            } else {
+                false
+            }
+        });
+    }
 }
 
 impl std::fmt::Debug for VariableCell {
@@ -41,24 +78,39 @@ impl PartialEq for VariableCell {
 impl VariableCell {
     /// An absent local cell.
     pub fn local() -> Self {
-        VariableCell::Local(Rc::new(RefCell::new(None)))
+        Self::Local(Rc::new(LocalCell {
+            value: RefCell::new(None),
+            changes: Changes::default(),
+        }))
     }
 
     /// A local cell holding `value`.
     pub fn local_with(value: Value) -> Self {
-        VariableCell::Local(Rc::new(RefCell::new(Some(value))))
+        Self::Local(Rc::new(LocalCell {
+            value: RefCell::new(Some(value.clone())),
+            changes: Changes {
+                seen: RefCell::new(Some(value)),
+                ..Changes::default()
+            },
+        }))
     }
 
     /// Wrap a store slot handed back by a [`VariableResolver`].
     pub fn stored(slot: Box<dyn Slot>) -> Self {
-        VariableCell::Stored(Rc::from(slot))
+        Self::Stored(Rc::new(StoredCell {
+            changes: Changes {
+                seen: RefCell::new(slot.get()),
+                ..Changes::default()
+            },
+            slot,
+        }))
     }
 
     /// The current value, or `None` if absent (unset local cell / missing key).
     pub fn get(&self) -> Option<Value> {
         match self {
-            VariableCell::Local(cell) => cell.borrow().clone(),
-            VariableCell::Stored(slot) => slot.get(),
+            VariableCell::Local(cell) => cell.value.borrow().clone(),
+            VariableCell::Stored(slot) => slot.slot.get(),
         }
     }
 
@@ -75,15 +127,54 @@ impl VariableCell {
 
     /// Set (or clear, with `None`) the value.
     pub fn set_opt(&self, value: Option<Value>) {
+        // A store can move without this handle seeing it. Observe that move
+        // before the write, so overwriting it cannot hide a value change.
+        if matches!(self, Self::Stored(_)) {
+            self.observe();
+        }
         match self {
-            VariableCell::Local(cell) => *cell.borrow_mut() = value,
+            VariableCell::Local(cell) => {
+                *cell.value.borrow_mut() = value;
+            }
             // A failed store write surfaces via the change feed (the runtime's
             // STEP 3 is where it is observed), so we don't propagate it here and
             // keep the tick signature unchanged. Revisit if write failures must
             // fail a tick.
             VariableCell::Stored(slot) => {
-                let _ = slot.set(value);
+                let _ = slot.slot.set(value);
             }
+        }
+        self.changes().observe(self.get());
+    }
+
+    /// Number of observed value changes. Rewriting an equal value keeps it unchanged.
+    pub fn version(&self) -> u64 {
+        self.changes().version.get()
+    }
+
+    fn changes(&self) -> &Changes {
+        match self {
+            Self::Local(cell) => &cell.changes,
+            Self::Stored(cell) => &cell.changes,
+        }
+    }
+    pub(crate) fn observe(&self) {
+        let _external = crate::incremental::Visit::detached();
+        self.changes().observe(self.get());
+    }
+    pub(crate) fn observe_written(&self) {
+        self.changes().observe(self.get());
+    }
+    pub(crate) fn subscribe(&self, reader: &Rc<State>) {
+        self.changes()
+            .readers
+            .borrow_mut()
+            .push(Rc::downgrade(reader));
+    }
+    pub(crate) fn identity(&self) -> usize {
+        match self {
+            Self::Local(cell) => Rc::as_ptr(cell) as usize,
+            Self::Stored(cell) => Rc::as_ptr(cell) as usize,
         }
     }
 }
