@@ -28,10 +28,14 @@ All notable changes to `arora-behavior-tree`. The format follows
     sink reads another sink's key as it was before the tick. Of two sinks of
     one key, the later listed wins. A shared `Graph` lists its root, then its
     other nodes by id.
-  - Lowering refuses detached nodes that read each other in a cycle, a read of
-    a port that is neither a return value nor a mutable parameter, and a
-    tree-local cell that a detached node and another node both write,
-    counting what nested calls and native nodes such as `Unpack` write.
+  - Lowering refuses detached nodes that read each other in a cycle, a
+    detached node reading an output of its own other than its state, a call
+    in a detached node's arguments writing back a store key, a read of a port
+    that is neither a return value nor a mutable parameter, and a tree-local
+    cell that a detached node and another node both write. The writes counted
+    include nested calls', at any depth, native nodes' such as `Unpack`'s, and
+    a call-valued argument's cell; a call whose function or parameter is
+    computed counts every cell its arguments name.
   - `BehaviorTree::detached_plan` (`DetachedPlan`: `every_tick`, `on_demand`,
     `unused`), `detached_calls` and `display_detached`.
 - A node's argument can nest calls to module functions (`Expression::Call`),
@@ -44,7 +48,9 @@ All notable changes to `arora-behavior-tree`. The format follows
   - Lowering refuses a call to the interpreter module, an argument for a
     parameter the function does not have, and a mutable parameter fed by a
     selection or a call.
-  - A leaf evaluates its arguments in its function's parameter order.
+  - A leaf evaluates its arguments in its function's parameter order; the core
+    string nodes compute theirs too. A call computing a module, function or
+    parameter id keeps a call site's state as an argument's call does.
 - `display`: a text form of expressions and nodes, with names from the
   function index (`Names`), on one line with `{}` or broken over lines with
   `{:#}`: `level: {face/level} = add(a: @cm, b: 1f64)`. Lowering errors and

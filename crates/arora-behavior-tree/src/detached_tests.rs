@@ -77,6 +77,15 @@ fn compute(
     }
 }
 
+/// `function(…)` whose parameter ids are expressions of their own.
+fn raw_call(function: Uuid, arguments: Vec<(Expression, Expression)>) -> Expression {
+    let Expression::Call(mut stated) = call(function, Vec::new()) else {
+        unreachable!("call builds a call");
+    };
+    stated.arguments = arguments;
+    Expression::Call(stated)
+}
+
 /// `below(x, limit: limit)`, a leaf of the tree.
 fn below(node_id: u128, x: Expression, limit: f64) -> Node {
     node(node_id, BELOW, vec![(BELOW_X, x), (BELOW_LIMIT, f(limit))])
@@ -921,6 +930,192 @@ fn lowering_refuses_a_second_writer_of_a_detached_output() {
         vec![detached()],
     );
     assert!(error.contains("one tree-local cell"), "{error}");
+
+    // A detached node's state bound to an argument a tree node computes from
+    // a call: the tree node writes the call's result there.
+    let error = lowering_error(
+        vec![below(
+            1,
+            call(ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))]),
+            100.0,
+        )],
+        vec![compute(
+            50,
+            SMOOTH,
+            vec![
+                (SMOOTH_X, f(1.0)),
+                (SMOOTH_ALPHA, f(1.0)),
+                (SMOOTH_STATE, port(1, BELOW_X)),
+            ],
+            None,
+        )],
+    );
+    assert!(error.contains("one tree-local cell"), "{error}");
+
+    // A call that computes a parameter id, and writes the output back.
+    let smooth_v = || {
+        call(
+            SMOOTH,
+            vec![
+                (SMOOTH_X, f(1.0)),
+                (SMOOTH_ALPHA, f(1.0)),
+                (SMOOTH_STATE, key(".v")),
+            ],
+        )
+    };
+    let error = lowering_error(
+        vec![below(
+            1,
+            raw_call(
+                ADD,
+                vec![(smooth_v(), f(1.0)), (Expression::Uuid(ADD_B), f(1.0))],
+            ),
+            100.0,
+        )],
+        vec![detached()],
+    );
+    assert!(error.contains("one tree-local cell"), "{error}");
+
+    // A call whose parameter id is computed may write back any cell it names.
+    let error = lowering_error(
+        vec![below(
+            1,
+            raw_call(
+                SMOOTH,
+                vec![
+                    (Expression::Uuid(SMOOTH_X), f(1.0)),
+                    (Expression::Uuid(SMOOTH_ALPHA), f(1.0)),
+                    (key(".p"), key(".v")),
+                ],
+            ),
+            100.0,
+        )],
+        vec![detached()],
+    );
+    assert!(error.contains("one tree-local cell"), "{error}");
+}
+
+/// A call in a detached node's arguments writes back no store key: the node
+/// writes the store only through its own outputs, after the tree ticks.
+#[test]
+fn a_call_in_a_detached_node_writes_back_no_store_key() {
+    let error = lowering_error(
+        vec![below(1, read(50), 100.0)],
+        vec![compute(
+            50,
+            ADD,
+            vec![
+                (
+                    ADD_A,
+                    call(
+                        SMOOTH,
+                        vec![
+                            (SMOOTH_X, f(1.0)),
+                            (SMOOTH_ALPHA, f(1.0)),
+                            (SMOOTH_STATE, key("y")),
+                        ],
+                    ),
+                ),
+                (ADD_B, f(1.0)),
+            ],
+            None,
+        )],
+    );
+    assert!(error.contains("writes a store key back"), "{error}");
+}
+
+/// A detached node reads its own state, but any other output of its own it
+/// reads is feedback, which goes through a store key: lowering refuses it.
+#[test]
+fn a_detached_node_reading_its_own_output_is_refused() {
+    for graph in [
+        compute(50, ADD, vec![(ADD_A, read(50)), (ADD_B, f(1.0))], None),
+        compute(
+            50,
+            ADD,
+            vec![(ADD_A, key(".v")), (ADD_B, f(1.0))],
+            Some(".v"),
+        ),
+    ] {
+        let error = lowering_error(vec![below(1, read(50), 100.0)], vec![graph]);
+        assert!(error.contains("reads its own output"), "{error}");
+    }
+
+    // Its state, named by a variable, is no feedback.
+    let store = SimpleDataStore::new();
+    set(&store, "target", 2.0);
+    let smooth = compute(
+        50,
+        SMOOTH,
+        vec![
+            (SMOOTH_X, key("target")),
+            (SMOOTH_ALPHA, f(0.5)),
+            (SMOOTH_STATE, key(".x")),
+        ],
+        None,
+    );
+    let tree = build(&store, vec![below(1, read(50), 100.0)], vec![smooth]);
+    tree.variables.borrow()[&var(".x")].set(Value::F64(0.0));
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    runtime.tick().expect("it ticks");
+    assert_eq!(
+        tree.variables.borrow()[&var(".x")].get(),
+        Some(Value::F64(1.0))
+    );
+}
+
+/// A call that computes a parameter id keeps a call-site state of its own,
+/// which a rebuilt tree takes over; a literal id stays as it is.
+#[test]
+fn a_call_computing_an_id_keeps_its_call_site_state() {
+    let nodes = || {
+        vec![below(
+            1,
+            raw_call(
+                ADD,
+                vec![
+                    (
+                        call(
+                            SMOOTH,
+                            vec![
+                                (SMOOTH_X, f(1.0)),
+                                (SMOOTH_ALPHA, f(1.0)),
+                                (SMOOTH_STATE, f(0.0)),
+                            ],
+                        ),
+                        f(1.0),
+                    ),
+                    (Expression::Uuid(ADD_B), f(1.0)),
+                ],
+            ),
+            100.0,
+        )]
+    };
+    let state = |tree: &BehaviorTree| {
+        let Expression::Call(outer) = &tree.node_index[&id(1)].arguments[&BELOW_X] else {
+            panic!("a call");
+        };
+        assert_eq!(
+            outer.arguments[1].0,
+            Expression::Uuid(ADD_B),
+            "a literal id"
+        );
+        let Expression::Call(inner) = &outer.arguments[0].0 else {
+            panic!("a call computes the id");
+        };
+        match &inner.arguments[2].1 {
+            Expression::Variable(cell) => cell.clone(),
+            other => panic!("a cell, not {other:?}"),
+        }
+    };
+    let store = SimpleDataStore::new();
+    let before = build(&store, nodes(), Vec::new());
+    state(&before).set(Value::F64(0.5));
+    let after = build(&store, nodes(), Vec::new());
+    after.keep_state(&before, &std::collections::HashSet::new());
+    assert_eq!(state(&after).get(), Some(Value::F64(0.5)));
 }
 
 /// Attached and detached nodes show alike: one line per node, its name in

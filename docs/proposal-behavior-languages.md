@@ -235,13 +235,16 @@ holds the sinks and what they read, `on_demand` what the tree reads, and
 `unused` the rest (`BehaviorTree::detached_plan()`).
 
 **The build refuses** a reference to no node. **Lowering refuses** detached
-nodes that read each other in a cycle, since feedback goes through a store
-key; a read of a port that is neither a return value nor a mutable parameter;
-a tree-local cell that a detached node and another node both write, counting
-what a nested call or a native node such as `Unpack` writes; a call to the
-interpreter module; an argument to no parameter of the function; and a
-mutable parameter fed by a call or a selection, neither of which has a cell to
-hold what the function writes back.
+nodes that read each other in a cycle, and a detached node reading an output
+of its own other than its state, since feedback goes through a store key; a
+call in a detached node's arguments writing back a store key, which the node
+writes only through its outputs; a read of a port that is neither a return
+value nor a mutable parameter; a tree-local cell that a detached node and
+another node both write, counting what a nested call or a native node such as
+`Unpack` writes, and every cell a call names when its function or parameter is
+computed; a call to the interpreter module; an argument to no parameter of
+the function; and a mutable parameter fed by a call or a selection, neither of
+which has a cell to hold what the function writes back.
 
 ### 3.4 Either flow alone
 

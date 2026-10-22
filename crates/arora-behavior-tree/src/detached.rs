@@ -33,7 +33,9 @@
 //! tree-local cell of its own, which `@node` reads, and publishes to the key
 //! after the tree ticks. The key itself is read as the store holds it, so a
 //! value fed back through a key, or passed from one graph to another through a
-//! key, reaches its reader at the next tick.
+//! key, reaches its reader at the next tick. Feedback goes only through a key:
+//! a detached node reads its own state, but no other output of its own, and a
+//! call in its arguments writes back no key.
 //!
 //! # Evaluation
 //!
@@ -268,10 +270,16 @@ impl Detached {
     /// Refuses, naming the node: a call to the interpreter module; an argument
     /// for a parameter the function does not have; a mutable parameter fed by
     /// a selection or a call, neither of which has a cell to hold what the
-    /// function writes back; a tree-local cell two nodes write; a read of a
-    /// mutable parameter's port that is no output; and detached nodes that
-    /// read each other in a cycle. A function `functions` does not have fails
-    /// the node when it is evaluated, as a module leaf fails.
+    /// function writes back; a tree-local cell two nodes write; a call in a
+    /// detached node's arguments that writes back to a store key, which a
+    /// detached node writes only through its outputs; a read of a mutable
+    /// parameter's port that is no output; a detached node reading its own
+    /// output other than as its state; and detached nodes that read each other
+    /// in a cycle. A function `functions` does not have fails the node when it
+    /// is evaluated, as a module leaf fails.
+    ///
+    /// A call whose function or parameter is computed may write back any cell
+    /// its arguments name, so each such cell counts as written.
     pub(crate) fn lower(
         &self,
         functions: &FunctionIndex,
@@ -283,6 +291,9 @@ impl Detached {
         let mut signatures = FunctionIndex::new();
         let mut arguments = Vec::with_capacity(self.nodes.len());
         let mut outputs = Vec::with_capacity(self.nodes.len());
+        // The cells each detached node keeps its state in, which it reads and
+        // writes back: its mutable parameters' and its calls'.
+        let mut states: Vec<HashSet<usize>> = Vec::with_capacity(self.nodes.len());
         // The writer of each tree-local cell a node outputs to, attached or
         // detached: `Some(position)` for a detached node.
         let mut writers: HashMap<usize, (Option<usize>, Uuid)> = HashMap::new();
@@ -360,9 +371,13 @@ impl Detached {
                 signatures.insert(node.function, signature.clone());
             }
             let mut written = Vec::new();
+            let mut state = HashSet::new();
             for port in ports {
                 if let Some(cell) = output_cell(node.id, port) {
                     claim(&cell, Some(at), node.id)?;
+                    if port != _RET_PARAM_ID {
+                        state.insert(cell_id(&cell));
+                    }
                     let publish = self
                         .bindings
                         .get(&NodeParameterId {
@@ -374,8 +389,18 @@ impl Detached {
                 }
             }
             for cell in call_writes(node, functions, variables, node_parameters_variables) {
+                if matches!(cell, VariableCell::Stored(_)) {
+                    return refuse(
+                        "writes a store key back from a call in its arguments: a detached \
+                         node writes the store only through its own outputs, after the tree \
+                         ticks"
+                            .into(),
+                    );
+                }
                 claim(&cell, Some(at), node.id)?;
+                state.insert(cell_id(&cell));
             }
+            states.push(state);
             outputs.push(written);
             arguments.push(
                 crate::display::ordered(&node.arguments, signature)
@@ -425,32 +450,48 @@ impl Detached {
             }
         }
 
-        // Who reads whom, from the cells each node's arguments read.
+        // Who reads whom, from the cells each node's arguments read. A
+        // detached node reads its own state; any other output of its own it
+        // reads is feedback, which goes through a store key.
         let reads_of = |node: &Node, own: Option<usize>| {
             let mut cells = Vec::new();
-            for argument in node.arguments.values() {
-                cells_read(argument, variables, node_parameters_variables, &mut cells);
+            for (parameter, argument) in &node.arguments {
+                // The return's binding is where the node writes, not a read.
+                if *parameter != _RET_PARAM_ID {
+                    cells_read(argument, variables, node_parameters_variables, &mut cells);
+                }
             }
-            let mut read: Vec<usize> = cells
-                .iter()
-                .filter_map(|cell| writers.get(&cell_id(cell)))
-                .filter_map(|(writer, _)| *writer)
-                .filter(|writer| Some(*writer) != own)
-                .collect();
+            let mut read = Vec::new();
+            for cell in &cells {
+                let id = cell_id(cell);
+                let Some((Some(writer), _)) = writers.get(&id) else {
+                    continue;
+                };
+                if Some(*writer) != own {
+                    read.push(*writer);
+                } else if !states[*writer].contains(&id) {
+                    return Err(inconsistent(format!(
+                        "detached node {}: {} reads its own output: feedback goes through a \
+                         store key",
+                        node.id,
+                        node.display(names)
+                    )));
+                }
+            }
             read.sort_unstable();
             read.dedup();
-            read
+            Ok(read)
         };
         let reads: Vec<Vec<usize>> = self
             .nodes
             .iter()
             .enumerate()
             .map(|(at, node)| reads_of(node, Some(at)))
-            .collect();
+            .collect::<Result<_, _>>()?;
         let mut pulls = HashMap::new();
         let mut tree_reads = Vec::new();
         for node in attached {
-            let read = reads_of(node, None);
+            let read = reads_of(node, None)?;
             if !read.is_empty() {
                 tree_reads.extend(read.iter().copied());
                 pulls.insert(node.id, Rc::from(read));
@@ -648,8 +689,9 @@ fn output_optional(signature: Option<&arora_behavior::ModuleFunction>, port: &Uu
     })
 }
 
-/// Claim the tree-local cells an attached `node` writes: its bound return and
-/// the mutable parameters of the module function it calls.
+/// Claim the tree-local cells an attached `node` writes: its bound return,
+/// the mutable parameters of the module function it calls, and each argument
+/// it computes from a call into the argument's cell.
 fn claim_attached(
     node: &Node,
     functions: &FunctionIndex,
@@ -661,6 +703,12 @@ fn claim_attached(
         ports.push(_RET_PARAM_ID);
     }
     ports.extend(native_writes(node.function).iter().copied());
+    ports.extend(
+        node.arguments
+            .iter()
+            .filter(|(_, argument)| matches!(argument, Expression::Call(_)))
+            .map(|(parameter, _)| *parameter),
+    );
     if let Some(signature) = functions.get(&node.function) {
         ports.extend(
             node.arguments
@@ -696,8 +744,12 @@ fn native_writes(function: Uuid) -> &'static [Uuid] {
     }
 }
 
-/// The cells the calls nested in `node`'s arguments write back to: the
-/// argument of each mutable parameter of a function `functions` has.
+/// The cells the calls nested in `node`'s arguments may write back to, at
+/// any depth, the calls computing a module, function or parameter id
+/// included: the argument of each mutable parameter. When the function or
+/// the parameter is computed, or the function is not in `functions`, which
+/// parameters are mutable is not known, so every cell the call's arguments
+/// name counts.
 fn call_writes(
     node: &Node,
     functions: &FunctionIndex,
@@ -721,12 +773,31 @@ fn call_writes(
             ),
             Expression::Call(call) => {
                 let signature = stated_id(&call.function).and_then(|id| functions.get(&id));
+                for identifier in [&call.module, &call.function] {
+                    walk(
+                        identifier,
+                        functions,
+                        variables,
+                        node_parameters_variables,
+                        found,
+                    );
+                }
                 for (parameter, argument) in &call.arguments {
-                    let mutable = signature.is_some_and(|signature| {
-                        stated_id(parameter)
-                            .and_then(|id| signature.function.parameters.get(&id))
-                            .is_some_and(|parameter| parameter.mutable)
-                    });
+                    let mutable = match (signature, stated_id(parameter)) {
+                        (Some(signature), Some(id)) => signature
+                            .function
+                            .parameters
+                            .get(&id)
+                            .is_some_and(|parameter| parameter.mutable),
+                        _ => true,
+                    };
+                    walk(
+                        parameter,
+                        functions,
+                        variables,
+                        node_parameters_variables,
+                        found,
+                    );
                     if mutable {
                         found.extend(match argument {
                             Expression::Variable(cell) => Some(cell.clone()),

@@ -708,8 +708,15 @@ fn tick_builtin(
             index_variable.set(Value::U16(current_index));
             status
         }
-        // The core string nodes, value-based over their bound cells.
+        // The core string nodes, value-based over their bound cells. A call is
+        // computed into its argument's cell first, in the node's parameter
+        // order, as for every other node.
         function => {
+            for parameter in core_nodes::core_node_parameters(function).unwrap_or_default() {
+                if matches!(node.arguments.get(&parameter.id), Some(Expression::Call(_))) {
+                    argument(caller, parameter.id)?;
+                }
+            }
             return core_nodes::tick_core_node(function, node.id, |parameter| {
                 get_node_parameter_variable(
                     &NodeParameterId {
@@ -719,7 +726,7 @@ fn tick_builtin(
                     scope.node_parameters_variables,
                 )
                 .cloned()
-            })
+            });
         }
     };
     Ok(Some(status))
@@ -1716,7 +1723,13 @@ pub(crate) fn expression_call_signatures<'e>(
 /// mutable parameter fed a literal starts from that literal and keeps what
 /// the function writes back from one tick to the next, as a module leaf's
 /// literal argument does. Two call sites of one function keep two states.
+/// The calls that compute a module, function or parameter id get their cells
+/// too; a literal id stays as it is.
 pub(crate) fn with_call_site_cells(expression: Expression) -> Expression {
+    let identifier = |expression: Expression| match expression {
+        Expression::Call(_) | Expression::Select { .. } => with_call_site_cells(expression),
+        expression => expression,
+    };
     match expression {
         Expression::Call(call) => {
             let CallExpression {
@@ -1725,11 +1738,12 @@ pub(crate) fn with_call_site_cells(expression: Expression) -> Expression {
                 arguments,
             } = *call;
             Expression::Call(Box::new(CallExpression {
-                module,
-                function,
+                module: identifier(module),
+                function: identifier(function),
                 arguments: arguments
                     .into_iter()
                     .map(|(parameter, argument)| {
+                        let parameter = identifier(parameter);
                         let argument = match argument {
                             Expression::Value(value) => {
                                 Expression::Variable(VariableCell::local_with(value))
@@ -1758,7 +1772,12 @@ pub(crate) fn with_call_site_cells(expression: Expression) -> Expression {
 fn take_call_site_cells(expression: &Expression, held: &Expression) {
     match (expression, held) {
         (Expression::Call(call), Expression::Call(held)) => {
-            for ((_, argument), (_, held)) in call.arguments.iter().zip(&held.arguments) {
+            take_call_site_cells(&call.module, &held.module);
+            take_call_site_cells(&call.function, &held.function);
+            for ((parameter, argument), (held_parameter, held)) in
+                call.arguments.iter().zip(&held.arguments)
+            {
+                take_call_site_cells(parameter, held_parameter);
                 take_call_site_cells(argument, held);
             }
         }

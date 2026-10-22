@@ -30,6 +30,7 @@ use crate::{load_behavior_tree_nodes, BehaviorTree, BehaviorTreeRuntime};
 pub(crate) const SENSORS: Uuid = Uuid::from_u128(0x5E00);
 pub(crate) const DISTANCE: Uuid = Uuid::from_u128(0x5E01);
 pub(crate) const BATTERY: Uuid = Uuid::from_u128(0x5E02);
+pub(crate) const LABEL: Uuid = Uuid::from_u128(0x5E03);
 
 pub(crate) const MATH: Uuid = Uuid::from_u128(0x3A00);
 pub(crate) const ADD: Uuid = Uuid::from_u128(0x3A01);
@@ -96,6 +97,7 @@ pub(crate) fn index() -> FunctionIndex {
     FunctionIndex::from([
         function(SENSORS, DISTANCE, "distance", vec![]),
         function(SENSORS, BATTERY, "battery", vec![]),
+        function(SENSORS, LABEL, "label", vec![]),
         function(
             MATH,
             ADD,
@@ -192,6 +194,7 @@ impl CallBridge for Engine {
         Ok(match call.id {
             DISTANCE => returns(sensor(DISTANCE)),
             BATTERY => returns(sensor(BATTERY)),
+            LABEL => returns(Value::String("ready".to_string())),
             ADD => returns(Value::F64(number(&args, ADD_A)? + number(&args, ADD_B)?)),
             MUL => returns(Value::F64(number(&args, MUL_A)? * number(&args, MUL_B)?)),
             CLAMP => {
@@ -749,4 +752,28 @@ fn a_node_shows_as_the_call_it_makes() {
         format!("{:#}", level.display(names)),
         "{face/level} = add(\n    a: battery(),\n    b: clamp(x: mul(a: distance(), b: 100f64), lo: 0f64),\n)"
     );
+}
+
+/// A core string node computes a call-valued argument into its cell before it
+/// reads it, as every other node does.
+#[test]
+fn a_string_node_computes_a_call_argument() {
+    const NAME: u128 = 0x4A3E;
+    let tree = tree(vec![node(
+        1,
+        crate::nodes::SET_STR_FUNCTION_ID,
+        vec![
+            (crate::nodes::SET_STR_VARIABLE_PARAM_ID, variable(NAME)),
+            (crate::nodes::SET_STR_VALUE_PARAM_ID, call(LABEL, vec![])),
+        ],
+    )]);
+    let mut engine = Engine::default();
+    let calls = engine.calls.clone();
+    let status = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false)
+        .expect("it lowers")
+        .tick()
+        .expect("it ticks");
+    assert_eq!(status, Status::Success);
+    assert_eq!(read(&tree, NAME), Some(Value::String("ready".to_string())));
+    assert_eq!(calls.borrow().len(), 1, "label is called once");
 }
