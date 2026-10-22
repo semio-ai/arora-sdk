@@ -32,7 +32,8 @@ In short:
   with nothing `Running` makes no dispatch at all.
 - **Cells carry versions.** A write advances a cell's version only when the
   value differs. Store-backed cells are checked at the start of a tick, since
-  the HAL, bridges and other runs write them too.
+  the HAL, bridges and other runs write them too, and again before a clean
+  subtree is skipped when something may have written the store since.
 - **Effects are never skipped.** A module function may act on the world, so a
   module leaf is ticked as today unless it states that it computes only from
   its arguments. A leaf that returns `Running` is polled every tick.
@@ -43,7 +44,9 @@ In short:
   makes the same check for every node of every tree.
 - **One executor.** The spike keeps the incremental executor behind a flag so
   both run in one process for the differential test. The proposal is to make
-  it the only executor, with the naive one kept as the tests' reference.
+  it the only executor, with the naive one kept as the tests' reference. A
+  tree with no `_on_change` leaf costs about 12% more on it than today (§4)
+  until its leaves opt in.
 
 ---
 
@@ -83,9 +86,13 @@ to compute only from its arguments.
   a cell already holds is not a change.
 - **A store-backed cell can change outside the tree.** At the start of a tick,
   the executor compares each store-backed cell the tree reads with the value it
-  last saw, and treats a difference as a write. A node also compares its own
-  store-backed reads before its clean check, so a write through another handle
-  to the same key is seen. A store subscription would replace both (§5).
+  last saw, and treats a difference as a write.
+- **A store write within a tick reaches a skipped subtree.** Two variable ids
+  can name one key, and `Scatter` or a host module can write a slot directly.
+  So after a store write, or a visit to a node that cannot be cached, a clean
+  node about to answer from its cache first compares the store-backed cells
+  its subtree reads. Skipped subtrees are disjoint, so this stays linear in the
+  tree. A store subscription would replace both comparisons (§5).
 - **Readers are known when the tree is lowered.** Each node's reads are its
   arguments' expressions at any depth, as the detached layer already computes
   them, and its own argument cells, since a mutable parameter is read as well
@@ -111,7 +118,21 @@ cache check where it used to cost a dispatch and a call.
 A visit clears a node's dirty mark before it runs, so a mark made later in the
 same tick waits for the next one. That keeps today's order within a tick: a
 reader after a writer in tree order sees the new value this tick, and a reader
-before it sees it at the next tick. A node's own write does not dirty it.
+before it sees it at the next tick.
+
+**A node's arguments include its own state.** A visit that changes one of the
+node's arguments (every argument but `_ret`, its own in-out and mutable cells
+included), whoever wrote it, leaves the node dirty for the next tick. Feedback
+through a node's own output or state therefore runs as it does today: a
+smoothing computation runs until its state settles, and a finished action that
+resets its state is ticked again. A write only to the cell `_ret` is bound to
+does not dirty its writer, so a computation settles once its result stops
+changing.
+
+**What is polled.** At the start of a tick, the nodes visited last tick that
+returned `Running`, that cannot be cached, or that read detached nodes are
+marked dirty. A `Running` node its parent no longer reaches is not polled; its
+cached `Running` is never an answer, so it is ticked when it is reached again.
 
 ### 2.4 What can be cached
 
@@ -130,7 +151,8 @@ before it sees it at the next tick. A node's own write does not dirty it.
 
 A module leaf states that it computes only from its arguments with a reserved
 argument, `_on_change: true`, beside `_ret`. Such a leaf is called when one of
-its reads changed and keeps its last status and outputs otherwise. The
+its arguments changed, its own state included, and keeps its last status and
+outputs otherwise. The
 argument stays in the tree and is never sent to the module. A function's
 description could carry the same fact for every caller (§5).
 
@@ -167,12 +189,13 @@ A node graph can be an attached subtree:
 PARALLEL                                   ◇ node graph
   {.amount} = clamp(x: {face/smile}, min: 0, max: 1, _on_change: true)
   {.corner} = remap(x: {.amount}, …, _on_change: true)
-  {rig/mouth_corner} = damp(target: {.corner}, …, _on_change: true)
+  {rig/mouth_corner} = damp(target: {.corner}, state: 0, …, _on_change: true)
   RUNNING
 ```
 
 With this executor, a tick of that subtree calls the leaves whose inputs
-changed, checks the cache of the others, and dispatches the `PARALLEL` and
+changed (`damp`'s state is one of them, so it runs until it reaches its
+target), checks the cache of the others, and dispatches the `PARALLEL` and
 `RUNNING`. It needs no guard per node, and nothing a tree does not already
 have apart from `RUNNING`, which #332 also proposed. The editor recognizes the
 shape and opens it as a node graph. Detached nodes remain available. The two
@@ -213,13 +236,19 @@ which Arora does not have (§5).
 `cargo bench -p arora-behavior-tree --bench incremental` builds a node graph
 of N module functions (add, mul, clamp, remap) through a native test bridge,
 with K = max(2, N/10) store inputs, each function's result published to a
-store key, in three forms:
+store key, in four forms:
 
 - **attached-naive**: `PARALLEL[ leaf × N, RUN ]` on today's executor;
+- **attached-plain-incremental**: the same tree on the incremental executor,
+  with no `_on_change`: what an existing tree costs on it;
 - **attached-incremental**: the same tree with `_on_change` on each leaf, on
   the incremental executor;
 - **detached**: the same calls as detached nodes whose results are sinks,
   under a root `RUN`.
+
+Each attached leaf also writes its result through a mutable parameter, which
+is one of its arguments, so after a change it is called once more to see that
+argument settle.
 
 Scenarios: **settled** (no input changes), **one-input** (input 0 changes
 every tick), **all-inputs** (every input changes every tick). Median µs per
@@ -228,33 +257,43 @@ engine dispatches per tick. Apple M4 Pro, release profile with thin LTO.
 
 | N | Scenario | Form | µs/tick | Calls | Dispatches |
 |--:|---|---|--:|--:|--:|
-| 10 | settled | attached-naive | 10.5 | 10 | 12 |
-| | | attached-incremental | 0.39 | 0 | 2 |
-| | | detached | 2.3 | 0 | 1 |
+| 10 | settled | attached-naive | 12.4 | 10 | 12 |
+| | | attached-plain-incremental | 11.7 | 10 | 12 |
+| | | attached-incremental | 0.31 | 0 | 2 |
+| | | detached | 2.1 | 0 | 1 |
 | 100 | settled | attached-naive | 100 | 100 | 102 |
-| | | attached-incremental | 2.7 | 0 | 2 |
-| | | detached | 25 | 0 | 1 |
-| 1000 | settled | attached-naive | 1017 | 1000 | 1002 |
-| | | attached-incremental | 32 | 0 | 2 |
-| | | detached | 247 | 0 | 1 |
-| 1000 | one-input | attached-naive | 1019 | 1000 | 1002 |
-| | | attached-incremental | 46 | 10 | 12 |
-| | | detached | 252 | 10 | 1 |
-| 1000 | all-inputs | attached-naive | 1131 | 1000 | 1002 |
-| | | attached-incremental | 996 | 828 | 830 |
-| | | detached | 454 | 828 | 1 |
+| | | attached-plain-incremental | 112 | 100 | 102 |
+| | | attached-incremental | 1.6 | 0 | 2 |
+| | | detached | 22 | 0 | 1 |
+| 1000 | settled | attached-naive | 1023 | 1000 | 1002 |
+| | | attached-plain-incremental | 1144 | 1000 | 1002 |
+| | | attached-incremental | 15 | 0 | 2 |
+| | | detached | 219 | 0 | 1 |
+| 1000 | one-input | attached-naive | 1026 | 1000 | 1002 |
+| | | attached-plain-incremental | 1151 | 1000 | 1002 |
+| | | attached-incremental | 42 | 10 | 12 |
+| | | detached | 224 | 10 | 1 |
+| 1000 | all-inputs | attached-naive | 1105 | 1000 | 1002 |
+| | | attached-plain-incremental | 1235 | 1000 | 1002 |
+| | | attached-incremental | 1046 | 841 | 843 |
+| | | detached | 421 | 828 | 1 |
 
 What the numbers show:
 
-- **The incremental form makes the calls the detached form makes**, in every
-  scenario, so the two do the same useful work. They differ in bookkeeping.
-- **A settled incremental tick is not free.** It is about 30 ns per node at
-  N = 1000: the `PARALLEL` checks every child's cache, the executor compares
-  every store-backed cell at the start of the tick, and it scans every node for
-  one left `Running`. Each is linear in the tree, and each has a known
-  replacement (§5). A settled detached tick is about 250 ns per node, because
-  every sink is brought up to date each tick: its arguments are evaluated and
-  compared with its last call's, and its outputs are published again.
+- **The incremental form makes about the calls the detached form makes**, in
+  every scenario: the same when settled or when one input changes, and 2% more
+  when every input changes, from the mutable parameter above. The two differ
+  mainly in bookkeeping.
+- **A settled incremental tick is not free.** It is about 15 ns per node at
+  N = 1000: the `PARALLEL` checks every child's cache, and the executor
+  compares every store-backed cell at the start of the tick. Both are linear
+  in the tree, and both have a known replacement (§5). A settled detached tick
+  is about 220 ns per node, because every sink is brought up to date each
+  tick: its arguments are evaluated and compared with its last call's, and its
+  outputs are published again.
+- **Without `_on_change`, a tree costs about 12% more** than on today's
+  executor, with the same calls and dispatches: the versioned writes and the
+  dirty bookkeeping, with nothing to skip.
 - **When everything changes, detached nodes are cheaper.** Each attached leaf
   still costs an engine dispatch and its bookkeeping; a detached node calls its
   function directly. The incremental form then costs about what today's
@@ -271,10 +310,8 @@ What the numbers show:
 - **A queue of dirty children** per composite, with counts of its children's
   statuses, so a `PARALLEL` visits only the children that changed instead of
   checking every child's cache.
-- **A set of running nodes** in place of scanning every node at the start of a
-  tick.
-- **A store subscription** in place of comparing store-backed cells at each
-  tick and before each clean check.
+- **A store subscription** in place of comparing store-backed cells at the
+  start of a tick and before a skipped subtree.
 - **Completion signals** from long-running modules, so a waiting call is not
   polled.
 - **Carrying caches across an edit.** A re-lowering starts from a dirty tree,
@@ -286,4 +323,5 @@ What the numbers show:
   decision (#332 §3.2).
 - **API.** `VariableCell`'s variants now hold change metadata beside the
   value. Code that built a cell from a raw `Rc<RefCell<…>>` uses
-  `VariableCell::local_with` and `set` instead.
+  `VariableCell::local_with` and `set` instead. With the flag off, a cell has
+  no subscribers and a write does no change tracking.
