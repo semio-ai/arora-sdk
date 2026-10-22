@@ -23,8 +23,9 @@ fn main() -> Result<()> {
     let out_dir = PathBuf::from(env::var("OUT_DIR").context("OUT_DIR not set")?);
     let tools_dir = out_dir.join("arora-tools");
     std::fs::create_dir_all(&tools_dir).ok();
-    let arora_module_cli = tools_dir.join("arora-module-cli");
-    let arora_module_cpp = tools_dir.join("arora-module-cpp");
+    let exe = std::env::consts::EXE_SUFFIX;
+    let arora_module_cli = tools_dir.join(format!("arora-module-cli{exe}"));
+    let arora_module_cpp = tools_dir.join(format!("arora-module-cpp{exe}"));
     copy_executable(&arora_module_cli_src, &arora_module_cli)?;
     copy_executable(&arora_module_cpp_src, &arora_module_cpp)?;
 
@@ -66,7 +67,8 @@ fn main() -> Result<()> {
         .define("TEST_CPP_RECORDS", &test_cpp_records)
         .define("LOCAL_RECORDS", &local_records)
         .define("ARORA_MODULE_DIR", &module_dir)
-        .build_target("test-cpp-2")
+        // Its module directory, which builds the guest first.
+        .build_target("test-cpp-2-module-directory")
         .very_verbose(false)
         .build();
 

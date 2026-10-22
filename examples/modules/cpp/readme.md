@@ -17,8 +17,8 @@ module directory a device loads it from.
 - [`CMakeLists.txt`](CMakeLists.txt) builds the guest with the WASI SDK's
   `wasm32-wasip1` toolchain file, links it against `arora-buffers`,
   `arora-util` and [`arora-cpp`](../../../libs/cpp), and calls
-  `arora_module_directory`, which writes the module directory once the guest
-  links.
+  `arora_module_directory`, whose target `example-cpp-module-directory`
+  builds the guest and writes the module directory.
 
 The guest links as a WASI reactor (`-mexec-model=reactor`). It has no
 `main`; the engine calls its `_initialize` once, when it loads the module,

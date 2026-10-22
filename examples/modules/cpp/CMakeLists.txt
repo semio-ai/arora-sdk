@@ -36,7 +36,10 @@ set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_IN
 # module.yaml -> the bindings (include/example-cpp.hpp, source/example-cpp.cpp),
 # the module's record (records/) and its header (header.json).
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
+# The records are written afresh: the generator adds files and removes none,
+# so a version module.yaml no longer declares would stay among them.
 add_custom_target(generate-example-cpp-bindings ALL
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${GENERATED_DIR}/records
   COMMAND ${ARORA_MODULE_CLI}
     generate
     -l cpp
@@ -65,8 +68,8 @@ target_link_options(example-cpp PRIVATE
   -Wl,--allow-multiple-definition
 )
 
-# The module directory a device loads the module from: header.json,
-# example-cpp.wasm and records/.
+# The module directory a device loads the module from, written by the target
+# example-cpp-module-directory: header.json, example-cpp.wasm and records/.
 arora_module_directory(example-cpp ${ARORA_MODULE_DIR}
   HEADER ${GENERATED_DIR}/header.json
   RECORDS ${GENERATED_DIR}/records)

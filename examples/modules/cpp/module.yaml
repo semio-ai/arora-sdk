@@ -1,6 +1,6 @@
 id: e8e2d89e-d4c7-440d-8683-0b5ec6c5407e
 author: Semio
-description: An example C++ module that adds two integers and counts its calls
+description: An example C++ module that adds two integers and counts its sums
 license: Apache-2.0
 name: example-cpp
 version:
@@ -26,7 +26,7 @@ exports:
           id: i32
     ret:
       kind: scalar
-      id: i32
+      id: i64
   - type: function
     id: 26c0cfc2-da81-4561-a67c-af7133a478a5
     name: sums_so_far

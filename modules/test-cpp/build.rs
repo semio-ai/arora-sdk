@@ -24,13 +24,15 @@ fn main() -> Result<()> {
 
     // Stage host generators side-by-side under OUT_DIR. arora-module-cli
     // discovers the language generator by appending its --language argument
-    // to its own exe directory ("arora-module-cpp"), so the cli + cpp bins
-    // must live in the same directory with their canonical names.
+    // to its own exe directory ("arora-module-cpp", with the platform's
+    // executable suffix), so the cli + cpp bins must live in the same
+    // directory with their canonical names.
     let out_dir = PathBuf::from(env::var("OUT_DIR").context("OUT_DIR not set")?);
     let tools_dir = out_dir.join("arora-tools");
     std::fs::create_dir_all(&tools_dir).ok();
-    let arora_module_cli = tools_dir.join("arora-module-cli");
-    let arora_module_cpp = tools_dir.join("arora-module-cpp");
+    let exe = std::env::consts::EXE_SUFFIX;
+    let arora_module_cli = tools_dir.join(format!("arora-module-cli{exe}"));
+    let arora_module_cpp = tools_dir.join(format!("arora-module-cpp{exe}"));
     copy_executable(&arora_module_cli_src, &arora_module_cli)?;
     copy_executable(&arora_module_cpp_src, &arora_module_cpp)?;
 
@@ -69,7 +71,8 @@ fn main() -> Result<()> {
         .define("ARORA_CPP_SOURCE_DIR", &arora_cpp_source)
         .define("ARORA_INCLUDE_DIR", &arora_include_dir)
         .define("ARORA_MODULE_DIR", &module_dir)
-        .build_target("test-cpp")
+        // Its module directory, which builds the guest first.
+        .build_target("test-cpp-module-directory")
         .very_verbose(false)
         .build();
 

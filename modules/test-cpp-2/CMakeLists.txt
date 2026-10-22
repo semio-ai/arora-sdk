@@ -35,7 +35,10 @@ set_property(TARGET arora-util PROPERTY IMPORTED_LOCATION ${ARORA_UTIL_LIB})
 set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
 
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
+# The records are written afresh: the generator adds files and removes none,
+# so a version module.yaml no longer declares would stay among them.
 add_custom_target(generate-test-cpp-2-wrapper ALL
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${GENERATED_DIR}/records
   COMMAND ${ARORA_MODULE_CLI}
     --include ${TEST_CPP_RECORDS}
     --include ${LOCAL_RECORDS}
@@ -71,7 +74,8 @@ target_link_options(test-cpp-2 PRIVATE
   -Wl,--allow-multiple-definition
 )
 
-# The module directory a device loads the module from: its header, the guest,
+# The module directory a device loads the module from, written by the target
+# test-cpp-2-module-directory: its header, the guest,
 # its record, and the records of the types its functions name.
 arora_module_directory(test-cpp-2 ${ARORA_MODULE_DIR}
   HEADER ${GENERATED_DIR}/header.json

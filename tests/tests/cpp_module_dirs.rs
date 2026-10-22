@@ -148,8 +148,8 @@ fn the_example_cpp_module_keeps_its_state_across_calls() {
             .expect("add_two_integers answers")
             .ret
     };
-    assert_eq!(add(2, 3), Value::I32(5));
-    assert_eq!(add(-4, 1), Value::I32(-3));
+    assert_eq!(add(2, 3), Value::I64(5));
+    assert_eq!(add(i32::MAX, i32::MAX), Value::I64(2 * i64::from(i32::MAX)));
 
     let sums = device
         .call(Call {
