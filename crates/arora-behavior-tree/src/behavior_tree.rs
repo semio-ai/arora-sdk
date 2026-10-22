@@ -44,9 +44,9 @@ use crate::nodes::{
     EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
     RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
-    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID,
-    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
-    UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
+    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
+    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
 };
 
 // Runtime.
@@ -1344,11 +1344,12 @@ fn get_variable<'a>(
 /// Check a data node's arguments, and bind where an `Unpack` or a `Scatter`
 /// node writes: `None` for any other node.
 ///
-/// `Equal` needs both its arguments, `Unpack` its values and `Scatter` all
-/// three of its arguments, linked. Each of `Unpack`'s other arguments is an
-/// output port bound to a variable, whose cell the generic lowering already set
-/// up; two ports may not bind one variable, by id or by name. `Scatter`'s
-/// `within` is a literal key prefix (see [`scatter::Scatter::bind`]).
+/// `Equal` needs both its arguments, `Unpack` its values and `Scatter` its
+/// values and keys, linked. Each of `Unpack`'s other arguments is an output
+/// port bound to a variable, whose cell the generic lowering already set up;
+/// two ports may not bind one variable, by id or by name. `Scatter`'s
+/// `within`, if linked, is a literal key prefix, the tree's whole namespace
+/// when empty (see [`scatter::Scatter::bind`]).
 pub(crate) fn bind_data_node(
     node: &Node,
     names: &HashMap<Uuid, String>,
@@ -1362,11 +1363,7 @@ pub(crate) fn bind_data_node(
     let required: &[Uuid] = match node.function {
         EQUAL_FUNCTION_ID => &[EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID],
         UNPACK_FUNCTION_ID => &[UNPACK_VALUES_PARAM_ID],
-        SCATTER_FUNCTION_ID => &[
-            SCATTER_VALUES_PARAM_ID,
-            SCATTER_KEYS_PARAM_ID,
-            SCATTER_WITHIN_PARAM_ID,
-        ],
+        SCATTER_FUNCTION_ID => &[SCATTER_VALUES_PARAM_ID, SCATTER_KEYS_PARAM_ID],
         _ => return Ok(None),
     };
     if let Some(missing) = required.iter().find(|id| !node.arguments.contains_key(id)) {
