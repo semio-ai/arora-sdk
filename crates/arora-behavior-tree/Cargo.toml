@@ -46,3 +46,7 @@ arora-simple-data-store = { path = "../arora-simple-data-store" }
 [[bench]]
 name = "incremental"
 harness = false
+
+[[bench]]
+name = "scale"
+harness = false
