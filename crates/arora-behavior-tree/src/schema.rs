@@ -69,10 +69,6 @@ pub enum Expression {
     },
     /// Local variable resulting from some computation.
     Call(Box<CallExpression>),
-    /// The output of a compute node (see [`crate::compute`]): its return
-    /// value when `parameter` is `_ret`, else the value of that mutable
-    /// parameter after its last call.
-    Computed(NodeParameterId),
 }
 
 /// An expression describing a function to call.

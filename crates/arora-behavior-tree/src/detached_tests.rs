@@ -1,5 +1,6 @@
-//! Compute nodes: the calls of a node graph held beside the tree, evaluated on
-//! demand, once per tick, and only when their inputs changed.
+//! Detached nodes: the calls of a node graph listed with the tree but held by
+//! none of its nodes, evaluated when what they output is read, once per tick,
+//! and only when their inputs changed.
 //!
 //! The functions are the fake engine's four modules
 //! ([`call_expression_tests`](crate::call_expression_tests)). The inputs are
@@ -19,7 +20,7 @@ use crate::call_expression_tests::{
 use crate::display::Names;
 use crate::nodes::{FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, SEQ_FUNCTION_ID};
 use crate::schema::{Expression, Node, NodeParameterId, _RET_PARAM_ID};
-use crate::{load_behavior_tree_with_compute, BehaviorTree, BehaviorTreeRuntime, ComputeNode};
+use crate::{load_behavior_tree_nodes_with, BehaviorTree, BehaviorTreeRuntime};
 use arora_behavior::Status;
 
 /// The variable id of the store key or tree-local name `name`.
@@ -39,31 +40,37 @@ fn id(node: u128) -> Uuid {
     Uuid::from_u128(node)
 }
 
-/// `#node`: a compute node's return value.
+/// `@node`: a node's return value.
 fn read(node: u128) -> Expression {
     port(node, _RET_PARAM_ID)
 }
 
-/// `#node.parameter`: a mutable parameter's value after the node's last call.
+/// `@node.parameter`: a node's argument, here a mutable parameter's value
+/// after the node's last call.
 fn port(node: u128, parameter: Uuid) -> Expression {
-    Expression::Computed(NodeParameterId {
+    Expression::NodeArgument(NodeParameterId {
         node: id(node),
         parameter,
     })
 }
 
+/// A node of the graph: a node like any other, with its return value bound
+/// to `output` when given. Listed after the tree, no node holds it.
 fn compute(
     node: u128,
     function: Uuid,
     inputs: Vec<(Uuid, Expression)>,
     output: Option<&str>,
-) -> ComputeNode {
-    ComputeNode {
+) -> Node {
+    let mut arguments: HashMap<Uuid, Expression> = inputs.into_iter().collect();
+    if let Some(output) = output {
+        arguments.insert(_RET_PARAM_ID, key(output));
+    }
+    Node {
         id: id(node),
         function,
-        inputs,
-        output: output.map(var),
-        volatile: false,
+        arguments,
+        children: None,
     }
 }
 
@@ -94,10 +101,12 @@ fn names() -> HashMap<Uuid, String> {
         .collect()
 }
 
-/// Build a tree whose variables are the store's keys, but for the `.` ones.
-fn build(store: &SimpleDataStore, nodes: Vec<Node>, compute: Vec<ComputeNode>) -> BehaviorTree {
+/// Build a tree from `nodes`, the root first, and `graph` after them, whose
+/// variables are the store's keys, but for the `.` ones.
+fn build(store: &SimpleDataStore, nodes: Vec<Node>, graph: Vec<Node>) -> BehaviorTree {
     let resolver = |name: &str| Some(store.slot(&Key::from(name)));
-    load_behavior_tree_with_compute(nodes, compute, &resolver, &names()).expect("the tree builds")
+    let listed = nodes.into_iter().chain(graph).collect();
+    load_behavior_tree_nodes_with(listed, &resolver, &names()).expect("the tree builds")
 }
 
 fn set(store: &SimpleDataStore, name: &str, value: f64) {
@@ -119,9 +128,9 @@ fn take(calls: &Calls) -> HashMap<&'static str, usize> {
     counts
 }
 
-/// `#raw = mul(a: {sensor/distance}, b: 100)`, `#cm = clamp(x: #raw, lo: 0)`:
+/// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw, lo: 0)`:
 /// the distance in centimetres, never negative.
-fn centimetres_nodes() -> Vec<ComputeNode> {
+fn centimetres_nodes() -> Vec<Node> {
     vec![
         compute(
             10,
@@ -175,8 +184,8 @@ fn a_node_read_by_several_leaves_calls_its_function_once_per_tick() {
     assert_eq!((counts["mul"], counts["clamp"], counts["below"]), (3, 3, 3));
 }
 
-/// `#l = mul({left}, 2)`, `#r = mul({right}, 3)`, `#sum = add(#l, #r)`, read
-/// by one leaf.
+/// `l: mul({left}, 2)`, `r: mul({right}, 3)`, `sum: add(@l, @r)`, read by
+/// one leaf.
 fn two_branches(store: &SimpleDataStore) -> BehaviorTree {
     build(
         store,
@@ -220,9 +229,9 @@ fn a_changed_input_calls_only_the_nodes_downstream_of_it() {
         take(&calls),
         HashMap::from([("mul", 1), ("add", 1), ("below", 1)])
     );
-    assert_eq!(tree.compute_calls(id(20)), Some(2), "#l: once more");
-    assert_eq!(tree.compute_calls(id(21)), Some(1), "#r: not again");
-    assert_eq!(tree.compute_calls(id(22)), Some(2), "#sum: once more");
+    assert_eq!(tree.detached_calls(id(20)), Some(2), "#l: once more");
+    assert_eq!(tree.detached_calls(id(21)), Some(1), "#r: not again");
+    assert_eq!(tree.detached_calls(id(22)), Some(2), "#sum: once more");
 }
 
 /// A node whose result does not change stops the change: its readers keep
@@ -248,7 +257,7 @@ fn an_unchanged_result_stops_the_change() {
     set(&store, "sensor/distance", -0.2);
     runtime.tick().unwrap();
     assert_eq!(
-        [10, 11, 12].map(|node| tree.compute_calls(id(node)).unwrap()),
+        [10, 11, 12].map(|node| tree.detached_calls(id(node)).unwrap()),
         [2, 2, 1]
     );
 }
@@ -274,19 +283,18 @@ fn only_the_nodes_a_ticking_leaf_reads_are_evaluated() {
             compute(29, MUL, vec![(MUL_A, key("left")), (MUL_B, f(9.0))], None),
         ],
     );
-    assert_eq!(tree.compute_plan().on_demand, [id(20), id(21)]);
-    assert_eq!(tree.compute_plan().unused, [id(29)]);
-
     let mut engine = Engine::default();
     let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    assert_eq!(tree.detached_plan().on_demand, [id(20), id(21)]);
+    assert_eq!(tree.detached_plan().unused, [id(29)]);
     assert_eq!(runtime.tick().unwrap(), Status::Success);
-    assert_eq!(tree.compute_calls(id(20)), Some(1));
+    assert_eq!(tree.detached_calls(id(20)), Some(1));
     assert_eq!(
-        tree.compute_calls(id(21)),
+        tree.detached_calls(id(21)),
         Some(0),
         "the second child did not tick"
     );
-    assert_eq!(tree.compute_calls(id(29)), Some(0), "nothing reads it");
+    assert_eq!(tree.detached_calls(id(29)), Some(0), "nothing reads it");
 }
 
 /// A node that writes a store key is brought up to date every tick though
@@ -315,11 +323,10 @@ fn a_rogue_node_writing_a_store_key_runs_every_tick_from_its_cache() {
             ),
         ],
     );
-    assert_eq!(tree.compute_plan().every_tick, [id(30)]);
-    assert_eq!(tree.compute_plan().unused, [id(31)]);
-
     let mut engine = Engine::default();
     let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    assert_eq!(tree.detached_plan().every_tick, [id(30)]);
+    assert_eq!(tree.detached_plan().unused, [id(31)]);
     runtime.tick().unwrap();
     assert_eq!(get(&store, "out"), Some(Value::F64(6.0)));
 
@@ -328,16 +335,16 @@ fn a_rogue_node_writing_a_store_key_runs_every_tick_from_its_cache() {
     runtime.tick().unwrap();
     assert_eq!(get(&store, "out"), Some(Value::F64(6.0)));
     assert_eq!(
-        tree.compute_calls(id(30)),
+        tree.detached_calls(id(30)),
         Some(1),
         "its input did not change"
     );
-    assert_eq!(tree.compute_calls(id(31)), Some(0));
+    assert_eq!(tree.detached_calls(id(31)), Some(0));
 
     set(&store, "in", 4.0);
     runtime.tick().unwrap();
     assert_eq!(get(&store, "out"), Some(Value::F64(8.0)));
-    assert_eq!(tree.compute_calls(id(30)), Some(2));
+    assert_eq!(tree.detached_calls(id(30)), Some(2));
 }
 
 /// Of two nodes writing one store key, the later one wins at every tick, also
@@ -373,18 +380,18 @@ fn the_later_of_two_nodes_writing_one_key_wins_every_tick() {
     set(&store, "x", 7.0);
     runtime.tick().unwrap();
     assert_eq!(get(&store, "out"), Some(Value::F64(2.0)), "y still wins");
-    assert_eq!(tree.compute_calls(id(41)), Some(1), "from its cache");
+    assert_eq!(tree.detached_calls(id(41)), Some(1), "from its cache");
 }
 
-/// A volatile node calls its function once per tick, however many leaves read
-/// it. A node that is not volatile, with no arguments, would call it once and
-/// keep that result: a sensor read as a function is volatile.
+/// A node is called when its arguments change, however its function gets its
+/// result. A value that changes at every tick, such as the clock, calls the
+/// node that reads it at every tick, once however many leaves read it. A
+/// function whose result follows from no argument, such as a sensor read as a
+/// function, is called once and keeps that result: what it depends on is an
+/// argument, or a store key its source writes.
 #[test]
-fn a_volatile_node_calls_its_function_once_per_tick() {
+fn a_node_reading_the_clock_is_called_once_per_tick() {
     let store = SimpleDataStore::new();
-    let mut sensor = compute(50, DISTANCE, vec![], None);
-    sensor.volatile = true;
-    let stale = compute(51, DISTANCE, vec![], None);
     let tree = build(
         &store,
         vec![
@@ -393,16 +400,20 @@ fn a_volatile_node_calls_its_function_once_per_tick() {
             below(3, read(50), 2.0),
             below(4, read(51), 1.0),
         ],
-        vec![sensor, stale],
+        vec![
+            compute(50, ADD, vec![(ADD_A, key("x")), (ADD_B, f(0.0))], None),
+            compute(51, DISTANCE, vec![], None),
+        ],
     );
     let mut engine = Engine::default();
     let sensors = engine.sensors.clone();
     let calls = engine.calls.clone();
     let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
-    for distance in [0.5, 1.5] {
+    for (tick, distance) in [(1.0, 0.5), (2.0, 1.5)] {
+        set(&store, "x", tick);
         sensors.borrow_mut().insert(DISTANCE, distance);
         runtime.tick().unwrap();
-        // The last leaf reads the node that is not volatile.
+        // The last leaf reads the sensor called with no argument.
         let stale = calls
             .borrow()
             .iter()
@@ -412,11 +423,11 @@ fn a_volatile_node_calls_its_function_once_per_tick() {
         calls.borrow_mut().clear();
     }
     assert_eq!(
-        tree.compute_calls(id(50)),
+        tree.detached_calls(id(50)),
         Some(2),
         "once per tick, two readers"
     );
-    assert_eq!(tree.compute_calls(id(51)), Some(1));
+    assert_eq!(tree.detached_calls(id(51)), Some(1));
 }
 
 /// A stateful node keeps its state in its mutable parameter, starting from the
@@ -516,53 +527,47 @@ fn a_node_is_brought_up_to_date_at_its_first_read_in_a_tick() {
     assert_eq!(readings(&calls), [Value::F64(30.0), Value::F64(30.0)]);
 }
 
-fn build_error(nodes: Vec<Node>, compute: Vec<ComputeNode>) -> String {
+fn build_error(nodes: Vec<Node>, graph: Vec<Node>) -> String {
     let store = SimpleDataStore::new();
     let resolver = |name: &str| Some(store.slot(&Key::from(name)));
-    match load_behavior_tree_with_compute(nodes, compute, &resolver, &names()) {
+    let listed = nodes.into_iter().chain(graph).collect();
+    match load_behavior_tree_nodes_with(listed, &resolver, &names()) {
         Ok(_) => panic!("the tree builds"),
         Err(error) => error.to_string(),
     }
 }
 
-/// Building refuses a cycle, a reference to no compute node, and a compute
-/// node reading a tree node's argument.
+/// Building refuses a reference to no node.
 #[test]
-fn building_refuses_what_a_graph_cannot_evaluate() {
-    let tree = || vec![below(1, read(80), 1.0)];
-    let error = build_error(
-        tree(),
-        vec![
-            compute(80, ADD, vec![(ADD_A, read(81)), (ADD_B, f(1.0))], None),
-            compute(81, ADD, vec![(ADD_A, read(80)), (ADD_B, f(1.0))], None),
-        ],
-    );
-    assert!(error.contains("in a cycle"), "{error}");
-
-    let error = build_error(tree(), Vec::new());
-    assert!(error.contains("is not a compute node"), "{error}");
-
-    let error = build_error(
-        tree(),
-        vec![compute(
-            80,
-            ADD,
-            vec![(
-                ADD_A,
-                Expression::NodeArgument(NodeParameterId {
-                    node: id(1),
-                    parameter: BELOW_LIMIT,
-                }),
-            )],
-            None,
-        )],
-    );
-    assert!(error.contains("reads a tree node's argument"), "{error}");
+fn building_refuses_a_reference_to_no_node() {
+    let error = build_error(vec![below(1, read(80), 1.0)], Vec::new());
+    assert!(error.contains("was not found"), "{error}");
 }
 
-fn lowering_error(nodes: Vec<Node>, compute: Vec<ComputeNode>) -> String {
+/// A node no node holds that is not a call to a module function, such as a
+/// control node an edit adds before placing it, or a node with children,
+/// waits until a node holds it: it is not detached, and never runs.
+#[test]
+fn a_loose_node_that_is_no_call_waits_until_a_node_holds_it() {
     let store = SimpleDataStore::new();
-    let tree = build(&store, nodes, compute);
+    let mut parent = compute(81, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    parent.children = Some(vec![id(1)]);
+    let tree = build(
+        &store,
+        vec![below(1, f(1.0), 2.0)],
+        vec![control(80, SEQ_FUNCTION_ID, &[]), parent],
+    );
+    let mut engine = Engine::default();
+    let calls = engine.calls.clone();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    assert_eq!(tree.detached_plan(), Default::default());
+    assert_eq!(take(&calls), HashMap::from([("below", 1)]));
+}
+
+fn lowering_error(nodes: Vec<Node>, graph: Vec<Node>) -> String {
+    let store = SimpleDataStore::new();
+    let tree = build(&store, nodes, graph);
     let mut engine = Engine::default();
     match BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false) {
         Ok(_) => panic!("the tree lowers"),
@@ -570,10 +575,21 @@ fn lowering_error(nodes: Vec<Node>, compute: Vec<ComputeNode>) -> String {
     }
 }
 
-/// Lowering refuses a port that is neither a return value nor a mutable
-/// parameter, and a mutable parameter fed by another node's port.
+/// Lowering refuses detached nodes that read each other in a cycle, a read of
+/// a port that is neither a return value nor a mutable parameter, and a cell
+/// a detached node writes that another node writes too: here a mutable
+/// parameter fed by another node's return value.
 #[test]
-fn lowering_refuses_a_port_that_is_no_output() {
+fn lowering_refuses_what_a_graph_cannot_evaluate() {
+    let error = lowering_error(
+        vec![below(1, read(80), 1.0)],
+        vec![
+            compute(80, ADD, vec![(ADD_A, read(81)), (ADD_B, f(1.0))], None),
+            compute(81, ADD, vec![(ADD_A, read(80)), (ADD_B, f(1.0))], None),
+        ],
+    );
+    assert!(error.contains("in a cycle"), "{error}");
+
     let error = lowering_error(
         vec![below(1, port(90, MUL_A), 1.0)],
         vec![compute(
@@ -601,11 +617,121 @@ fn lowering_refuses_a_port_that_is_no_output() {
             ),
         ],
     );
-    assert!(error.contains("mutable parameter `state`"), "{error}");
+    assert!(error.contains("one tree-local cell"), "{error}");
 }
 
-/// The text form of a graph: one line per node, inputs before their readers,
-/// with the store key a node writes after it.
+/// A detached node reads the tree as any node does: here a leaf's argument.
+#[test]
+fn a_detached_node_reads_a_tree_node_s_argument() {
+    let store = SimpleDataStore::new();
+    let tree = build(
+        &store,
+        vec![
+            control(1, SEQ_FUNCTION_ID, &[2, 3]),
+            below(2, f(1.0), 4.0),
+            below(3, read(80), 100.0),
+        ],
+        vec![compute(
+            80,
+            MUL,
+            vec![(MUL_A, port(2, BELOW_LIMIT)), (MUL_B, f(10.0))],
+            None,
+        )],
+    );
+    let mut engine = Engine::default();
+    let calls = engine.calls.clone();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    let reading = calls
+        .borrow()
+        .iter()
+        .rfind(|(name, _)| *name == "below")
+        .map(|(_, args)| args[&BELOW_X].clone());
+    assert_eq!(reading, Some(Value::F64(40.0)));
+}
+
+/// Every port of a node is an output: here the state of `smooth`, a mutable
+/// parameter, written to a store key while the return value goes to another.
+#[test]
+fn a_node_writes_each_of_its_outputs() {
+    let store = SimpleDataStore::new();
+    set(&store, "target", 2.0);
+    let smooth = compute(
+        60,
+        SMOOTH,
+        vec![
+            (SMOOTH_X, key("target")),
+            (SMOOTH_ALPHA, f(0.5)),
+            (SMOOTH_STATE, key("y")),
+        ],
+        Some("out"),
+    );
+    set(&store, "y", 0.0);
+    let tree = build(&store, vec![below(1, f(1.0), 2.0)], vec![smooth]);
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    assert_eq!(tree.detached_plan().every_tick, [id(60)]);
+    runtime.tick().unwrap();
+    assert_eq!(
+        get(&store, "y"),
+        Some(Value::F64(1.0)),
+        "the state, halfway"
+    );
+    assert_eq!(
+        get(&store, "out"),
+        Some(Value::F64(1.0)),
+        "the return value"
+    );
+}
+
+/// A sink writes its store keys after the tree has ticked, even when the
+/// tree brings it up to date earlier: within a tick, the tree reads the store
+/// as it was, and the key at the next tick.
+#[test]
+fn a_sink_writes_its_keys_after_the_tree_ticks() {
+    let store = SimpleDataStore::new();
+    set(&store, "target", 2.0);
+    set(&store, "out", -1.0);
+    let tree = build(
+        &store,
+        vec![
+            control(1, SEQ_FUNCTION_ID, &[2, 3]),
+            // Reading the state brings the sink up to date during the tick.
+            below(2, port(60, SMOOTH_STATE), 100.0),
+            below(3, key("out"), 100.0),
+        ],
+        vec![compute(
+            60,
+            SMOOTH,
+            vec![
+                (SMOOTH_X, key("target")),
+                (SMOOTH_ALPHA, f(0.5)),
+                (SMOOTH_STATE, f(0.0)),
+            ],
+            Some("out"),
+        )],
+    );
+    let mut engine = Engine::default();
+    let calls = engine.calls.clone();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    let readings = |calls: &Calls| -> Vec<Value> {
+        calls
+            .borrow_mut()
+            .drain(..)
+            .filter(|(name, _)| *name == "below")
+            .map(|(_, args)| args[&BELOW_X].clone())
+            .collect()
+    };
+    runtime.tick().unwrap();
+    assert_eq!(readings(&calls), [Value::F64(1.0), Value::F64(-1.0)]);
+    assert_eq!(get(&store, "out"), Some(Value::F64(1.0)), "written after");
+    runtime.tick().unwrap();
+    assert_eq!(readings(&calls), [Value::F64(1.5), Value::F64(1.0)]);
+}
+
+/// Attached and detached nodes show alike: one line per node, its name in
+/// front when it has one, its bound return before `=`, and `@node` for
+/// another node's return value. The graph shows in the order it is listed.
 #[test]
 fn a_graph_shows_one_node_per_line() {
     let store = SimpleDataStore::new();
@@ -616,12 +742,10 @@ fn a_graph_shows_one_node_per_line() {
         vec![(ADD_A, read(11)), (ADD_B, f(1.0))],
         Some("face/level"),
     ));
-    // Given readers first: the display follows the evaluation order.
-    nodes.reverse();
     let tree = build(&store, vec![below(1, read(11), 30.0)], nodes);
     let functions = index();
     let variables = names();
-    let compute_names = HashMap::from([
+    let node_names = HashMap::from([
         (id(10), "raw".to_string()),
         (id(11), "cm".to_string()),
         (id(12), "level".to_string()),
@@ -629,17 +753,17 @@ fn a_graph_shows_one_node_per_line() {
     let names = Names {
         functions: Some(&functions),
         variables: Some(&variables),
-        compute: Some(&compute_names),
+        nodes: Some(&node_names),
     };
     assert_eq!(
-        tree.display_compute(names),
-        "#raw = mul(a: {sensor/distance}, b: 100f64)\n\
-         #cm = clamp(x: #raw, lo: 0f64)\n\
-         #level = add(a: #cm, b: 1f64) -> {face/level}\n"
+        tree.display_detached(names),
+        "raw: mul(a: {sensor/distance}, b: 100f64)\n\
+         cm: clamp(x: @raw, lo: 0f64)\n\
+         level: {face/level} = add(a: @cm, b: 1f64)\n"
     );
     assert_eq!(
         tree.node_index[&id(1)].display(names).to_string(),
-        "below(x: #cm, limit: 30f64)"
+        "below(x: @cm, limit: 30f64)"
     );
 }
 
@@ -647,7 +771,7 @@ fn a_graph_shows_one_node_per_line() {
 /// [`a_node_read_by_several_leaves_calls_its_function_once_per_tick`] over a
 /// hundred ticks, the distance changing every tenth tick. Written as call
 /// expressions, every leaf calls the whole cascade every tick. Written as
-/// compute nodes, the cascade runs once per change.
+/// detached nodes, the cascade runs once per change.
 #[test]
 fn over_a_hundred_ticks_the_cascade_runs_once_per_change() {
     let store = SimpleDataStore::new();
@@ -677,7 +801,7 @@ fn over_a_hundred_ticks_the_cascade_runs_once_per_change() {
     };
     eprintln!("calls over 100 ticks: [distance, mul, clamp, below]");
     eprintln!("  call expressions: {:?}", row(&totals[0]));
-    eprintln!("  compute nodes:    {:?}", row(&totals[1]));
+    eprintln!("  detached nodes:   {:?}", row(&totals[1]));
     assert_eq!(row(&totals[0]), [300, 300, 300, 300]);
     assert_eq!(row(&totals[1]), [0, 10, 10, 300]);
 }

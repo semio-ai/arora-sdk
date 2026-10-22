@@ -1,10 +1,10 @@
 pub mod behavior;
 #[cfg(test)]
 mod call_expression_tests;
-pub mod compute;
-#[cfg(test)]
-mod compute_tests;
 pub mod core_nodes;
+pub mod detached;
+#[cfg(test)]
+mod detached_tests;
 pub mod display;
 pub mod error;
 pub mod graph;
@@ -17,8 +17,8 @@ mod tests;
 pub mod tree_node;
 pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
-use compute::ComputeGraph;
-pub use compute::{ComputeNode, ComputePlan};
+use detached::Detached;
+pub use detached::DetachedPlan;
 
 use crate::display::{stated_id, Names};
 use crate::variable::{is_tree_local, VariableCell, VariableResolver};
@@ -63,8 +63,8 @@ pub struct BehaviorTree {
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
     /// Each `Unpack` and `Scatter` node's outputs, bound at load.
     outputs: HashMap<Uuid, Outputs>,
-    /// The compute nodes the tree reads, held beside it.
-    compute: Rc<ComputeGraph>,
+    /// The nodes no node holds, evaluated when what they output is read.
+    detached: Rc<Detached>,
 }
 
 /// Where a data node writes, bound when the tree is loaded.
@@ -78,26 +78,43 @@ enum Outputs {
 }
 
 impl BehaviorTree {
-    /// How the tree's compute nodes are evaluated.
-    pub fn compute_plan(&self) -> &ComputePlan {
-        self.compute.plan()
+    /// How the tree's detached nodes are evaluated, once it is lowered.
+    pub fn detached_plan(&self) -> DetachedPlan {
+        self.detached.plan()
     }
 
-    /// How many times the compute node `id` has called its function.
-    pub fn compute_calls(&self, id: Uuid) -> Option<u64> {
-        self.compute.calls(id)
+    /// How many times the detached node `id` has called its function.
+    pub fn detached_calls(&self, id: Uuid) -> Option<u64> {
+        self.detached.calls(id)
     }
 
-    /// The tree's compute nodes as text, one per line, inputs before their
-    /// readers.
-    pub fn display_compute(&self, names: Names) -> String {
-        self.compute
+    /// The tree's detached nodes as text, one per line, in the order the tree
+    /// lists them.
+    pub fn display_detached(&self, names: Names) -> String {
+        self.detached
             .nodes()
+            .iter()
             .map(|node| format!("{}\n", node.display(names)))
             .collect()
     }
 
-    /// Tick `root` once, its compute nodes around it: they are out of date
+    /// Find who reads which detached node, against `functions`.
+    fn lower_detached(&self, functions: &FunctionIndex) -> Result<(), BehaviorTreeError> {
+        let attached: Vec<Rc<Node>> = self
+            .node_index
+            .values()
+            .filter(|node| !self.detached.contains(&node.id))
+            .cloned()
+            .collect();
+        self.detached.lower(
+            functions,
+            &attached,
+            &self.variables.borrow(),
+            &self.node_arg_variables,
+        )
+    }
+
+    /// Tick `root` once, its detached nodes around it: they are out of date
     /// until read, and the sinks are brought up to date and written after the
     /// tree has ticked.
     fn tick_root(
@@ -105,16 +122,15 @@ impl BehaviorTree {
         root: &TickId,
         caller: &mut dyn CallBridge,
     ) -> Result<Status, BehaviorTreeError> {
-        self.compute.begin_tick();
+        self.detached.begin_tick();
         let status = root.tick(caller)?;
         let variables = self.variables.borrow();
         let calls = FunctionIndex::new();
-        self.compute.tick_sinks(
+        self.detached.tick_sinks(
             Scope {
                 variables: &variables,
                 node_parameters_variables: &self.node_arg_variables,
                 calls: &calls,
-                compute: &self.compute,
             },
             caller,
         )?;
@@ -167,7 +183,6 @@ impl BehaviorTree {
                     // unwrapped every selection.
                     Expression::NodeArgument(_)
                     | Expression::Variable(_)
-                    | Expression::Computed(_)
                     | Expression::Select { .. } => {}
                 }
             }
@@ -212,14 +227,14 @@ impl<'a> BehaviorTreeRuntime<'a> {
         trace: bool,
     ) -> Result<Self, BehaviorTreeError> {
         let mut callables = Vec::new();
-        tree.compute.lower(functions)?;
+        tree.lower_detached(functions)?;
         let tick = setup_tick_function(
             tree.root.clone(),
             &tree.node_index,
             functions,
             tree.variables.clone(),
             tree.node_arg_variables.clone(),
-            tree.compute.clone(),
+            tree.detached.clone(),
             &tree.outputs,
             caller,
             if trace {
@@ -265,14 +280,14 @@ pub fn lower_behavior_tree(
     trace: bool,
 ) -> Result<LoweredTree, BehaviorTreeError> {
     let mut callables = Vec::new();
-    tree.compute.lower(functions)?;
+    tree.lower_detached(functions)?;
     let root = setup_tick_function(
         tree.root.clone(),
         &tree.node_index,
         functions,
         tree.variables.clone(),
         tree.node_arg_variables.clone(),
-        tree.compute.clone(),
+        tree.detached.clone(),
         &tree.outputs,
         caller,
         if trace {
@@ -344,7 +359,7 @@ fn setup_tick_function(
     functions: &FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
-    compute: Rc<ComputeGraph>,
+    detached: Rc<Detached>,
     outputs: &HashMap<Uuid, Outputs>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
@@ -373,7 +388,7 @@ fn setup_tick_function(
                 functions,
                 variables.clone(),
                 node_arg_variables.clone(),
-                compute.clone(),
+                detached.clone(),
                 outputs,
                 caller,
                 trace,
@@ -392,7 +407,8 @@ fn setup_tick_function(
             .collect(),
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
-        compute,
+        pulls: detached.pulls(&node.id),
+        detached,
         outputs: outputs.get(&node.id).cloned(),
         children: children_ticks,
         trace,
@@ -453,7 +469,7 @@ fn tick_builtin(
             }
         })?;
         let value = compute_expression(scope, expression, caller, &node_parameter)?;
-        if let (Expression::Call(_) | Expression::Computed(_), Some(cell)) = (
+        if let (Expression::Call(_), Some(cell)) = (
             expression,
             scope.node_parameters_variables.get(&node_parameter),
         ) {
@@ -696,7 +712,7 @@ fn tick(
     argument_order: &[Uuid],
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
-    compute: &ComputeGraph,
+    detached: (&Detached, Option<&[usize]>),
     outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
     node: Rc<Node>,
@@ -712,6 +728,18 @@ fn tick(
             );
         }
     };
+    // The detached nodes the node reads are brought up to date first.
+    if let (detached, Some(pulls)) = detached {
+        detached.pull(
+            pulls,
+            Scope {
+                variables: &variables.borrow(),
+                node_parameters_variables: &node_parameters_variables,
+                calls,
+            },
+            caller,
+        )?;
+    }
     // The basic control nodes are wired in natively; everything else is
     // dispatched into a module through the engine.
     let builtin = tick_builtin(
@@ -720,7 +748,6 @@ fn tick(
             variables: &variables.borrow(),
             node_parameters_variables: &node_parameters_variables,
             calls,
-            compute,
         },
         outputs,
         child_tick_ids,
@@ -813,7 +840,6 @@ fn tick(
             variables: &variables,
             node_parameters_variables: &node_parameters_variables,
             calls,
-            compute,
         };
         for param_id in argument_order {
             let value_expression = &node.arguments[param_id];
@@ -824,12 +850,8 @@ fn tick(
             let variable =
                 get_node_parameter_variable(&node_parameter, &node_parameters_variables)?;
 
-            // A call, or a compute node's output, is computed into the
-            // argument's cell.
-            if matches!(
-                value_expression,
-                Expression::Call(_) | Expression::Computed(_)
-            ) {
+            // A call is computed into the argument's cell.
+            if matches!(value_expression, Expression::Call(_)) {
                 let value = compute_expression(scope, value_expression, caller, &node_parameter)?;
                 variable.set_opt(Some(value).filter(|value| *value != Value::Unit));
             };
@@ -972,7 +994,9 @@ struct TickFunction {
     argument_order: Rc<[Uuid]>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
-    compute: Rc<ComputeGraph>,
+    detached: Rc<Detached>,
+    /// The detached nodes the node reads, brought up to date before it ticks.
+    pulls: Option<Rc<[usize]>>,
     /// Where the node writes, for an `Unpack` or a `Scatter` node.
     outputs: Option<Outputs>,
     children: Vec<TickId>,
@@ -988,7 +1012,7 @@ impl Tickable for TickFunction {
             &self.argument_order,
             self.locals.clone(),
             self.node_arg_variables.clone(),
-            &self.compute,
+            (&self.detached, self.pulls.as_deref()),
             self.outputs.as_ref(),
             &self.children,
             self.node.clone(),
@@ -1019,25 +1043,17 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
 /// expects; ids absent from it (or that the resolver declines) stay tree-local.
 /// This is the path the shared-graph lowering
 /// ([`build_behavior_tree`](crate::graph::build_behavior_tree)) uses.
+///
+/// The first node is the root. A call to a module function that the tree does
+/// not hold, being neither the root nor a child of a held node, is
+/// [detached](detached): it runs when what it outputs is read.
 pub fn load_behavior_tree_nodes_with(
     nodes: Vec<Node>,
     resolver: &VariableResolver,
     names: &HashMap<Uuid, String>,
 ) -> Result<BehaviorTree, BehaviorTreeError> {
-    load_behavior_tree_with_compute(nodes, Vec::new(), resolver, names)
-}
-
-/// Like [`load_behavior_tree_nodes_with`], with `compute` nodes held beside
-/// the tree, which its nodes read through [`Expression::Computed`]. See
-/// [`compute`] for how they are evaluated, and
-/// [`BehaviorTree::compute_plan`] for which of them are.
-pub fn load_behavior_tree_with_compute(
-    nodes: Vec<Node>,
-    compute: Vec<ComputeNode>,
-    resolver: &VariableResolver,
-    names: &HashMap<Uuid, String>,
-) -> Result<BehaviorTree, BehaviorTreeError> {
     let mut node_index: HashMap<Uuid, Rc<Node>> = HashMap::new();
+    let mut listed: Vec<Rc<Node>> = Vec::new();
     let mut root: Option<Rc<Node>> = None;
     let mut variables = HashMap::new();
     let mut node_parameters_variables = HashMap::new();
@@ -1054,6 +1070,7 @@ pub fn load_behavior_tree_with_compute(
             // first node is the root?
             root = Some(shared_node.clone());
         }
+        listed.push(shared_node.clone());
 
         // Index the node and check for duplicates.
         let existing_node = node_index.insert(shared_node.id, shared_node.clone());
@@ -1071,6 +1088,31 @@ pub fn load_behavior_tree_with_compute(
                 },
                 arg_expr.clone(),
             ));
+        }
+    }
+
+    // The nodes the tree holds: the root, and the children of a held node.
+    // A call no node holds is detached (see [`detached`]), and its return
+    // value is a port whether or not `_ret` is bound.
+    let mut attached = HashSet::new();
+    let mut held: Vec<Uuid> = root.iter().map(|root| root.id).collect();
+    while let Some(id) = held.pop() {
+        if attached.insert(id) {
+            if let Some(children) = node_index.get(&id).and_then(|node| node.children.as_ref()) {
+                held.extend(children.iter().copied());
+            }
+        }
+    }
+    let detached = Detached::new(&listed, &attached);
+    for node in detached.nodes() {
+        if !node.arguments.contains_key(&_RET_PARAM_ID) {
+            node_parameters_variables.insert(
+                NodeParameterId {
+                    node: node.id,
+                    parameter: _RET_PARAM_ID,
+                },
+                VariableCell::local(),
+            );
         }
     }
 
@@ -1120,14 +1162,6 @@ pub fn load_behavior_tree_with_compute(
         }
     }
 
-    let mut tree_reads = Vec::new();
-    for node in node_index.values() {
-        for argument in node.arguments.values() {
-            compute::references_in(argument, &mut tree_reads);
-        }
-    }
-    let compute = ComputeGraph::build(compute, tree_reads, &mut variables, resolver, names)?;
-
     Ok(BehaviorTree {
         root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
             message: "behavior tree has no nodes".to_string(),
@@ -1136,7 +1170,7 @@ pub fn load_behavior_tree_with_compute(
         variables: Rc::new(RefCell::new(variables)),
         node_arg_variables: Rc::new(node_parameters_variables),
         outputs,
-        compute: Rc::new(compute),
+        detached: Rc::new(detached),
     })
 }
 
@@ -1301,9 +1335,6 @@ pub(crate) fn setup_node_parameter_variable(
             bind_variables(argument_expression, variables, resolver, names);
             VariableCell::local()
         }
-        // The compute node keeps its output: the argument's cell holds what
-        // the node read last.
-        Expression::Computed(_) => VariableCell::local(),
     };
     node_parameters_variables.insert(node_parameter.to_owned(), variable.to_owned());
     Ok(variable)
@@ -1368,8 +1399,6 @@ pub(crate) struct Scope<'a> {
     pub(crate) variables: &'a HashMap<Uuid, VariableCell>,
     pub(crate) node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
     pub(crate) calls: &'a FunctionIndex,
-    /// The tree's compute nodes, which a [`Expression::Computed`] reads.
-    pub(crate) compute: &'a ComputeGraph,
 }
 
 pub(crate) fn compute_expression(
@@ -1387,7 +1416,6 @@ pub(crate) fn compute_expression(
             variable.get_or_unit()
         }
         Expression::Call(call) => call_expression(scope, call, caller, node_parameter)?,
-        Expression::Computed(port) => scope.compute.read(port, scope, caller)?,
         Expression::NodeArgument(other_node_parameter) => {
             let variable =
                 get_node_parameter_variable(other_node_parameter, scope.node_parameters_variables)?;
@@ -1568,8 +1596,8 @@ fn calls_in<'e>(expression: &'e Expression, found: &mut Vec<&'e CallExpression>)
 /// Refuses, naming the call:
 /// - a call to the interpreter module's functions, which a tree does not call;
 /// - an argument for a parameter the function does not have;
-/// - a mutable parameter fed by a selection, a call or a compute node's output: the function
-///   writes it back, and neither has a cell to hold what it writes. A literal
+/// - a mutable parameter fed by a selection or a call: the function writes it
+///   back, and neither has a cell to hold what it writes. A literal
 ///   holds it at the call site, a variable or a node argument in its cell.
 fn call_signatures(
     node: &Node,
@@ -1634,10 +1662,7 @@ pub(crate) fn expression_call_signatures<'e>(
                 );
             };
             if declared.mutable
-                && matches!(
-                    argument,
-                    Expression::Select { .. } | Expression::Call(_) | Expression::Computed(_)
-                )
+                && matches!(argument, Expression::Select { .. } | Expression::Call(_))
             {
                 return refuse(
                     call,
