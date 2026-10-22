@@ -9,6 +9,15 @@
 //! `_on_change` leaves; `placed` is the detached form's file placed before its
 //! readers with `place_detached`, on the incremental executor.
 //!
+//! `attached-guarded` is the attached tree on today's executor (flag off) with
+//! each leaf wrapped as `FALLBACK[SEQ[Equal(a: 0, b: 1), leaf], SUCCEED]`, the
+//! pattern a tree uses to skip an unchanged node without the flag. `Equal` on
+//! two different literals always fails, so no leaf is called: the row is the
+//! cost of the guard alone on a settled graph, four native nodes ticked per
+//! graph node and no module call. A literal guard cannot follow an input
+//! change, so this form runs in `settled` only, and it is left out of the
+//! output comparison because its leaves never publish.
+//!
 //! Attached leaves bind `_ret` to a tree-local port and mirror the computed
 //! value through a mutable `out` parameter to a store key. Detached nodes bind
 //! `_ret` directly to those keys (sink publication). The host ignores `out`'s
@@ -23,7 +32,10 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::time::Instant;
 
-use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, WITH_FUNCTION_ID};
+use arora_behavior_tree::nodes::{
+    EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
+    PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SUCCEED_FUNCTION_ID, WITH_FUNCTION_ID,
+};
 use arora_behavior_tree::schema::{
     Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
 };
@@ -42,6 +54,9 @@ fn id(n: usize) -> Uuid {
 fn variable(n: usize) -> Expression {
     Expression::VariableId(id(n))
 }
+/// First id of the `attached-guarded` wrapper nodes: graph node `i` takes
+/// `GUARD + 4 * i` to `GUARD + 4 * i + 3`, above every other id in the bench.
+const GUARD: usize = 1_000_000;
 fn measure(
     n: usize,
     mode: &str,
@@ -69,6 +84,8 @@ fn measure(
         })
         .collect();
     let detached = matches!(mode, "detached" | "placed");
+    let guarded = mode == "attached-guarded";
+    let top = |i: usize| id(if guarded { GUARD + 4 * i } else { 2 + i });
     let mut nodes = vec![Node {
         id: id(1),
         function: if detached {
@@ -76,7 +93,7 @@ fn measure(
         } else {
             PARALLEL_FUNCTION_ID
         },
-        children: (!detached).then(|| (0..=n).map(|i| id(2 + i)).collect()),
+        children: (!detached).then(|| (0..n).map(top).chain([id(2 + n)]).collect()),
         ..Node::default()
     }];
     let mut bridge = Bridge::default();
@@ -114,6 +131,38 @@ fn measure(
             arguments,
             children: None,
         });
+        if guarded {
+            let fallback = GUARD + 4 * i;
+            let (seq, equal, succeed) = (fallback + 1, fallback + 2, fallback + 3);
+            nodes.extend([
+                Node {
+                    id: id(fallback),
+                    function: FALLBACK_FUNCTION_ID,
+                    children: Some(vec![id(seq), id(succeed)]),
+                    ..Node::default()
+                },
+                Node {
+                    id: id(seq),
+                    function: SEQ_FUNCTION_ID,
+                    children: Some(vec![id(equal), id(2 + i)]),
+                    ..Node::default()
+                },
+                Node {
+                    id: id(equal),
+                    function: EQUAL_FUNCTION_ID,
+                    arguments: HashMap::from([
+                        (EQUAL_A_PARAM_ID, Expression::Value(Value::F64(0.0))),
+                        (EQUAL_B_PARAM_ID, Expression::Value(Value::F64(1.0))),
+                    ]),
+                    ..Node::default()
+                },
+                Node {
+                    id: id(succeed),
+                    function: SUCCEED_FUNCTION_ID,
+                    ..Node::default()
+                },
+            ]);
+        }
     }
     if !detached {
         nodes.push(Node {
@@ -215,9 +264,16 @@ fn main() {
                 "attached-incremental-with",
                 "detached",
                 "placed",
+                "attached-guarded",
             ] {
+                let guarded = mode == "attached-guarded";
+                if guarded && scenario != "settled" {
+                    continue;
+                }
                 let (time, calls, dispatches, outputs) = measure(n, mode, scenario, ticks, samples);
-                if let Some(expected) = &expected {
+                if guarded {
+                    assert_eq!(calls, 0.0, "{n} {scenario} {mode}: a guarded leaf ran");
+                } else if let Some(expected) = &expected {
                     assert_eq!(&outputs, expected, "{n} {scenario} {mode}");
                 } else {
                     expected = Some(outputs);
