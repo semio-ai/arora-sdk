@@ -187,19 +187,38 @@ pub(crate) fn ordered<'e>(
     arguments: &'e HashMap<Uuid, Expression>,
     signature: Option<&ModuleFunction>,
 ) -> Vec<(Uuid, &'e Expression)> {
-    let order: Vec<Uuid> = signature
-        .map(|signature| signature.function.parameter_ordering.clone())
+    let order: &[Uuid] = signature
+        .map(|signature| signature.function.parameter_ordering.as_slice())
         .unwrap_or_default();
     let mut ordered: Vec<(Uuid, &Expression)> = arguments
         .iter()
         .map(|(parameter, argument)| (*parameter, argument))
         .collect();
-    ordered.sort_by_key(|(parameter, _)| {
+    // Each argument's position is found once.
+    ordered.sort_by_cached_key(|(parameter, _)| {
         (
             order
                 .iter()
                 .position(|id| id == parameter)
                 .unwrap_or(usize::MAX),
+            *parameter,
+        )
+    });
+    ordered
+}
+
+/// [`ordered`], by the `positions` of the function's parameters.
+pub(crate) fn ordered_by<'e>(
+    arguments: &'e HashMap<Uuid, Expression>,
+    positions: &crate::id_hash::IdMap<Uuid, usize>,
+) -> Vec<(Uuid, &'e Expression)> {
+    let mut ordered: Vec<(Uuid, &Expression)> = arguments
+        .iter()
+        .map(|(parameter, argument)| (*parameter, argument))
+        .collect();
+    ordered.sort_unstable_by_key(|(parameter, _)| {
+        (
+            positions.get(parameter).copied().unwrap_or(usize::MAX),
             *parameter,
         )
     });

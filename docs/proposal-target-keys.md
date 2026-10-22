@@ -21,9 +21,10 @@ In short:
   `studio_value` is retired as a name.
 - **Devices accept both forms** and list both as open inputs; a client writes
   the form the device lists, preferring `k/target.c`.
-- **A change that sets both forms of one target applies `k/target.c`.** A
-  device whose own consumers read targets from the store may keep the two
-  forms in agreement.
+- **A change that sets both forms of one target applies `k/target.c`, and
+  the device keeps the two forms in agreement:** it writes the value that
+  wins into both, since a store notifies a write only when it changes a key's
+  value (§3).
 - **The axis of a structured value comes after the component:**
   `eye/target.position.x` targets `eye.position.x`, the field `x` of the
   value `eye.position` (§5). Studio's per-axis keys, axis first today
@@ -181,28 +182,53 @@ current one. The rule:
    every device a client drives describes its keys; a client then drives only
    what a device lists, and states the rest as not driven.
 4. **A client writes one form per target.** A change that sets both forms of
-   one target applies `k/target.c` and ignores `k.target_c`, whatever value
-   `k/target.c` holds: the keys of a `StateChange` carry no order, so "last
-   write wins" cannot apply within one change, and the form decides. Across
-   changes, the later write wins, whichever form each was written in; a HAL
-   that merges a backlog of changes into one keeps that
-   (`arora_hal::fold_newest_wins`). A whole target covers its fields: a later
-   write or unset of the whole drops earlier writes of its fields, and within
-   one change the whole applies before its fields (§5). The two forms are
-   distinct keys of the store: a store or a bridge never merges them.
-5. **A device may keep the two forms of a target in agreement.** A device
-   whose own consumers read targets from the store, rather than from the
-   change it is handed, writes the value that wins by rule 4 into both keys,
-   and an unset of either form, with neither set, into both. On such a device
-   a client sees both keys move together, whichever form it wrote, and the
-   write to the form it did not use is the device's own. A device whose HAL
-   resolves targets from each change (every HAL in arora-sdk, through
-   `set_targets`) has no need to: each key holds what was last written to it.
-   - **Why it is allowed:** a node graph, like Vizij's, reads each input's
-     current value every tick. It cannot tell which of two keys was written
-     last, or that both arrived in one change; the store's `write` sees each
-     change whole, the unit `set_targets` reads, so the rule is applied there
-     and the graph reads one form
+   one target applies `k/target.c` and ignores `k.target_c`: the keys of a
+   `StateChange` carry no order, so "last write wins" cannot apply within one
+   change, and the form decides. Arora's runtime hands its HAL each step's
+   store changes merged key by key into one change (`flush`,
+   `crates/arora/src/runtime.rs`), so writes to the two forms within one step
+   also reach the HAL as one change, and the form decides there too. That loses
+   no order between remotes: a writer writes one form, and the writes of two
+   remotes within one step carry no order between them. It does override one
+   order the runtime sets: it applies a step's bridge events before it ticks
+   the behavior (`Arora::step`), so on one key the behavior's write wins, but
+   where a remote and the behavior write different forms of one target within
+   one step, `k/target.c`'s value applies, whichever of them wrote it. The rule
+   applies to what the store notifies: a write that leaves a form at the value
+   it holds sets nothing. With both forms at 1, a step that sets `k/target.c`
+   to 1 and `k.target_c` to 2 changes only `k.target_c`, and 2 applies: the
+   store notifies only the writes that change a value, and two writers' writes
+   within one step carry no order to recover. Across steps, the later write
+   wins, whichever form each was written in; a HAL that merges a backlog of
+   changes into one keeps that (`arora_hal::fold_newest_wins`), and rule 5
+   keeps the store from dropping the later write. A whole target covers its
+   fields: a later write or unset of the whole drops earlier writes of its
+   fields, and within one change the whole applies before its fields (§5). The
+   two forms are distinct keys of the store: a store or a bridge never merges
+   them.
+5. **A device keeps the two forms of a target in agreement.** It writes the
+   value that wins by rule 4 into both keys, and an unset of either form, with
+   neither set, into both. A client sees both keys move together, whichever
+   form it wrote, and the write to the form it did not use is the device's
+   own. Every HAL arora's runtime feeds reads its targets from the store's
+   notifications, the step's changes the runtime hands it (`write_hal`), so
+   for those HALs the runtime applies the rule, and keeps a whole target and
+   its fields in agreement the same way (§5). It does not yet
+   ([ARORA-187](https://linear.app/semio-ai/issue/ARORA-187)).
+   - **Why it is required:** a store notifies a write only when it changes
+     the key's value (`DataStore::write`): a key set to the value it already
+     holds is left out of what observers see. Were each form to hold only
+     what was last written to it, a write that returns one form to the value
+     it holds would not be notified, though the other form has moved since:
+     `hip_yaw.target_position` set to 1, `hip_yaw/target.position` to 2, then
+     `hip_yaw.target_position` to 1, in three steps, would leave the HAL at 2
+     where rule 4 gives 1. With the value that wins in both keys, the next
+     write to either form is a change, and is notified.
+   - **A consumer that reads the store's values needs it too.** A node graph,
+     like Vizij's, reads each input's current value every tick. It cannot tell
+     which of two keys was written last, or that both arrived in one change;
+     the store's `write` sees each change whole, the unit `set_targets` reads,
+     so the rule is applied there and the graph reads one form
      ([vizij-rs#199](https://github.com/vizij-ai/vizij-rs/pull/199)).
    - **Why not a third key:** the alternative is an internal key holding the
      resolved target, which every bridge would relay and every client would
@@ -273,9 +299,14 @@ boundaries only, below), and a store or a bridge carries each key as it is.
   5 leaves x at 5. The keys of a change carry no order, so the rule decides,
   as the form does in §3 rule 4.
 - **A device that lists both the whole and its fields keeps them in
-  agreement**, as §3 rule 5 does for the two forms of a target, so a consumer
-  that reads the store sees `eye/target.position` and `eye/target.position.x`
-  agree.
+  agreement**, as it does the two forms of a target (§3 rule 5). Wherever a
+  HAL reads its targets from store notifications, the runtime writes back the
+  resolved whole and fields, so a later write to either is a change: the
+  store notifies a write only when it changes the key's value.
+  `eye/target.position.x` set to 5, `eye/target.position` to (0, 0, 0), then
+  `eye/target.position.x` to 5 again, in three steps, leaves x at 5, the
+  field holding 0 after the second. A consumer that reads the store sees
+  `eye/target.position` and `eye/target.position.x` agree.
 - **Merging a field write into the whole is optional.** A device MAY accept a
   write of one field to an input that takes the whole value, and merge it
   into the value it holds; it need not. Most HALs and bridges cannot: a ROS 2
@@ -371,10 +402,10 @@ input spelling breaks nothing in production.
 
 ## 6. Studio's per-axis keys
 
-Paths below are semio_studio's. *Main* is Studio's production line; *the
-stack* is the Studio-on-Arora branch `feat/studio-arora-target-keys`, whose
-top is semio_studio PR 542 (each bound device resolves its own input key per
-animatable).
+Paths below are semio_studio's. *Main* is Studio's production line.
+*Staging* carries the Studio-on-Arora World (`packages/studio-arora`), which
+resolves each animatable's input and feedback keys per bound device
+(semio_studio PR 542).
 
 A target key is a device's input: the output of the pipeline that drives the
 device, not what a track addresses. A device's behavior writes the animation
@@ -398,14 +429,18 @@ directly.
   `packages/vizij/src/functions/gltf-loading/map-features.ts`) and in the
   animation migration (`packages/animation/src/functions/migrate-animation-data.ts`,
   `normalize-track-data.ts`). Studio has no quaternion animatable.
-- **Device keys, on the stack.** The World's key for an animatable is its
+- **Device keys, on staging.** The World's key for an animatable is its
   output or its id (`packages/studio-arora/src/animatable.rs`), so an axis's
-  key `k` is `<id>.<axis>`. `TargetForm::key` gives `<id>.<axis>.target_position`
-  for the current form and `<id>.<axis>/target.position` for `k/target.c`,
-  which arora's grammar reads as no target. The feedback is
-  `<id>.<axis>.position` (`Declared::feedback`, and `feedbackKey` in
-  `packages/utils/src/scene-binding.ts`). The World's `Animatable` does not
-  read `group`.
+  key is `<id>.<axis>`, and it stays the key on the animation plane and in
+  the key table. The World spells an axis's device keys from its group's key
+  `k` (that key without the trailing `.<axis>`, the axis read from
+  `group.axis`) and the axis. Its inputs are `k/target.c.<axis>`,
+  `k.<axis>.target_c` and the bare `k.<axis>` (`Declared::input_in`),
+  resolved per device (§6.2). Its feedback is read at `k.c.<axis>` where the
+  device lists it, else at `k.<axis>.c` (`resolve_feedback`). An entity's
+  writes address `k.<axis>.target_c` (`DECLARED_FORM`), which an emulated
+  device declares as its input, and an emulated device reports `k.<axis>.c`.
+  The component `c` is `position` for every number.
 - **Device keys, on main.** The device commander
   (`apps/studio/src/store/subscriptions/device-subscriptions.ts`) reads
   feedback as any `<name>.position`, so it reads `<id>.<axis>.position`. It
@@ -419,27 +454,41 @@ directly.
 
 ### 6.2 What changes, by surface
 
-- **The World's per-device resolution** (stack). An axis animatable's key
-  becomes its group's key `k` (its key without the trailing `.<axis>`), and
-  its forms put the axis last: `k/target.c.<axis>`, then Studio's
-  `k.<axis>.target_c`, then the bare `k.<axis>`, in that order of preference,
-  under the rules PR 542 sets for a scalar (the first form listed open; not
-  driven when a target form is listed closed; `k.<axis>.target_c`, unchecked,
-  when none is listed). `Animatable` reads `group.axis`, and the key
-  uniqueness check applies to the pair of `k` and axis. `undriven` names the
-  keys tried, as for a scalar.
-- **The component** (stack). The World names the component of every number
+- **The World's per-device resolution.** On staging the World tries an
+  axis's inputs as `k/target.c.<axis>`, Studio's `k.<axis>.target_c`, then
+  the bare `k.<axis>`, under the rules PR 542 sets for a scalar (the first
+  form listed open; not driven when a target form is listed closed;
+  `k.<axis>.target_c`, unchecked, when none is listed), and `undriven` names
+  the keys tried. A scalar's sequence is `k/target.c`, `k.target_c`, then the
+  bare `k`. Both lack `k.c`, the form a device with no dynamics takes (§2),
+  which §3 rule 3 tries third. It joins both sequences before the bare key:
+  `k/target.c`, `k.target_c`, `k.c`, then `k` for a scalar;
+  `k/target.c.<axis>`, `k.<axis>.target_c`, `k.c.<axis>`, then `k.<axis>`
+  for an axis. A device that lists only `eye.position.x` open is then written
+  there, not in `eye.x.target_position`, which it does not read. Like a bare
+  key, `k.c` or `k.c.<axis>` listed closed is the device's feedback, an
+  output, and states nothing about its targets.
+- **The component.** The World names the component of every number
   `position` (`Animatable::declared`), so a colour's channel reads
   `light.position.r`. It names a grouped animatable's component from its
   group's type instead, `light.color.r` for a colour (§2;
-  [STUDIO-394](https://linear.app/semio-ai/issue/STUDIO-394)). It renames
-  keys devices read, so it ships with stage (c), resolved per device like the
-  rest.
-- **The scene binding** (`packages/utils/src/scene-binding.ts`). Inputs need
-  no change: the binding reads each device's input keys from the World
-  (`inputKeys`) and spells none. `feedbackKey` takes the axis and gives
-  `k.position.<axis>`. `AnimatableKeys.feedback` is one key for every device;
-  it stays one while devices publish both spellings (§6.3 a).
+  [STUDIO-394](https://linear.app/semio-ai/issue/STUDIO-394)). That renames
+  keys devices read and publish, so it ships with stage (c), and the
+  `position` spellings stay candidates of their own until stage (e): the
+  World tries each sequence with the group's component, then with `position`,
+  then the bare key. For the channel `r` of `light`, the inputs are
+  `light/target.color.r`, `light.r.target_color`, `light.color.r`, then
+  `light/target.position.r` and `light.r.target_position`, which the `vizij`
+  device takes (§6.1), then `light.position.r`, then `light.r`. The feedback
+  is `light.color.r`, `light.r.color`, then `light.position.r`,
+  `light.r.position`. A device that lists none is written and read in
+  `position`, axis first (`light.r.target_position`, `light.r.position`), as
+  on staging.
+- **The scene binding** (`packages/utils/src/scene-binding.ts`). It spells no
+  key: it reads each device's input and feedback keys from the World
+  (`inputKeys`, `feedbackKeys`), and `AnimatableKeys.feedback` holds one key
+  per device. The component the World names reaches the scene's feedback
+  with no mapping of its own.
 - **Device pairing.** Pairing lists the device's keys (`ListKeys`) and the
   World resolves each animatable from them, axes included; a device that
   lists only one spelling of an axis is written in that one.
@@ -474,18 +523,20 @@ writes or reads.
 
 | Stage | What ships | Gated by | If skipped |
 |---|---|---|---|
-| **(a) Devices take both spellings.** | A device with per-axis keys — the `vizij` device first — lists `k/target.c.<axis>` and `k.<axis>.target_c` as open inputs, keeps them in agreement where its graph reads the store (§3 rule 5), and publishes its feedback under both `k.c.<axis>` and `k.<axis>.c`. | Nothing: it adds keys. vizij-rs#199 ships the inputs; the feedback under `k.c.<axis>` is to add. | A device that moves to axis after alone is not driven by a Studio before (b), and its feedback is not seen by a Studio before (c). |
-| **(b) Studio resolves axes per device.** | The World resolves an axis's input as in §6.2, with its own spelling and feedback unchanged (`k.<axis>.target_c`, `k.<axis>.c`). | semio_studio PR 542 merged. | Studio cannot drive a device that lists only axis after, and setting `DECLARED_FORM` to `k/target.c` would declare `<id>.<axis>/target.position`, which no device reads as a target. |
-| **(c) Studio switches its spelling.** | `DECLARED_FORM` becomes `k/target.c` for every animatable: emulated devices declare `k/target.c.<axis>` and report `k.c.<axis>`; `feedbackKey` gives `k.c.<axis>`; the live-data table resolves from the longest streamed prefix. | This proposal accepted; (a) shipped on every device Studio drives per axis; (b). | Studio keeps writing a spelling meant to retire, and (e) cannot start. Shipped before (a), it loses the per-axis feedback of every device not yet at (a): the scene's device rows and the live-data table show nothing for those axes. |
+| **(a) Devices take both spellings.** | A device with per-axis keys — the `vizij` device first — lists `k/target.c.<axis>` and `k.<axis>.target_c` as open inputs, keeps them in agreement (§3 rule 5), and publishes its feedback under both `k.c.<axis>` and `k.<axis>.c`. For a grouped value whose component (c) renames, `color` for a colour, it does so under both component names: it takes `light/target.color.r` beside `light/target.position.r` and `light.r.target_position`, and publishes `light.color.r` beside its `position` feedback. | Nothing: it adds keys. vizij-rs#199 ships the inputs under `position`; the feedback under `k.c.<axis>` and the new component's keys are to add. | A device that moves to axis after alone is not driven or read by a Studio before (b), and one that moves to the new component alone is not driven or read by a Studio before (c). |
+| **(b) Studio resolves axes per device.** | The World resolves an axis's input and feedback per device as in §6.1 and §6.2, with its own spelling and feedback unchanged (`k.<axis>.target_c`, `k.<axis>.c`). | semio_studio PR 542, on staging; the direct-write form `k.c.<axis>` is to add ([STUDIO-397](https://linear.app/semio-ai/issue/STUDIO-397)). | Studio cannot drive a device that lists only axis after, and setting `DECLARED_FORM` to `k/target.c` would declare `<id>.<axis>/target.position`, which no device reads as a target. |
+| **(c) Studio switches its spelling.** | `DECLARED_FORM` becomes `k/target.c` for every animatable, and a grouped animatable's component becomes its group's, `color` for a colour (§6.2): emulated devices declare `k/target.c.<axis>` and report `k.c.<axis>` in that component. The World keeps the `position` spellings as candidates of their own, and writes and reads a device that lists none of an axis's spellings in `position`, axis first. The live-data table resolves from the longest streamed prefix. | This proposal accepted; (b). Devices move at their own pace: Studio drives and reads each by what it lists. | Studio keeps writing a spelling and a component meant to retire, and devices cannot drop a grouped value's `position` (e). |
 | **(d) Saved data.** | Projects and animations: nothing, their ids do not change. Live-data layouts: a row or collapsed group whose key the device no longer lists is rewritten to the other spelling when the device lists that one, and the layout saved; or a one-time migration of `liveDataViewConfigs`. Recordings: nothing, none is persisted. | (c). | Once (e) ships, saved per-axis rows go blank, silently. |
-| **(e) The axis-first spelling retires.** | Devices stop listing `k.<axis>.target_c` and publishing `k.<axis>.c` (a major of each); the World drops the form from its preference. | Studio in production at (c); (d) shipped; no device in use relying on axis first. As for `k.target_c` (§3). | Retired early, a Studio before (b) or (c) loses the inputs and the feedback of every axis. |
+| **(e) The axis-first spelling and the `position` of a grouped value retire.** | Devices stop listing `k.<axis>.target_c` and publishing `k.<axis>.c`, and stop taking and publishing a grouped value under `position` (a major of each); the World drops those spellings from its preference. | A device drops a spelling once Studio in production drives and reads it by what it lists: at (b) for the axis-first spelling, at (c) for a grouped value's `position`; (d) shipped. The World drops a spelling once no device in use lists it. As for `k.target_c` (§3). | Dropped early by a device, a Studio before (b), or before (c) for the component, loses that device's inputs and feedback for every axis. Dropped early by the World, a device that still lists only that spelling is not driven. |
 
-Feedback could instead be resolved per device, as inputs are, from which
-spelling the device lists; that would make `AnimatableKeys.feedback` a
-per-device table. Publishing both spellings for the transition keeps Studio's
-feedback one key per animatable, and the device that carries the cost — the
-`vizij` device, the device outside Studio with per-axis targets — already keeps two forms of
-each target.
+The World reads feedback per device, as it resolves inputs
+(`resolve_feedback`): a device is read in the spelling and the component it
+lists, and a device that lists none in the spelling devices publish today,
+`k.<axis>.position`. Publishing both spellings from (a) keeps a device's
+per-axis feedback where a Studio before (b) and the saved live-data rows read
+it, and the device that carries the cost — the `vizij` device, the device
+outside Studio with per-axis targets — already keeps two forms of each
+target.
 
 ## 7. Alternatives
 

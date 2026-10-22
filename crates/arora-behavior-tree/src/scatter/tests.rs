@@ -15,6 +15,7 @@ use arora_types::value::Value;
 use uuid::Uuid;
 
 use crate::behavior::BehaviorTreeInterpreter;
+use crate::error::BehaviorTreeError;
 use crate::graph::build_behavior_tree;
 use crate::lower_behavior_tree;
 use crate::nodes::{
@@ -332,6 +333,73 @@ fn a_key_outside_within_errors_the_tick_and_writes_nothing() {
     }
 }
 
+/// An empty `within`, or none, is the tree's whole namespace: keys at its root
+/// and under paths that share no prefix are written alike.
+#[test]
+fn an_empty_or_omitted_within_writes_anywhere_in_the_namespace() {
+    let keys = [
+        "root",
+        "hip_yaw/target.position",
+        "eye.position",
+        "anim/face/k0",
+    ];
+    for within in [Some(""), None] {
+        let mut device = Device::new(scatter_graph(
+            Some(literal(floats(&[1.0, 2.0, 3.0, 4.0]))),
+            Some(literal(strings(&keys))),
+            within.map(|text| literal(Value::String(text.to_string()))),
+        ));
+        device.tick().unwrap();
+        assert!(device.succeeded(), "within {within:?}");
+        assert_eq!(
+            device.read(&keys),
+            vec![
+                Some(Value::F64(1.0)),
+                Some(Value::F64(2.0)),
+                Some(Value::F64(3.0)),
+                Some(Value::F64(4.0))
+            ],
+            "within {within:?}"
+        );
+    }
+}
+
+/// A tree-local name is no store key: whatever `within` is, a key that is one
+/// errors the tick as a key outside `within` does, an inconsistent tree, and
+/// nothing is written.
+#[test]
+fn a_tree_local_key_errors_the_tick_and_writes_nothing() {
+    for within in [Some("anim"), Some(""), None] {
+        let counted = Counted::new();
+        let graph = scatter_graph(
+            Some(literal(floats(&[1.0, 2.0]))),
+            Some(literal(strings(&["anim/a", ".anim/b"]))),
+            within.map(|text| literal(Value::String(text.to_string()))),
+        );
+        let resolver = counted.resolver("");
+        let tree = build_behavior_tree(&graph, &*resolver)
+            .unwrap()
+            .with_key_resolver(resolver);
+        let mut bridge = Bridge::default();
+        let lowered = lower_behavior_tree(tree, &FunctionIndex::new(), &mut bridge, false).unwrap();
+        let error = format!("{}", lowered.tick(&mut bridge).expect_err("tree-local"));
+        let refusal = BehaviorTreeError::InconsistentTreeError {
+            message: format!("Scatter node {SCATTER}: the key '.anim/b'"),
+        };
+        assert!(
+            error.starts_with(&refusal.to_string()),
+            "within {within:?}: {error}"
+        );
+        assert_eq!(
+            counted
+                .store
+                .read(&[Key::new("anim/a"), Key::new(".anim/b")]),
+            vec![None, None],
+            "within {within:?}"
+        );
+    }
+}
+
 #[test]
 fn a_key_named_twice_errors_the_tick_and_writes_nothing() {
     let mut device = Device::new(scatter(
@@ -345,14 +413,16 @@ fn a_key_named_twice_errors_the_tick_and_writes_nothing() {
 }
 
 #[test]
-fn within_is_a_literal_key_prefix_and_every_argument_is_linked() {
+fn within_is_a_literal_key_prefix_or_none_and_values_and_keys_are_linked() {
     let lowers = |graph: Graph| build_behavior_tree(&graph, &|_| None).map(|_| ());
     let values = || Some(literal(floats(&[1.0])));
     let keys = || Some(literal(strings(&["anim/a"])));
     let within = |text: &str| Some(literal(Value::String(text.to_string())));
     lowers(scatter_graph(values(), keys(), within("anim"))).expect("a key prefix");
     lowers(scatter_graph(values(), keys(), within("anim/face"))).expect("a deeper prefix");
-    for text in ["", "anim/", ".anim"] {
+    lowers(scatter_graph(values(), keys(), within(""))).expect("the whole namespace");
+    lowers(scatter_graph(values(), keys(), None)).expect("`within` left out");
+    for text in ["anim/", ".anim", "/", "."] {
         assert!(
             lowers(scatter_graph(values(), keys(), within(text))).is_err(),
             "'{text}' is not a key prefix"
@@ -369,7 +439,6 @@ fn within_is_a_literal_key_prefix_and_every_argument_is_linked() {
     for (graph, missing) in [
         (scatter_graph(None, keys(), within("anim")), "values"),
         (scatter_graph(values(), None, within("anim")), "keys"),
-        (scatter_graph(values(), keys(), None), "within"),
     ] {
         assert!(lowers(graph).is_err(), "{missing} is not linked");
     }
@@ -629,13 +698,16 @@ fn scatter_round_trips_through_groot() {
     for port in [r#"values="{.values}""#, r#"within="anim""#, "keys=\"json:"] {
         assert!(written.contains(port), "{written}");
     }
-    assert!(
-        groot(r#"<Scatter values="{v}" keys="{k}"/>"#)
-            .root
-            .try_into_tree_node(&HashMap::new(), &mut HashMap::new())
-            .is_err(),
-        "`within` is required"
-    );
+    let mut names = HashMap::new();
+    let node = groot(r#"<Scatter values="{v}" keys="{k}"/>"#)
+        .root
+        .try_into_tree_node(&HashMap::new(), &mut names)
+        .expect("`within` may be left out");
+    assert!(!node.parameters.contains_key(&SCATTER_WITHIN_PARAM_ID));
+    let mut by_id = names.iter().map(|(name, id)| (*id, name.clone())).collect();
+    let exported = Node::try_from_tree_node(&node, &HashMap::new(), &mut by_id).unwrap();
+    let written = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+    assert!(!written.contains("within"), "{written}");
 
     let palette = include_str!("../../groot/groot_arora_palette.xml");
     let start = palette.find(r#"<Action ID="Scatter">"#).expect("Scatter");

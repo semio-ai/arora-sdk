@@ -33,7 +33,7 @@ pub struct Variable {
     ty: TypeRef,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct Node {
     /// The ID of this node.
     pub id: Uuid,

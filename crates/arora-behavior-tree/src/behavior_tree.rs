@@ -8,6 +8,7 @@ mod detached_tests;
 pub mod display;
 pub mod error;
 pub mod graph;
+mod id_hash;
 mod incremental;
 #[cfg(test)]
 mod incremental_tests;
@@ -49,9 +50,9 @@ use crate::nodes::{
     EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
     RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
-    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID,
-    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
-    UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
+    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
+    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
 };
 
 // Runtime.
@@ -65,7 +66,7 @@ pub struct BehaviorTree {
     /// The local variables.
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     /// Variables associated to node arguments (node, arg).
-    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     /// Each `Unpack` and `Scatter` node's outputs, bound at load.
     outputs: HashMap<Uuid, Outputs>,
     /// The nodes no node holds, evaluated when what they output is read.
@@ -91,6 +92,57 @@ impl BehaviorTree {
     /// How many times the detached node `id` has called its function.
     pub fn detached_calls(&self, id: Uuid) -> Option<u64> {
         self.detached.calls(id)
+    }
+
+    /// Observe the detached nodes among `ids`: from the next lowering on,
+    /// each is brought up to date at every tick, after the tree ticks, as a
+    /// sink is, whether or not a node reads it. A host showing what every
+    /// node of a graph computes observes them all.
+    pub fn observe_detached(&self, ids: impl IntoIterator<Item = Uuid>) {
+        self.detached.observe(ids);
+    }
+
+    /// The outputs of the detached node `id` after its last call, by port:
+    /// its return value under [`_RET_PARAM_ID`], and each mutable parameter
+    /// under its id. `None` for a node that is not detached or has not been
+    /// called yet.
+    pub fn detached_outputs(&self, id: Uuid) -> Option<HashMap<Uuid, Value>> {
+        self.detached.outputs(id)
+    }
+
+    /// The output `port` of the detached node `id` after its last call: its
+    /// return value for [`_RET_PARAM_ID`]. `None` as for
+    /// [`detached_outputs`](Self::detached_outputs), or for a port the node
+    /// has not output.
+    pub fn detached_output(&self, id: Uuid, port: Uuid) -> Option<Value> {
+        self.detached.output(id, port)
+    }
+
+    /// The value the cell of `node`'s argument `parameter` holds: what a node
+    /// reading `@node.parameter` reads. A detached node's argument bound to a
+    /// store key has a cell of its own, apart from the key: the port the key
+    /// is published from. `None` for an argument the tree does not have, or a
+    /// cell that holds nothing.
+    pub fn argument_value(&self, node: Uuid, parameter: Uuid) -> Option<Value> {
+        self.node_arg_variables
+            .get(&NodeParameterId { node, parameter })
+            .and_then(VariableCell::get)
+    }
+
+    /// Set the cell of `node`'s argument `parameter` to `value`, as a write
+    /// of the node would: a host restoring a node's state into a tree built
+    /// again from a changed node. Returns whether the tree has the argument.
+    pub fn set_argument_value(&self, node: Uuid, parameter: Uuid, value: Option<Value>) -> bool {
+        match self
+            .node_arg_variables
+            .get(&NodeParameterId { node, parameter })
+        {
+            Some(cell) => {
+                cell.set_opt(value);
+                true
+            }
+            None => false,
+        }
     }
 
     /// The tree's detached nodes as text, one per line, in the order the tree
@@ -167,7 +219,7 @@ impl BehaviorTree {
     /// tree being replaced. A cell bound to another node's argument is that
     /// node's to carry, and a store-backed cell holds nothing of the tree's. A
     /// tree-local variable that only fresh nodes read starts afresh with them.
-    pub(crate) fn keep_state(&self, previous: &BehaviorTree, fresh: &HashSet<Uuid>) {
+    pub fn keep_state(&self, previous: &BehaviorTree, fresh: &HashSet<Uuid>) {
         let mut read = HashSet::new();
         for node in self.node_index.values() {
             if fresh.contains(&node.id) {
@@ -447,7 +499,7 @@ fn setup_tick_function(
     node_index: &HashMap<Uuid, Rc<Node>>,
     functions: &FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
-    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     outputs: &HashMap<Uuid, Outputs>,
     caller: &mut dyn CallBridge,
@@ -904,7 +956,7 @@ fn tick(
     calls: &FunctionIndex,
     argument_order: &[Uuid],
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
-    node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_parameters_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: (&Detached, Option<&[usize]>),
     outputs: Option<&Outputs>,
     child_tick_ids: &[TickLink],
@@ -1205,7 +1257,7 @@ struct TickFunction {
     /// argument runs before a call in the next, every tick.
     argument_order: Rc<[Uuid]>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
-    node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
+    node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     /// The detached nodes the node reads, brought up to date before it ticks.
     pulls: Option<Rc<[usize]>>,
@@ -1352,7 +1404,7 @@ pub fn load_behavior_tree_nodes_with(
     let mut listed: Vec<Rc<Node>> = Vec::new();
     let mut root: Option<Rc<Node>> = None;
     let mut variables = HashMap::new();
-    let mut node_parameters_variables = HashMap::new();
+    let mut node_parameters_variables = crate::id_hash::IdMap::default();
     let mut arguments = Vec::new();
     let mut outputs = HashMap::new();
     for mut node in nodes {
@@ -1401,7 +1453,7 @@ pub fn load_behavior_tree_nodes_with(
     }
     let detached_nodes = Detached::select(&listed, &attached);
     let detached_ids: HashSet<Uuid> = detached_nodes.iter().map(|node| node.id).collect();
-    let mut bindings = HashMap::new();
+    let mut bindings = crate::id_hash::IdMap::default();
     let mut fed_inputs = HashSet::new();
     for node in &detached_nodes {
         if !node.arguments.contains_key(&_RET_PARAM_ID) {
@@ -1575,15 +1627,16 @@ fn get_variable<'a>(
 /// Check a data node's arguments, and bind where an `Unpack` or a `Scatter`
 /// node writes: `None` for any other node.
 ///
-/// `Equal` needs both its arguments, `Unpack` its values and `Scatter` all
-/// three of its arguments, linked. Each of `Unpack`'s other arguments is an
-/// output port bound to a variable, whose cell the generic lowering already set
-/// up; two ports may not bind one variable, by id or by name. `Scatter`'s
-/// `within` is a literal key prefix (see [`scatter::Scatter::bind`]).
+/// `Equal` needs both its arguments, `Unpack` its values and `Scatter` its
+/// values and keys, linked. Each of `Unpack`'s other arguments is an output
+/// port bound to a variable, whose cell the generic lowering already set up;
+/// two ports may not bind one variable, by id or by name. `Scatter`'s
+/// `within`, if linked, is a literal key prefix, the tree's whole namespace
+/// when empty (see [`scatter::Scatter::bind`]).
 pub(crate) fn bind_data_node(
     node: &Node,
     names: &HashMap<Uuid, String>,
-    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+    node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
 ) -> Result<Option<Outputs>, BehaviorTreeError> {
     let refuse = |what: String| {
         Err(BehaviorTreeError::InconsistentTreeError {
@@ -1593,11 +1646,7 @@ pub(crate) fn bind_data_node(
     let required: &[Uuid] = match node.function {
         EQUAL_FUNCTION_ID => &[EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID],
         UNPACK_FUNCTION_ID => &[UNPACK_VALUES_PARAM_ID],
-        SCATTER_FUNCTION_ID => &[
-            SCATTER_VALUES_PARAM_ID,
-            SCATTER_KEYS_PARAM_ID,
-            SCATTER_WITHIN_PARAM_ID,
-        ],
+        SCATTER_FUNCTION_ID => &[SCATTER_VALUES_PARAM_ID, SCATTER_KEYS_PARAM_ID],
         _ => return Ok(None),
     };
     if let Some(missing) = required.iter().find(|id| !node.arguments.contains_key(id)) {
@@ -1655,7 +1704,7 @@ fn read_argument(expression: &Expression) -> Option<&NodeParameterId> {
 
 fn get_node_parameter_variable<'a>(
     node_parameter: &NodeParameterId,
-    node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
+    node_parameters_variables: &'a crate::id_hash::IdMap<NodeParameterId, VariableCell>,
 ) -> Result<&'a VariableCell, BehaviorTreeError> {
     node_parameters_variables
         .get(node_parameter)
@@ -1674,7 +1723,7 @@ pub(crate) fn setup_node_parameter_variable(
     node_parameter: &NodeParameterId,
     argument_expression: &Expression,
     variables: &mut HashMap<Uuid, VariableCell>,
-    node_parameters_variables: &mut HashMap<NodeParameterId, VariableCell>,
+    node_parameters_variables: &mut crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     resolver: &VariableResolver,
     names: &HashMap<Uuid, String>,
 ) -> Result<VariableCell, BehaviorTreeError> {
@@ -1776,7 +1825,7 @@ pub(crate) fn variable_cell(
 #[derive(Clone, Copy)]
 pub(crate) struct Scope<'a> {
     pub(crate) variables: &'a HashMap<Uuid, VariableCell>,
-    pub(crate) node_parameters_variables: &'a HashMap<NodeParameterId, VariableCell>,
+    pub(crate) node_parameters_variables: &'a crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     pub(crate) calls: &'a FunctionIndex,
 }
 
@@ -1997,7 +2046,7 @@ fn call_signatures(
     functions: &FunctionIndex,
 ) -> Result<FunctionIndex, BehaviorTreeError> {
     let mut signatures = expression_call_signatures(
-        &format!("node {}", node.id),
+        || format!("node {}", node.id),
         node.arguments.values(),
         functions,
     )?;
@@ -2010,7 +2059,7 @@ fn call_signatures(
 /// The signatures of the functions the calls in `arguments` state, checked as
 /// [`call_signatures`] says; `owner` names what holds them in a refusal.
 pub(crate) fn expression_call_signatures<'e>(
-    owner: &str,
+    owner: impl Fn() -> String,
     arguments: impl IntoIterator<Item = &'e Expression>,
     functions: &FunctionIndex,
 ) -> Result<FunctionIndex, BehaviorTreeError> {
@@ -2019,11 +2068,15 @@ pub(crate) fn expression_call_signatures<'e>(
     for argument in arguments {
         calls_in(argument, &mut calls);
     }
+    if calls.is_empty() {
+        return Ok(signatures);
+    }
     let names = Names::functions(functions);
     let refuse = |call: &CallExpression, why: String| {
         Err(BehaviorTreeError::InconsistentTreeError {
             message: format!(
-                "{owner}: {} {why}",
+                "{}: {} {why}",
+                owner(),
                 Expression::Call(Box::new(call.clone())).display(names)
             ),
         })

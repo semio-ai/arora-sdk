@@ -46,7 +46,7 @@ jobs:
           # `cargo publish` verifies those against the registry too — so a
           # release that bumps several in lockstep publishes each after its new
           # dependencies.
-          publishable=(arora-types-derive arora-types arora-buffers arora-engine arora-vfs arora-behavior arora-module-macros arora-module arora-animation arora-animation-module arora-msgs-ros2 arora-bridge arora-bridge-ws arora-behavior-tree-types arora-hal arora-simple-data-store arora-registry arora-module-core arora-module-rust arora-behavior-tree arora arora-bridge-ros2 arora-web)
+          publishable=(arora-types-derive arora-types arora-shape arora-buffers arora-engine arora-vfs arora-behavior arora-module-macros arora-module arora-animation arora-animation-module arora-msgs-ros2 arora-bridge arora-bridge-ws arora-behavior-tree-types arora-hal arora-simple-data-store arora-registry arora-module-core arora-module-rust arora-behavior-tree arora-node-graph arora arora-bridge-ros2 arora-web)
           for crate in "${publishable[@]}"; do
             ver=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$crate" '.packages[] | select(.name==$c) | .version')

@@ -1,0 +1,166 @@
+{
+  "spec": {
+    "nodes": [
+      {
+        "id": "host_time",
+        "type": "input",
+        "params": {
+          "path": "driver/time.seconds",
+          "value": 0
+        }
+      },
+      {
+        "id": "freq",
+        "type": "constant",
+        "params": {
+          "value": 0.5
+        }
+      },
+      {
+        "id": "time_scaled",
+        "type": "multiply"
+      },
+      {
+        "id": "tau",
+        "type": "constant",
+        "params": {
+          "value": 6.283185307179586
+        }
+      },
+      {
+        "id": "phase",
+        "type": "multiply"
+      },
+      {
+        "id": "sin_val",
+        "type": "sin"
+      },
+      {
+        "id": "shifted",
+        "type": "add",
+        "input_defaults": {
+          "operand_2": {
+            "value": 1
+          }
+        }
+      },
+      {
+        "id": "normalized",
+        "type": "multiply",
+        "input_defaults": {
+          "operand_2": {
+            "value": 0.5
+          }
+        }
+      },
+      {
+        "id": "seek_seconds",
+        "type": "multiply",
+        "input_defaults": {
+          "operand_2": {
+            "value": 2
+          }
+        }
+      },
+      {
+        "id": "seek_out",
+        "type": "output",
+        "params": {
+          "path": "anim/player/0/cmd/seek"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": {
+          "node_id": "host_time"
+        },
+        "to": {
+          "node_id": "time_scaled",
+          "input": "operand_1"
+        }
+      },
+      {
+        "from": {
+          "node_id": "freq"
+        },
+        "to": {
+          "node_id": "time_scaled",
+          "input": "operand_2"
+        }
+      },
+      {
+        "from": {
+          "node_id": "time_scaled"
+        },
+        "to": {
+          "node_id": "phase",
+          "input": "operand_1"
+        }
+      },
+      {
+        "from": {
+          "node_id": "tau"
+        },
+        "to": {
+          "node_id": "phase",
+          "input": "operand_2"
+        }
+      },
+      {
+        "from": {
+          "node_id": "phase"
+        },
+        "to": {
+          "node_id": "sin_val",
+          "input": "in"
+        }
+      },
+      {
+        "from": {
+          "node_id": "sin_val"
+        },
+        "to": {
+          "node_id": "shifted",
+          "input": "operand_1"
+        }
+      },
+      {
+        "from": {
+          "node_id": "shifted"
+        },
+        "to": {
+          "node_id": "normalized",
+          "input": "operand_1"
+        }
+      },
+      {
+        "from": {
+          "node_id": "normalized"
+        },
+        "to": {
+          "node_id": "seek_seconds",
+          "input": "operand_1"
+        }
+      },
+      {
+        "from": {
+          "node_id": "seek_seconds"
+        },
+        "to": {
+          "node_id": "seek_out",
+          "input": "in"
+        }
+      }
+    ]
+  },
+  "subs": {
+    "inputs": [
+      "driver/time.seconds"
+    ],
+    "outputs": [
+      "anim/player/0/cmd/seek"
+    ]
+  },
+  "edges": []
+}
