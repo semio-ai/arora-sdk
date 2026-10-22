@@ -1110,8 +1110,8 @@ pub fn load_behavior_tree_nodes(nodes: Vec<Node>) -> Result<BehaviorTree, Behavi
 /// ([`build_behavior_tree`](crate::graph::build_behavior_tree)) uses.
 ///
 /// The first node is the root. A call to a module function that the tree does
-/// not hold, being neither the root nor a child of a held node, is
-/// [detached](detached): it runs when what it outputs is read.
+/// not hold, being neither the root nor a child of a held node, is detached
+/// ([`detached`]): it runs when what it outputs is read.
 pub fn load_behavior_tree_nodes_with(
     nodes: Vec<Node>,
     resolver: &VariableResolver,
