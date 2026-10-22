@@ -44,6 +44,9 @@
 //! - `attached-incremental`: the attached leaves, `_on_change`, on the
 //!   incremental executor, each graph's leaves in its own branch:
 //!   `PARALLEL[ leaf × n, RUN ]`.
+//! - `placed`: the detached form placed with `place_detached(…,
+//!   PlacementScope::Readers)`, on the incremental executor. Sinks place before
+//!   the root.
 //!
 //! The bench compares the values the forms publish. In `branches`, it compares
 //! the first branch's keys: the incremental leaves alone publish no other
@@ -69,7 +72,9 @@ use arora_behavior_tree::nodes::{
 use arora_behavior_tree::schema::{
     Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
 };
-use arora_behavior_tree::{load_behavior_tree_nodes_with, lower_behavior_tree};
+use arora_behavior_tree::{
+    load_behavior_tree_nodes_with, lower_behavior_tree, place_detached, PlacementScope,
+};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::data::{DataStore, Key};
@@ -544,22 +549,25 @@ enum Form {
     AttachedNaive,
     Detached,
     AttachedIncremental,
+    Placed,
 }
 impl Form {
-    const ALL: [Form; 3] = [
+    const ALL: [Form; 4] = [
         Form::AttachedNaive,
         Form::Detached,
         Form::AttachedIncremental,
+        Form::Placed,
     ];
     fn name(self) -> &'static str {
         match self {
             Form::AttachedNaive => "attached-naive",
             Form::Detached => "detached",
             Form::AttachedIncremental => "attached-incremental",
+            Form::Placed => "placed",
         }
     }
     fn detached(self) -> bool {
-        self == Form::Detached
+        matches!(self, Form::Detached | Form::Placed)
     }
 }
 
@@ -756,11 +764,21 @@ fn measure(
             .collect(),
         ..Bridge::default()
     };
-    let (nodes, names) = build(graph, form);
+    let (mut nodes, names) = build(graph, form);
     let resolver = |name: &str| Some(store.slot(&Key::from(name)));
+    if form == Form::Placed {
+        nodes = place_detached(
+            nodes,
+            PlacementScope::Readers,
+            &bridge.index(),
+            &resolver,
+            &names,
+        )
+        .unwrap();
+    }
     let tree = load_behavior_tree_nodes_with(nodes, &resolver, &names).unwrap();
     let tree = lower_behavior_tree(tree, &bridge.index(), &mut bridge, false).unwrap();
-    tree.set_incremental(form == Form::AttachedIncremental);
+    tree.set_incremental(matches!(form, Form::AttachedIncremental | Form::Placed));
     // Write a key only when its value changes, as a host would.
     let mut step = 0;
     let mut tick = |bridge: &mut Bridge, step: &mut usize| {
