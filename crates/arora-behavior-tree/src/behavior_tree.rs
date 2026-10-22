@@ -1171,6 +1171,7 @@ pub fn load_behavior_tree_nodes_with(
     let detached_nodes = Detached::select(&listed, &attached);
     let detached_ids: HashSet<Uuid> = detached_nodes.iter().map(|node| node.id).collect();
     let mut bindings = HashMap::new();
+    let mut fed_inputs = HashSet::new();
     for node in &detached_nodes {
         if !node.arguments.contains_key(&_RET_PARAM_ID) {
             node_parameters_variables.insert(
@@ -1208,10 +1209,21 @@ pub fn load_behavior_tree_nodes_with(
             )?;
             // A detached node's port bound to a store key keeps a tree-local
             // cell of its own, which `@node` reads; the key is published to
-            // after the tree ticks.
+            // after the tree ticks. A return bound to another node's input,
+            // which names a store key, feeds that input instead: the two share
+            // the tree-local cell, and the key is not written.
             if matches!(cell, VariableCell::Stored(_)) && detached_ids.contains(&node_param.node) {
-                node_parameters_variables.insert(node_param.clone(), VariableCell::local());
-                bindings.insert(node_param, cell);
+                let port = VariableCell::local();
+                node_parameters_variables.insert(node_param.clone(), port.clone());
+                match read_argument(&arg_expr) {
+                    Some(input) if node_param.parameter == _RET_PARAM_ID => {
+                        node_parameters_variables.insert(input.clone(), port);
+                        fed_inputs.insert(input.clone());
+                    }
+                    _ => {
+                        bindings.insert(node_param, cell);
+                    }
+                }
             }
         }
         if let Some((node_param, arg_expr)) =
@@ -1227,6 +1239,44 @@ pub fn load_behavior_tree_nodes_with(
             )?;
         }
         pending = unresolved;
+    }
+
+    // An argument that reads a fed input, at any remove, shares the cell it
+    // now has, wherever the sweep set it up.
+    if !fed_inputs.is_empty() {
+        let sources: HashMap<NodeParameterId, NodeParameterId> = node_index
+            .values()
+            .flat_map(|node| {
+                node.arguments.iter().filter_map(|(parameter, argument)| {
+                    read_argument(argument).map(|source| {
+                        (
+                            NodeParameterId {
+                                node: node.id,
+                                parameter: *parameter,
+                            },
+                            source.clone(),
+                        )
+                    })
+                })
+            })
+            .collect();
+        for reader in sources.keys() {
+            let mut at = reader;
+            for _ in 0..sources.len() {
+                let Some(source) = sources.get(at) else {
+                    break;
+                };
+                if let Some(cell) = fed_inputs
+                    .contains(source)
+                    .then(|| node_parameters_variables.get(source).cloned())
+                    .flatten()
+                {
+                    node_parameters_variables.insert(reader.clone(), cell);
+                    break;
+                }
+                at = source;
+            }
+        }
     }
 
     // The data nodes, once every argument has its cell.

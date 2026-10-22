@@ -29,7 +29,9 @@
 //! every such cell, and gives each node the detached nodes it reads. A
 //! detached node's return value is a port even when `_ret` is not bound. An
 //! output bound to another node's input, as `_ret: @reader.x`, writes the cell
-//! that input reads, so the reader reads the detached node.
+//! that input reads, so the reader reads the detached node. When the input
+//! names a store key, the two share a tree-local cell, and the key is not
+//! written.
 //!
 //! A store key is not such a cell. A port bound to a store key keeps a
 //! tree-local cell of its own, which `@node` reads, and publishes to the key

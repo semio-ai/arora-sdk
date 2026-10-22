@@ -1341,3 +1341,34 @@ fn a_failed_call_is_not_repeated_within_the_tick() {
         assert_eq!(take(&calls).get("mul"), Some(&1), "tick {tick}");
     }
 }
+
+/// An output bound to a tree node's input feeds it even when the input names
+/// a store key: the two share a cell, a node reading that input through its
+/// port reads it too, and the key is not written.
+#[test]
+fn an_output_bound_to_a_store_backed_tree_input_feeds_it() {
+    let store = SimpleDataStore::new();
+    set(&store, "in", 5.0);
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments.insert(_RET_PARAM_ID, port(1, BELOW_X));
+    // below(x: {in} = 5, limit: 3) fails; with x = add(1, 1) it holds.
+    let tree = build(
+        &store,
+        vec![
+            control(10, SEQ_FUNCTION_ID, &[1, 2]),
+            below(1, key("in"), 3.0),
+            below(2, port(1, BELOW_X), 3.0),
+        ],
+        vec![add],
+    );
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
+    assert_eq!(
+        get(&store, "in"),
+        Some(Value::F64(5.0)),
+        "the key is not written"
+    );
+    assert_eq!(tree.detached_plan().on_demand, vec![id(50)]);
+}
