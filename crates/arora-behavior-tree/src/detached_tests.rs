@@ -1424,3 +1424,39 @@ fn lowering_refuses_an_output_bound_to_an_input_with_no_cell_to_feed() {
     let error = lowering_error(vec![below(1, key("in"), 3.0)], vec![smooth]);
     assert!(error.contains("names a store key"), "{error}");
 }
+
+/// A sink that fails stops no other: the healthy sink publishes its key, and
+/// the tick reports the failure.
+#[test]
+fn a_failing_sink_stops_no_other() {
+    let store = SimpleDataStore::new();
+    // `mul` errors on an absent argument.
+    let failing = compute(
+        50,
+        MUL,
+        vec![(MUL_A, key(".absent")), (MUL_B, f(1.0))],
+        Some("out"),
+    );
+    let healthy = compute(
+        51,
+        ADD,
+        vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))],
+        Some("face/level"),
+    );
+    let tree = build(&store, vec![below(1, f(1.0), 3.0)], vec![failing, healthy]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    tree.variables.borrow()[&var(".absent")].set(Value::F64(3.0));
+    runtime.tick().expect("both sinks publish");
+    assert_eq!(get(&store, "out"), Some(Value::F64(3.0)));
+
+    // The input goes absent: that sink fails, and publishes nothing, not even
+    // its last result over the key's newer value.
+    tree.variables.borrow()[&var(".absent")].set_opt(None);
+    set(&store, "out", 9.0);
+    set(&store, "face/level", 0.0);
+    assert!(runtime.tick().is_err(), "the failing sink's error");
+    assert_eq!(get(&store, "face/level"), Some(Value::F64(2.0)));
+    assert_eq!(get(&store, "out"), Some(Value::F64(9.0)));
+}

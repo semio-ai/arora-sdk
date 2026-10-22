@@ -64,7 +64,8 @@
 //!
 //! A detached node with an output bound to a **store key** is a sink. Its
 //! readers are outside the tree, so it is brought up to date at **every
-//! tick**, after the tree has ticked, even when the tree failed. Once every sink is up to date, each
+//! tick**, after the tree has ticked, even when the tree failed; a sink that
+//! fails stops no other, and publishes nothing that tick. Once every sink is up to date, each
 //! publishes its keys, in the order the tree lists them, even when its result
 //! comes from its cache: a sink never reads another's key of the same tick,
 //! and of two sinks of one key, the later listed wins, as the later writer
@@ -653,18 +654,23 @@ impl Detached {
 
     /// Bring every sink up to date, then publish each one's store keys, in
     /// the order the tree lists them: no sink reads another's key of this tick.
+    /// A sink that fails stops no other: the others are brought up to date and
+    /// publish, and the tick reports the first failure.
     pub(crate) fn tick_sinks(
         &self,
         scope: Scope,
         caller: &mut dyn CallBridge,
     ) -> Result<(), BehaviorTreeError> {
         let sinks = self.lowered.borrow().sinks.clone();
+        let mut failure = None;
         for at in &sinks {
-            self.bring_up_to_date(*at, scope, caller)?;
+            if let Err(error) = self.bring_up_to_date(*at, scope, caller) {
+                failure.get_or_insert(error);
+            }
         }
         let lowered = self.lowered.borrow();
         let caches = self.caches.borrow();
-        for at in sinks {
+        for at in sinks.into_iter().filter(|at| caches[*at].failed.is_none()) {
             let signature = lowered.signatures.get(&self.nodes[at].function);
             for (port, _, publish) in &lowered.outputs[at] {
                 if let (Some(key), Some(value)) = (publish, caches[at].outputs.get(port)) {
@@ -672,7 +678,7 @@ impl Detached {
                 }
             }
         }
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
 
     /// Bring the detached node at `at` up to date for this tick, at most

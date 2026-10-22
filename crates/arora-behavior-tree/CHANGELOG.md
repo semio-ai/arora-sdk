@@ -27,7 +27,8 @@ All notable changes to `arora-behavior-tree`. The format follows
     that tick without calling again, and is tried again at the next. A store key is read as the store holds it.
   - One with an output bound to a store key is a sink: it is brought up to
     date at every tick, after the tree ticks, even when the tree fails; the
-    tick then reports the tree's error. Once every sink is up to date,
+    tick then reports the tree's error. A sink that fails stops no other: the
+    others publish, and the failing one publishes nothing that tick. Once every sink is up to date,
     each writes its keys, from its cache when its inputs did not change, so a
     sink reads another sink's key as it was before the tick. Of two sinks of
     one key, the later listed wins. A shared `Graph` lists its root, then its
