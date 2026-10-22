@@ -3,10 +3,14 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use arora_behavior::{FunctionIndex, ModuleFunction, Status};
+use arora_behavior_tree_types::TickId;
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
+use arora_types::data::Slot;
+use arora_types::module::low::TypeRef;
 use arora_types::record::module::frozen::{Function, Parameter};
 use arora_types::record::ty::{FrozenTy, PrimitiveKind};
 use arora_types::value::{StructureField, Value};
+use arora_types::AroraType;
 use uuid::Uuid;
 
 pub const X: Uuid = Uuid::from_u128(0x10001);
@@ -14,6 +18,7 @@ pub const Y: Uuid = Uuid::from_u128(0x10002);
 pub const STATE: Uuid = Uuid::from_u128(0x10003);
 pub const OUT: Uuid = Uuid::from_u128(0x10004);
 pub const MODULE: Uuid = Uuid::from_u128(0x10000);
+pub const CHILDREN: Uuid = uuid::uuid!("5b6e9515-dbcc-411d-bee9-3d8cba5fedda");
 
 #[derive(Clone, Copy)]
 pub enum Op {
@@ -27,6 +32,8 @@ pub enum Op {
     Effect,
     #[allow(dead_code)]
     Running(u64),
+    #[allow(dead_code)] // Exercised by the tests sharing this host.
+    WriteThenTick,
 }
 
 pub fn signature(id: Uuid) -> (Uuid, ModuleFunction) {
@@ -73,10 +80,44 @@ pub struct Bridge {
     pub dispatches: u64,
     pub module_calls: u64,
     pub count_only: bool,
+    pub raw_write: Option<Box<dyn Slot>>,
+    raw_writes: u64,
 }
 impl Bridge {
     pub fn index(&self) -> FunctionIndex {
-        self.ops.keys().map(|id| signature(*id)).collect()
+        self.ops
+            .iter()
+            .map(|(id, op)| {
+                let (id, mut function) = signature(*id);
+                if matches!(op, Op::WriteThenTick) {
+                    function.function = Function {
+                        parameter_ordering: vec![CHILDREN],
+                        parameters: HashMap::from([(
+                            CHILDREN,
+                            Parameter {
+                                name: "children".into(),
+                                ty: FrozenTy::from_type_ref(
+                                    &TypeRef::Array {
+                                        id: TickId::arora_type_id(),
+                                    },
+                                    &TickId::arora_type_version(),
+                                )
+                                .unwrap(),
+                                mutable: false,
+                            },
+                        )]),
+                        return_ty: FrozenTy::from_type_ref(
+                            &TypeRef::Scalar {
+                                id: Status::arora_type_id(),
+                            },
+                            &Status::arora_type_version(),
+                        )
+                        .unwrap(),
+                    };
+                }
+                (id, function)
+            })
+            .collect()
     }
     pub fn reset_counts(&mut self) {
         self.calls.clear();
@@ -92,6 +133,34 @@ impl CallBridge for Bridge {
             .copied()
             .ok_or(CallError::FunctionNotFound { id: call.id })?;
         assert_eq!(call.module_id, Some(MODULE));
+        if matches!(op, Op::WriteThenTick) {
+            let slot = self.raw_write.as_ref().expect("a raw store slot");
+            slot.set(Some(Value::F64(self.raw_writes as f64))).unwrap();
+            self.raw_writes += 1;
+            let children = call.args.iter().find(|field| field.id == CHILDREN).unwrap();
+            let children = (*children.value).clone().into_elements().unwrap();
+            self.module_calls += 1;
+            if !self.count_only {
+                self.calls.push((call.id, call.args));
+            }
+            let mut status = Status::Success;
+            for child in children {
+                let child = TickId::try_from(child).unwrap();
+                status = CallableId {
+                    id: child.callable_id,
+                }
+                .call(self)?
+                .try_into()
+                .unwrap();
+                if status != Status::Success {
+                    break;
+                }
+            }
+            return Ok(CallResult {
+                ret: status.into(),
+                mutated: Vec::new(),
+            });
+        }
         let value = |id| {
             call.args
                 .iter()
@@ -105,6 +174,7 @@ impl CallBridge for Bridge {
         let (x, y, state) = (number(X), number(Y), number(STATE));
         let mut mutated = Vec::new();
         let ret = match op {
+            Op::WriteThenTick => unreachable!("composites tick above"),
             Op::Add => Value::F64(x + y),
             Op::Approach => {
                 let next = if (x - state).abs() < 1e-3 {

@@ -48,7 +48,7 @@ use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_types::value::Value;
 use uuid::Uuid;
 
-use crate::schema::{CallExpression, Expression, Node, _RET_PARAM_ID};
+use crate::schema::{CallExpression, Expression, Node, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 
 /// The width past which `{:#}` breaks a call over several lines.
 pub const WIDTH: usize = 60;
@@ -207,6 +207,9 @@ pub(crate) fn ordered<'e>(
 }
 
 fn parameter_name(signature: Option<&ModuleFunction>, parameter: Uuid) -> String {
+    if parameter == _ON_CHANGE_PARAM_ID {
+        return "_on_change".to_string();
+    }
     signature
         .and_then(|signature| signature.function.parameters.get(&parameter))
         .map(|parameter| parameter.name.clone())

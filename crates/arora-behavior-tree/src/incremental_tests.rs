@@ -697,9 +697,11 @@ fn cells(
 /// Replays 81,920 deterministic ticks across controls, mutable call-site state,
 /// shared paths, tree-local results and overwritten cached outputs. Ordinary
 /// calls must match in order; every omitted opt-in call must have unchanged
-/// module arguments.
+/// module arguments. Aggregate calls and dispatches must show caching occurred.
 #[test]
 fn seeded_trees_match_the_naive_executor_in_lockstep() {
+    let mut opted_calls = [0_u64; 2];
+    let mut dispatches = [0_u64; 2];
     for seed in 1..=320 {
         let mut a = generated(seed);
         let mut b = generated(seed);
@@ -734,6 +736,14 @@ fn seeded_trees_match_the_naive_executor_in_lockstep() {
                 cells(&incremental),
                 "cells: seed {seed}, tick {step}"
             );
+            for (at, bridge) in [&naive_bridge, &incremental_bridge].into_iter().enumerate() {
+                opted_calls[at] += bridge
+                    .calls
+                    .iter()
+                    .filter(|(id, _)| a.opted.contains(id))
+                    .count() as u64;
+                dispatches[at] += bridge.dispatches;
+            }
             for name in ["a", "b", "c", "d", "out"] {
                 assert_eq!(
                     naive_store.slot(&Key::from(name)).get(),
@@ -784,6 +794,18 @@ fn seeded_trees_match_the_naive_executor_in_lockstep() {
             );
         }
     }
+    assert!(
+        opted_calls[1] < opted_calls[0],
+        "caching must reduce _on_change calls: naive {}, incremental {}",
+        opted_calls[0],
+        opted_calls[1]
+    );
+    assert!(
+        dispatches[1] < dispatches[0],
+        "caching must reduce engine dispatches: naive {}, incremental {}",
+        dispatches[0],
+        dispatches[1]
+    );
 }
 
 #[test]
@@ -1004,6 +1026,42 @@ impl Lockstep {
     }
 }
 
+/// Unlike a later sibling's write, a module composite's raw write must reach
+/// its child before the composite returns and before the child's cache answers.
+#[test]
+fn a_module_composites_raw_store_write_reaches_its_cached_child() {
+    let composite = id(20001);
+    let mut pair = Lockstep::new(
+        vec![
+            control(1, composite, vec![2]),
+            node(
+                2,
+                EQUAL_FUNCTION_ID,
+                vec![
+                    (EQUAL_A_PARAM_ID, variable(9000)),
+                    (EQUAL_B_PARAM_ID, lit(0.0)),
+                ],
+            ),
+        ],
+        HashMap::from([(composite, Op::WriteThenTick)]),
+    );
+    pair.naive_bridge.raw_write = Some(pair.stores[0].slot(&Key::from("a")));
+    pair.incremental_bridge.raw_write = Some(pair.stores[1].slot(&Key::from("a")));
+    // Tick 1 leaves the boundary value unchanged, so the child's cached
+    // Success is clean when the composite writes 1 during tick 2.
+    pair.put("a", Some(Value::F64(0.0)));
+    for (step, expected) in [Status::Success, Status::Failure, Status::Failure]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(pair.tick(), expected);
+        assert_eq!(
+            pair.stores[1].slot(&Key::from("a")).get(),
+            Some(Value::F64(step as f64))
+        );
+    }
+}
+
 #[test]
 fn own_argument_versions_keep_feedback_writers_dirty() {
     for input in [8001, 9000] {
@@ -1207,18 +1265,39 @@ fn stateful_on_change_computation_runs_until_its_state_settles() {
     }
 }
 
+/// Attached and detached nodes accept and display the reserved argument even
+/// though the module signature has no such parameter, and never pass it along.
 #[test]
 fn reserved_on_change_argument_never_crosses_the_module_bridge() {
-    let mut leaf = module(1, lit(0.0), true);
-    leaf.arguments.insert(_RET_PARAM_ID, variable(8001));
-    let mut pair = Lockstep::new(vec![leaf], HashMap::from([(id(20001), Op::Add)]));
-    pair.tick();
-    for bridge in [&pair.naive_bridge, &pair.incremental_bridge] {
-        assert_eq!(bridge.calls.len(), 1);
-        assert!(bridge
-            .calls
-            .iter()
-            .all(|(_, args)| args.iter().all(|field| field.id != _ON_CHANGE_PARAM_ID)));
+    for detached in [false, true] {
+        let mut leaf = module(1, lit(0.0), true);
+        let index = HashMap::from([fixture::signature(leaf.function)]);
+        assert!(leaf
+            .display(crate::display::Names::functions(&index))
+            .to_string()
+            .contains("_on_change: true"));
+        leaf.arguments.insert(_RET_PARAM_ID, variable(8001));
+        let mut nodes = Vec::new();
+        if detached {
+            nodes.push(node(
+                2,
+                EQUAL_FUNCTION_ID,
+                vec![
+                    (EQUAL_A_PARAM_ID, port(1, _RET_PARAM_ID)),
+                    (EQUAL_B_PARAM_ID, lit(2.0)),
+                ],
+            ));
+        }
+        nodes.push(leaf);
+        let mut pair = Lockstep::new(nodes, HashMap::from([(id(20001), Op::Add)]));
+        pair.tick();
+        for bridge in [&pair.naive_bridge, &pair.incremental_bridge] {
+            assert_eq!(bridge.calls.len(), 1);
+            assert!(bridge
+                .calls
+                .iter()
+                .all(|(_, args)| args.iter().all(|field| field.id != _ON_CHANGE_PARAM_ID)));
+        }
     }
 }
 

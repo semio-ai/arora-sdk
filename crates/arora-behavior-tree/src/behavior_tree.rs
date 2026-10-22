@@ -339,6 +339,8 @@ impl LoweredTree {
     /// does not self-invalidate; foreign overwrites still invalidate its producer.
     /// Store reads are observed at tick start and lazily before skipping clean
     /// subtrees after possible store movement, never globally after each visit.
+    /// Non-cacheable visits flag possible movement before running: a module
+    /// composite's children observe its raw writes before answering from cache.
     /// Detached pulls precede a reader's clean check; sinks still run after the
     /// root. Later writes invalidate earlier readers for the next tick.
     /// With the flag off, subscriptions are dropped and cell writes do no value
@@ -1279,6 +1281,11 @@ impl Tickable for TickFunction {
         };
         self.state.dirty.set(false);
         let _visit = incremental::Visit::enter(&self.state);
+        if enabled && !self.state.cacheable {
+            // A module composite can write raw store slots before ticking its
+            // children, so their cache checks must already observe live reads.
+            incremental::store_written();
+        }
         let result = tick(
             caller,
             self.function.as_ref(),
@@ -1293,9 +1300,6 @@ impl Tickable for TickFunction {
             self.trace,
         );
         if enabled {
-            if !self.state.cacheable {
-                incremental::store_written();
-            }
             self.state.status.set(result.as_ref().ok().copied());
             if self.state.dirty.get()
                 || self

@@ -150,6 +150,10 @@ no whole-store comparison after each visit. Tick-boundary observation costs one
 pass over store-backed read cells; lazy checks cover disjoint skipped subtrees,
 and polling follows only the previous tick's visits.
 
+Module composites never cache their own visits. Possible store movement is
+flagged before they run, so a child can answer from cache only after observing
+its subtree's store reads, including raw writes made by the composite.
+
 Detached inputs are pulled before a reader's cache check, and detached sinks
 still publish after the root. Later writes invalidate earlier readers for the
 next tick. Control order and the absence of halt stay the same.
