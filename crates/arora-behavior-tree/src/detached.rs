@@ -65,12 +65,12 @@
 //! A detached node with an output bound to a **store key** is a sink. Its
 //! readers are outside the tree, so it is brought up to date at **every
 //! tick**, after the tree has ticked, even when the tree failed; a sink that
-//! fails stops no other, and publishes nothing that tick. Once every sink is up to date, each
-//! publishes its keys, in the order the tree lists them, even when its result
-//! comes from its cache: a sink never reads another's key of the same tick,
-//! and of two sinks of one key, the later listed wins, as the later writer
-//! does in a node graph. A tree built from the shared `Graph`, which keeps no
-//! order among its nodes, lists them by id after the root.
+//! fails stops no other, and publishes nothing that tick. Once every sink is
+//! up to date, each publishes its keys, in the order the tree lists them, even
+//! when its result comes from its cache: a sink never reads another's key of
+//! the same tick, and of two sinks of one key, the later listed wins, as the
+//! later writer does in a node graph. A tree built from the shared `Graph`,
+//! which keeps no order among its nodes, lists them by id after the root.
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
