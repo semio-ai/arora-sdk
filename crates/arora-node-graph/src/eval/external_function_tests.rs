@@ -392,6 +392,31 @@ fn spawn_requests_a_run_each_time_its_args_change() {
     assert_eq!(spawn_step(&mut rt, &graph, "sil").len(), 1);
 }
 
+/// An evaluation on the cached plan requests its own runs alone: once its
+/// args hold again, the run an earlier evaluation requested is gone.
+#[test]
+fn a_cached_evaluation_requests_only_its_own_runs() {
+    let (function, shape, weight) = (
+        Uuid::from_u128(0x7771),
+        Uuid::from_u128(0x7772),
+        Uuid::from_u128(0x7773),
+    );
+    let graph = spawn_graph(function, shape, weight);
+    let mut rt = GraphRuntime::default();
+    // The first evaluation plans the graph and is the baseline.
+    assert!(spawn_step(&mut rt, &graph, "aa").is_empty());
+
+    let path = arora_shape::TypedPath::parse("test/shape").expect("path");
+    let cached_step = |rt: &mut GraphRuntime, shape: &str| {
+        rt.set_input(path.clone(), vocab::text(shape), None);
+        evaluate_all_cached(rt, &graph).expect("the cached plan evaluates");
+        rt.spawns.clone()
+    };
+    assert_eq!(cached_step(&mut rt, "oh").len(), 1);
+    assert!(cached_step(&mut rt, "oh").is_empty(), "its args held");
+    assert_eq!(rt.outputs["spawn"]["out"].value, vocab::bool_(false));
+}
+
 /// A new `when` makes the same args a new run, and `when` is not an arg.
 #[test]
 fn spawn_requests_a_run_each_time_its_when_changes() {

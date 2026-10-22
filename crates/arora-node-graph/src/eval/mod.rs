@@ -238,6 +238,7 @@ pub fn evaluate_all_cached(rt: &mut GraphRuntime, spec: &GraphSpec) -> Result<()
     rt.outputs.clear();
     rt.outputs.reserve(spec.nodes.len());
     rt.writes.0.clear();
+    rt.spawns.clear();
     rt.node_states
         .retain(|id, _| spec.nodes.iter().any(|node| node.id == *id));
 

@@ -13,6 +13,7 @@
 //! | `plan_cache_rebuilds_when_spec_version_changes` | `a_spec_of_another_version_builds_its_tree_again` |
 //! | `an_evaluation_for_writes_writes_what_a_full_one_writes` | `an_evaluation_of_what_the_outputs_read_writes_what_a_full_one_writes` |
 //! | `a_selection_from_a_constant_is_planned_and_follows_its_value` | `a_selection_from_a_constant_reads_it_once_and_follows_its_value` |
+//! | `a_cached_evaluation_requests_only_its_own_runs` | `an_evaluation_of_a_kept_tree_requests_only_its_own_runs` |
 //!
 //! [`structure_tests`] holds the counterparts of the topology, plan and
 //! selection tests. [`equivalence`] runs every fixture on both engines, and

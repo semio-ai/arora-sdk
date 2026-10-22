@@ -400,6 +400,27 @@ fn spawn_requests_a_run_each_time_its_args_change() {
     assert_eq!(spawn_step(&mut rt, &graph, "sil").len(), 1);
 }
 
+/// An evaluation of a tree built once requests its own runs alone: once its
+/// args hold again, the run an earlier evaluation requested is gone.
+#[test]
+fn an_evaluation_of_a_kept_tree_requests_only_its_own_runs() {
+    let (function, shape, weight) = (
+        Uuid::from_u128(0x7771),
+        Uuid::from_u128(0x7772),
+        Uuid::from_u128(0x7773),
+    );
+    let graph = spawn_graph(function, shape, weight);
+    let mut rt = TreeRuntime::default();
+    assert!(spawn_step(&mut rt, &graph, "aa").is_empty());
+    assert_eq!(spawn_step(&mut rt, &graph, "oh").len(), 1);
+    assert!(
+        spawn_step(&mut rt, &graph, "oh").is_empty(),
+        "its args held"
+    );
+    assert_eq!(rt.outputs["spawn"]["out"].value, vocab::bool_(false));
+    assert_eq!(rt.loads(), 1, "the tree is built once");
+}
+
 /// A new `when` makes the same args a new run, and `when` is not an arg.
 #[test]
 fn spawn_requests_a_run_each_time_its_when_changes() {

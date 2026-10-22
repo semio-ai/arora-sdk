@@ -52,6 +52,12 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   `arora-shape` where it depended on `vizij-api-core`. Its graph format and
   its evaluation do not change.
 
+### Fixed
+
+- `evaluate_all_cached` clears the runs an earlier evaluation requested, as
+  `evaluate_all` does: `GraphRuntime::spawns` holds the evaluation's own
+  requests, so a host reading it after each evaluation starts a run once.
+
 ## [3.1.1] - 2026-10-19
 
 ### Fixed
