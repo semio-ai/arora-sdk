@@ -245,6 +245,10 @@ store key, in four forms:
   the incremental executor;
 - **detached**: the same calls as detached nodes whose results are sinks,
   under a root `RUN`.
+- **attached-guarded**: the attached tree on today's executor with each leaf
+  wrapped as `FALLBACK[ SEQ[ guard, leaf ], SUCCEED ]`, the pattern a tree uses
+  to skip an unchanged node without this executor; settled only, since its
+  literal guard never passes.
 
 Each attached leaf also writes its result through a mutable parameter, which
 is one of its arguments, so after a change it is called once more to see that
@@ -291,6 +295,10 @@ What the numbers show:
   is about 220 ns per node, because every sink is brought up to date each
   tick: its arguments are evaluated and compared with its last call's, and its
   outputs are published again.
+- **A guard per node costs a third of calling every leaf.** Settled at
+  N = 1000, `attached-guarded` ticks four native nodes per graph node and calls
+  nothing: 388 µs in a run where `attached-naive` took 1093 µs and `detached`
+  243 µs. The executor makes the same check without adding nodes.
 - **Without `_on_change`, a tree costs about 12% more** than on today's
   executor, with the same calls and dispatches: the versioned writes and the
   dirty bookkeeping, with nothing to skip.
