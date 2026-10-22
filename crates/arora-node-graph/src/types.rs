@@ -510,8 +510,6 @@ impl GraphSpec {
             }
         }
 
-        let mut seen_inputs: HashSet<(NodeId, String)> = HashSet::new();
-
         for edge in &self.edges {
             if !known.contains(&edge.from.node_id) {
                 return Err(format!(
@@ -526,15 +524,21 @@ impl GraphSpec {
                 ));
             }
 
-            let key = (edge.to.node_id.clone(), edge.to.input.clone());
-            if !seen_inputs.insert(key.clone()) {
-                return Err(format!("duplicate edge for input '{}:{}'", key.0, key.1));
+            // The keys are copied only for an input no default or edge has
+            // reached yet.
+            let connection_entry = map
+                .entry_ref(edge.to.node_id.as_str())
+                .or_default()
+                .entry_ref(edge.to.input.as_str())
+                .or_default();
+            // An edge sets the source an inline default leaves unset: one set
+            // already is a second edge into the input.
+            if connection_entry.node_id.is_some() {
+                return Err(format!(
+                    "duplicate edge for input '{}:{}'",
+                    edge.to.node_id, edge.to.input
+                ));
             }
-
-            let entry = map.entry(edge.to.node_id.clone()).or_default();
-            let connection_entry = entry
-                .entry(edge.to.input.clone())
-                .or_insert_with(InputConnection::default);
 
             connection_entry.node_id = Some(edge.from.node_id.clone());
             connection_entry.output_key = edge.from.output.clone();

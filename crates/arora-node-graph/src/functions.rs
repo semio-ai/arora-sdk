@@ -1184,8 +1184,9 @@ pub struct NodeGraphModule {
     /// [`CALLABLE_IDS`], apart from the wrapped bridge's own.
     next_callable: u64,
     /// The call sites, by graph node id: what each one's static arguments
-    /// decode to.
-    sites: HashMap<String, Site>,
+    /// decode to. Boxed, as a site is large and the map grows with the
+    /// graph.
+    sites: HashMap<String, Box<Site>>,
     /// The runtime a call evaluates its node in, kept between calls.
     scratch: GraphRuntime,
     /// The buffer a call collects its inputs in, kept between calls.
@@ -1308,7 +1309,7 @@ impl NodeGraphModule {
             None => self
                 .sites
                 .entry(node.to_string())
-                .or_insert_with(|| Site::new(node)),
+                .or_insert_with(|| Box::new(Site::new(node))),
         };
         let mut inputs = std::mem::take(&mut self.inputs);
         inputs.clear();
