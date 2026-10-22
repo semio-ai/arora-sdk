@@ -42,6 +42,7 @@ members = [
   "modules/test-rust-component",
   "modules/test-cpp",
   "modules/test-cpp-2",
+  "examples/modules/cpp",
   "tests",
 ]
 

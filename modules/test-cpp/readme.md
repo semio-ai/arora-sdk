@@ -13,3 +13,8 @@ to perform a sanity check of the module.
 
 It exports a function that [the second C++ test module](../test-cpp-2/readme.md)
 should try to import.
+
+It builds for `wasm32-wasip1` as a WASI reactor, as the Rust guests build, and
+its build writes the module directory a device loads it from
+(`arora --module`): `target/<profile>/modules/test-cpp/` holds `header.json`,
+`test-cpp.wasm` and `records/`.

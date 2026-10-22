@@ -373,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "5.3.1"
+version = "5.4.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
@@ -400,6 +400,7 @@ dependencies = [
  "wasm-bindgen-test",
  "wasmtime",
  "wasmtime-wasi",
+ "wat",
  "web-sys",
 ]
 
@@ -496,6 +497,7 @@ dependencies = [
  "arora-engine",
  "arora-registry",
  "arora-types",
+ "example-cpp",
  "futures",
  "serde_yaml 0.9.34+deprecated",
  "test-behavior-tree-nodes",
@@ -504,6 +506,7 @@ dependencies = [
  "test-rust-component",
  "test-rust-wasm",
  "uuid",
+ "wasmparser 0.262.0",
 ]
 
 [[package]]
@@ -521,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arora-module-core",
@@ -543,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-core"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "arora-registry",
  "arora-types",
@@ -593,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-rust"
-version = "3.0.0"
+version = "4.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -2837,6 +2840,19 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "example-cpp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arora-buffers",
+ "arora-module-cli",
+ "arora-module-cpp",
+ "arora-util",
+ "cmake",
+ "wasi-sdk",
 ]
 
 [[package]]
@@ -8343,8 +8359,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "974d643b125b272607e2fff8012ea14a8328acd7621e4bafa7afb32500052b1b"
 dependencies = [
  "bitflags 2.13.1",
+ "hashbrown 0.17.1",
  "indexmap 2.14.0",
  "semver",
+ "serde",
 ]
 
 [[package]]

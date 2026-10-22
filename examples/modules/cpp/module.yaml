@@ -1,7 +1,39 @@
+id: e8e2d89e-d4c7-440d-8683-0b5ec6c5407e
+author: Semio
+description: An example C++ module that adds two integers and counts its calls
+license: Apache-2.0
 name: example-cpp
-version: 0.1.0
-description: An example C++ module
-types:
-  - i32
+version:
+  major: 0
+  minor: 1
+  patch: 0
+executor:
+  name: wasm
 exports:
-  - "add_two_integers(a: i32, b: i32): i32"
+  - type: function
+    id: 4a3020dc-6db3-43c2-bb75-6a7db237329a
+    name: add_two_integers
+    parameters:
+      - id: e15b0627-29df-441c-bea8-706ddc92f712
+        name: a
+        type:
+          kind: scalar
+          id: i32
+      - id: 0374610f-5f4a-41d8-97f3-64f48cf21f40
+        name: b
+        type:
+          kind: scalar
+          id: i32
+    ret:
+      kind: scalar
+      id: i32
+  - type: function
+    id: 26c0cfc2-da81-4561-a67c-af7133a478a5
+    name: sums_so_far
+    parameters: []
+    ret:
+      kind: scalar
+      id: u32
+imports: []
+dependencies: []
+executable_mime: application/wasm

@@ -1,6 +1,6 @@
 use crate::{
     resolve::{resolve_low_module, ModuleAndImports},
-    ImportAsset, ModuleDeclarationError,
+    ImportAsset, ModuleDeclarationError, ModuleMetadata,
 };
 use arora_registry::{ModuleFrozen, ReadableRegistry};
 use arora_types::record::{
@@ -10,8 +10,7 @@ use arora_types::record::{
 };
 use arora_types::{
     module::low::{
-        Executor, ExportFunction, ExportSymbol, Header, ImportFunction, ImportSymbol, Parameter,
-        TypeRef,
+        ExportFunction, ExportSymbol, Header, ImportFunction, ImportSymbol, Parameter, TypeRef,
     },
     ty::{
         BOOLEAN_ID, F32_ID, F64_ID, I16_ID, I32_ID, I64_ID, I8_ID, STRING_ID, U16_ID, U32_ID,
@@ -25,29 +24,35 @@ use std::fs::read_to_string;
 use std::path::Path;
 use uuid::Uuid;
 
-/// Creates a YAML header file named `module.yaml` describing the module.
+/// Creates the module's header, at `version` and with its `metadata`, twice:
+/// as `module.yaml`, the form `arora-cli --header` reads, and as
+/// `header.json`, the form a module directory carries beside its artifact.
 pub fn generate_header_file(
     id: &Uuid,
+    version: &Version,
     module: &ModuleFrozen,
     imports: &[ImportAsset],
-    executor: &String,
+    metadata: &ModuleMetadata,
 ) -> Result<Directory, ModuleDeclarationError> {
+    let version_part = |part: u64| {
+        u32::try_from(part).map_err(|_| {
+            ModuleDeclarationError::Generic(format!(
+                "module {id}: version {version} has a part beyond a header's 32 bits"
+            ))
+        })
+    };
     let header = Header {
         id: id.to_owned(),
         name: module.name.to_owned(),
-        author: String::new(),
-        description: None,
-        license: String::new(),
+        author: metadata.author.to_owned(),
+        description: metadata.description.to_owned(),
+        license: metadata.license.to_owned(),
         version: SemanticVersion {
-            major: 0u32,
-            minor: 0u32,
-            patch: 0u32,
+            major: version_part(version.major)?,
+            minor: version_part(version.minor)?,
+            patch: version_part(version.patch)?,
         },
-        executor: Executor {
-            name: executor.to_owned(),
-            min_version: None,
-            max_version: None,
-        },
+        executor: metadata.executor.to_owned(),
         exports: module
             .exports
             .iter()
@@ -106,6 +111,10 @@ pub fn generate_header_file(
     let header_file = File::new(serde_yaml::to_string(&header).unwrap().as_bytes());
     result
         .insert("module.yaml", Entry::File(header_file))
+        .map_err(ModuleDeclarationError::VfsError)?;
+    let header_json = File::new(serde_json::to_string_pretty(&header).unwrap().as_bytes());
+    result
+        .insert("header.json", Entry::File(header_json))
         .map_err(ModuleDeclarationError::VfsError)?;
     Ok(result)
 }

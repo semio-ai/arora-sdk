@@ -37,8 +37,9 @@ This produces:
 - Host binaries (`arora-cli`, `arora-module-cli`, `arora-module-cpp`, …)
   under `target/<profile>/`.
 - Host cdylibs for native modules (`libpolly.dylib` / `.so`).
-- C++ wasm guests (`test-cpp.wasm`, `test-cpp-2.wasm`) staged under
-  `target/<profile>/modules/`.
+- C++ wasm guests, each as the module directory a device loads it from —
+  `header.json`, the guest, and `records/` — at
+  `target/<profile>/modules/test-cpp/` and `…/test-cpp-2/`.
 - Rust modules (`test-behavior-tree-nodes`, `test-rust-wasm`) built for the
   **host** by default — `cargo test -p test-rust-wasm` runs natively.
   Their wasm flavour is produced on demand (see *Testing* below).
@@ -128,8 +129,8 @@ flowchart TD
   end
 
   subgraph wasm_guests [wasm guests wasip1 and wasip2]
-    tcpp[test-cpp.wasm]
-    tcpp2[test-cpp-2.wasm]
+    tcpp[test-cpp module directory]
+    tcpp2[test-cpp-2 module directory]
     btn[test-behavior-tree-nodes]
     trw[test-rust-wasm]
     trc["test-rust-component (wasip2)"]

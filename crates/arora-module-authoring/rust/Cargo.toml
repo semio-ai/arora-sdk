@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-rust"
-version = "3.0.0"
+version = "4.0.0"
 edition = "2021"
 description = "Rust source generation for Arora modules (types and bindings from type records)."
 license = "Apache-2.0"
@@ -8,7 +8,7 @@ readme = "readme.md"
 include = ["/src", "/tests", "/LICENSE"]
 
 [dependencies]
-arora-module-core = { path = "../core", version = "2" }
+arora-module-core = { path = "../core", version = "3" }
 arora-registry = { path = "../../arora-registry", version = "2" }
 arora-types = { path = "../../arora-types", version = "3" }
 arora-vfs = { path = "../../arora-vfs", version = "0.1" }

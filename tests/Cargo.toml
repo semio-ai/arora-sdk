@@ -22,6 +22,9 @@ path = "src/lib.rs"
 anyhow = "1"
 test-cpp = { path = "../modules/test-cpp" }
 test-cpp-2 = { path = "../modules/test-cpp-2" }
+# The example C++ module, built here so that its module directory exists for
+# the tests that load it.
+example-cpp = { path = "../examples/modules/cpp" }
 
 # Component-model executor tests (tests/component.rs) drive the engine
 # in-process rather than through arora-cli.
@@ -38,6 +41,8 @@ arora-animation-module = { path = "../modules/animation", version = "1", feature
 arora = { path = "../crates/arora" }
 arora-registry = { path = "../crates/arora-registry" }
 futures = "0.3"
+# Reads the guests' binaries, to check the C++ and Rust guests share one form.
+wasmparser = "0.262"
 
 [build-dependencies]
 arora-animation-module = { path = "../modules/animation", artifact = "cdylib", target = "wasm32-wasip1" }

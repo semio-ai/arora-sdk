@@ -19,7 +19,10 @@ Two are shipped today:
 
 Both expose the same ABI to guests (`arora_buffer_alloc`/`free`,
 `arora_function_<uuid>` exports, `arora_dispatch` / `arora_dispatch_indirect`
-imports), so a module compiled once runs in either host.
+imports), so a module compiled once runs in either host. A guest that exports
+`_initialize` — a WASI reactor, which a C or C++ guest is when linked with
+`-mexec-model=reactor` — has it called once, when it loads, before any other
+export: it runs the guest's static constructors.
 
 ### Compiling a module once
 

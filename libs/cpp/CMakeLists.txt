@@ -27,3 +27,31 @@ target_compile_options(arora-cpp PRIVATE -fPIC -O3 -flto)
 if(TARGET arora-buffers)
   target_link_libraries(arora-cpp PRIVATE arora-buffers)
 endif()
+
+# arora_module_directory(<target> <directory> HEADER <header.json>
+#                        [RECORDS <records dir>...])
+#
+# Once <target> links, write the module directory a device loads it from —
+# the form a Rust module ships in too:
+#
+#   <directory>/header.json     the header arora-module-cli generated
+#   <directory>/<target>.wasm   the guest
+#   <directory>/records/        the records of every RECORDS directory, merged
+#
+# <directory> is written afresh on every link.
+function(arora_module_directory target directory)
+  cmake_parse_arguments(ARG "" "HEADER" "RECORDS" ${ARGN})
+  if(NOT ARG_HEADER)
+    message(FATAL_ERROR "arora_module_directory(${target}): HEADER is required")
+  endif()
+  set(commands
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${directory}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${directory}/records
+    COMMAND ${CMAKE_COMMAND} -E copy ${ARG_HEADER} ${directory}/header.json
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${target}> ${directory}/${target}.wasm)
+  foreach(records ${ARG_RECORDS})
+    list(APPEND commands
+      COMMAND ${CMAKE_COMMAND} -E copy_directory ${records} ${directory}/records)
+  endforeach()
+  add_custom_command(TARGET ${target} POST_BUILD ${commands} VERBATIM)
+endfunction()

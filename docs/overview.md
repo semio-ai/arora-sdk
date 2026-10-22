@@ -50,8 +50,10 @@ against, the entry points an executor looks up. See
 [test-rust-wasm](../modules/test-rust-wasm/readme.md).
 
 **In another language**, the interface is a `module.yaml`, and
-`arora-module-cli` generates the sources to implement it. See
-[test-cpp](../modules/test-cpp/readme.md) or
+`arora-module-cli` generates the sources to implement it. See the
+[example C++ module](../examples/modules/cpp/readme.md), which builds into
+the module directory a Rust module ships in, or
+[test-cpp](../modules/test-cpp/readme.md) and
 [test-cpp-2](../modules/test-cpp-2/readme.md); a module still authored this way
 regenerates `src/arora_generated/` from the YAML on every build, so edits to
 generated files are lost — change the YAML instead, and list a function you
@@ -171,6 +173,8 @@ for other uses.
     Only works as a executable.
 
 - Modules:
+  - [`example-cpp`](../examples/modules/cpp/readme.md):
+    an example module in C++, built into a module directory.
   - [`test-cpp`](../modules/test-cpp/readme.md):
     a module to test the C++ bindings.
   - [`test-cpp-2`](../modules/test-cpp-2/readme.md):

@@ -4,7 +4,17 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [5.3.1] - 2026-10-22
+## [5.4.0] - 2026-10-22
+
+### Added
+
+- A guest that exports `_initialize` has it called once, when it loads,
+  before any other export, by `WebAssemblyExecutor` and `BrowserExecutor`
+  alike. `_initialize` is the entry point of a WASI reactor — a C or C++
+  guest linked with `-mexec-model=reactor` — and runs the guest's static
+  constructors, which nothing ran before: a C++ global with a dynamic
+  initializer stayed zeroed memory. A guest that does not export it loads as
+  it did.
 
 ### Security
 

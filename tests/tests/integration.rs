@@ -108,8 +108,8 @@ fn call_test_cpp_with_optionals() {
         .join("target")
         .join(profile)
         .join("modules");
-    let header = modules_dir.join("test-cpp").join("module.yaml");
-    let exe = modules_dir.join("test-cpp.wasm");
+    let header = modules_dir.join("test-cpp").join("header.json");
+    let exe = modules_dir.join("test-cpp").join("test-cpp.wasm");
     let call = |args: &str| {
         run(&[
             "--header",
@@ -158,8 +158,8 @@ fn call_test_cpp_2_from_engine_with_struct() {
         "release"
     };
     let modules_dir = workspace.join("target").join(profile).join("modules");
-    let test_cpp_2_module_yaml = modules_dir.join("test-cpp-2").join("module.yaml");
-    let test_cpp_module_yaml = modules_dir.join("test-cpp").join("module.yaml");
+    let test_cpp_2_header = modules_dir.join("test-cpp-2").join("header.json");
+    let test_cpp_header = modules_dir.join("test-cpp").join("header.json");
     let test_cpp_2_records = test_cpp_2_root.join("records");
     let test_cpp_records_published = modules_dir.join("test-cpp").join("records");
 
@@ -169,13 +169,21 @@ fn call_test_cpp_2_from_engine_with_struct() {
         "--include",
         test_cpp_records_published.to_str().unwrap(),
         "--header",
-        test_cpp_2_module_yaml.to_str().unwrap(),
+        test_cpp_2_header.to_str().unwrap(),
         "--exe",
-        modules_dir.join("test-cpp-2.wasm").to_str().unwrap(),
+        modules_dir
+            .join("test-cpp-2")
+            .join("test-cpp-2.wasm")
+            .to_str()
+            .unwrap(),
         "--header",
-        test_cpp_module_yaml.to_str().unwrap(),
+        test_cpp_header.to_str().unwrap(),
         "--exe",
-        modules_dir.join("test-cpp.wasm").to_str().unwrap(),
+        modules_dir
+            .join("test-cpp")
+            .join("test-cpp.wasm")
+            .to_str()
+            .unwrap(),
         "--call",
         concat!(
             "id: 07f5740c-ba4a-45af-8ec5-bedde5737e99\n",

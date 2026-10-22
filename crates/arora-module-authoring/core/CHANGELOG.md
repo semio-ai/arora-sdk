@@ -4,6 +4,24 @@ All notable changes to `arora-module-core`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-10-22
+
+### Changed
+
+- **Breaking:** `ModuleAsset::Module` carries a `ModuleMetadata` — the
+  executor, author, license and description the definition declares — in
+  place of the executor's name.
+- **Breaking:** `generate_header_file` takes the module's version and its
+  `ModuleMetadata`, and writes them into the header. The header it wrote had
+  version 0.0.0, no author, license or description, and no executor bounds;
+  a device matches a module's record by the header's version, so a module
+  directory carrying such a header was not described from its record.
+
+### Added
+
+- `generate_header_file` writes the header as `header.json` too: the form a
+  module directory carries beside its artifact.
+
 ## [2.0.0] - 2026-09-25
 
 ### Changed
