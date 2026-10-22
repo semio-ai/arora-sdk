@@ -78,6 +78,7 @@
 //! unticked, and the next lowering takes over its state.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use arora_behavior::graph::{
     source_port, Graph, GraphDiff, GraphType, Io, Link, LinkSource, Node as GraphNode, Port,
@@ -87,7 +88,7 @@ use arora_behavior::{
     RunPolicy, TaskHandle, TaskId,
 };
 use arora_types::call::Call;
-use arora_types::data::{DataStore, Key, Slot, StateChange};
+use arora_types::data::{DataStore, Key, StateChange};
 use arora_types::value::Value;
 use arora_types::value_serde;
 use uuid::Uuid;
@@ -99,6 +100,7 @@ use crate::nodes::{
     RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
 };
 use crate::schema::_RET_PARAM_ID;
+use crate::variable::VariableResolver;
 use crate::{lower_behavior_tree, schema_groot, FunctionIndex, LoweredTree};
 use arora_behavior::Status;
 
@@ -113,13 +115,16 @@ pub const GRAPH_TYPE_NAME: &str = "behavior-tree";
 ///   module function leaves;
 /// - `1.1` adds the data nodes `Equal` and `Unpack`
 ///   ([`EQUAL_FUNCTION_ID`](crate::nodes::EQUAL_FUNCTION_ID),
-///   [`UNPACK_FUNCTION_ID`](crate::nodes::UNPACK_FUNCTION_ID)).
-pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 1, 0);
+///   [`UNPACK_FUNCTION_ID`](crate::nodes::UNPACK_FUNCTION_ID));
+/// - `1.2` adds the data node `Scatter`
+///   ([`SCATTER_FUNCTION_ID`](crate::nodes::SCATTER_FUNCTION_ID)).
+pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 2, 0);
 
 /// The [`GraphType`] this interpreter reads: [`GRAPH_TYPE_NAME`] at
 /// [`GRAPH_TYPE_VERSION`]. A graph states the oldest version that has every
 /// node it uses, so that an interpreter reading an older minor still runs it:
-/// a graph without the `1.1` data nodes is spawned as `1.0`.
+/// a graph without the data nodes is spawned as `1.0`, and one with `Equal` or
+/// `Unpack` but not `Scatter` as `1.1`.
 pub fn graph_type() -> GraphType {
     GraphType {
         name: GRAPH_TYPE_NAME.to_string(),
@@ -173,9 +178,12 @@ pub struct BehaviorTreeInterpreter {
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
 /// convention (variable name == store key). The lowering never asks it for a
-/// tree-local name ([`is_tree_local`](crate::variable::is_tree_local)).
-fn direct_resolver(store: &dyn DataStore) -> impl Fn(&str) -> Option<Box<dyn Slot>> + '_ {
-    move |name: &str| Some(store.slot(&Key::from(name)))
+/// tree-local name ([`is_tree_local`](crate::variable::is_tree_local)). It
+/// holds its own handle on the store, so the lowered tree keeps it to resolve
+/// the keys its `Scatter` nodes are handed.
+fn direct_resolver(store: &dyn DataStore) -> Rc<VariableResolver<'static>> {
+    let store = store.clone_box();
+    Rc::new(move |name: &str| Some(store.slot(&Key::from(name))))
 }
 
 /// `from` and the nodes under it in `graph`, through the children relation.
@@ -735,8 +743,10 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         if self.dirty {
             self.prune_finished()?;
             check_selections(&self.graph, ctx.functions)?;
-            let tree = build_behavior_tree(&self.graph, &direct_resolver(ctx.store))
-                .map_err(|e| behavior_error(format!("lowering the scaffold: {e:?}")))?;
+            let resolver = direct_resolver(ctx.store);
+            let tree = build_behavior_tree(&self.graph, &*resolver)
+                .map_err(|e| behavior_error(format!("lowering the scaffold: {e:?}")))?
+                .with_key_resolver(resolver);
             if let Some(lowered) = self.lowered.take() {
                 tree.keep_state(lowered.tree(), &self.fresh);
                 lowered.unregister(ctx.call_bridge);

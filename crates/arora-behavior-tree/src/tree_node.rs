@@ -117,10 +117,10 @@ impl TreeNode {
         )?;
         // The data nodes, the root among them, once every argument has its
         // cell.
-        let mut unpack_outputs = HashMap::new();
+        let mut outputs = HashMap::new();
         for node in node_index.values().chain(std::iter::once(&root)) {
-            if let Some(outputs) = crate::bind_data_node(node, names, &node_arg_variables)? {
-                unpack_outputs.insert(node.id, outputs);
+            if let Some(bound) = crate::bind_data_node(node, names, &node_arg_variables)? {
+                outputs.insert(node.id, bound);
             }
         }
         Ok(BehaviorTree {
@@ -128,7 +128,7 @@ impl TreeNode {
             node_index,
             variables: Rc::new(RefCell::new(variables)),
             node_arg_variables: Rc::new(node_arg_variables),
-            unpack_outputs,
+            outputs,
         })
     }
 }

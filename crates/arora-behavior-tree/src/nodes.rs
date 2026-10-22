@@ -232,8 +232,9 @@ pub const RUN_STATUS_LATCH_PARAM_ID: Uuid = Uuid::from_bytes([
     0xb7, 0x38, 0x91, 0x2d, 0xc0, 0x54, 0x4a, 0x19, 0x8f, 0xe6, 0x25, 0x70, 0x4c, 0xa8, 0x13, 0x57,
 ]);
 
-// Data nodes: a condition over two values, and an array spread over output
-// ports. Both are ticked natively (see `behavior_tree::tick_builtin`).
+// Data nodes: a condition over two values, an array spread over output ports,
+// and an array written to keys named by data. They are ticked natively (see
+// `behavior_tree::tick_builtin`).
 
 /// `Equal(a, b)`: Success when the two values are equal — the same type and
 /// the same value, so `U64(1)` and `U32(1)` differ, and NaN equals nothing —
@@ -271,7 +272,8 @@ pub const UNPACK_VALUES_PARAM_ID: Uuid = uuid::uuid!("aa7e72c3-f979-4e94-b11f-f6
 /// Every port is declared — in the Groot palette, one line each, and in
 /// Groot's port editor, one row each — so the count is what a node can show:
 /// 64 holds a face's 52 ARKit blend shapes with head and eye pose beside them.
-/// A longer array is split by its producer into arrays of at most 64 elements.
+/// A longer array, or one whose keys come as data, is written by
+/// [`SCATTER_FUNCTION_ID`].
 pub const UNPACK_PORTS: usize = 64;
 /// [`UNPACK_FUNCTION_ID`]'s output ports: `UNPACK_OUT_PARAM_IDS[i]` is
 /// `out_i`. They differ only in their last byte, which is `i`.
@@ -293,6 +295,42 @@ pub fn unpack_out_index(param: Uuid) -> Option<usize> {
     let index = param.as_u128().checked_sub(UNPACK_OUT_BASE)?;
     (index < UNPACK_PORTS as u128).then_some(index as usize)
 }
+
+/// `Scatter(values, keys, within)`: writes element `i` of the array `values`
+/// to the store key named by element `i` of the array `keys`, and succeeds. A
+/// `Unit` element leaves its key as it is.
+///
+/// `within` is a key prefix, a literal string fixed when the tree is lowered:
+/// every key must be `within` or under it (its path continues `within` past a
+/// `/`, as [`prefix_covers`](arora_types::data::prefix_covers) says), so the
+/// keys a tree can write are read off its graph whatever data reaches the
+/// node. Lowering refuses a `within` that is not a literal string, is empty,
+/// ends with `/` or is tree-local. Keys are store keys under the Direct
+/// convention: paths in the store the tree runs over, a device's own keys.
+///
+/// A tick checks before it writes, and writes all its keys or none:
+///
+/// - it fails, writing nothing, when `values` or `keys` is not an array, an
+///   element of `keys` is not a string, or the two arrays differ in length —
+///   a table whose keys and values do not match yet;
+/// - it errors, writing nothing, when a key is outside `within` or is named
+///   twice in `keys`: the tree would write a key its graph does not name, or
+///   one key twice in a tick. A key under `within` is never tree-local.
+///
+/// The node keeps the store slots its last keys resolved to: a tick whose
+/// `keys` equal the previous tick's resolves none, and a tick with other keys
+/// resolves them all again. A slot notifies a change only when the value
+/// differs from the one it holds (the `Slot` contract), so a value that does
+/// not move makes no store change. A write the store refuses is not reported
+/// by the node, as for any variable. `values` and `keys` are any link source,
+/// a selection included; all three arguments must be linked.
+pub const SCATTER_FUNCTION_ID: Uuid = uuid::uuid!("eb0a42a1-6596-46f7-83c3-990632bfff94");
+/// [`SCATTER_FUNCTION_ID`]'s values.
+pub const SCATTER_VALUES_PARAM_ID: Uuid = uuid::uuid!("40940dc9-27ce-41b2-be54-4203665eda66");
+/// [`SCATTER_FUNCTION_ID`]'s keys, one per value.
+pub const SCATTER_KEYS_PARAM_ID: Uuid = uuid::uuid!("4056190c-ced0-4547-90c3-26d6a93c30b4");
+/// [`SCATTER_FUNCTION_ID`]'s key prefix, which every key is under.
+pub const SCATTER_WITHIN_PARAM_ID: Uuid = uuid::uuid!("4d773cff-49a7-4b2f-88c8-c6af05f96673");
 
 pub const SEQ_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0x32, 0x24, 0x6d, 0xf6, 0xab, 0x5d, 0x4f, 0x18, 0x92, 0x21, 0x23, 0xe2, 0x87, 0x31, 0xde, 0x93,
