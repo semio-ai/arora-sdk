@@ -11,9 +11,12 @@
 //! A step of `moving` stages a new value on every input; one of `settled`
 //! stages none, so only what the clock drives changes. `Demanded` runs what
 //! the outputs read and makes the writes alone, as a device does; `Every`
-//! runs every node and copies every port, as an editor does. An `edit` is an
-//! editor's: one constant's value changed, then an evaluation, in place
-//! ([`TreeRuntime::set_params`]) and by loading the edited spec.
+//! runs every node and copies every port, as an editor does. The reference
+//! runs every node either way; `reference writes` evaluates it for the writes
+//! alone (`evaluate_writes_with_functions`), with no copy of every port by
+//! name. An `edit` is an editor's: one constant's value changed, then an
+//! evaluation, in place ([`TreeRuntime::set_params`]) and by loading the
+//! edited spec.
 use std::time::{Duration, Instant};
 
 use arora_node_graph::import::tree_node_id;
@@ -21,7 +24,7 @@ use arora_node_graph::tree_runtime::{Evaluation, TreeRuntime};
 use arora_node_graph::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, NodeParams, NodeSpec, NodeType,
 };
-use arora_node_graph::{evaluate_all, GraphRuntime};
+use arora_node_graph::{evaluate_all, evaluate_writes_with_functions, GraphRuntime, NodeFunctions};
 use arora_shape::value::float;
 use arora_shape::{TypedPath, Value};
 
@@ -93,6 +96,15 @@ fn chain(depth: usize) -> GraphSpec {
         nodes,
         edges,
         ..Default::default()
+    }
+}
+
+/// The host of a graph calling no other module.
+struct NoFunctions;
+
+impl NodeFunctions for NoFunctions {
+    fn call(&mut self, function: uuid::Uuid, _: &[(uuid::Uuid, Value)]) -> Result<Value, String> {
+        Err(format!("no module has the function {function}"))
     }
 }
 
@@ -173,6 +185,28 @@ fn main() {
         println!(
             "{label} reference         load+eval {:>10.1} ms   step {}",
             cold.as_secs_f64() * 1e3,
+            per_step(start.elapsed())
+        );
+
+        // The reference evaluating every node for the writes alone, with no
+        // copy of every port by name.
+        let mut reference = GraphRuntime {
+            dt: 1.0 / 60.0,
+            ..Default::default()
+        };
+        evaluate_writes_with_functions(&mut reference, &spec, &mut NoFunctions)
+            .expect("the reference evaluates");
+        let start = Instant::now();
+        for step in 0..STEPS {
+            reference.t = step as f32 * reference.dt;
+            stage(step, &mut |path, value| {
+                reference.set_input(path, float(value), None);
+            });
+            evaluate_writes_with_functions(&mut reference, &spec, &mut NoFunctions)
+                .expect("the reference evaluates");
+        }
+        println!(
+            "{label} reference writes                          step {}",
             per_step(start.elapsed())
         );
 
