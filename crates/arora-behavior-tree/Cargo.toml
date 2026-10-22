@@ -9,6 +9,10 @@ license = "Apache-2.0"
 path = "src/behavior_tree.rs"
 
 [[bench]]
+name = "attached"
+harness = false
+
+[[bench]]
 name = "edit"
 harness = false
 
@@ -41,4 +45,8 @@ arora-simple-data-store = { path = "../arora-simple-data-store" }
 
 [[bench]]
 name = "incremental"
+harness = false
+
+[[bench]]
+name = "scale"
 harness = false

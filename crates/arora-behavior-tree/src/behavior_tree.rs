@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod attached_tests;
 pub mod behavior;
 #[cfg(test)]
 mod call_expression_tests;
@@ -69,7 +71,7 @@ pub struct BehaviorTree {
     /// All the nodes, indexed by their ID.
     node_index: HashMap<Uuid, Rc<Node>>,
     /// The local variables.
-    variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
+    variables: Rc<RefCell<crate::id_hash::IdMap<Uuid, VariableCell>>>,
     /// Variables associated to node arguments (node, arg).
     node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     /// Each `Unpack` and `Scatter` node's outputs, bound at load.
@@ -192,12 +194,12 @@ impl BehaviorTree {
     /// tree's error first, then the sinks'.
     fn tick_root(
         &self,
-        root: &TickLink,
+        root: &ChildTick,
         caller: &mut dyn CallBridge,
     ) -> Result<Status, BehaviorTreeError> {
         let _store = root.function.incremental.begin_tick();
         self.detached.begin_tick();
-        let status = root.tick(caller);
+        let status = root.tick_root(caller);
         let variables = self.variables.borrow();
         let calls = FunctionIndex::new();
         let sinks = self.detached.tick_sinks(
@@ -317,7 +319,7 @@ fn take_local(cell: &VariableCell, held: &VariableCell) {
 
 pub struct BehaviorTreeRuntime<'a> {
     caller: &'a mut dyn CallBridge,
-    tick: TickLink,
+    tick: ChildTick,
     tree: &'a BehaviorTree,
 }
 
@@ -353,7 +355,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
 /// [`unregister`](Self::unregister)ed when the lowering is replaced — without
 /// it, every re-lowering would leak its callables in the engine.
 pub struct LoweredTree {
-    root: TickLink,
+    root: ChildTick,
     callables: Vec<CallableId>,
     /// Keeps the tree's shared cells alive for the registered tick functions.
     tree: BehaviorTree,
@@ -407,6 +409,13 @@ impl LoweredTree {
         self.root.function.incremental.set_enabled(enabled);
     }
 
+    /// The visits that have run a node of this tree rather than answering
+    /// from its cache, since it was lowered.
+    #[cfg(test)]
+    pub(crate) fn executed_visits(&self) -> u64 {
+        self.root.function.incremental.executed.get()
+    }
+
     /// Tick the tree **once**: every reactive pass drills through the ready
     /// children and returns the root's status — [`Status::Running`] means "see
     /// you next tick", never "spin".
@@ -437,7 +446,7 @@ fn register_ticks(
     functions: &FunctionIndex,
     caller: &mut dyn CallBridge,
     trace: bool,
-) -> Result<(TickLink, Vec<CallableId>), BehaviorTreeError> {
+) -> Result<(ChildTick, Vec<CallableId>), BehaviorTreeError> {
     tree.lower_detached(functions)?;
     let mut callables = Vec::new();
     let incremental = Rc::new(incremental::Incremental::default());
@@ -503,7 +512,7 @@ fn setup_tick_function(
     node: Rc<Node>,
     node_index: &HashMap<Uuid, Rc<Node>>,
     functions: &FunctionIndex,
-    variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
+    variables: Rc<RefCell<crate::id_hash::IdMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     outputs: &HashMap<Uuid, Outputs>,
@@ -514,7 +523,7 @@ fn setup_tick_function(
     callables: &mut Vec<CallableId>,
     incremental: Rc<incremental::Incremental>,
     parent: Option<std::rc::Weak<incremental::State>>,
-) -> Result<TickLink, BehaviorTreeError> {
+) -> Result<ChildTick, BehaviorTreeError> {
     let pulls = detached.pulls(&node.id);
     let mut reads = Vec::new();
     let mut arguments = Vec::new();
@@ -575,7 +584,7 @@ fn setup_tick_function(
         .as_ref()
         .map(|children| children.len())
         .unwrap_or(0);
-    let mut children_ticks: Vec<TickLink> = Vec::with_capacity(nof_children);
+    let mut children_ticks: Vec<ChildTick> = Vec::with_capacity(nof_children);
     if let Some(children) = &node.children {
         for child_id in children {
             let child_node = node_index
@@ -615,17 +624,18 @@ fn setup_tick_function(
             }
         }
     }
+    let module_call = AttachedCall::lower(
+        &node,
+        functions.get(&node.function),
+        &node_arg_variables,
+        &children_ticks,
+    );
     let tick_function = Rc::new(TickFunction {
         state,
         incremental,
         node: node.clone(),
-        function: functions.get(&node.function).cloned(),
+        module_call,
         calls: Rc::new(call_signatures(&node, functions)?),
-        argument_order: crate::display::ordered(&node.arguments, functions.get(&node.function))
-            .into_iter()
-            .map(|(parameter, _)| parameter)
-            .filter(|parameter| *parameter != _ON_CHANGE_PARAM_ID)
-            .collect(),
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
         pulls,
@@ -639,7 +649,7 @@ fn setup_tick_function(
         callable_id: callable_id.id,
     };
     callables.push(callable_id);
-    Ok(TickLink {
+    Ok(ChildTick {
         id: tick,
         function: tick_function,
     })
@@ -671,14 +681,15 @@ pub(crate) fn is_native(function: Uuid) -> bool {
 /// Tick the native nodes (see [`is_native`]) — the control nodes, the status
 /// leaves, the task-run nodes, the data nodes `Equal`, `Copy`, `Unpack` and `Scatter`
 /// and the core string nodes ([`core_nodes`]) — without consulting the
-/// function index or the wasm engine. Children are ticked through their registered tick functions
-/// ([`Tickable for TickId`]). Returns `Some(status)` for a built-in node and
-/// `None` for any other function (which the caller dispatches via the engine).
+/// function index or the wasm engine. Children run their tick functions directly,
+/// with the same error conversion as their registered callables. Returns
+/// `Some(status)` for a built-in node and `None` for any other function (which
+/// the caller dispatches via the engine).
 fn tick_builtin(
     caller: &mut dyn CallBridge,
     scope: Scope,
     outputs: Option<&Outputs>,
-    child_tick_ids: &[TickLink],
+    child_tick_ids: &[ChildTick],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
     // An argument's value: a call or a selection is computed, a selection
@@ -959,7 +970,7 @@ fn tick_builtin(
         // writes keeps the cell it writes to.
         function => {
             let writes = detached::native_writes(function);
-            let mut selected = HashMap::new();
+            let mut selected = crate::id_hash::IdMap::default();
             for parameter in core_nodes::core_node_parameters(function).unwrap_or_default() {
                 match node.arguments.get(&parameter.id) {
                     Some(Expression::Call(_)) => {
@@ -993,14 +1004,13 @@ fn tick_builtin(
 #[allow(clippy::too_many_arguments)]
 fn tick(
     caller: &mut dyn CallBridge,
-    function: Option<&ModuleFunction>,
+    module_call: &AttachedCall,
     calls: &FunctionIndex,
-    argument_order: &[Uuid],
-    variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
+    variables: Rc<RefCell<crate::id_hash::IdMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: (&Detached, Option<&[usize]>),
     outputs: Option<&Outputs>,
-    child_tick_ids: &[TickLink],
+    child_tick_ids: &[ChildTick],
     node: Rc<Node>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
@@ -1045,159 +1055,15 @@ fn tick(
         return Ok(status);
     }
 
-    let module_function =
-        function.ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
-            id: node.function,
-        }))?;
-    let function = &module_function.function;
-
-    let mut call = Call {
-        module_id: Some(module_function.module_id),
-        id: node.function,
-        args: Vec::with_capacity(
-            node.arguments.len() + if node.children.is_some() { 1 } else { 0 },
-        ),
-    };
-
-    let nof_children = node
-        .children
-        .as_ref()
-        .map(|children| children.len())
-        .unwrap_or(0);
-    assert_eq!(nof_children, child_tick_ids.len());
-
-    if node.children.is_some() {
-        // Check the presence of the `children` parameter, which must be the first one.
-        let first_parameter_id = function.parameter_ordering.first().ok_or(
-            BehaviorTreeError::MissingChildrenParameter {
-                node: node.id.to_owned(),
-                function: node.function.to_owned(),
-            },
-        )?;
-        let first_parameter = function.parameters.get(first_parameter_id).ok_or(
-            BehaviorTreeError::MissingChildrenParameter {
-                node: node.id,
-                function: node.function.to_owned(),
-            },
-        )?;
-        if first_parameter.name != "children" {
-            Err(BehaviorTreeError::MissingChildrenParameter {
-                node: node.id,
-                function: node.function.to_owned(),
-            })?;
-        }
-        let first_parameter_type_id = first_parameter
-            .ty
-            .as_array()
-            .ok_or(BehaviorTreeError::MissingChildrenParameter {
-                node: node.id,
-                function: node.function.to_owned(),
-            })?
-            .reference
-            .id;
-        if first_parameter_type_id != TickId::arora_type_id() {
-            Err(BehaviorTreeError::MissingChildrenParameter {
-                node: node.id,
-                function: node.function.to_owned(),
-            })?;
-        }
-
-        // Pass the tick ids of the children.
-        call.args.push(StructureField {
-            id: *first_parameter_id,
-            value: Box::new(Value::array_of_type::<TickId>(
-                child_tick_ids
-                    .iter()
-                    .map(|child| Value::from(child.id))
-                    .collect(),
-            )),
-        })
-    }
-
-    // Resolving the remaining parameters, and passing them.
-    // A local map of variables is maintained to update them when if mutated.
-    // Some of them were setup to be shared, but it is transparent here.
-    // They are indexed by parameter id.
-    let mut locals = HashMap::<Uuid, VariableCell>::new();
-    // Arguments read through a selection: the function receives the selected
-    // part. A selection is read-only — the interpreter refuses one on a
-    // mutable parameter — so a mutation reported for it is not written back
-    // over the whole source.
-    let mut selected = Vec::new();
-    {
-        let variables = variables.borrow();
-        let scope = Scope {
-            variables: &variables,
+    let status = module_call.tick(
+        caller,
+        Scope {
+            variables: &variables.borrow(),
             node_parameters_variables: &node_parameters_variables,
             calls,
-        };
-        for param_id in argument_order {
-            let value_expression = &node.arguments[param_id];
-            let node_parameter = NodeParameterId {
-                node: node.id.to_owned(),
-                parameter: param_id.to_owned(),
-            };
-            let variable =
-                get_node_parameter_variable(&node_parameter, &node_parameters_variables)?;
-
-            // A call is computed into the argument's cell.
-            if matches!(value_expression, Expression::Call(_)) {
-                let value = compute_expression(scope, value_expression, caller, &node_parameter)?;
-                variable.set_opt(Some(value).filter(|value| *value != Value::Unit));
-            };
-
-            if param_id == &_RET_PARAM_ID {
-                locals.insert(*param_id, variable.clone());
-                continue;
-            }
-            let value = if let Expression::Select { .. } = value_expression {
-                selected.push(*param_id);
-                // A selection over an absent value reads as absent (`Unit`).
-                Some(compute_expression(
-                    scope,
-                    value_expression,
-                    caller,
-                    &node_parameter,
-                )?)
-                .filter(|value| *value != Value::Unit)
-            } else {
-                locals.insert(*param_id, variable.clone());
-                variable.get()
-            };
-            call.args.push(StructureField {
-                id: *param_id,
-                value: Box::new(argument_value(value, is_optional(function, param_id))),
-            });
-        }
-    }
-
-    let result = caller
-        .arora_call(call)
-        .map_err(BehaviorTreeError::CallError)?;
-
-    for mutated in result.mutated {
-        if selected.contains(&mutated.id) {
-            continue;
-        }
-        let variable = locals
-            .get(&mutated.id)
-            .ok_or(BehaviorTreeError::InternalError {
-                message: format!(
-                    "mutated parameter {} does not correspond to any local variable",
-                    mutated.id
-                ),
-            })?;
-        write_back(variable, *mutated.value, is_optional(function, &mutated.id));
-    }
-
-    // If the node has a _ret argument (function does not return a status),
-    // write the return value to the bound variable.
-    let status = if let Some(var) = locals.get(&_RET_PARAM_ID) {
-        write_back(var, result.ret.clone(), function.return_ty.is_option());
-        Status::Success
-    } else {
-        result.ret.try_into().unwrap_or(Status::Success)
-    };
+        },
+        &node,
+    )?;
     trace_line(status);
     Ok(status)
 }
@@ -1267,13 +1133,18 @@ impl Tickable for CallableId {
     }
 }
 
-/// A child edge that can check its cache before entering engine dispatch.
-struct TickLink {
+/// A child edge keeps both entry points: native parents call the function,
+/// module parents receive its registered id.
+struct ChildTick {
     id: TickId,
     function: Rc<TickFunction>,
 }
-impl Tickable for TickLink {
-    fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
+
+impl ChildTick {
+    /// Tick the root: a clean root answers from its cache and makes no
+    /// indirect dispatch; any other visit goes through the engine, whose
+    /// callable boundary converts the tree's error to a `CallError`.
+    fn tick_root(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
         if let Some(status) = self.function.cached(caller)? {
             return Ok(status);
         }
@@ -1281,30 +1152,227 @@ impl Tickable for TickLink {
     }
 }
 
+impl Tickable for ChildTick {
+    fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
+        // A child's error goes up unconverted. Native parents pass errors on
+        // without reading them, and the root's callable boundary converts the
+        // error to a `CallError`, keeping one that already is: the root
+        // reports what converting at every edge reported. The function checks
+        // its own cache first.
+        self.function.tick(caller)
+    }
+}
+
+/// An attached argument with its cell resolved once. Arguments run in the
+/// function's parameter order, then any others by id: a nested call in one
+/// argument finishes before the next argument is read.
+struct AttachedArgument {
+    parameter: Uuid,
+    cell: Option<VariableCell>,
+    computed: Option<Expression>,
+    optional: bool,
+    selected: bool,
+}
+
+/// The module call a node makes. Arguments own snapshots during dispatch so
+/// nested calls and re-entrant callbacks may write the cells they came from.
+struct AttachedCall {
+    module: Option<Uuid>,
+    arguments: Vec<AttachedArgument>,
+    outputs: crate::id_hash::IdMap<Uuid, (VariableCell, bool)>,
+    selected: crate::id_hash::IdSet<Uuid>,
+    return_optional: bool,
+    children: Option<(Uuid, Value)>,
+    missing_children: bool,
+}
+
+impl AttachedCall {
+    fn lower(
+        node: &Node,
+        signature: Option<&ModuleFunction>,
+        cells: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
+        children: &[ChildTick],
+    ) -> Self {
+        let function = signature.map(|signature| &signature.function);
+        // The reserved `_on_change` argument stays in the tree, never in a
+        // module call.
+        let arguments: Vec<_> = crate::display::ordered(&node.arguments, signature)
+            .into_iter()
+            .filter(|(parameter, _)| *parameter != _ON_CHANGE_PARAM_ID)
+            .map(|(parameter, expression)| AttachedArgument {
+                parameter,
+                cell: cells
+                    .get(&NodeParameterId {
+                        node: node.id,
+                        parameter,
+                    })
+                    .cloned(),
+                computed: matches!(expression, Expression::Call(_) | Expression::Select { .. })
+                    .then(|| expression.clone()),
+                optional: function.is_some_and(|function| is_optional(function, &parameter)),
+                selected: matches!(expression, Expression::Select { .. }),
+            })
+            .collect();
+        let outputs = arguments
+            .iter()
+            .filter(|argument| !argument.selected || argument.parameter == _RET_PARAM_ID)
+            .filter_map(|argument| {
+                argument
+                    .cell
+                    .clone()
+                    .map(|cell| (argument.parameter, (cell, argument.optional)))
+            })
+            .collect();
+        let child_parameter = function.and_then(|function| {
+            let id = function.parameter_ordering.first()?;
+            let parameter = function.parameters.get(id)?;
+            (parameter.name == "children"
+                && parameter
+                    .ty
+                    .as_array()
+                    .is_some_and(|ty| ty.reference.id == TickId::arora_type_id()))
+            .then_some(*id)
+        });
+        Self {
+            module: signature.map(|signature| signature.module_id),
+            return_optional: function.is_some_and(|function| function.return_ty.is_option()),
+            selected: arguments
+                .iter()
+                .filter(|argument| argument.selected && argument.parameter != _RET_PARAM_ID)
+                .map(|argument| argument.parameter)
+                .collect(),
+            arguments,
+            outputs,
+            children: node
+                .children
+                .as_ref()
+                .and(child_parameter)
+                .map(|parameter| {
+                    (
+                        parameter,
+                        Value::array_of_type::<TickId>(
+                            children.iter().map(|child| Value::from(child.id)).collect(),
+                        ),
+                    )
+                }),
+            missing_children: node.children.is_some() && child_parameter.is_none(),
+        }
+    }
+
+    fn tick(
+        &self,
+        caller: &mut dyn CallBridge,
+        scope: Scope,
+        node: &Node,
+    ) -> Result<Status, BehaviorTreeError> {
+        let module =
+            self.module
+                .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
+                    id: node.function,
+                }))?;
+        if self.missing_children {
+            return Err(BehaviorTreeError::MissingChildrenParameter {
+                node: node.id,
+                function: node.function,
+            });
+        }
+        let mut values = Vec::with_capacity(self.arguments.len());
+        for argument in &self.arguments {
+            let at = NodeParameterId {
+                node: node.id,
+                parameter: argument.parameter,
+            };
+            let cell =
+                argument
+                    .cell
+                    .as_ref()
+                    .ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
+                        message: format!("node parameter {at} was not found"),
+                    })?;
+            let computed = argument
+                .computed
+                .as_ref()
+                .filter(|_| !argument.selected || argument.parameter != _RET_PARAM_ID)
+                .map(|expression| compute_expression(scope, expression, caller, &at))
+                .transpose()?;
+            // A call writes its result into the argument cell before the next
+            // argument runs. A selection reads without writing its source.
+            // `_ret` is where the return goes, not an argument: a call bound
+            // there is computed into its cell, and nothing is passed.
+            if argument.parameter == _RET_PARAM_ID {
+                if let Some(value) = computed {
+                    cell.set_opt(Some(value).filter(|value| *value != Value::Unit));
+                }
+                continue;
+            }
+            let value = if argument.selected {
+                // A selection over an absent value reads as absent (`Unit`).
+                computed.filter(|value| *value != Value::Unit)
+            } else {
+                if let Some(value) = computed {
+                    cell.set_opt(Some(value).filter(|value| *value != Value::Unit));
+                }
+                cell.get()
+            };
+            values.push((argument.parameter, argument_value(value, argument.optional)));
+        }
+        let mut args = Vec::with_capacity(values.len() + usize::from(self.children.is_some()));
+        if let Some((parameter, children)) = &self.children {
+            args.push((*parameter, children));
+        }
+        args.extend(values.iter().map(|(parameter, value)| (*parameter, value)));
+        let result = caller
+            .arora_call_borrowed(Some(module), node.function, &args)
+            .map_err(BehaviorTreeError::CallError)?;
+        for mutated in result.mutated {
+            // The function receives a selection's selected part. A selection is
+            // read-only, since the interpreter refuses one on a mutable
+            // parameter, so a mutation reported for it is not written back
+            // over the whole source.
+            if self.selected.contains(&mutated.id) {
+                continue;
+            }
+            let (cell, optional) =
+                self.outputs
+                    .get(&mutated.id)
+                    .ok_or_else(|| BehaviorTreeError::InternalError {
+                        message: format!(
+                            "mutated parameter {} does not correspond to any local variable",
+                            mutated.id
+                        ),
+                    })?;
+            write_back(cell, *mutated.value, *optional);
+        }
+        // A node with a `_ret` argument writes the return value to the
+        // variable it binds and succeeds; otherwise the return is its status.
+        Ok(if let Some((cell, _)) = self.outputs.get(&_RET_PARAM_ID) {
+            write_back(cell, result.ret, self.return_optional);
+            Status::Success
+        } else {
+            result.ret.try_into().unwrap_or(Status::Success)
+        })
+    }
+}
+
+/// The usual Tickable object in behavior trees, which is also Callable.
 struct TickFunction {
     state: Rc<incremental::State>,
     incremental: Rc<incremental::Incremental>,
     node: Rc<Node>,
-    /// The module function the node calls, resolved against the device's
-    /// index when the tree was lowered; `None` for a function the index did
-    /// not have (or a native node, which needs none).
-    function: Option<ModuleFunction>,
+    /// The module call with its cells and optional framing resolved at lowering.
+    module_call: AttachedCall,
     /// The functions the node's call expressions state, resolved against the
     /// same index, with the node's own function: what a call frames its
     /// arguments by, and what a trace names.
     calls: Rc<FunctionIndex>,
-    /// The node's parameters in the order its arguments are evaluated: its
-    /// function's parameter order, then any others by id. A call in one
-    /// argument runs before a call in the next, every tick.
-    argument_order: Rc<[Uuid]>,
-    locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
+    locals: Rc<RefCell<crate::id_hash::IdMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     /// The detached nodes the node reads, brought up to date before it ticks.
     pulls: Option<Rc<[usize]>>,
     /// Where the node writes, for an `Unpack` or a `Scatter` node.
     outputs: Option<Outputs>,
-    children: Vec<TickLink>,
+    children: Vec<ChildTick>,
     trace: TraceTick,
 }
 
@@ -1352,6 +1420,10 @@ impl Tickable for TickFunction {
         if let Some(status) = self.cached(caller)? {
             return Ok(status);
         }
+        #[cfg(test)]
+        self.incremental
+            .executed
+            .set(self.incremental.executed.get() + 1);
         let enabled = self.incremental.enabled.get();
         // A dirty visit reads live slots too. Bring just its own read versions
         // up to date before recording the argument snapshot; a raw write by an
@@ -1381,9 +1453,8 @@ impl Tickable for TickFunction {
         }
         let result = tick(
             caller,
-            self.function.as_ref(),
+            &self.module_call,
             &self.calls,
-            &self.argument_order,
             self.locals.clone(),
             self.node_arg_variables.clone(),
             (&self.detached, self.pulls.as_deref()),
@@ -1444,7 +1515,7 @@ pub fn load_behavior_tree_nodes_with(
     let mut node_index: HashMap<Uuid, Rc<Node>> = HashMap::new();
     let mut listed: Vec<Rc<Node>> = Vec::new();
     let mut root: Option<Rc<Node>> = None;
-    let mut variables = HashMap::new();
+    let mut variables = crate::id_hash::IdMap::default();
     let mut node_parameters_variables = crate::id_hash::IdMap::default();
     let mut arguments = Vec::new();
     let mut outputs = HashMap::new();
@@ -1653,7 +1724,7 @@ pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeE
 // Other helpers
 //=======================================================
 fn get_variable<'a>(
-    variables: &'a HashMap<Uuid, VariableCell>,
+    variables: &'a crate::id_hash::IdMap<Uuid, VariableCell>,
     variable_id: &Uuid,
     node_id: &Uuid,
 ) -> Result<&'a VariableCell, BehaviorTreeError> {
@@ -1773,7 +1844,7 @@ fn get_node_parameter_variable<'a>(
 pub(crate) fn setup_node_parameter_variable(
     node_parameter: &NodeParameterId,
     argument_expression: &Expression,
-    variables: &mut HashMap<Uuid, VariableCell>,
+    variables: &mut crate::id_hash::IdMap<Uuid, VariableCell>,
     node_parameters_variables: &mut crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     resolver: &VariableResolver,
     names: &HashMap<Uuid, String>,
@@ -1822,7 +1893,7 @@ pub(crate) fn setup_node_parameter_variable(
 /// Give every variable `expression` reads, at any depth, its cell.
 pub(crate) fn bind_variables(
     expression: &Expression,
-    variables: &mut HashMap<Uuid, VariableCell>,
+    variables: &mut crate::id_hash::IdMap<Uuid, VariableCell>,
     resolver: &VariableResolver,
     names: &HashMap<Uuid, String>,
 ) {
@@ -1853,7 +1924,7 @@ pub(crate) fn bind_variables(
 /// `shared_variable_id_resolves_to_one_cell` regression test).
 pub(crate) fn variable_cell(
     variable_id: Uuid,
-    variables: &mut HashMap<Uuid, VariableCell>,
+    variables: &mut crate::id_hash::IdMap<Uuid, VariableCell>,
     resolver: &VariableResolver,
     names: &HashMap<Uuid, String>,
 ) -> VariableCell {
@@ -1875,7 +1946,7 @@ pub(crate) fn variable_cell(
 /// state.
 #[derive(Clone, Copy)]
 pub(crate) struct Scope<'a> {
-    pub(crate) variables: &'a HashMap<Uuid, VariableCell>,
+    pub(crate) variables: &'a crate::id_hash::IdMap<Uuid, VariableCell>,
     pub(crate) node_parameters_variables: &'a crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     pub(crate) calls: &'a FunctionIndex,
 }

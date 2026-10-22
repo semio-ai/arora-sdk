@@ -125,9 +125,14 @@ fn value(tree: &LoweredTree, n: u128, parameter: Uuid) -> Option<Value> {
     }]
         .get()
 }
+/// Tick once, leaving in `bridge.visits` the nodes the tick ran rather than
+/// answered from their caches.
 fn tick(tree: &LoweredTree, bridge: &mut Bridge) -> Status {
     bridge.reset_counts();
-    tree.tick(bridge).unwrap()
+    let before = tree.executed_visits();
+    let status = tree.tick(bridge).unwrap();
+    bridge.visits = tree.executed_visits() - before;
+    status
 }
 const W1: u128 = 0x57544800000040008000000000000001;
 const W2: u128 = 0x57544800000040008000000000000002;
@@ -809,13 +814,13 @@ fn with_caches_prerequisites_independently_of_a_running_body() {
         tick(&tree, &mut bridge);
         tick(&tree, &mut bridge);
         assert!(bridge.calls.is_empty());
-        assert_eq!(bridge.dispatches, if running { 2 } else { 0 });
+        assert_eq!(bridge.visits, if running { 2 } else { 0 });
         put(&store, "input/a", 3.0);
         tick(&tree, &mut bridge);
         assert_eq!(bridge.calls.len(), 1);
         tick(&tree, &mut bridge);
         assert!(bridge.calls.is_empty());
-        assert_eq!(bridge.dispatches, if running { 2 } else { 0 });
+        assert_eq!(bridge.visits, if running { 2 } else { 0 });
     }
 }
 
