@@ -248,6 +248,20 @@ fn expand_keyed_batch(
     key_field: Uuid,
     value_field: Uuid,
 ) -> Result<(), String> {
+    for op in keyed_batch_writes(batch, key_field, value_field)? {
+        rt.writes.push(op);
+    }
+    Ok(())
+}
+
+/// The writes a keyed record batch makes, in batch order: one per record,
+/// of its `value_field` under the path its `key_field` holds; see
+/// [`expand_keyed_batch`].
+pub fn keyed_batch_writes(
+    batch: &Value,
+    key_field: Uuid,
+    value_field: Uuid,
+) -> Result<Vec<WriteOp>, String> {
     let Value::ArrayStructure { elements, .. } = batch else {
         return Err(
             "a path-less Output applies a keyed record batch (an array of structures); \
@@ -255,6 +269,7 @@ fn expand_keyed_batch(
                 .to_string(),
         );
     };
+    let mut writes = Vec::with_capacity(elements.len());
     for (index, record) in elements.iter().enumerate() {
         let mut key: Option<&str> = None;
         let mut value: Option<&Value> = None;
@@ -279,9 +294,9 @@ fn expand_keyed_batch(
         };
         let path = TypedPath::parse(key)
             .map_err(|e| format!("record {index}: key {key:?} is not a path: {e}"))?;
-        rt.writes.push(WriteOp::new(path, value.clone()));
+        writes.push(WriteOp::new(path, value.clone()));
     }
-    Ok(())
+    Ok(writes)
 }
 
 fn evaluate_kind_inner(

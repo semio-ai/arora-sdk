@@ -318,7 +318,7 @@ impl PlanCache {
             order.push(idx);
         }
 
-        let signatures = signature_map();
+        let signatures = signatures();
         let referenced_outputs = gather_referenced_outputs(spec, &node_index);
         let empty_connections: HashMap<String, InputConnection> = HashMap::new();
 
@@ -639,6 +639,55 @@ fn signature_map() -> HashMap<NodeType, NodeSignature> {
         .into_iter()
         .map(|sig| (sig.type_id.clone(), sig))
         .collect()
+}
+
+/// The registry's signatures by node kind, built once.
+pub(crate) fn signatures() -> &'static HashMap<NodeType, NodeSignature> {
+    static SIGNATURES: std::sync::OnceLock<HashMap<NodeType, NodeSignature>> =
+        std::sync::OnceLock::new();
+    SIGNATURES.get_or_init(signature_map)
+}
+
+/// The input layout a node of `kind` gets when the inputs `names` are wired:
+/// the layout the plan builds for it, its signature's fixed inputs first and
+/// its variadic group in key order.
+pub(crate) fn input_layout<'a>(
+    kind: &NodeType,
+    names: impl IntoIterator<Item = &'a str>,
+) -> PortLayout {
+    let connections: HashMap<String, InputConnection> = names
+        .into_iter()
+        .map(|name| (name.to_string(), InputConnection::default()))
+        .collect();
+    let placeholder = NodeSpec {
+        id: String::new(),
+        kind: kind.clone(),
+        params: Default::default(),
+        output_shapes: Default::default(),
+        input_defaults: Default::default(),
+    };
+    build_input_layout(&placeholder, signatures().get(kind), &connections)
+}
+
+/// The output layout the plan builds for `node`, whose ports `referenced`
+/// are read by an edge: its signature's outputs, its declared output shapes,
+/// its variadic outputs and every referenced port.
+pub(crate) fn output_layout(node: &NodeSpec, referenced: &HashSet<String>) -> PortLayout {
+    build_output_layout(node, signatures().get(&node.kind), referenced)
+}
+
+/// A port layout of exactly `names`, in order, with the variadic groups
+/// `variadics` (each a group name and its range of slots).
+pub(crate) fn layout_of(
+    names: impl IntoIterator<Item = String>,
+    variadics: impl IntoIterator<Item = (String, VariadicRange)>,
+) -> PortLayout {
+    let mut layout = PortLayout::default();
+    for name in names {
+        layout.insert_slot(name);
+    }
+    layout.variadics.extend(variadics);
+    layout
 }
 
 pub fn fingerprint_spec(spec: &GraphSpec) -> u64 {

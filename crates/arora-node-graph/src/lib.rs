@@ -4,13 +4,18 @@
 //! and evaluation runtime used by wasm bindings and the Arora behavior interpreter.
 
 pub mod eval;
+pub mod functions;
+pub mod import;
 pub mod schema;
 pub mod task;
 pub mod topo;
+pub mod tree_runtime;
 pub mod types;
 
 #[cfg(test)]
 mod fixtures;
+#[cfg(test)]
+mod tree_tests;
 
 pub use eval::{
     eval_node, evaluate_all, evaluate_all_cached, evaluate_all_with_functions,

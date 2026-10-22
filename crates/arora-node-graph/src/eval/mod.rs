@@ -17,16 +17,16 @@ use crate::types::{GraphSpec, NodeSpec, NodeType};
 use std::mem;
 
 pub mod eval_node;
-mod graph_runtime;
+pub(crate) mod graph_runtime;
 mod node_function;
 mod noise;
 mod numeric;
-mod plan;
-mod shape_helpers;
+pub(crate) mod plan;
+pub(crate) mod shape_helpers;
 #[cfg(feature = "urdf_ik")]
-mod urdfik;
-mod value_layout;
-mod variadic;
+pub(crate) mod urdfik;
+pub(crate) mod value_layout;
+pub(crate) mod variadic;
 
 pub use eval_node::eval_node;
 pub use graph_runtime::{GraphRuntime, SpawnRequest, StagedInput};

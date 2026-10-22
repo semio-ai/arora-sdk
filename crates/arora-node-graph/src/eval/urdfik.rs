@@ -504,3 +504,139 @@ pub fn quat_from_value(value: &Value, label: &str) -> Result<[f32; 4], String> {
             )
         })
 }
+
+/// The URDF chains a host has built, by the hash of their configuration
+/// ([`hash_urdf_config`]), with their joint names: a cache, so a node whose
+/// state lives outside the runtime does not parse its URDF at every call.
+pub(crate) type Chains = std::collections::HashMap<u64, (k::SerialChain<f32>, Vec<String>)>;
+
+/// The hash of the chain configuration `params` names, as
+/// [`kinematics_state_mut`](crate::eval::GraphRuntime::kinematics_state_mut)
+/// keys it; `None` without URDF XML.
+fn configuration_hash(params: &crate::types::NodeParams) -> Option<u64> {
+    let urdf_xml = params
+        .urdf_xml
+        .as_deref()
+        .filter(|xml| !xml.trim().is_empty())?;
+    Some(hash_urdf_config(
+        urdf_xml,
+        params.root_link.as_deref().unwrap_or("base_link"),
+        params.tip_link.as_deref().unwrap_or("tool0"),
+    ))
+}
+
+/// The kinematics state a URDF node starts a call with: the chain `chains`
+/// holds for its configuration, its joints and its last solve set from
+/// `state` (what [`encode_state`] made of the state its last call left), and
+/// `None` when `chains` has not built the chain yet.
+pub(crate) fn prepared_state(
+    chains: &Chains,
+    params: &crate::types::NodeParams,
+    state: Option<&Value>,
+) -> Option<UrdfKinematicsState> {
+    let hash = configuration_hash(params)?;
+    let (chain, joint_names) = chains.get(&hash)?;
+    let mut prepared = UrdfKinematicsState::new(hash, chain.clone(), joint_names.clone());
+    let Some(Value::ArrayValue(parts)) = state else {
+        return Some(prepared);
+    };
+    if let Some(Value::ArrayF32(joints)) = parts.first() {
+        if joints.len() == prepared.dofs {
+            prepared.chain.set_joint_positions_clamped(joints);
+        }
+    }
+    prepared.last_solve = parts.get(1).and_then(decode_solve);
+    Some(prepared)
+}
+
+/// Keep the chain `state` holds in `chains`, for the next call of a node of
+/// the same configuration.
+pub(crate) fn keep_chain(chains: &mut Chains, state: &UrdfKinematicsState) {
+    chains
+        .entry(state.hash)
+        .or_insert_with(|| (state.chain.clone(), state.joint_names.clone()));
+}
+
+/// A URDF node's state as a value: its joints, and its last solve.
+pub(crate) fn encode_state(state: &UrdfKinematicsState) -> Value {
+    Value::ArrayValue(vec![
+        Value::ArrayF32(state.chain.joint_positions()),
+        state
+            .last_solve
+            .as_ref()
+            .map_or(Value::Unit, |(request, solution)| {
+                encode_solve(request, solution)
+            }),
+    ])
+}
+
+fn optional_floats(values: &Option<Vec<f32>>) -> Value {
+    Value::Option(
+        values
+            .clone()
+            .map(|values| Box::new(Value::ArrayF32(values))),
+    )
+}
+
+fn encode_solve(request: &IkRequest, solution: &[f32]) -> Value {
+    let target = match &request.target {
+        IkTarget::Position(position) => Value::ArrayF32(position.to_vec()),
+        IkTarget::Pose {
+            position,
+            rotation,
+            tol_rot,
+        } => Value::ArrayF32(
+            position
+                .iter()
+                .chain(rotation)
+                .copied()
+                .chain([*tol_rot])
+                .collect(),
+        ),
+    };
+    Value::ArrayValue(vec![
+        target,
+        optional_floats(&request.seed),
+        optional_floats(&request.weights),
+        Value::U32(request.max_iters),
+        Value::F32(request.tol_pos),
+        Value::ArrayF32(solution.to_vec()),
+    ])
+}
+
+fn decode_solve(value: &Value) -> Option<(IkRequest, Vec<f32>)> {
+    let Value::ArrayValue(parts) = value else {
+        return None;
+    };
+    let floats = |value: &Value| match value {
+        Value::ArrayF32(values) => Some(values.clone()),
+        _ => None,
+    };
+    let optional = |value: &Value| match value {
+        Value::Option(Some(values)) => floats(values),
+        _ => None,
+    };
+    let target = floats(parts.first()?)?;
+    let target = match target.as_slice() {
+        [x, y, z] => IkTarget::Position([*x, *y, *z]),
+        [x, y, z, qx, qy, qz, qw, tol_rot] => IkTarget::Pose {
+            position: [*x, *y, *z],
+            rotation: [*qx, *qy, *qz, *qw],
+            tol_rot: *tol_rot,
+        },
+        _ => return None,
+    };
+    let (Value::U32(max_iters), Value::F32(tol_pos)) = (parts.get(3)?, parts.get(4)?) else {
+        return None;
+    };
+    Some((
+        IkRequest {
+            target,
+            seed: optional(parts.get(1)?),
+            weights: optional(parts.get(2)?),
+            max_iters: *max_iters,
+            tol_pos: *tol_pos,
+        },
+        floats(parts.get(5)?)?,
+    ))
+}
