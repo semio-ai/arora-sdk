@@ -52,9 +52,11 @@ In short:
 
 ## 1. What exists
 
-- **Every node is an engine callable.** A composite ticks a child through the
-  engine (`arora_call_indirect`, a map lookup, then the child's tick
-  function). The cost of a tick is one dispatch per node on the active path.
+- **Every node is an engine callable.** The root is ticked through the
+  engine (`arora_call_indirect`, a map lookup, then the root's tick
+  function), and so are a module composite's children. A native composite
+  calls its children's tick functions directly. The cost of a tick is one
+  visit per node on the active path.
 - **Composites are textbook and reactive.** `SEQ` starts from its first child
   every tick, `FALLBACK` stops at the first child that does not fail, and
   `PARALLEL` ticks every child. `SEQ_STAR` and `RunStatus` keep their state in
@@ -195,7 +197,7 @@ PARALLEL                                   ◇ node graph
 
 With this executor, a tick of that subtree calls the leaves whose inputs
 changed (`damp`'s state is one of them, so it runs until it reaches its
-target), checks the cache of the others, and dispatches the `PARALLEL` and
+target), checks the cache of the others, and ticks the `PARALLEL` and
 `RUNNING`. It needs no guard per node, and nothing a tree does not already
 have apart from `RUNNING`, which #332 also proposed. The editor recognizes the
 shape and opens it as a node graph. Detached nodes remain available. The two
@@ -233,82 +235,101 @@ which Arora does not have (§5).
 
 ## 4. Measurements
 
-`cargo bench -p arora-behavior-tree --bench incremental` builds a node graph
-of N module functions (add, mul, clamp, remap) through a native test bridge,
-with K = max(2, N/10) store inputs, each function's result published to a
-store key, in four forms:
+Two benches measure the forms a node graph takes, through a native test
+bridge with no function work, on an Apple M4 Pro, release profile with thin
+LTO. Attached nodes tick the way arora-behavior-tree's detached evaluator
+runs detached ones: a native parent calls its child's tick function, and a
+module leaf lends its arguments to its call (semio-ai/arora-sdk#407, merged
+into this branch and not yet into main).
+
+`cargo bench -p arora-behavior-tree --bench incremental` builds K = max(2,
+N/10) chains of add, mul, clamp and remap over N module calls, each chain
+fed by a store input. Only the last call of each chain publishes: its
+`_ret` is bound to the chain's key; every other result stays in the tree.
+Every form makes the same calls. The forms:
 
 - **attached-naive**: `PARALLEL[ leaf × N, RUN ]` on today's executor;
 - **attached-plain-incremental**: the same tree on the incremental executor,
   with no `_on_change`: what an existing tree costs on it;
 - **attached-incremental**: the same tree with `_on_change` on each leaf, on
   the incremental executor;
-- **detached**: the same calls as detached nodes whose results are sinks,
-  under a root `RUN`.
+- **detached**: the same calls as detached nodes, the last of each chain a
+  sink, under a root `RUN`;
 - **attached-guarded**: the attached tree on today's executor with each leaf
   wrapped as `FALLBACK[ SEQ[ guard, leaf ], SUCCEED ]`, the pattern a tree uses
   to skip an unchanged node without this executor; settled only, since its
   literal guard never passes.
 
-Each attached leaf also writes its result through a mutable parameter, which
-is one of its arguments, so after a change it is called once more to see that
-argument settle.
-
 Scenarios: **settled** (no input changes), **one-input** (input 0 changes
 every tick), **all-inputs** (every input changes every tick). Median µs per
-tick over 7 samples of 500 ticks after 50 warm-up ticks; module calls and
-engine dispatches per tick. Apple M4 Pro, release profile with thin LTO.
+tick over 7 samples of 500 ticks after 50 warm-up ticks, and module calls
+per tick. Every form makes one engine dispatch per tick, for the root.
 
-| N | Scenario | Form | µs/tick | Calls | Dispatches |
-|--:|---|---|--:|--:|--:|
-| 10 | settled | attached-naive | 10.6 | 10 | 12 |
-| | | attached-plain-incremental | 10.7 | 10 | 12 |
-| | | attached-incremental | 0.28 | 0 | 2 |
-| | | detached | 0.43 | 0 | 1 |
-| 100 | settled | attached-naive | 97 | 100 | 102 |
-| | | attached-plain-incremental | 112 | 100 | 102 |
-| | | attached-incremental | 1.5 | 0 | 2 |
-| | | detached | 3.8 | 0 | 1 |
-| 1000 | settled | attached-naive | 996 | 1000 | 1002 |
-| | | attached-plain-incremental | 1108 | 1000 | 1002 |
-| | | attached-incremental | 14 | 0 | 2 |
-| | | detached | 41 | 0 | 1 |
-| | | attached-guarded | 340 | 0 | 4002 |
-| 1000 | one-input | attached-naive | 1004 | 1000 | 1002 |
-| | | attached-plain-incremental | 1117 | 1000 | 1002 |
-| | | attached-incremental | 44 | 10 | 12 |
-| | | detached | 43 | 10 | 1 |
-| 1000 | all-inputs | attached-naive | 1109 | 1000 | 1002 |
-| | | attached-plain-incremental | 1207 | 1000 | 1002 |
-| | | attached-incremental | 1061 | 841 | 843 |
-| | | detached | 228 | 828 | 1 |
+| N | Scenario | Form | µs/tick | Calls |
+|--:|---|---|--:|--:|
+| 10 | settled | attached-naive | 1.77 | 10 |
+| | | attached-plain-incremental | 2.45 | 10 |
+| | | attached-incremental | 0.25 | 0 |
+| | | detached | 0.34 | 0 |
+| 100 | settled | attached-naive | 12.5 | 100 |
+| | | attached-plain-incremental | 16.5 | 100 |
+| | | attached-incremental | 0.75 | 0 |
+| | | detached | 2.08 | 0 |
+| 1000 | settled | attached-naive | 129 | 1000 |
+| | | attached-plain-incremental | 162 | 1000 |
+| | | attached-incremental | 6.6 | 0 |
+| | | detached | 30 | 0 |
+| | | attached-guarded | 134 | 0 |
+| 1000 | one-input | attached-naive | 133 | 1000 |
+| | | attached-plain-incremental | 163 | 1000 |
+| | | attached-incremental | 10.0 | 10 |
+| | | detached | 28.9 | 10 |
+| 1000 | all-inputs | attached-naive | 142 | 1000 |
+| | | attached-plain-incremental | 190 | 1000 |
+| | | attached-incremental | 157 | 828 |
+| | | detached | 127 | 828 |
 
-These are measured on main with arora-behavior-tree 9.5.0's detached
-evaluator, which compares a node's arguments in place and lends them to its
-call.
+`cargo bench -p arora-behavior-tree --bench scale` measures N = 10, 30, 100,
+300 and 1000 in six scenarios: the chains above when settled, one input
+changes or every input changes; a generated graph a tenth of whose calls
+read a clock; and eight generated graphs as the branches of a `FALLBACK`,
+with every input changing and the taken branch fixed or moving every 50
+ticks. A published call binds its `_ret` to its key in every form, so in
+the branch scenarios detached sinks compute every branch, while incremental
+leaves are held by their branch. At N = 1000, µs per tick and calls:
+
+| Scenario | attached-naive | detached | attached-incremental |
+|---|--:|--:|--:|
+| clock | 165 · 1000 | 91 · 293 | 98 · 293 |
+| branches | 199 · 1000 | 201 · 1000 | 46 · 125 |
+| branches, switching | 221 · 1000 | 204 · 1000 | 48 · 125 |
 
 What the numbers show:
 
-- **The incremental and detached forms make about the same calls**, in every
-  scenario: the same when settled or when one input changes, and 2% more
-  when every input changes, from the mutable parameter above.
-- **Settled, an incremental tree costs about a third of detached nodes**: 14
-  against 41 µs at N = 1000. The incremental `PARALLEL` checks every child's
-  cache and the executor compares every store-backed cell at the start of the
-  tick, about 15 ns per node, both linear in the tree with a known
-  replacement (§5). Every detached sink is brought up to date and published
-  each tick, about 40 ns per node.
-- **When one input changes, the two cost the same**: the calls dominate.
-- **When everything changes, detached nodes are about 4.7× cheaper.** Each
-  attached leaf costs an engine dispatch and its bookkeeping; a detached node
-  is called directly, with its arguments lent in place. The incremental form
-  then costs about what today's executor costs.
-- **A guard per node costs a third of calling every leaf**: four native nodes
-  ticked per graph node. The executor makes the same check without adding
-  nodes.
-- **Without `_on_change`, a tree costs about 10% more** than on today's
-  executor, with the same calls and dispatches: the versioned writes and the
-  dirty bookkeeping, with nothing to skip.
+- **The incremental and detached forms make the same calls** in every chain
+  scenario, and in the clock scenario.
+- **Settled, an incremental tree costs under a quarter of detached nodes**:
+  6.6 against 30 µs at N = 1000. The incremental `PARALLEL` checks every
+  child's cache and the executor compares every store-backed cell at the
+  start of the tick, about 7 ns per node, both linear in the tree with a
+  known replacement (§5). Every detached sink is brought up to date and
+  published each tick.
+- **When one input changes, an incremental tree costs a third** of detached
+  nodes: 10 against 29 µs.
+- **When every input changes, detached nodes are about 1.2× cheaper**: 127
+  against 157 µs. An incremental leaf records the versions of its argument
+  cells before its call and compares them after it, and its writes advance
+  versions; a detached node compares its argument values in place.
+- **Under a clock, the two cost about the same**: 98 against 91 µs.
+- **A branch the tree does not take costs nothing** when its graph's leaves
+  are in it: 46 µs, where sinks and today's executor compute all eight
+  branches, about 200 µs.
+- **A guard per node costs as much as calling every leaf**: four native
+  nodes ticked per graph node. The executor makes the same check, about 20
+  times cheaper, without adding nodes.
+- **Without `_on_change`, a tree costs 25 to 35% more** than on today's
+  executor, with the same calls: the versioned writes and the dirty
+  bookkeeping, with nothing to skip.
 - **The bridge is native.** These timings do not include wasm calls or
   hardware I/O, which add the same cost per call to every form. Compare the
   counts as well as the times.
