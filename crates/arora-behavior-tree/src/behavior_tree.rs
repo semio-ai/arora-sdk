@@ -12,6 +12,10 @@ mod incremental;
 #[cfg(test)]
 mod incremental_tests;
 pub mod nodes;
+pub mod placement;
+#[cfg(test)]
+mod placement_tests;
+pub use placement::{place_detached, PlacementScope};
 mod scatter;
 pub mod schema;
 pub mod schema_groot;
@@ -51,7 +55,7 @@ use crate::nodes::{
     RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
     SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID,
     SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
-    UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
+    UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, WITH_FUNCTION_ID,
 };
 
 // Runtime.
@@ -601,6 +605,7 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | SEQ_STAR_FUNCTION_ID
             | FALLBACK_FUNCTION_ID
             | PARALLEL_FUNCTION_ID
+            | WITH_FUNCTION_ID
             | RUN_CALL_FUNCTION_ID
             | RUN_STATUS_FUNCTION_ID
             | EQUAL_FUNCTION_ID
@@ -728,6 +733,18 @@ fn tick_builtin(
                 }
                 status
             }
+        }
+        WITH_FUNCTION_ID => {
+            if child_tick_ids.len() < 2 {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("WITH node {} requires at least two children", node.id),
+                });
+            }
+            let (body, prerequisites) = child_tick_ids.split_last().unwrap();
+            for child in prerequisites {
+                child.tick(caller)?;
+            }
+            body.tick(caller)?
         }
         PARALLEL_FUNCTION_ID => {
             // Ticks every child every time, then aggregates: Success only if

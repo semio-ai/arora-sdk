@@ -25,6 +25,7 @@ use crate::nodes::{
     SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
     STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
     UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, UNSET_STR_FUNCTION_ID, WAIT_STR_SET_FUNCTION_ID,
+    WITH_FUNCTION_ID,
 };
 use crate::schema::{Expression, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
@@ -67,6 +68,7 @@ impl Node {
             SEQ_STAR_GROOT_ID => SEQ_STAR_FUNCTION_ID,
             FALLBACK_GROOT_ID => FALLBACK_FUNCTION_ID,
             PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
+            WITH_GROOT_ID => WITH_FUNCTION_ID,
             EQUAL_GROOT_ID => EQUAL_FUNCTION_ID,
             UNPACK_GROOT_ID => UNPACK_FUNCTION_ID,
             SCATTER_GROOT_ID => SCATTER_FUNCTION_ID,
@@ -193,6 +195,7 @@ impl Node {
             SEQ_STAR_FUNCTION_ID => SEQ_STAR_GROOT_ID,
             FALLBACK_FUNCTION_ID => FALLBACK_GROOT_ID,
             PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
+            WITH_FUNCTION_ID => WITH_GROOT_ID,
             EQUAL_FUNCTION_ID => EQUAL_GROOT_ID,
             UNPACK_FUNCTION_ID => UNPACK_GROOT_ID,
             SCATTER_FUNCTION_ID => SCATTER_GROOT_ID,
@@ -494,6 +497,7 @@ const SEQ_GROOT_ID: &str = "Sequence";
 const SEQ_STAR_GROOT_ID: &str = "SequenceStar";
 const FALLBACK_GROOT_ID: &str = "Fallback";
 const PARALLEL_GROOT_ID: &str = "Parallel";
+const WITH_GROOT_ID: &str = "With";
 const COS_GROOT_ID: &str = "Cos";
 const EQUAL_GROOT_ID: &str = "Equal";
 const UNPACK_GROOT_ID: &str = "Unpack";
@@ -1329,6 +1333,7 @@ mod tests {
       <RunStatus status="{run/status}">
         <Succeed/>
       </RunStatus>
+      <With><Fail/><Succeed/></With>
     </Sequence>
   </BehaviorTree>
 </root>"#;
@@ -1368,6 +1373,7 @@ mod tests {
             ])
         );
         assert_eq!(children[2].function, RUN_STATUS_FUNCTION_ID);
+        assert_eq!(children[3].function, WITH_FUNCTION_ID);
 
         // Export and import again: the same nodes and arguments.
         let mut by_id: HashMap<Uuid, String> =

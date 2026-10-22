@@ -4,7 +4,7 @@ pub(crate) fn existing_tests_enabled() -> bool {
 }
 
 #[path = "../benches/support/incremental.rs"]
-mod fixture;
+pub(crate) mod fixture;
 
 use std::collections::{HashMap, HashSet};
 

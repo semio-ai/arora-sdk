@@ -162,6 +162,7 @@ impl Display for NodeDisplay<'_> {
         };
         let head = match signature {
             Some(signature) => signature.function_name.clone(),
+            None if node.function == crate::nodes::WITH_FUNCTION_ID => "WITH".into(),
             None => node.function.to_string(),
         };
         let arguments: Vec<(String, &Expression)> = ordered(&node.arguments, signature)

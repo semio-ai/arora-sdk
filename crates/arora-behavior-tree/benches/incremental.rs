@@ -5,6 +5,9 @@
 //! calls. `one-input` changes one chain, `all-inputs` changes all chains.
 //! `attached-plain-incremental` enables the flag on the attached tree without
 //! `_on_change`, measuring the incremental cost for existing effectful trees.
+//! `attached-incremental-with` is `WITH[ PARALLEL[ leaf × N ], RUN ]` with
+//! `_on_change` leaves; `placed` is the detached form's file placed before its
+//! readers with `place_detached`, on the incremental executor.
 //!
 //! Attached leaves bind `_ret` to a tree-local port and mirror the computed
 //! value through a mutable `out` parameter to a store key. Detached nodes bind
@@ -20,11 +23,13 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::time::Instant;
 
-use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID};
+use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, WITH_FUNCTION_ID};
 use arora_behavior_tree::schema::{
     Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
 };
-use arora_behavior_tree::{load_behavior_tree_nodes_with, lower_behavior_tree};
+use arora_behavior_tree::{
+    load_behavior_tree_nodes_with, lower_behavior_tree, place_detached, PlacementScope,
+};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key};
 use arora_types::value::Value;
@@ -63,7 +68,7 @@ fn measure(
             store.slot(&Key::from(key))
         })
         .collect();
-    let detached = mode == "detached";
+    let detached = matches!(mode, "detached" | "placed");
     let mut nodes = vec![Node {
         id: id(1),
         function: if detached {
@@ -100,7 +105,7 @@ fn measure(
         if !detached {
             arguments.insert(OUT, variable(90000 + i));
         }
-        if mode == "attached-incremental" {
+        if mode.starts_with("attached-incremental") {
             arguments.insert(_ON_CHANGE_PARAM_ID, Expression::Value(Value::Boolean(true)));
         }
         nodes.push(Node {
@@ -117,14 +122,37 @@ fn measure(
             ..Node::default()
         });
     }
+    if mode == "attached-incremental-with" {
+        nodes[0].children = Some((0..n).map(|i| id(2 + i)).collect());
+        nodes.insert(
+            0,
+            Node {
+                id: id(200000),
+                function: WITH_FUNCTION_ID,
+                children: Some(vec![id(1), id(2 + n)]),
+                ..Node::default()
+            },
+        );
+    }
+    if mode == "placed" {
+        nodes = place_detached(
+            nodes,
+            PlacementScope::Readers,
+            &bridge.index(),
+            &|name| Some(store.slot(&Key::from(name))),
+            &names,
+        )
+        .unwrap();
+    }
     let tree =
         load_behavior_tree_nodes_with(nodes, &|name| Some(store.slot(&Key::from(name))), &names)
             .unwrap();
     let tree = lower_behavior_tree(tree, &bridge.index(), &mut bridge, false).unwrap();
-    tree.set_incremental(matches!(
-        mode,
-        "attached-incremental" | "attached-plain-incremental"
-    ));
+    tree.set_incremental(
+        mode.starts_with("attached-incremental")
+            || mode == "attached-plain-incremental"
+            || mode == "placed",
+    );
     let update = |step: usize| {
         let changed = match scenario {
             "settled" => 0,
@@ -184,7 +212,9 @@ fn main() {
                 "attached-naive",
                 "attached-plain-incremental",
                 "attached-incremental",
+                "attached-incremental-with",
                 "detached",
+                "placed",
             ] {
                 let (time, calls, dispatches, outputs) = measure(n, mode, scenario, ticks, samples);
                 if let Some(expected) = &expected {

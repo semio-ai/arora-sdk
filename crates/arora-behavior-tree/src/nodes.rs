@@ -142,6 +142,11 @@ pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
     TreeNode::control_node(PARALLEL_FUNCTION_ID, children)
 }
 
+/// Build a control that ticks prerequisites before its last child, the body.
+pub fn with(children: Vec<TreeNode>) -> TreeNode {
+    TreeNode::control_node(WITH_FUNCTION_ID, children)
+}
+
 // Other functions from other modules
 //================================================================
 #[allow(unused)]
@@ -350,6 +355,11 @@ pub const FALLBACK_FUNCTION_ID: Uuid = Uuid::from_bytes([
 pub const PARALLEL_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0xa9, 0x34, 0x02, 0x89, 0x1f, 0x30, 0x41, 0x1f, 0x9f, 0xaa, 0x0f, 0x07, 0xd5, 0x46, 0x13, 0xe8,
 ]);
+
+/// Ticks its prerequisites in order, ignoring their statuses, then returns
+/// the last child's status. Errors propagate. Requires at least two children.
+/// A settled prerequisite subtree can be cached independently of the body.
+pub const WITH_FUNCTION_ID: Uuid = uuid::uuid!("57544800-0000-4000-8000-000000000001");
 
 // Direct action nodes from test-rust-wasm (non-Status returns via _ret out-parameter)
 //==============================================================

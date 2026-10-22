@@ -131,6 +131,8 @@ struct Lowered {
     signatures: FunctionIndex,
     /// By node: the detached nodes it reads, by position.
     reads: Vec<Vec<usize>>,
+    /// All detached nodes in data order, including unused nodes.
+    order: Vec<usize>,
     /// By node: its arguments in signature order, `_ret` aside.
     arguments: Vec<Vec<Uuid>>,
     /// The inputs another detached node's output is bound to: each reads the
@@ -651,6 +653,7 @@ impl Detached {
         *self.lowered.borrow_mut() = Lowered {
             signatures,
             reads,
+            order,
             arguments,
             fed,
             outputs,
@@ -659,6 +662,22 @@ impl Detached {
             plan,
         };
         Ok(())
+    }
+
+    pub(crate) fn publishes(&self, port: &NodeParameterId) -> bool {
+        self.bindings.contains_key(port)
+    }
+
+    /// The same dependency graph used for pulls, with all nodes in data order.
+    pub(crate) fn placement(&self) -> PlacementAnalysis {
+        let lowered = self.lowered.borrow();
+        PlacementAnalysis {
+            reads: lowered.reads.clone(),
+            pulls: lowered.pulls.clone(),
+            sinks: lowered.sinks.clone(),
+            order: lowered.order.clone(),
+            unused: lowered.plan.unused.iter().copied().collect(),
+        }
     }
 
     /// Start a tick: every detached node is out of date until it is read.
@@ -1061,4 +1080,13 @@ fn visit(
     done.insert(at);
     sorted.push(at);
     Ok(())
+}
+
+/// Read-only projection of detached lowering for load-time placement.
+pub(crate) struct PlacementAnalysis {
+    pub(crate) reads: Vec<Vec<usize>>,
+    pub(crate) pulls: HashMap<Uuid, Rc<[usize]>>,
+    pub(crate) sinks: Vec<usize>,
+    pub(crate) order: Vec<usize>,
+    pub(crate) unused: HashSet<Uuid>,
 }
