@@ -130,6 +130,9 @@ struct Lowered {
     reads: Vec<Vec<usize>>,
     /// By node: its arguments in signature order, `_ret` aside.
     arguments: Vec<Vec<Uuid>>,
+    /// The inputs another detached node's output is bound to: each reads the
+    /// cell that node writes, even when its argument names a store key.
+    fed: HashSet<NodeParameterId>,
     /// By node: its outputs, each a port, the tree-local cell it writes, and
     /// the store key it publishes to after the tree ticks.
     outputs: Vec<Vec<(Uuid, VariableCell, Option<VariableCell>)>>,
@@ -150,6 +153,9 @@ struct Cache {
     outputs: HashMap<Uuid, Value>,
     /// How many times it called its function.
     calls: u64,
+    /// Why its evaluation failed at `tick`, if it did: a later read in the
+    /// same tick fails alike without calling again.
+    failed: Option<String>,
 }
 
 fn inconsistent(message: String) -> BehaviorTreeError {
@@ -505,6 +511,26 @@ impl Detached {
             }
         }
 
+        let fed = self
+            .nodes
+            .iter()
+            .enumerate()
+            .flat_map(|(at, node)| {
+                node.arguments
+                    .keys()
+                    .filter(|parameter| **parameter != _RET_PARAM_ID)
+                    .map(move |parameter| (at, node.id, *parameter))
+            })
+            .filter_map(|(at, node, parameter)| {
+                let np = NodeParameterId { node, parameter };
+                let cell = node_parameters_variables.get(&np)?;
+                match writers.get(&cell_id(cell)) {
+                    Some((Some(writer), _)) if *writer != at => Some(np),
+                    _ => None,
+                }
+            })
+            .collect();
+
         // Inputs before their readers, otherwise in the order given.
         let mut order = Vec::with_capacity(self.nodes.len());
         let mut done = HashSet::new();
@@ -549,6 +575,7 @@ impl Detached {
             signatures,
             reads,
             arguments,
+            fed,
             outputs,
             sinks,
             pulls,
@@ -600,15 +627,43 @@ impl Detached {
         Ok(())
     }
 
+    /// Bring the detached node at `at` up to date for this tick, at most
+    /// once: a second read in the tick reuses its result, or its failure.
     fn bring_up_to_date(
         &self,
         at: usize,
         scope: Scope,
         caller: &mut dyn CallBridge,
     ) -> Result<(), BehaviorTreeError> {
-        if self.caches.borrow()[at].tick == self.tick.get() {
-            return Ok(());
+        {
+            let cache = &self.caches.borrow()[at];
+            if cache.tick == self.tick.get() {
+                return match &cache.failed {
+                    None => Ok(()),
+                    Some(why) => Err(BehaviorTreeError::CallError(CallError::Generic {
+                        message: format!(
+                            "detached node {} failed this tick: {why}",
+                            self.nodes[at].id
+                        ),
+                    })),
+                };
+            }
         }
+        let outcome = self.evaluate(at, scope, caller);
+        let mut caches = self.caches.borrow_mut();
+        caches[at].tick = self.tick.get();
+        caches[at].failed = outcome.as_ref().err().map(ToString::to_string);
+        outcome
+    }
+
+    /// Evaluate the detached node at `at`: the nodes it reads first, then its
+    /// call, when its arguments changed.
+    fn evaluate(
+        &self,
+        at: usize,
+        scope: Scope,
+        caller: &mut dyn CallBridge,
+    ) -> Result<(), BehaviorTreeError> {
         let reads = self.lowered.borrow().reads[at].clone();
         for read in reads {
             self.bring_up_to_date(read, scope, caller)?;
@@ -627,13 +682,18 @@ impl Detached {
                 node: node.id,
                 parameter: *parameter,
             };
-            // An argument reads its cell, as a module leaf's does; a call or
-            // a selection is computed.
+            // An argument reads its cell, as a module leaf's does: the cell
+            // another detached node's output is bound to, or the store key it
+            // names. A call or a selection is computed.
             let value = match argument {
                 Expression::Call(_) | Expression::Select { .. } => {
                     Some(compute_expression(scope, argument, caller, &np)?)
                         .filter(|value| *value != Value::Unit)
                 }
+                _ if lowered.fed.contains(&np) => scope
+                    .node_parameters_variables
+                    .get(&np)
+                    .and_then(VariableCell::get),
                 _ => self
                     .bindings
                     .get(&np)
@@ -679,7 +739,6 @@ impl Detached {
             caches[at].outputs = outputs;
             caches[at].calls += 1;
         }
-        self.caches.borrow_mut()[at].tick = self.tick.get();
         Ok(())
     }
 }

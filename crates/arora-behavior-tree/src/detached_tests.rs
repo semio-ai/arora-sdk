@@ -1295,3 +1295,49 @@ fn a_loose_native_writer_stays_inert() {
         BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
     assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
 }
+
+/// An output bound to a detached node's input feeds it even when the
+/// argument names a store key: the node reads its producer's result.
+#[test]
+fn an_output_bound_to_a_store_backed_detached_input_feeds_it() {
+    let store = SimpleDataStore::new();
+    set(&store, "in", 5.0);
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments.insert(_RET_PARAM_ID, port(51, ADD_A));
+    let sink = compute(
+        51,
+        ADD,
+        vec![(ADD_A, key("in")), (ADD_B, f(1.0))],
+        Some("out"),
+    );
+    let tree = build(&store, vec![below(1, f(1.0), 3.0)], vec![sink, add]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    runtime.tick().expect("it ticks");
+    assert_eq!(get(&store, "out"), Some(Value::F64(3.0)));
+}
+
+/// A detached node whose call fails is called at most once in the tick: a
+/// sink the tree also reads fails the tree's read, and the sink pass gets the
+/// same failure without calling again. The next tick calls it again.
+#[test]
+fn a_failed_call_is_not_repeated_within_the_tick() {
+    let store = SimpleDataStore::new();
+    // `mul` errors on an absent argument.
+    let failing = compute(
+        50,
+        MUL,
+        vec![(MUL_A, key(".absent")), (MUL_B, f(1.0))],
+        Some("out"),
+    );
+    let tree = build(&store, vec![below(1, read(50), 3.0)], vec![failing]);
+    let mut engine = Engine::default();
+    let calls = engine.calls.clone();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    for tick in 1..=2 {
+        assert!(runtime.tick().is_err(), "tick {tick} fails");
+        assert_eq!(take(&calls).get("mul"), Some(&1), "tick {tick}");
+    }
+}
