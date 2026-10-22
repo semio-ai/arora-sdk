@@ -9,6 +9,10 @@ license = "Apache-2.0"
 path = "src/behavior_tree.rs"
 
 [[bench]]
+name = "attached"
+harness = false
+
+[[bench]]
 name = "edit"
 harness = false
 

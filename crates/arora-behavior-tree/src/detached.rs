@@ -162,7 +162,7 @@ struct Lowered {
     /// order.
     observed: Vec<usize>,
     /// By attached node: the detached nodes it reads, by position.
-    pulls: HashMap<Uuid, Rc<[usize]>>,
+    pulls: crate::id_hash::IdMap<Uuid, Rc<[usize]>>,
     plan: DetachedPlan,
 }
 
@@ -213,7 +213,7 @@ fn cell_id(cell: &VariableCell) -> usize {
 /// The cells `expression` reads, at any depth.
 fn cells_read(
     expression: &Expression,
-    variables: &HashMap<Uuid, VariableCell>,
+    variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
     node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     found: &mut Vec<VariableCell>,
 ) {
@@ -368,7 +368,7 @@ impl Detached {
         &self,
         functions: &FunctionIndex,
         attached: &[Rc<Node>],
-        variables: &HashMap<Uuid, VariableCell>,
+        variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
         node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     ) -> Result<(), BehaviorTreeError> {
         let names = Names::functions(functions);
@@ -717,7 +717,7 @@ impl Detached {
             .enumerate()
             .map(|(at, node)| reads_of(node, Some(at)))
             .collect::<Result<_, _>>()?;
-        let mut pulls = HashMap::new();
+        let mut pulls = crate::id_hash::IdMap::default();
         let mut tree_reads = Vec::new();
         for node in attached {
             let read = reads_of(node, None)?;
@@ -1218,13 +1218,13 @@ pub(crate) fn native_writes(function: Uuid) -> &'static [Uuid] {
 fn call_writes(
     node: &Node,
     functions: &FunctionIndex,
-    variables: &HashMap<Uuid, VariableCell>,
+    variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
     node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
 ) -> Vec<VariableCell> {
     fn walk(
         expression: &Expression,
         functions: &FunctionIndex,
-        variables: &HashMap<Uuid, VariableCell>,
+        variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
         node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
         found: &mut Vec<VariableCell>,
     ) {
