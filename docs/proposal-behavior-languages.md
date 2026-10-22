@@ -366,21 +366,22 @@ A Vizij graph translates node for node. Counted over 64 unique graphs (13
 face GLBs, the fixtures, the perf scenes, the host's skill and mapping assets,
 the standard adaptations), about 23,050 nodes over 86 node kinds:
 
-| Vizij feature | As detached nodes |
+| Vizij feature | On the tree (`arora-node-graph`) |
 |---|---|
-| arithmetic, ranges, vectors, logic, noise | one function each, called by one detached node per graph node |
-| `input` | a store key as an argument. A default for an unset key is an optional parameter with a default, or a `default(x, d)` function. |
+| arithmetic, ranges, vectors, logic, noise | one function of `@arora/node-graph` each, called by one detached node per graph node |
+| `input` | a store key as an argument; the `input` function applies the node's default when the key is unset |
 | `output` | an output port bound to a store key, with the later sink winning, as the later `output` does in a `flow` |
-| the keyed-batch `output`, which writes keys named by data | a `Scatter` node of the tree, which writes an array to keys named by data, under a literal key prefix; a detached node's output binds static keys only (§9) |
-| non-input params (`half_life`, `case_labels`, noise settings) | literal arguments |
-| variadic inputs (`operand_N`, `args_N`), most edges | an array parameter and an array-building function, or functions specialized by arity |
-| named output ports (`weightedsumvector`, `readrecord`, `urdffk`) | the return value and mutable parameters, each bindable and read as `@node.parameter`; or a record return read through a selection |
-| hidden state (`damp`, `spring`, `slew`, the URDF cache) | the function exposes its state as a mutable parameter |
-| `time`, `oscillator`, `dt` | functions taking `arora/time` and `arora/dt` as arguments, so they run once per tick |
+| the keyed-batch `output`, which writes keys named by data | a detached node its host observes, and whose batch the host writes. A `Scatter` node of the tree writes keys named by data under a literal prefix, which a graph's batch does not state; a detached node's output binds static keys only (§9) |
+| non-input params (`half_life`, `case_labels`, noise settings) | literal arguments, `param.<field>` |
+| variadic inputs (`operand_N`, `args_N`), most edges | one parameter per port: a function declares 64 ports of its variadic group, and the importer refuses a graph wiring one past them |
+| named output ports (`weightedsumvector`, `readrecord`, `urdffk`) | a structure returned, each port a field, read through a selection |
+| an edge's selector, which reads a field by name | a `select` node between the two, which reads it as the reference evaluator does |
+| hidden state (`damp`, `spring`, `slew`, IK) | the function exposes its state as the mutable parameter `state`, as a value; a URDF chain is a cache of the module |
+| `time`, `oscillator`, `dt` | functions taking the clock as arguments (`arora/time` and `arora/dt` on a device), so they run once per tick |
 | implicit coercion and broadcasting | inside the functions, whose parameters stay dynamically typed |
 | `case` and `if` | functions that evaluate every branch, as Vizij does |
-| `taskrun`, `spawn` | attached leaves and spawned runs: they are control |
-| `externalfunction` | a detached node: it is a module call already. A face's animation step calls `@arora/animation`'s `step` with the clock. |
+| `taskrun`, `spawn` | attached leaves under the root: they act at every tick; a spawn's request is the host's to serve |
+| `externalfunction` | an attached leaf, ticked at every tick, as Vizij calls it. A face's animation step calls `@arora/animation`'s `step` with the frame's `dt`: the same arguments every frame, a different result each time, as the module's players advance. A detached node would not call it again. The importer reads the function's description: a call to a function that returns nothing and writes nothing back is left out, as nothing could read it. |
 | unused nodes | never evaluated: nothing reads them |
 
 The animation step returns its tracks as values named by data. A `Scatter`
@@ -559,17 +560,25 @@ The design holds without them. Each is settled before the stage it touches.
   52-element blend-shape array, that is a pass over the value at every read.
   Versions on cells cost one integer comparison, and need the store to
   version its writes.
-- **Functions whose result follows from no argument**, such as a sensor or a
-  random source read as a function. Called once, they keep their first result.
-  An effect stated in the function's description would let them run at every
-  tick they are read.
+- **Functions whose result does not follow from their arguments**: a module
+  keeping state (the animation module's `step(dt)`, called with the same `dt`
+  every frame), a sensor, a random source. A detached node calls them once
+  for arguments it has seen, so the importer ticks a graph's call to another
+  module at every tick. A function's description stating whether it is pure
+  would let a pure one be a detached node, and an effect would let an impure
+  one run at every tick it is read rather than at every tick.
 - **Keyed outputs on detached nodes.** `Scatter`, a node of the tree, writes
   keys named by data within a literal prefix. Whether a detached node's
   output binds such keys itself, as a sink, and how the write analysis treats
-  a prefix instead of a key, remain.
-- **Variadic inputs**: an array parameter, or functions specialized by arity.
-- **Selections on records** read by field name, as Vizij's edges select a
-  `KeyValue` field.
+  a prefix instead of a key, remain. Until then, the host of a translated
+  graph writes its keyed batches, whose keys share no prefix a `Scatter`
+  could be bounded by.
+- **Variadic inputs**: 64 declared ports per group, or an array parameter, or
+  functions specialized by arity.
+- **Incremental lowering.** A parameter value changes in place, as a literal
+  argument set on the lowered tree. Any other edit lowers the whole tree
+  again, carrying each node's state: a run grafted onto a face, or a node
+  added in an editor, costs a lowering of every node.
 - **Restarting state.** Whether a branch ticked anew restarts its smoothing
   by default, or only through an argument (§3.5).
 - **Store hops between a face's sources** (ROS4HRI, adaptation, pose driver,

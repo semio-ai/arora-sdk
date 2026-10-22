@@ -51,6 +51,29 @@ pub trait CallBridge {
   /// of the invocation, and one naming no module is refused.
   fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError>;
 
+  /// Dispatch a call of the function `id` of the module `module_id`, its
+  /// arguments borrowed: what a bridge answering in-process can answer
+  /// without copying them. By default it makes the owned [`Call`] and
+  /// dispatches it with [`arora_call`](Self::arora_call).
+  fn arora_call_borrowed(
+    &mut self,
+    module_id: Option<Uuid>,
+    id: Uuid,
+    args: &[(Uuid, &Value)],
+  ) -> Result<CallResult, CallError> {
+    self.arora_call(Call {
+      module_id,
+      id,
+      args: args
+        .iter()
+        .map(|(id, value)| StructureField {
+          id: *id,
+          value: Box::new((*value).clone()),
+        })
+        .collect(),
+    })
+  }
+
   /// Registers the given function in the executor and associates it to an
   /// identifier generated on the fly. The function is made available to
   /// every module by calling `arora_dispatch_indirect(id: u64) -> Value`.
