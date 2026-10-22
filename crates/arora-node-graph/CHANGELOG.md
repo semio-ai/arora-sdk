@@ -20,9 +20,13 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   code.
 - The importer (`import`, `import_json`): a graph, or its JSON document,
   translated node for node into the nodes of a behavior tree, each a
-  detached call, an `output` node with a path a sink on its key, and the
-  nodes that act at each evaluation (`externalfunction`, `taskrun`,
-  `spawn`) leaves under the root.
+  detached call, an `output` node with a path a sink on its key, and a
+  task run or a spawn a leaf under the root, ticked at every tick.
+  `import_with` places a call to another module (`externalfunction`) by
+  its function's description (`placement`): left out when the function
+  returns nothing, a leaf when it takes no parameter, a detached call
+  otherwise. `TreeRuntime::load_with_functions` imports this way, with a
+  device's function index.
 - `TreeRuntime`: a graph run on the behavior tree behind the reference
   evaluator's surface, evaluating every node (`Evaluation::Every`) or what
   the outputs read (`Evaluation::Demanded`). A reload keeps every node's

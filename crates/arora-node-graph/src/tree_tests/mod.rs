@@ -18,13 +18,15 @@
 //! selection tests. [`equivalence`] runs every fixture on both engines, and
 //! again with its parameters edited in place halfway through.
 //! [`param_edit_tests`] holds the parameter edits the tree makes in place
-//! and those it refuses.
+//! and those it refuses, and [`placement_tests`] where a call to another
+//! module goes, read from its function's description.
 //!
 //! [`TreeRuntime`]: crate::tree_runtime::TreeRuntime
 mod blend_tests;
 mod equivalence;
 mod external_function_tests;
 mod param_edit_tests;
+mod placement_tests;
 mod required_inputs_tests;
 mod spring_tests;
 mod structure_tests;

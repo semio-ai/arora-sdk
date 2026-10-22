@@ -30,6 +30,7 @@
 //!   has a `SUCCEED` leaf as its root.
 use std::collections::{HashMap, HashSet};
 
+use arora_behavior::FunctionIndex;
 use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, SUCCEED_FUNCTION_ID};
 use arora_behavior_tree::schema::{Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use arora_behavior_tree::variable::VariableResolver;
@@ -41,11 +42,13 @@ use uuid::Uuid;
 use crate::eval::plan::output_layout;
 use crate::functions::{
     declares_input, dt_param, encode_params, encode_selector, external_function, function_id,
-    input_param, is_action, is_stateful, node_param, output_field, output_shapes_param,
+    input_param, is_stateful, node_param, output_field, output_shapes_param, placement,
     ports_param, reads_dt, reads_time, select_function, selector_param, state_param, time_param,
     VARIADIC_PORTS,
 };
 use crate::types::{GraphSpec, InputConnection, NodeSpec, NodeType};
+
+pub use crate::functions::Placement;
 
 /// Where a translated graph reads its clock from.
 #[derive(Clone, Debug)]
@@ -83,6 +86,10 @@ pub struct GraphNode {
     /// Whether the tree holds it, as a leaf ticked at every tick, rather
     /// than detached.
     pub attached: bool,
+    /// Whether the tree leaves it out: a call to a function that returns
+    /// nothing and writes nothing back ([`Placement::Ignored`]). It has no
+    /// ports, so an edge from it reads as an input with no edge.
+    pub ignored: bool,
 }
 
 impl GraphNode {
@@ -213,8 +220,19 @@ pub fn import_json(
 /// two edges into one input, two nodes of one id, and a variadic port past
 /// the last a function declares
 /// ([`VARIADIC_PORTS`](crate::functions::VARIADIC_PORTS)). A cycle is
-/// refused when the tree is lowered.
+/// refused when the tree is lowered. A call to another module is placed as
+/// [`placement`] says with no function described: ticked at every tick.
 pub fn import(spec: &GraphSpec, options: &ImportOptions) -> Result<ImportedGraph, String> {
+    import_with(spec, options, &FunctionIndex::new())
+}
+
+/// [`import`] `spec`, placing each call to another module by the
+/// description `functions` gives of its function ([`placement`]).
+pub fn import_with(
+    spec: &GraphSpec,
+    options: &ImportOptions,
+    functions: &FunctionIndex,
+) -> Result<ImportedGraph, String> {
     let connections = spec.input_connections()?;
     let mut seen = HashSet::new();
     for node in &spec.nodes {
@@ -235,12 +253,19 @@ pub fn import(spec: &GraphSpec, options: &ImportOptions) -> Result<ImportedGraph
     let graph_nodes: Vec<GraphNode> = spec
         .nodes
         .iter()
-        .map(|node| GraphNode {
-            id: node.id.clone(),
-            kind: node.kind.clone(),
-            tree_id: tree_node_id(&node.id),
-            ports: ports_of(node, referenced.get(node.id.as_str()).unwrap_or(&empty)),
-            attached: is_action(&node.kind),
+        .map(|node| {
+            let placed = placement(node, functions);
+            GraphNode {
+                id: node.id.clone(),
+                kind: node.kind.clone(),
+                tree_id: tree_node_id(&node.id),
+                ports: match placed {
+                    Placement::Ignored => Vec::new(),
+                    _ => ports_of(node, referenced.get(node.id.as_str()).unwrap_or(&empty)),
+                },
+                attached: placed == Placement::Attached,
+                ignored: placed == Placement::Ignored,
+            }
         })
         .collect();
     let by_id: HashMap<&str, &GraphNode> = graph_nodes
@@ -260,6 +285,9 @@ pub fn import(spec: &GraphSpec, options: &ImportOptions) -> Result<ImportedGraph
     let mut keyed_outputs = Vec::new();
     let no_connections = hashbrown::HashMap::new();
     for (node, graph_node) in spec.nodes.iter().zip(&graph_nodes) {
+        if graph_node.ignored {
+            continue;
+        }
         let mut arguments: HashMap<Uuid, Expression> = HashMap::new();
         let wired = connections.get(&node.id).unwrap_or(&no_connections);
         let mut ports: Vec<(&String, &InputConnection)> = wired.iter().collect();

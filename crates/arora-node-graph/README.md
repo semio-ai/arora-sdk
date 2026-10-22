@@ -51,7 +51,8 @@ How a graph translates:
 | an `input` node | a read of the store key its path names |
 | an `output` node with a path | a sink: its return value bound to the store key of its path, written after the tree ticks; the later-listed writer of a key wins |
 | an `output` node with no path (a keyed batch) | listed in `ImportedGraph::keyed_outputs`, for its host to apply |
-| `externalfunction`, `taskrun`, `spawn` | leaves under the root `PARALLEL`, ticked at every tick, as they act at each evaluation |
+| `taskrun`, `spawn` | leaves under the root `PARALLEL`, ticked at every tick, as they act at each evaluation |
+| `externalfunction` | placed by its function's description (`placement`): left out when the function returns nothing and writes nothing back; a leaf ticked at every tick when it takes no parameter, as its result can only come from outside its arguments, or when no description names it; a detached call otherwise |
 
 What differs from the reference evaluator:
 

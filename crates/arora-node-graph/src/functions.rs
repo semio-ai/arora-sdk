@@ -42,7 +42,7 @@ use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_shape::{Shape, TypedPath, Value};
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::record::module::frozen::{Function, Parameter};
-use arora_types::record::ty::{FrozenOption, FrozenScalar, FrozenTy};
+use arora_types::record::ty::{FrozenOption, FrozenScalar, FrozenTy, PrimitiveKind};
 use arora_types::record::{FrozenReference, Version};
 use arora_types::value::{Structure, StructureField};
 use uuid::Uuid;
@@ -582,14 +582,57 @@ pub fn reads_dt(kind: &NodeType) -> bool {
     matches!(kind, NodeType::Spring | NodeType::Damp | NodeType::Slew)
 }
 
-/// Whether a node of `kind` acts each time it is evaluated, so the tree
-/// ticks it at every tick rather than when its inputs change: a call to
-/// another module, a task run, a spawn.
-pub fn is_action(kind: &NodeType) -> bool {
-    matches!(
-        kind,
-        NodeType::ExternalFunction | NodeType::TaskRun | NodeType::Spawn
-    )
+/// Where the importer places a graph node on the tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Placement {
+    /// A detached call: it runs when what it outputs is read, once per
+    /// tick, and only when its arguments changed.
+    Detached,
+    /// A leaf under the root, ticked at every tick: a node that acts each
+    /// time it is evaluated.
+    Attached,
+    /// Not on the tree: a call to a function that returns nothing and
+    /// writes nothing back, so nothing could read the node.
+    Ignored,
+}
+
+/// Where the importer places `node`, reading the description `functions`
+/// gives of a function it calls in another module.
+///
+/// A task run and a spawn are control, ticked at every tick. A call to
+/// another module (`externalfunction`) is placed by its function:
+/// - one that returns nothing and has no mutable parameter is ignored;
+/// - one that takes no parameter is ticked at every tick, as its result can
+///   only come from outside its arguments (the animation module's
+///   `player_states()`);
+/// - any other is a detached call;
+/// - one `functions` does not describe is ticked at every tick, as Vizij
+///   calls it.
+///
+/// Every other node is a detached call.
+pub fn placement(node: &NodeSpec, functions: &FunctionIndex) -> Placement {
+    match node.kind {
+        NodeType::TaskRun | NodeType::Spawn => Placement::Attached,
+        NodeType::ExternalFunction => {
+            let Some(described) = node.params.function.and_then(|id| functions.get(&id)) else {
+                return Placement::Attached;
+            };
+            let function = &described.function;
+            let returns = !matches!(
+                function.return_ty.as_primitive(),
+                Some(primitive) if primitive.kind == PrimitiveKind::Unit
+            );
+            let writes_back = function.parameters.values().any(|p| p.mutable);
+            if !returns && !writes_back {
+                Placement::Ignored
+            } else if function.parameters.is_empty() {
+                Placement::Attached
+            } else {
+                Placement::Detached
+            }
+        }
+        _ => Placement::Detached,
+    }
 }
 
 /// A dynamically typed value: the well-known key-value type, an opaque bag

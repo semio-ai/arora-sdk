@@ -381,7 +381,7 @@ the standard adaptations), about 23,050 nodes over 86 node kinds:
 | implicit coercion and broadcasting | inside the functions, whose parameters stay dynamically typed |
 | `case` and `if` | functions that evaluate every branch, as Vizij does |
 | `taskrun`, `spawn` | attached leaves under the root: they act at every tick; a spawn's request is the host's to serve |
-| `externalfunction` | an attached leaf too: a module's function can return something new with no argument changing (`player_states()`), so it is called at every tick, as Vizij calls it. A face's animation step calls `@arora/animation`'s `step` with the clock. |
+| `externalfunction` | a detached node: it is a module call already. A face's animation step calls `@arora/animation`'s `step` with the clock. The importer reads the function's description: a call to a function that returns nothing and writes nothing back is left out, as nothing could read it; one to a function that takes no parameter (`player_states()`) is an attached leaf, ticked at every tick, as its result can only come from outside its arguments. |
 | unused nodes | never evaluated: nothing reads them |
 
 The animation step returns its tracks as values named by data. A `Scatter`
@@ -563,8 +563,8 @@ The design holds without them. Each is settled before the stage it touches.
 - **Functions whose result follows from no argument**, such as a sensor or a
   random source read as a function. Called once, they keep their first result.
   An effect stated in the function's description would let them run at every
-  tick they are read; until then, the importer attaches a graph's calls to
-  other modules, which run at every tick whatever reads them.
+  tick they are read. Until then, the importer ticks a graph's call to a
+  function that takes no parameter at every tick.
 - **Keyed outputs on detached nodes.** `Scatter`, a node of the tree, writes
   keys named by data within a literal prefix. Whether a detached node's
   output binds such keys itself, as a sink, and how the write analysis treats

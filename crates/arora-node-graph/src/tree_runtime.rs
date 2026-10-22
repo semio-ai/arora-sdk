@@ -14,6 +14,7 @@
 //! what a device runs.
 use std::collections::{HashMap, HashSet};
 
+use arora_behavior::FunctionIndex;
 use arora_behavior_tree::{lower_behavior_tree, BehaviorTree, LoweredTree};
 use arora_shape::{Shape, TypedPath, Value, WriteBatch, WriteOp};
 use arora_simple_data_store::SimpleDataStore;
@@ -25,7 +26,7 @@ use uuid::Uuid;
 use crate::eval::shape_helpers::infer_shape;
 use crate::eval::{NodeFunctions, PortValue, SpawnRequest};
 use crate::functions::{encode_params, function_index, is_stateful, state_param, NodeGraphModule};
-use crate::import::{import, ports_of, ImportOptions, ImportedGraph};
+use crate::import::{import_with, ports_of, ImportOptions, ImportedGraph};
 use crate::types::{GraphSpec, NodeId, NodeParams, NodeSpec, NodeType};
 
 /// What an evaluation brings up to date.
@@ -204,17 +205,35 @@ impl TreeRuntime {
     }
 
     /// Run `spec` from now on. Every node of `spec` the previous graph also
-    /// had keeps its state.
+    /// had keeps its state. A call to another module is ticked at every
+    /// tick, as no function is described ([`load_with_functions`](Self::load_with_functions)).
     pub fn load(&mut self, spec: &GraphSpec) -> Result<(), String> {
-        self.load_with(spec, &mut NoModules)
+        self.load_with(spec, &FunctionIndex::new(), &mut NoModules)
     }
 
-    fn load_with(&mut self, spec: &GraphSpec, inner: &mut dyn CallBridge) -> Result<(), String> {
+    /// [`load`](Self::load) `spec`, placing each call to another module by
+    /// the description `functions` gives of its function
+    /// ([`placement`](crate::functions::placement)): such as a device's
+    /// function index.
+    pub fn load_with_functions(
+        &mut self,
+        spec: &GraphSpec,
+        functions: &FunctionIndex,
+    ) -> Result<(), String> {
+        self.load_with(spec, functions, &mut NoModules)
+    }
+
+    fn load_with(
+        &mut self,
+        spec: &GraphSpec,
+        functions: &FunctionIndex,
+        inner: &mut dyn CallBridge,
+    ) -> Result<(), String> {
         let options = ImportOptions {
             time: TIME.to_string(),
             dt: DT.to_string(),
         };
-        let imported = import(spec, &options)?;
+        let imported = import_with(spec, &options, functions)?;
         let store = &self.store;
         let resolver = |name: &str| Some(store.slot(&Key::from(name)));
         let tree = imported.build(&resolver)?;
@@ -354,7 +373,7 @@ impl TreeRuntime {
             None => false,
         };
         if !same {
-            self.load_with(spec, inner)?;
+            self.load_with(spec, &FunctionIndex::new(), inner)?;
         }
         self.evaluate_with(inner)
     }
@@ -510,6 +529,18 @@ pub fn evaluate_all_with_functions(
 ) -> Result<(), String> {
     rt.module.set_default_module(Some(FUNCTIONS_MODULE));
     let result = rt.evaluate_spec_with(spec, &mut FunctionsBridge { functions });
+    rt.module.set_default_module(None);
+    result
+}
+
+/// Evaluate the graph `rt` has loaded, its calls to other modules going to
+/// `functions`.
+pub fn evaluate_with_functions(
+    rt: &mut TreeRuntime,
+    functions: &mut dyn NodeFunctions,
+) -> Result<(), String> {
+    rt.module.set_default_module(Some(FUNCTIONS_MODULE));
+    let result = rt.evaluate_with(&mut FunctionsBridge { functions });
     rt.module.set_default_module(None);
     result
 }
