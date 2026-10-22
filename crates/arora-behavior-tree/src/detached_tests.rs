@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::call_expression_tests::{
     call, centimetres, control, f, index, node, Calls, Engine, ADD, ADD_A, ADD_B, BELOW,
-    BELOW_LIMIT, BELOW_X, CLAMP, CLAMP_LO, CLAMP_X, DISTANCE, MUL, MUL_A, MUL_B, SMOOTH,
-    SMOOTH_ALPHA, SMOOTH_STATE, SMOOTH_X, TWIN, TWIN_FIRST, TWIN_SECOND,
+    BELOW_LIMIT, BELOW_X, CLAMP, CLAMP_LO, CLAMP_X, DISTANCE, KEEP, KEEP_STATE, MUL, MUL_A, MUL_B,
+    SMOOTH, SMOOTH_ALPHA, SMOOTH_STATE, SMOOTH_X, TWIN, TWIN_FIRST, TWIN_SECOND,
 };
 use crate::display::Names;
 use crate::nodes::{
@@ -1584,4 +1584,75 @@ fn returns_feeding_aliased_inputs_share_one_cell() {
             "load {load}: {error}"
         );
     }
+}
+
+/// A return bound to a port that aliases a store-backed input feeds that
+/// input: every port on the chain reads the detached node's result.
+#[test]
+fn an_output_bound_to_an_alias_feeds_the_input_it_aliases() {
+    let store = SimpleDataStore::new();
+    set(&store, "in", 5.0);
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments.insert(_RET_PARAM_ID, port(2, BELOW_X));
+    let tree = build(
+        &store,
+        vec![
+            control(10, SEQ_FUNCTION_ID, &[1, 2]),
+            below(1, key("in"), 3.0),
+            below(2, port(1, BELOW_X), 3.0),
+        ],
+        vec![add],
+    );
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
+    assert_eq!(
+        get(&store, "in"),
+        Some(Value::F64(5.0)),
+        "the key is not written"
+    );
+}
+
+/// A node whose arguments did not change keeps its outputs, even when one of
+/// its nested calls wrote the cell its return is bound to.
+#[test]
+fn a_node_skipping_its_call_keeps_its_outputs() {
+    let store = SimpleDataStore::new();
+    // twin() returns 0 and writes 1 to `first`, here `{.v}`; add(0, 0) then
+    // returns 0 into `{.v}` again.
+    let twin = call(TWIN, vec![(TWIN_FIRST, key(".v")), (TWIN_SECOND, f(0.0))]);
+    let add = compute(50, ADD, vec![(ADD_A, twin), (ADD_B, f(0.0))], Some(".v"));
+    let tree = build(&store, vec![below(1, key(".v"), 3.0)], vec![add]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    for tick in 1..=2 {
+        runtime.tick().expect("it ticks");
+        assert_eq!(
+            tree.variables.borrow()[&var(".v")].get(),
+            Some(Value::F64(0.0)),
+            "tick {tick}"
+        );
+    }
+}
+
+/// A mutable parameter the call does not report keeps the value it was
+/// given: its port reads it, and its sink publishes it.
+#[test]
+fn an_unreported_mutable_parameter_keeps_its_value() {
+    let store = SimpleDataStore::new();
+    set(&store, "x", 2.0);
+    // keep() returns 0 and reports no mutation.
+    let keep = compute(50, KEEP, vec![(KEEP_STATE, key("x"))], None);
+    let tree = build(
+        &store,
+        vec![below(1, port(50, KEEP_STATE), 3.0)],
+        vec![keep],
+    );
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
+    assert_eq!(get(&store, "x"), Some(Value::F64(2.0)));
 }

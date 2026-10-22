@@ -52,6 +52,8 @@ pub(crate) const SMOOTH_X: Uuid = Uuid::from_u128(0xF111);
 pub(crate) const SMOOTH_ALPHA: Uuid = Uuid::from_u128(0xF112);
 pub(crate) const SMOOTH_STATE: Uuid = Uuid::from_u128(0xF113);
 pub(crate) const TWIN: Uuid = Uuid::from_u128(0xF102);
+pub(crate) const KEEP: Uuid = Uuid::from_u128(0xF103);
+pub(crate) const KEEP_STATE: Uuid = Uuid::from_u128(0xF131);
 pub(crate) const TWIN_FIRST: Uuid = Uuid::from_u128(0xF121);
 pub(crate) const TWIN_SECOND: Uuid = Uuid::from_u128(0xF122);
 
@@ -144,6 +146,12 @@ pub(crate) fn index() -> FunctionIndex {
                 (TWIN_FIRST, parameter("first", f64_ty(), true)),
                 (TWIN_SECOND, parameter("second", f64_ty(), true)),
             ],
+        ),
+        function(
+            FILTERS,
+            KEEP,
+            "keep",
+            vec![(KEEP_STATE, parameter("state", f64_ty(), true))],
         ),
         function(
             CHECKS,
@@ -251,6 +259,7 @@ impl CallBridge for Engine {
                     }],
                 }
             }
+            KEEP => returns(Value::F64(0.0)),
             TWIN => CallResult {
                 ret: Value::F64(0.0),
                 mutated: [(TWIN_FIRST, 1.0), (TWIN_SECOND, 2.0)]

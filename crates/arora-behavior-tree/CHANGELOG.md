@@ -17,13 +17,15 @@ All notable changes to `arora-behavior-tree`. The format follows
   - A node reads it through `@node` or `@node.parameter` (a `NodeArgument` on
     its port), or through the variable an output is bound to. An output bound
     to another node's input feeds it in place of its argument, even one
-    naming a store key. A port bound to
+    naming a store key, and so does one bound to a port that aliases it. A port bound to
     a store key reads the node's current result, not the key. Nothing marks
     the read: lowering finds the detached node that writes each tree-local
     cell, and a node brings the detached nodes it reads up to date before it
     ticks.
   - It runs at most once per tick, and calls its function only when its
-    argument values changed. A failed evaluation fails every read of it in
+    argument values changed; otherwise its outputs keep their last values,
+    whatever its nested calls wrote. A mutable parameter the function does
+    not report keeps the value it was given. A failed evaluation fails every read of it in
     that tick without calling again, and is tried again at the next. Its
     outputs are written return first, then in its function's parameter order,
     so two that share a destination leave the same value at every load. A store key is read as the store holds it.

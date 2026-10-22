@@ -1217,8 +1217,21 @@ pub fn load_behavior_tree_nodes_with(
                 node_parameters_variables.insert(node_param.clone(), port.clone());
                 match read_argument(&arg_expr) {
                     Some(input) if node_param.parameter == _RET_PARAM_ID => {
-                        node_parameters_variables.insert(input.clone(), port);
-                        fed_inputs.insert(input.clone());
+                        // The input the chain of ports ends at: every port on
+                        // the chain shares its cell, once the aliases follow.
+                        let mut fed = input.clone();
+                        for _ in 0..node_index.len() {
+                            let next = node_index
+                                .get(&fed.node)
+                                .and_then(|node| node.arguments.get(&fed.parameter))
+                                .and_then(read_argument);
+                            match next {
+                                Some(next) => fed = next.clone(),
+                                None => break,
+                            }
+                        }
+                        node_parameters_variables.insert(fed.clone(), port);
+                        fed_inputs.insert(fed);
                     }
                     _ => {
                         bindings.insert(node_param, cell);

@@ -811,7 +811,19 @@ impl Detached {
                     args,
                 })
                 .map_err(BehaviorTreeError::CallError)?;
-            let mut outputs = HashMap::from([(_RET_PARAM_ID, result.ret)]);
+            // A mutable parameter the call leaves as it was keeps the value it
+            // was given; the ones it reports take their new value.
+            let mut outputs: HashMap<Uuid, Value> = lowered.arguments[at]
+                .iter()
+                .zip(&values)
+                .filter(|(parameter, _)| {
+                    lowered.outputs[at]
+                        .iter()
+                        .any(|(port, ..)| port == *parameter)
+                })
+                .map(|(parameter, value)| (*parameter, value.clone()))
+                .collect();
+            outputs.insert(_RET_PARAM_ID, result.ret);
             for mutated in result.mutated {
                 outputs.insert(mutated.id, *mutated.value);
             }
@@ -824,6 +836,15 @@ impl Detached {
             let mut caches = self.caches.borrow_mut();
             caches[at].arguments = Some(values);
             caches[at].outputs = outputs;
+        } else {
+            // A nested call of this node may have written an output's cell
+            // since: the cached outputs stand.
+            let caches = self.caches.borrow();
+            for (port, cell, _) in &lowered.outputs[at] {
+                if let Some(value) = caches[at].outputs.get(port) {
+                    write_back(cell, value.clone(), output_optional(signature, port));
+                }
+            }
         }
         Ok(())
     }
