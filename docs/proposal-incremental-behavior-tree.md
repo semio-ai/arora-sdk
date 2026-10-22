@@ -45,7 +45,7 @@ In short:
 - **One executor.** The spike keeps the incremental executor behind a flag so
   both run in one process for the differential test. The proposal is to make
   it the only executor, with the naive one kept as the tests' reference. A
-  tree with no `_on_change` leaf costs about 12% more on it than today (§4)
+  tree with no `_on_change` leaf costs about 10% more on it than today (§4)
   until its leaves opt in.
 
 ---
@@ -261,51 +261,54 @@ engine dispatches per tick. Apple M4 Pro, release profile with thin LTO.
 
 | N | Scenario | Form | µs/tick | Calls | Dispatches |
 |--:|---|---|--:|--:|--:|
-| 10 | settled | attached-naive | 12.4 | 10 | 12 |
-| | | attached-plain-incremental | 11.7 | 10 | 12 |
-| | | attached-incremental | 0.31 | 0 | 2 |
-| | | detached | 2.1 | 0 | 1 |
-| 100 | settled | attached-naive | 100 | 100 | 102 |
+| 10 | settled | attached-naive | 10.6 | 10 | 12 |
+| | | attached-plain-incremental | 10.7 | 10 | 12 |
+| | | attached-incremental | 0.28 | 0 | 2 |
+| | | detached | 0.43 | 0 | 1 |
+| 100 | settled | attached-naive | 97 | 100 | 102 |
 | | | attached-plain-incremental | 112 | 100 | 102 |
-| | | attached-incremental | 1.6 | 0 | 2 |
-| | | detached | 22 | 0 | 1 |
-| 1000 | settled | attached-naive | 1023 | 1000 | 1002 |
-| | | attached-plain-incremental | 1144 | 1000 | 1002 |
-| | | attached-incremental | 15 | 0 | 2 |
-| | | detached | 219 | 0 | 1 |
-| 1000 | one-input | attached-naive | 1026 | 1000 | 1002 |
-| | | attached-plain-incremental | 1151 | 1000 | 1002 |
-| | | attached-incremental | 42 | 10 | 12 |
-| | | detached | 224 | 10 | 1 |
-| 1000 | all-inputs | attached-naive | 1105 | 1000 | 1002 |
-| | | attached-plain-incremental | 1235 | 1000 | 1002 |
-| | | attached-incremental | 1046 | 841 | 843 |
-| | | detached | 421 | 828 | 1 |
+| | | attached-incremental | 1.5 | 0 | 2 |
+| | | detached | 3.8 | 0 | 1 |
+| 1000 | settled | attached-naive | 996 | 1000 | 1002 |
+| | | attached-plain-incremental | 1108 | 1000 | 1002 |
+| | | attached-incremental | 14 | 0 | 2 |
+| | | detached | 41 | 0 | 1 |
+| | | attached-guarded | 340 | 0 | 4002 |
+| 1000 | one-input | attached-naive | 1004 | 1000 | 1002 |
+| | | attached-plain-incremental | 1117 | 1000 | 1002 |
+| | | attached-incremental | 44 | 10 | 12 |
+| | | detached | 43 | 10 | 1 |
+| 1000 | all-inputs | attached-naive | 1109 | 1000 | 1002 |
+| | | attached-plain-incremental | 1207 | 1000 | 1002 |
+| | | attached-incremental | 1061 | 841 | 843 |
+| | | detached | 228 | 828 | 1 |
+
+These are measured on main with arora-behavior-tree 9.5.0's detached
+evaluator, which compares a node's arguments in place and lends them to its
+call.
 
 What the numbers show:
 
-- **The incremental form makes about the calls the detached form makes**, in
-  every scenario: the same when settled or when one input changes, and 2% more
-  when every input changes, from the mutable parameter above. The two differ
-  mainly in bookkeeping.
-- **A settled incremental tick is not free.** It is about 15 ns per node at
-  N = 1000: the `PARALLEL` checks every child's cache, and the executor
-  compares every store-backed cell at the start of the tick. Both are linear
-  in the tree, and both have a known replacement (§5). A settled detached tick
-  is about 220 ns per node, because every sink is brought up to date each
-  tick: its arguments are evaluated and compared with its last call's, and its
-  outputs are published again.
-- **A guard per node costs a third of calling every leaf.** Settled at
-  N = 1000, `attached-guarded` ticks four native nodes per graph node and calls
-  nothing: 388 µs in a run where `attached-naive` took 1093 µs and `detached`
-  243 µs. The executor makes the same check without adding nodes.
-- **Without `_on_change`, a tree costs about 12% more** than on today's
+- **The incremental and detached forms make about the same calls**, in every
+  scenario: the same when settled or when one input changes, and 2% more
+  when every input changes, from the mutable parameter above.
+- **Settled, an incremental tree costs about a third of detached nodes**: 14
+  against 41 µs at N = 1000. The incremental `PARALLEL` checks every child's
+  cache and the executor compares every store-backed cell at the start of the
+  tick, about 15 ns per node, both linear in the tree with a known
+  replacement (§5). Every detached sink is brought up to date and published
+  each tick, about 40 ns per node.
+- **When one input changes, the two cost the same**: the calls dominate.
+- **When everything changes, detached nodes are about 4.7× cheaper.** Each
+  attached leaf costs an engine dispatch and its bookkeeping; a detached node
+  is called directly, with its arguments lent in place. The incremental form
+  then costs about what today's executor costs.
+- **A guard per node costs a third of calling every leaf**: four native nodes
+  ticked per graph node. The executor makes the same check without adding
+  nodes.
+- **Without `_on_change`, a tree costs about 10% more** than on today's
   executor, with the same calls and dispatches: the versioned writes and the
   dirty bookkeeping, with nothing to skip.
-- **When everything changes, detached nodes are cheaper.** Each attached leaf
-  still costs an engine dispatch and its bookkeeping; a detached node calls its
-  function directly. The incremental form then costs about what today's
-  executor costs.
 - **The bridge is native.** These timings do not include wasm calls or
   hardware I/O, which add the same cost per call to every form. Compare the
   counts as well as the times.
