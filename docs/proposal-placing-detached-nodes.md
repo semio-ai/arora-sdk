@@ -169,47 +169,77 @@ These follow from the same move and are not asserted:
 
 ## 4. Measurements
 
+Apple M4 Pro, release profile, native test bridge with no function work.
+Attached nodes tick the way detached nodes are evaluated: a native parent
+calls its child's tick function, and a module leaf lends its arguments to
+its call (semio-ai/arora-sdk#407, merged into this branch through the
+incremental proposal and not yet into main). Median µs per tick and module
+calls per tick.
+
 `cargo bench -p arora-behavior-tree --bench incremental` adds two forms to the
 incremental proposal's bench: **placed** (the detached form's file, placed with
 `Readers`, on the incremental executor) and **attached-incremental-with**
-(`WITH[ PARALLEL[ leaf × N ], RUN ]`, each leaf `_on_change`). Every detached
-node in the bench is a sink and the tree is a bare `RUN`, so every group
-anchors at the root: the bench measures placed groups and publication, not
-anchoring at readers. Median µs per tick and module calls per tick, Apple M4
-Pro, release profile, native test bridge.
+(`WITH[ PARALLEL[ leaf × N ], RUN ]`, each leaf `_on_change`). Only the last
+call of each chain publishes, so the last detached node of each chain is a
+sink, and the tree is a bare `RUN`: every group anchors at the root, and the
+bench measures placed groups and publication, not anchoring at readers.
 
 | N = 1000 | settled | one input changes | every input changes |
 |---|--:|--:|--:|
-| attached-naive | 975 µs · 1000 calls | 983 µs · 1000 calls | 1072 µs · 1000 calls |
-| attached-incremental | 14 µs · 0 | 41 µs · 10 | 1014 µs · 841 |
-| attached-incremental-with | 11 µs · 0 | 41 µs · 10 | 1029 µs · 841 |
-| detached | 40 µs · 0 | 44 µs · 10 | 232 µs · 828 |
-| placed | 11 µs · 0 | 41 µs · 10 | 1014 µs · 828 |
+| attached-naive | 121 µs · 1000 calls | 121 µs · 1000 calls | 135 µs · 1000 calls |
+| attached-incremental | 6.6 µs · 0 | 9.8 µs · 10 | 151 µs · 828 |
+| attached-incremental-with | 1.9 µs · 0 | 10.0 µs · 10 | 159 µs · 828 |
+| detached | 27.4 µs · 0 | 29.9 µs · 10 | 131 µs · 828 |
+| placed | 2.5 µs · 0 | 6.5 µs · 10 | 174 µs · 828 |
 
-At N = 10 and 100, settled: placed 0.28 and 1.2 µs, detached 0.43 and 3.8 µs.
-These are measured on main with arora-behavior-tree 9.5.0's detached
-evaluator, which compares a node's arguments in place and lends them to its
-call.
+At N = 10 and 100, settled: placed 0.18 and 0.34 µs, detached 0.33 and 2.2 µs.
+
+`cargo bench -p arora-behavior-tree --bench scale` adds a graph a tenth of
+whose calls read a clock, and eight graphs as the branches of a `FALLBACK`
+with every input changing, generated as the design comparison's JavaScript
+model generates them. A published call is a sink, so its group places
+before the root, whichever branch reads it. At N = 1000:
+
+| N = 1000 | detached | placed | attached-incremental |
+|---|--:|--:|--:|
+| a tenth of the calls read a clock | 90 µs · 293 calls | 139 µs · 293 calls | 96 µs · 293 calls |
+| eight branches, the first taken | 204 µs · 1000 calls | 437 µs · 1000 calls | 46 µs · 125 calls |
+| eight branches, the taken one moving | 203 µs · 1000 calls | 423 µs · 1000 calls | 46 µs · 125 calls |
 
 - **Placed and detached make the same module calls** in every scenario and
   size here.
-- **Settled, a placed group costs about a quarter of detached nodes.** Its
-  `PARALLEL` has no `RUN`, so a settled tick dispatches only the `WITH` and
-  its body, where every detached sink is brought up to date and published.
-  Written as `WITH[ PARALLEL[ leaf × N ], RUN ]`, attached leaves cost the
-  same: the saving comes from the shape, which any attached node graph can
-  take.
-- **When one input changes, the forms cost the same**: the calls dominate.
-- **When every input changes, detached nodes are about 4.4× cheaper.** A
-  placed node is an attached leaf, ticked through an engine dispatch, with a
-  `Copy` for each sink: 1755 dispatches for 828 calls here. A detached node is
-  called directly, with its arguments lent in place.
-
+- **Settled, a placed group costs under a tenth of detached nodes.** Its
+  `PARALLEL` has no `RUN`, so a settled tick answers the `WITH` and its body
+  from their caches, where every detached sink is brought up to date and
+  published. Written as `WITH[ PARALLEL[ leaf × N ], RUN ]`, attached leaves
+  cost the same: the saving comes from the shape, which any attached node
+  graph can take.
+- **When one input changes, a placed group costs under a quarter** of
+  detached nodes: 6.5 against 30 µs.
+- **When every input changes, detached nodes are about 1.3× cheaper.** A
+  placed node is an incremental attached leaf, which records the versions of
+  its argument cells before its call and compares them after it, and each
+  sink adds a `Copy`. A detached node compares its argument values in place.
+- **On the generated graphs, whose calls take two to five arguments, a
+  placed node costs more per call than a detached one**, from the same
+  bookkeeping: 139 against 90 µs under the clock, for the same calls.
+- **A branch's sinks place before the root**, so placed nodes, like detached
+  ones, compute every branch: 437 against 204 µs. Leaves held by their
+  branch, as the incremental proposal places a node graph, compute only the
+  taken one: 46 µs. A sink's readers are outside the tree, so `Readers` has
+  no reader to anchor it at; §5 records this.
 ## 5. Open details
 
 - **Lifetime.** With a halt, a `WITH` that its parent stops ticking could drop
   its groups' state, so a branch's smoothing restarts when the branch starts
   again. Arora has no halt (§1); this placement needs none.
+- **Sinks read by one branch.** A sink is brought up to date at every tick,
+  whichever branch the tree takes, so its group places before the root, and
+  a graph that publishes only what one branch uses still runs in every
+  branch. A branch that publishes from inside itself, with a `Copy` reading
+  the node, gives `Readers` an anchor there and runs the group only when the
+  branch is taken. Whether a file states that, or placement infers it from
+  which branch reads a sink's key, is open.
 - **Finer groups.** A group per value read, instead of per connected
   component, places each value closer to its readers and runs less of the
   graph when one branch is taken. At the limit, it is #396's evaluation.
