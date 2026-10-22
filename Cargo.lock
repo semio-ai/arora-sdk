@@ -675,7 +675,10 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
+ "arora-behavior-tree",
  "arora-shape",
+ "arora-simple-data-store",
+ "arora-types",
  "criterion",
  "hashbrown 0.17.1",
  "k",

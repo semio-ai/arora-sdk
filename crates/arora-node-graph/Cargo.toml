@@ -15,7 +15,7 @@ arora-shape = { path = "../arora-shape", version = "1" }
 # Declares the behavior `Status` enumeration (type + variant ids) a task run
 # speaks — the cross-interpreter run-status contract.
 arora-behavior = { path = "../arora-behavior", version = "9.4" }
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.2" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.4" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 arora-types = { path = "../arora-types", version = "3" }
 hashbrown = { version = "0.17", features = ["serde"] }
