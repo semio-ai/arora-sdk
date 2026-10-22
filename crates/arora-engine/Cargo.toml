@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "5.3.0"
+version = "5.3.1"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
@@ -34,8 +34,8 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # Native-only optional deps. Disabled when targeting wasm32 (browser host).
 libloading = { version = "0.9", optional = true }
 tempfile = { version = "3", optional = true }
-wasmtime = { version = "45", features = ["async"], optional = true }
-wasmtime-wasi = { version = "45", optional = true }
+wasmtime = { version = "50", features = ["async"], optional = true }
+wasmtime-wasi = { version = "50", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

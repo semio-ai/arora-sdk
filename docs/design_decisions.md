@@ -185,7 +185,9 @@ selects between them by the `executor.name` in a module's header:
 `native` uses `libloading` to dlopen host cdylibs. `wasm` uses `wasmtime`
 core modules with the legacy malloc/dispatch ABI. `component` uses
 `wasmtime::component` against the `arora:module` WIT world plus
-`wasmtime-wasi` p2. `browser` uses
+`wasmtime-wasi` p2, with wasmtime's concurrency support off: the world
+declares no async function, stream or future, so a component that uses the
+component model's concurrency ABI is refused at compilation. `browser` uses
 `js_sys::WebAssembly::{Module, Instance, Memory}` and implements its own
 WASI stubs (`proc_exit`, `fd_write` → console, `random_get` via
 `crypto.getRandomValues`, …).

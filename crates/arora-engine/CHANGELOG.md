@@ -4,6 +4,34 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.3.1] - 2026-10-22
+
+### Security
+
+- Wasmtime 50, from 45. Wasmtime 45 is in the affected range of:
+  - [GHSA-mghf-wjfp-p5xm](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm)
+    (critical): on aarch64, Cranelift compiles a `br_table` of more than
+    about 256k targets to a branch that can land at an address the module
+    chooses — a sandbox escape under default settings.
+  - [GHSA-32h6-97mm-8q3c](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-32h6-97mm-8q3c)
+    (critical): the result count of an async-lifted component export's
+    callback is not validated, and a guest writes past a native stack
+    buffer. Reachable only with the component model's async ABI enabled,
+    which `ComponentExecutor` does not enable (below).
+  - [GHSA-m9f7-9w4p-gv38](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-m9f7-9w4p-gv38)
+    (high): on macOS and FreeBSD, a guest with write access to a preopened
+    directory escapes it by renaming a symlink. Neither wasmtime executor
+    preopens a directory.
+
+  Wasmtime is not part of this crate's interface: nothing changes for a
+  caller.
+- `ComponentExecutor` refuses to compile a component that uses the component
+  model's concurrency ABI — async functions, streams, futures. The
+  `arora:module` world declares none of them, so such a component is not an
+  Arora module, and refusing it keeps that part of wasmtime out of a guest's
+  reach. Wasmtime 50 enables the ABI by default; the executor turns it off,
+  so it refuses the same components it refused under wasmtime 45.
+
 ## [5.3.0] - 2026-10-16
 
 ### Added

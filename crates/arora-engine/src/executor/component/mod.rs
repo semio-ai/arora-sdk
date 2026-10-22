@@ -99,13 +99,25 @@ pub struct ComponentExecutor {
     arora_engine: Option<EngineRef>,
 }
 
+/// The configuration every component compiles and runs under.
+///
+/// The `arora:module` world declares no async function, stream or future, so
+/// a component built against it never uses the component model's concurrency
+/// ABI. Turning concurrency support off makes compilation refuse a component
+/// that does: such a component is not an Arora module, and refusing it keeps
+/// wasmtime's async lifting, lowering and task machinery out of a guest's
+/// reach.
+fn config() -> Config {
+    let mut config = Config::new();
+    config.debug_info(cfg!(debug_assertions));
+    config.cranelift_opt_level(wasmtime::OptLevel::Speed);
+    config.concurrency_support(false);
+    config
+}
+
 impl ComponentExecutor {
     pub fn new() -> Result<Self, InitializationError> {
-        let mut config = Config::new();
-        config.debug_info(cfg!(debug_assertions));
-        config.cranelift_opt_level(wasmtime::OptLevel::Speed);
-
-        let engine = WasmEngine::new(&config).map_err(anyhow::Error::from)?;
+        let engine = WasmEngine::new(&config()).map_err(anyhow::Error::from)?;
 
         let mut linker: Linker<HostState> = Linker::new(&engine);
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(anyhow::Error::from)?;
@@ -193,5 +205,43 @@ impl AroraModule for ComponentModule {
             Ok(bytes) => Ok(bytes.into_boxed_slice()),
             Err(message) => Err(DispatchError::Guest { message }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A component exporting `f`, of type `func {kind}(result u32)`, lifted
+    /// with the canonical options `lift_options`.
+    fn component(kind: &str, lift_options: &str) -> String {
+        format!(
+            r#"(component
+                (core module $m
+                    (func (export "f") (result i32) i32.const 0)
+                    (func (export "cb") (param i32 i32 i32) (result i32) i32.const 0))
+                (core instance $i (instantiate $m))
+                (func (export "f") {kind} (result u32)
+                    (canon lift (core func $i "f") {lift_options})))"#
+        )
+    }
+
+    /// A component lifting an export with the async ABI does not compile.
+    #[test]
+    fn a_component_using_the_async_abi_is_refused() {
+        let engine = WasmEngine::new(&config()).unwrap();
+        let async_lifted = component("async", r#"async (callback (core func $i "cb"))"#);
+        let error = Component::new(&engine, async_lifted).err().unwrap();
+        assert!(
+            format!("{error:#}").contains("require the component model async feature"),
+            "{error:#}"
+        );
+    }
+
+    /// The same export lifted synchronously compiles.
+    #[test]
+    fn a_component_lifting_synchronously_compiles() {
+        let engine = WasmEngine::new(&config()).unwrap();
+        Component::new(&engine, component("", "")).unwrap();
     }
 }
