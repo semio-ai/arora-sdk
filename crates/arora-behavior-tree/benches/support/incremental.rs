@@ -78,6 +78,9 @@ pub struct Bridge {
     pub ops: HashMap<Uuid, Op>,
     pub calls: Vec<RecordedCall>,
     pub dispatches: u64,
+    /// The nodes a tick ran, which the incremental tests set after each tick.
+    #[allow(dead_code)]
+    pub visits: u64,
     pub module_calls: u64,
     pub count_only: bool,
     pub raw_write: Option<Box<dyn Slot>>,

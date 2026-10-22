@@ -46,7 +46,7 @@ fn shared_variable_id_resolves_to_one_cell() {
     use crate::variable::VariableCell;
 
     let var_id = Uuid::new_v4();
-    let mut variables: HashMap<Uuid, VariableCell> = HashMap::new();
+    let mut variables: crate::id_hash::IdMap<Uuid, VariableCell> = crate::id_hash::IdMap::default();
     let mut node_parameters: crate::id_hash::IdMap<NodeParameterId, VariableCell> =
         crate::id_hash::IdMap::default();
 
@@ -108,7 +108,7 @@ fn resolved_variable_is_store_backed() {
     let var_id = Uuid::new_v4();
     let names = HashMap::from([(var_id, "battery.level".to_string())]);
 
-    let mut variables: HashMap<Uuid, VariableCell> = HashMap::new();
+    let mut variables: crate::id_hash::IdMap<Uuid, VariableCell> = crate::id_hash::IdMap::default();
     let mut node_parameters: crate::id_hash::IdMap<NodeParameterId, VariableCell> =
         crate::id_hash::IdMap::default();
     let param = NodeParameterId {
@@ -149,7 +149,8 @@ fn resolved_variable_is_store_backed() {
 //================================================================
 /// A leaf whose status is supplied by a shared, mutable cell, so a test can
 /// change what it returns between ticks. Modeled as a plain (non-control) node
-/// so it dispatches through `arora_call` — the path real module leaves use.
+/// so it makes a module call, as real module leaves do; the bridge implements
+/// only `arora_call`, which the default `arora_call_borrowed` reaches.
 type LeafStatuses = Rc<RefCell<HashMap<Uuid, Status>>>;
 
 /// Records how many times each leaf function id was ticked.

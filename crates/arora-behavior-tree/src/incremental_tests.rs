@@ -97,13 +97,18 @@ fn lower(
     tree.set_incremental(incremental);
     tree
 }
+/// Tick once, leaving in `bridge.visits` the nodes the tick ran rather than
+/// answered from their caches.
 fn tick(tree: &LoweredTree, bridge: &mut Bridge) -> Status {
     bridge.reset_counts();
-    tree.tick(bridge).unwrap()
+    let before = tree.executed_visits();
+    let status = tree.tick(bridge).unwrap();
+    bridge.visits = tree.executed_visits() - before;
+    status
 }
 
 #[test]
-fn a_settled_tree_makes_no_engine_dispatch() {
+fn a_settled_tree_ticks_no_node() {
     let mut bridge = Bridge::default();
     let tree = lower(
         vec![
@@ -116,9 +121,10 @@ fn a_settled_tree_makes_no_engine_dispatch() {
         true,
     );
     assert_eq!(tick(&tree, &mut bridge), Status::Success);
-    assert_eq!(bridge.dispatches, 3);
+    assert_eq!((bridge.visits, bridge.dispatches), (3, 1));
+    // A clean root answers from its cache before any engine dispatch.
     assert_eq!(tick(&tree, &mut bridge), Status::Success);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!((bridge.visits, bridge.dispatches), (0, 0));
 }
 
 #[test]
@@ -148,12 +154,12 @@ fn a_changed_store_key_ticks_only_its_readers_and_ancestors() {
     tick(&tree, &mut bridge);
     put(&store, "a", Some(Value::F64(1.0)));
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 2);
+    assert_eq!(bridge.visits, 2);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!(bridge.visits, 0);
     put(&store, "b", Some(Value::F64(1.0)));
     assert_eq!(tick(&tree, &mut bridge), Status::Success);
-    assert_eq!(bridge.dispatches, 2);
+    assert_eq!(bridge.visits, 2);
 }
 
 #[test]
@@ -173,7 +179,7 @@ fn a_running_leaf_and_its_ancestors_are_polled_every_tick() {
         assert_eq!(pair.tick(), expected);
         assert_eq!(
             (
-                pair.incremental_bridge.dispatches,
+                pair.incremental_bridge.visits,
                 pair.incremental_bridge.calls.len()
             ),
             (2, 1)
@@ -329,7 +335,7 @@ fn a_reactive_sequence_rechecks_an_earlier_condition_while_a_later_child_runs() 
     assert_eq!(tick(&tree, &mut bridge), Status::Running);
     put(&store, "a", Some(Value::F64(2.0)));
     assert_eq!(tick(&tree, &mut bridge), Status::Failure);
-    assert_eq!(bridge.dispatches, 2);
+    assert_eq!(bridge.visits, 2);
 }
 
 #[test]
@@ -357,9 +363,9 @@ fn a_later_write_reaches_an_earlier_reader_on_the_next_tick() {
     );
     assert_eq!(tick(&tree, &mut bridge), Status::Failure);
     assert_eq!(tick(&tree, &mut bridge), Status::Success);
-    assert_eq!(bridge.dispatches, 2);
+    assert_eq!(bridge.visits, 2);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!(bridge.visits, 0);
 }
 
 #[test]
@@ -390,20 +396,20 @@ fn detached_rewrites_dirty_readers_only_when_the_output_changes() {
     assert_eq!(tick(&tree, &mut bridge), Status::Success);
     tick(&tree, &mut bridge);
     assert_eq!(
-        bridge.dispatches, 1,
+        bridge.visits, 1,
         "ancestor visits so the reader can pull, then skip"
     );
     assert!(bridge.calls.is_empty());
     put(&store, "a", Some(Value::F64(11.0)));
     tick(&tree, &mut bridge);
     assert_eq!(
-        (bridge.dispatches, bridge.calls.len()),
+        (bridge.visits, bridge.calls.len()),
         (1, 1),
         "changed arguments but equal clamped output"
     );
     put(&store, "a", Some(Value::F64(1.0)));
     assert_eq!(tick(&tree, &mut bridge), Status::Failure);
-    assert_eq!((bridge.dispatches, bridge.calls.len()), (2, 1));
+    assert_eq!((bridge.visits, bridge.calls.len()), (2, 1));
 }
 
 #[test]
@@ -429,12 +435,12 @@ fn a_shared_node_has_a_cache_for_each_parent_path() {
         true,
     );
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 5);
+    assert_eq!(bridge.visits, 5);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!(bridge.visits, 0);
     put(&store, "a", Some(Value::F64(1.0)));
     assert_eq!(tick(&tree, &mut bridge), Status::Success);
-    assert_eq!(bridge.dispatches, 5);
+    assert_eq!(bridge.visits, 5);
 }
 
 #[test]
@@ -449,7 +455,7 @@ fn relowering_an_edit_starts_dirty_and_keeps_the_result_correct() {
     );
     tick(&tree, &mut bridge);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!(bridge.visits, 0);
     tree.unregister(&mut bridge);
     let edited = lower(
         vec![node(1, FAIL_FUNCTION_ID, vec![])],
@@ -458,7 +464,7 @@ fn relowering_an_edit_starts_dirty_and_keeps_the_result_correct() {
         true,
     );
     assert_eq!(tick(&edited, &mut bridge), Status::Failure);
-    assert_eq!(bridge.dispatches, 1);
+    assert_eq!(bridge.visits, 1);
 }
 
 #[test]
@@ -697,11 +703,11 @@ fn cells(
 /// Replays 81,920 deterministic ticks across controls, mutable call-site state,
 /// shared paths, tree-local results and overwritten cached outputs. Ordinary
 /// calls must match in order; every omitted opt-in call must have unchanged
-/// module arguments. Aggregate calls and dispatches must show caching occurred.
+/// module arguments. Aggregate calls and node visits must show caching occurred.
 #[test]
 fn seeded_trees_match_the_naive_executor_in_lockstep() {
     let mut opted_calls = [0_u64; 2];
-    let mut dispatches = [0_u64; 2];
+    let mut visits = [0_u64; 2];
     for seed in 1..=320 {
         let mut a = generated(seed);
         let mut b = generated(seed);
@@ -742,7 +748,7 @@ fn seeded_trees_match_the_naive_executor_in_lockstep() {
                     .iter()
                     .filter(|(id, _)| a.opted.contains(id))
                     .count() as u64;
-                dispatches[at] += bridge.dispatches;
+                visits[at] += bridge.visits;
             }
             for name in ["a", "b", "c", "d", "out"] {
                 assert_eq!(
@@ -801,10 +807,10 @@ fn seeded_trees_match_the_naive_executor_in_lockstep() {
         opted_calls[1]
     );
     assert!(
-        dispatches[1] < dispatches[0],
-        "caching must reduce engine dispatches: naive {}, incremental {}",
-        dispatches[0],
-        dispatches[1]
+        visits[1] < visits[0],
+        "caching must reduce node visits: naive {}, incremental {}",
+        visits[0],
+        visits[1]
     );
 }
 
@@ -876,14 +882,11 @@ fn a_scatter_write_dirties_a_later_readers_cached_ancestor() {
     // ancestor is visiting, leaving that ancestor dirty for one more pass.
     tick(&tree, &mut bridge);
     tick(&tree, &mut bridge);
-    assert_eq!(
-        bridge.dispatches, 2,
-        "only root and effectful scatter visit"
-    );
+    assert_eq!(bridge.visits, 2, "only root and effectful scatter visit");
     put(&store, "b", Some(Value::ArrayF64(vec![2.0])));
     assert_eq!(tick(&tree, &mut bridge), Status::Failure);
     assert_eq!(
-        bridge.dispatches, 4,
+        bridge.visits, 4,
         "the raw slot write invalidated the nested reader"
     );
 }
@@ -899,15 +902,15 @@ fn changing_the_executor_flag_invalidates_cached_statuses() {
     );
     tick(&tree, &mut bridge);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!(bridge.visits, 0);
     tree.set_incremental(false);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 1);
+    assert_eq!(bridge.visits, 1);
     tree.set_incremental(true);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 1);
+    assert_eq!(bridge.visits, 1);
     tick(&tree, &mut bridge);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!(bridge.visits, 0);
 }
 
 #[test]
@@ -938,9 +941,9 @@ fn unvisited_dirty_children_do_not_prevent_a_terminal_root_from_settling() {
         true,
     );
     assert_eq!(tick(&tree, &mut bridge), Status::Failure);
-    assert_eq!(bridge.dispatches, 2);
+    assert_eq!(bridge.visits, 2);
     assert_eq!(tick(&tree, &mut bridge), Status::Failure);
-    assert_eq!(bridge.dispatches, 0);
+    assert_eq!(bridge.visits, 0);
     assert!(bridge.calls.is_empty());
 }
 
@@ -1209,12 +1212,12 @@ fn only_running_nodes_visited_last_tick_keep_polling_alive() {
     assert_eq!(pair.tick(), Status::Success);
     for _ in 0..5 {
         assert_eq!(pair.tick(), Status::Success);
-        assert_eq!(pair.incremental_bridge.dispatches, 0);
+        assert_eq!(pair.incremental_bridge.visits, 0);
     }
     pair.put("a", Some(Value::F64(0.0)));
     assert_eq!(pair.tick(), Status::Running);
     assert_eq!(
-        pair.incremental_bridge.dispatches, 3,
+        pair.incremental_bridge.visits, 3,
         "cached Running cannot answer"
     );
 }
@@ -1261,7 +1264,7 @@ fn stateful_on_change_computation_runs_until_its_state_settles() {
     for _ in 0..5 {
         pair.tick();
         assert!(pair.incremental_bridge.calls.is_empty());
-        assert_eq!(pair.incremental_bridge.dispatches, 0);
+        assert_eq!(pair.incremental_bridge.visits, 0);
     }
 }
 
@@ -1359,7 +1362,7 @@ fn effectful_native_leaves_never_cache_terminal_results() {
         let mut pair = Lockstep::new(vec![leaf], HashMap::from([(id(20002), Op::Add)]));
         for _ in 0..4 {
             pair.tick();
-            assert_eq!(pair.incremental_bridge.dispatches, 1);
+            assert_eq!(pair.incremental_bridge.visits, 1);
         }
     }
 }

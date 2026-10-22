@@ -80,6 +80,10 @@ pub(crate) struct Incremental {
     pub(crate) states: RefCell<Vec<Weak<State>>>,
     pub(crate) stored: RefCell<Vec<VariableCell>>,
     polled: RefCell<Vec<Weak<State>>>,
+    /// Visits that ran a node rather than answering from its cache: what the
+    /// tests count to see which nodes a tick reached.
+    #[cfg(test)]
+    pub(crate) executed: Cell<u64>,
 }
 impl Incremental {
     pub(crate) fn set_enabled(&self, enabled: bool) {

@@ -28,8 +28,8 @@ In short:
 - **A clean node is not ticked.** A node is dirty when a cell it reads changed
   value, when it was `Running` last tick, when it has no cached status, or when
   it cannot be cached. Dirtiness propagates to the root. A composite reuses the
-  cached status of a clean child without an engine dispatch. A settled tree
-  with nothing `Running` makes no dispatch at all.
+  cached status of a clean child without ticking it. A settled tree with
+  nothing `Running` ticks no node and makes no engine dispatch.
 - **Cells carry versions.** A write advances a cell's version only when the
   value differs. Store-backed cells are checked at the start of a tick, since
   the HAL, bridges and other runs write them too, and again before a clean
@@ -111,9 +111,9 @@ A node is **dirty** when:
 Marking a node dirty marks its ancestors, up to the first that already is.
 
 A composite about to tick a child first looks at the child: a **clean** child
-returns its cached status, with no engine dispatch. The composite's own logic
-is unchanged: it still walks its children in order, and a clean child costs a
-cache check, where today's executor spends a dispatch and a call.
+returns its cached status without being ticked. The composite's own logic is
+unchanged: it still walks its children in order, and a clean child costs a
+cache check, where today's executor ticks it and makes its call.
 
 A visit clears a node's dirty mark before it runs, so a mark made later in the
 same tick waits for the next one. That keeps today's order within a tick: a
