@@ -182,33 +182,38 @@ current one. The rule:
    every device a client drives describes its keys; a client then drives only
    what a device lists, and states the rest as not driven.
 4. **A client writes one form per target.** A change that sets both forms of
-   one target applies `k/target.c` and ignores `k.target_c`, whatever value
-   `k/target.c` holds: the keys of a `StateChange` carry no order, so "last
-   write wins" cannot apply within one change, and the form decides. Arora's
-   runtime hands its HAL each step's store changes merged key by key into one
-   change (`flush`, `crates/arora/src/runtime.rs`), so writes to the two forms
-   within one step also reach the HAL as one change, and the form decides
-   there too. That loses no order between remotes: a writer writes one form,
-   and the writes of two remotes within one step carry no order between them.
-   It does override one order the runtime sets: it applies a step's bridge
-   events before it ticks the behavior (`Arora::step`), so on one key the
-   behavior's write wins, but where a remote and the behavior write different
-   forms of one target within one step, `k/target.c`'s value applies,
-   whichever of them wrote it. Across steps, the
-   later write wins, whichever form each was written in; a HAL that merges a
-   backlog of changes into one keeps that (`arora_hal::fold_newest_wins`), and
-   rule 5 keeps the store from dropping the later write. A whole target
-   covers its fields: a later write or unset of the whole drops earlier
-   writes of its fields, and within one change the whole applies before its
-   fields (§5). The two forms are distinct keys of the store: a store or a
-   bridge never merges them.
+   one target applies `k/target.c` and ignores `k.target_c`: the keys of a
+   `StateChange` carry no order, so "last write wins" cannot apply within one
+   change, and the form decides. Arora's runtime hands its HAL each step's
+   store changes merged key by key into one change (`flush`,
+   `crates/arora/src/runtime.rs`), so writes to the two forms within one step
+   also reach the HAL as one change, and the form decides there too. That loses
+   no order between remotes: a writer writes one form, and the writes of two
+   remotes within one step carry no order between them. It does override one
+   order the runtime sets: it applies a step's bridge events before it ticks
+   the behavior (`Arora::step`), so on one key the behavior's write wins, but
+   where a remote and the behavior write different forms of one target within
+   one step, `k/target.c`'s value applies, whichever of them wrote it. The rule
+   applies to what the store notifies: a write that leaves a form at the value
+   it holds sets nothing. With both forms at 1, a step that sets `k/target.c`
+   to 1 and `k.target_c` to 2 changes only `k.target_c`, and 2 applies: the
+   store notifies only the writes that change a value, and two writers' writes
+   within one step carry no order to recover. Across steps, the later write
+   wins, whichever form each was written in; a HAL that merges a backlog of
+   changes into one keeps that (`arora_hal::fold_newest_wins`), and rule 5
+   keeps the store from dropping the later write. A whole target covers its
+   fields: a later write or unset of the whole drops earlier writes of its
+   fields, and within one change the whole applies before its fields (§5). The
+   two forms are distinct keys of the store: a store or a bridge never merges
+   them.
 5. **A device keeps the two forms of a target in agreement.** It writes the
    value that wins by rule 4 into both keys, and an unset of either form, with
    neither set, into both. A client sees both keys move together, whichever
    form it wrote, and the write to the form it did not use is the device's
    own. Every HAL arora's runtime feeds reads its targets from the store's
    notifications, the step's changes the runtime hands it (`write_hal`), so
-   for those HALs the runtime applies the rule. It does not yet
+   for those HALs the runtime applies the rule, and keeps a whole target and
+   its fields in agreement the same way (§5). It does not yet
    ([ARORA-187](https://linear.app/semio-ai/issue/ARORA-187)).
    - **Why it is required:** a store notifies a write only when it changes
      the key's value (`DataStore::write`): a key set to the value it already
@@ -294,9 +299,14 @@ boundaries only, below), and a store or a bridge carries each key as it is.
   5 leaves x at 5. The keys of a change carry no order, so the rule decides,
   as the form does in §3 rule 4.
 - **A device that lists both the whole and its fields keeps them in
-  agreement**, as §3 rule 5 does for the two forms of a target, so a consumer
-  that reads the store sees `eye/target.position` and `eye/target.position.x`
-  agree.
+  agreement**, as it does the two forms of a target (§3 rule 5). Wherever a
+  HAL reads its targets from store notifications, the runtime writes back the
+  resolved whole and fields, so a later write to either is a change: the
+  store notifies a write only when it changes the key's value.
+  `eye/target.position.x` set to 5, `eye/target.position` to (0, 0, 0), then
+  `eye/target.position.x` to 5 again, in three steps, leaves x at 5, the
+  field holding 0 after the second. A consumer that reads the store sees
+  `eye/target.position` and `eye/target.position.x` agree.
 - **Merging a field write into the whole is optional.** A device MAY accept a
   write of one field to an input that takes the whole value, and merge it
   into the value it holds; it need not. Most HALs and bridges cannot: a ROS 2
@@ -514,10 +524,10 @@ writes or reads.
 | Stage | What ships | Gated by | If skipped |
 |---|---|---|---|
 | **(a) Devices take both spellings.** | A device with per-axis keys — the `vizij` device first — lists `k/target.c.<axis>` and `k.<axis>.target_c` as open inputs, keeps them in agreement (§3 rule 5), and publishes its feedback under both `k.c.<axis>` and `k.<axis>.c`. For a grouped value whose component (c) renames, `color` for a colour, it does so under both component names: it takes `light/target.color.r` beside `light/target.position.r` and `light.r.target_position`, and publishes `light.color.r` beside its `position` feedback. | Nothing: it adds keys. vizij-rs#199 ships the inputs under `position`; the feedback under `k.c.<axis>` and the new component's keys are to add. | A device that moves to axis after alone is not driven or read by a Studio before (b), and one that moves to the new component alone is not driven or read by a Studio before (c). |
-| **(b) Studio resolves axes per device.** | The World resolves an axis's input and feedback per device as in §6.1 and §6.2, with its own spelling and feedback unchanged (`k.<axis>.target_c`, `k.<axis>.c`). | semio_studio PR 542, on staging; the direct-write form `k.c.<axis>` is to add. | Studio cannot drive a device that lists only axis after, and setting `DECLARED_FORM` to `k/target.c` would declare `<id>.<axis>/target.position`, which no device reads as a target. |
-| **(c) Studio switches its spelling.** | `DECLARED_FORM` becomes `k/target.c` for every animatable, and a grouped animatable's component becomes its group's, `color` for a colour (§6.2): emulated devices declare `k/target.c.<axis>` and report `k.c.<axis>` in that component. The World keeps the `position` spellings as candidates of their own, and writes and reads a device that lists none of an axis's spellings in `position`, axis first. The live-data table resolves from the longest streamed prefix. | This proposal accepted; (a) shipped on every device Studio drives per axis, the new component's feedback included; (b). | Studio keeps writing a spelling and a component meant to retire, and (e) cannot start. |
+| **(b) Studio resolves axes per device.** | The World resolves an axis's input and feedback per device as in §6.1 and §6.2, with its own spelling and feedback unchanged (`k.<axis>.target_c`, `k.<axis>.c`). | semio_studio PR 542, on staging; the direct-write form `k.c.<axis>` is to add ([STUDIO-397](https://linear.app/semio-ai/issue/STUDIO-397)). | Studio cannot drive a device that lists only axis after, and setting `DECLARED_FORM` to `k/target.c` would declare `<id>.<axis>/target.position`, which no device reads as a target. |
+| **(c) Studio switches its spelling.** | `DECLARED_FORM` becomes `k/target.c` for every animatable, and a grouped animatable's component becomes its group's, `color` for a colour (§6.2): emulated devices declare `k/target.c.<axis>` and report `k.c.<axis>` in that component. The World keeps the `position` spellings as candidates of their own, and writes and reads a device that lists none of an axis's spellings in `position`, axis first. The live-data table resolves from the longest streamed prefix. | This proposal accepted; (b). Devices move at their own pace: Studio drives and reads each by what it lists. | Studio keeps writing a spelling and a component meant to retire, and devices cannot drop a grouped value's `position` (e). |
 | **(d) Saved data.** | Projects and animations: nothing, their ids do not change. Live-data layouts: a row or collapsed group whose key the device no longer lists is rewritten to the other spelling when the device lists that one, and the layout saved; or a one-time migration of `liveDataViewConfigs`. Recordings: nothing, none is persisted. | (c). | Once (e) ships, saved per-axis rows go blank, silently. |
-| **(e) The axis-first spelling and the `position` of a grouped value retire.** | Devices stop listing `k.<axis>.target_c` and publishing `k.<axis>.c`, and stop taking and publishing a grouped value under `position` (a major of each); the World drops those spellings from its preference. | Studio in production at (c); (d) shipped; no device in use relying on axis first or on `position` for a grouped value. As for `k.target_c` (§3). | Retired early, a Studio before (b) or (c) loses the inputs and the feedback of every axis. |
+| **(e) The axis-first spelling and the `position` of a grouped value retire.** | Devices stop listing `k.<axis>.target_c` and publishing `k.<axis>.c`, and stop taking and publishing a grouped value under `position` (a major of each); the World drops those spellings from its preference. | A device drops a spelling once Studio in production drives and reads it by what it lists: at (b) for the axis-first spelling, at (c) for a grouped value's `position`; (d) shipped. The World drops a spelling once no device in use lists it. As for `k.target_c` (§3). | Dropped early by a device, a Studio before (b), or before (c) for the component, loses that device's inputs and feedback for every axis. Dropped early by the World, a device that still lists only that spelling is not driven. |
 
 The World reads feedback per device, as it resolves inputs
 (`resolve_feedback`): a device is read in the spelling and the component it
