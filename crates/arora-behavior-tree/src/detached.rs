@@ -100,7 +100,8 @@ use crate::{
 /// detached node is in exactly one of them. Known once the tree is lowered.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DetachedPlan {
-    /// The sinks and the nodes they read: brought up to date at every tick.
+    /// The sinks, the nodes a host observes, and the nodes they read:
+    /// brought up to date at every tick.
     pub every_tick: Vec<Uuid>,
     /// The nodes the tree reads and the nodes they read, apart from the
     /// above: brought up to date at a tick only when a node that reads them
@@ -114,6 +115,8 @@ pub struct DetachedPlan {
 pub(crate) struct Detached {
     /// The detached nodes, in the order the tree lists them.
     nodes: Vec<Rc<Node>>,
+    /// Each node's position in `nodes`, by id.
+    ids: HashMap<Uuid, usize>,
     /// The store keys the ports of detached nodes publish to, by port; the
     /// port itself is the tree-local cell the node's argument has.
     bindings: HashMap<NodeParameterId, VariableCell>,
@@ -122,6 +125,9 @@ pub(crate) struct Detached {
     caches: RefCell<Vec<Cache>>,
     /// The current tick: a node whose cache is of this tick is up to date.
     tick: Cell<u64>,
+    /// The nodes a host observes: brought up to date at every tick, as a
+    /// sink is, whatever reads them.
+    observed: RefCell<HashSet<Uuid>>,
 }
 
 #[derive(Default)]
@@ -131,19 +137,45 @@ struct Lowered {
     signatures: FunctionIndex,
     /// By node: the detached nodes it reads, by position.
     reads: Vec<Vec<usize>>,
-    /// By node: its arguments in signature order, `_ret` aside.
-    arguments: Vec<Vec<Uuid>>,
-    /// The inputs another detached node's output is bound to: each reads the
-    /// cell that node writes, even when its argument names a store key.
-    fed: HashSet<NodeParameterId>,
+    /// By node: its arguments in signature order, `_ret` aside, each with
+    /// where its value comes from, resolved once.
+    arguments: Vec<Vec<Argument>>,
+    /// By node: the module its function belongs to, when the function index
+    /// has the function.
+    modules: Vec<Option<Uuid>>,
+    /// By node: whether something besides its own call writes its output
+    /// cells (a nested call of its arguments, or the store a mutable port is
+    /// seeded from), so an evaluation that does not call writes its cached
+    /// outputs back.
+    rewrites: Vec<bool>,
     /// By node: its outputs, each a port, the tree-local cell it writes, and
     /// the store key it publishes to after the tree ticks.
     outputs: Vec<Vec<(Uuid, VariableCell, Option<VariableCell>)>>,
     /// The sinks, by position, in the order the tree lists them.
     sinks: Vec<usize>,
+    /// The observed nodes that are no sinks, by position, in evaluation
+    /// order.
+    observed: Vec<usize>,
     /// By attached node: the detached nodes it reads, by position.
     pulls: HashMap<Uuid, Rc<[usize]>>,
     plan: DetachedPlan,
+}
+
+/// An argument of a detached node, resolved when the tree is lowered.
+struct Argument {
+    parameter: Uuid,
+    /// Whether the parameter is optional: an absent value passes `None`.
+    optional: bool,
+    source: Source,
+}
+
+/// Where an argument's value comes from at each tick.
+enum Source {
+    /// The cell it reads: a literal's own, a variable's, another node's port,
+    /// or the store key bound to it.
+    Cell(Option<VariableCell>),
+    /// A call or a selection, computed from the expression.
+    Computed(Expression),
 }
 
 #[derive(Default, Clone)]
@@ -152,8 +184,8 @@ struct Cache {
     tick: u64,
     /// The arguments of its last call.
     arguments: Option<Vec<Value>>,
-    /// Its outputs after its last call, by port.
-    outputs: HashMap<Uuid, Value>,
+    /// Its outputs after its last call, each a port and its value.
+    outputs: Vec<(Uuid, Value)>,
     /// How many times it called its function.
     calls: u64,
     /// Why its evaluation failed at `tick`, if it did: a later read in the
@@ -229,22 +261,62 @@ impl Detached {
     ) -> Self {
         let caches = RefCell::new(vec![Cache::default(); nodes.len()]);
         Self {
+            ids: nodes
+                .iter()
+                .enumerate()
+                .map(|(at, node)| (node.id, at))
+                .collect(),
             nodes,
             bindings,
             lowered: RefCell::default(),
             caches,
             tick: Cell::new(1),
+            observed: RefCell::default(),
         }
     }
 
     pub(crate) fn empty() -> Self {
         Self {
             nodes: Vec::new(),
+            ids: HashMap::new(),
             bindings: HashMap::new(),
             lowered: RefCell::default(),
             caches: RefCell::default(),
             tick: Cell::new(1),
+            observed: RefCell::default(),
         }
+    }
+
+    /// Observe the detached nodes among `ids` from the next lowering on:
+    /// bring them up to date at every tick, after the sinks.
+    pub(crate) fn observe(&self, ids: impl IntoIterator<Item = Uuid>) {
+        self.observed
+            .borrow_mut()
+            .extend(ids.into_iter().filter(|id| self.ids.contains_key(id)));
+    }
+
+    /// The output `port` of the detached node `id` after its last call.
+    pub(crate) fn output(&self, id: Uuid, port: Uuid) -> Option<Value> {
+        let at = *self.ids.get(&id)?;
+        let caches = self.caches.borrow();
+        caches[at].arguments.as_ref()?;
+        caches[at]
+            .outputs
+            .iter()
+            .find(|(output, _)| *output == port)
+            .map(|(_, value)| value.clone())
+    }
+
+    /// The outputs of the detached node `id` after its last call, by port:
+    /// its return value under `_ret`, each mutable parameter under its id.
+    /// `None` for a node that is not detached or has not been called.
+    pub(crate) fn outputs(&self, id: Uuid) -> Option<HashMap<Uuid, Value>> {
+        let at = *self.ids.get(&id)?;
+        let caches = self.caches.borrow();
+        caches[at]
+            .arguments
+            .is_some()
+            .then(|| caches[at].outputs.iter().cloned().collect())
     }
 
     /// The detached nodes, in the order the tree lists them.
@@ -258,7 +330,7 @@ impl Detached {
 
     /// How many times the detached node `id` called its function.
     pub(crate) fn calls(&self, id: Uuid) -> Option<u64> {
-        let at = self.nodes.iter().position(|node| node.id == id)?;
+        let at = *self.ids.get(&id)?;
         Some(self.caches.borrow()[at].calls)
     }
 
@@ -295,6 +367,8 @@ impl Detached {
         let names = Names::functions(functions);
         let mut signatures = FunctionIndex::new();
         let mut arguments = Vec::with_capacity(self.nodes.len());
+        let mut modules = Vec::with_capacity(self.nodes.len());
+        let mut rewrites = Vec::with_capacity(self.nodes.len());
         let mut outputs = Vec::with_capacity(self.nodes.len());
         // The cells each detached node keeps its state in, which it reads and
         // writes back: its mutable parameters' and its calls'.
@@ -378,7 +452,10 @@ impl Detached {
                         ports.push(parameter);
                     }
                 }
-                signatures.insert(node.function, signature.clone());
+                // One copy per function, however many nodes call it.
+                signatures
+                    .entry(node.function)
+                    .or_insert_with(|| signature.clone());
             }
             let mut written = Vec::new();
             let mut state = HashSet::new();
@@ -398,7 +475,9 @@ impl Detached {
                     written.push((port, cell, publish));
                 }
             }
+            let mut nested_writes = false;
             for cell in call_writes(node, functions, variables, node_parameters_variables) {
+                nested_writes = true;
                 if matches!(cell, VariableCell::Stored(_)) {
                     return refuse(
                         "writes a store key back from a call in its arguments: a detached \
@@ -411,14 +490,42 @@ impl Detached {
                 state.insert(cell_id(&cell));
             }
             states.push(state);
+            rewrites.push(
+                nested_writes
+                    || written
+                        .iter()
+                        .any(|(port, _, publish)| *port != _RET_PARAM_ID && publish.is_some()),
+            );
             outputs.push(written);
             arguments.push(
                 crate::display::ordered(&node.arguments, signature)
                     .into_iter()
-                    .map(|(parameter, _)| parameter)
-                    .filter(|parameter| *parameter != _RET_PARAM_ID)
+                    .filter(|(parameter, _)| *parameter != _RET_PARAM_ID)
+                    .map(|(parameter, argument)| {
+                        let at = NodeParameterId {
+                            node: node.id,
+                            parameter,
+                        };
+                        Argument {
+                            parameter,
+                            optional: signature
+                                .is_some_and(|f| is_optional(&f.function, &parameter)),
+                            source: match argument {
+                                Expression::Call(_) | Expression::Select { .. } => {
+                                    Source::Computed(argument.clone())
+                                }
+                                _ => Source::Cell(
+                                    self.bindings
+                                        .get(&at)
+                                        .or_else(|| node_parameters_variables.get(&at))
+                                        .cloned(),
+                                ),
+                            },
+                        }
+                    })
                     .collect::<Vec<_>>(),
             );
+            modules.push(signature.map(|signature| signature.module_id));
         }
         // What attached nodes write: their bound return, the mutable
         // parameters of the module functions they call, at any depth, and the
@@ -510,7 +617,7 @@ impl Detached {
                 let mut ports = Vec::new();
                 ports_named(argument, &mut ports);
                 for port in ports {
-                    let Some(source) = self.nodes.iter().find(|node| node.id == port.node) else {
+                    let Some(source) = self.ids.get(&port.node).map(|at| &self.nodes[*at]) else {
                         continue;
                     };
                     let Some(signature) = functions.get(&source.function) else {
@@ -609,21 +716,23 @@ impl Detached {
                     _ => None,
                 }
             })
-            .collect();
+            .collect::<HashSet<NodeParameterId>>();
+        // A fed input reads the cell the output bound to it writes, even
+        // when its argument names a store key.
+        for (node, arguments) in self.nodes.iter().zip(&mut arguments) {
+            for argument in arguments.iter_mut() {
+                let np = NodeParameterId {
+                    node: node.id,
+                    parameter: argument.parameter,
+                };
+                if fed.contains(&np) && matches!(argument.source, Source::Cell(_)) {
+                    argument.source = Source::Cell(node_parameters_variables.get(&np).cloned());
+                }
+            }
+        }
 
         // Inputs before their readers, otherwise in the order given.
-        let mut order = Vec::with_capacity(self.nodes.len());
-        let mut done = HashSet::new();
-        for at in 0..self.nodes.len() {
-            visit(
-                at,
-                &reads,
-                &self.nodes,
-                &mut done,
-                &mut Vec::new(),
-                &mut order,
-            )?;
-        }
+        let order = sorted(&reads, &self.nodes)?;
 
         let sink = |at: usize| outputs[at].iter().any(|(_, _, publish)| publish.is_some());
         let closure = |starts: Vec<usize>| {
@@ -636,7 +745,13 @@ impl Detached {
             }
             reached
         };
-        let every_tick = closure((0..self.nodes.len()).filter(|at| sink(*at)).collect());
+        let observed_ids = self.observed.borrow();
+        let observed_at = |at: usize| observed_ids.contains(&self.nodes[at].id);
+        let every_tick = closure(
+            (0..self.nodes.len())
+                .filter(|at| sink(*at) || observed_at(*at))
+                .collect(),
+        );
         let on_demand = closure(tree_reads);
         let mut plan = DetachedPlan::default();
         for at in &order {
@@ -650,14 +765,21 @@ impl Detached {
             }
         }
         let sinks = (0..self.nodes.len()).filter(|at| sink(*at)).collect();
+        let observed = order
+            .iter()
+            .copied()
+            .filter(|at| observed_at(*at) && !sink(*at))
+            .collect();
 
         *self.lowered.borrow_mut() = Lowered {
             signatures,
             reads,
             arguments,
-            fed,
+            modules,
+            rewrites,
             outputs,
             sinks,
+            observed,
             pulls,
             plan,
         };
@@ -686,7 +808,8 @@ impl Detached {
     /// Bring every sink up to date, then publish each one's store keys, in
     /// the order the tree lists them: no sink reads another's key of this tick.
     /// A sink that fails stops no other: the others are brought up to date and
-    /// publish, and the tick reports the first failure.
+    /// publish, and the tick reports the first failure. Then bring the
+    /// observed nodes up to date, alike.
     pub(crate) fn tick_sinks(
         &self,
         scope: Scope,
@@ -699,14 +822,27 @@ impl Detached {
                 failure.get_or_insert(error);
             }
         }
-        let lowered = self.lowered.borrow();
-        let caches = self.caches.borrow();
-        for at in sinks.into_iter().filter(|at| caches[*at].failed.is_none()) {
-            let signature = lowered.signatures.get(&self.nodes[at].function);
-            for (port, _, publish) in &lowered.outputs[at] {
-                if let (Some(key), Some(value)) = (publish, caches[at].outputs.get(port)) {
-                    write_back(key, value.clone(), output_optional(signature, port));
+        {
+            let lowered = self.lowered.borrow();
+            let caches = self.caches.borrow();
+            for at in sinks.into_iter().filter(|at| caches[*at].failed.is_none()) {
+                let signature = lowered.signatures.get(&self.nodes[at].function);
+                for (port, _, publish) in &lowered.outputs[at] {
+                    let value = caches[at]
+                        .outputs
+                        .iter()
+                        .find(|(output, _)| output == port)
+                        .map(|(_, value)| value);
+                    if let (Some(key), Some(value)) = (publish, value) {
+                        write_back(key, value.clone(), output_optional(signature, port));
+                    }
                 }
+            }
+        }
+        let observed = self.lowered.borrow().observed.clone();
+        for at in observed {
+            if let Err(error) = self.bring_up_to_date(at, scope, caller) {
+                failure.get_or_insert(error);
             }
         }
         failure.map_or(Ok(()), Err)
@@ -720,40 +856,80 @@ impl Detached {
         scope: Scope,
         caller: &mut dyn CallBridge,
     ) -> Result<(), BehaviorTreeError> {
-        {
-            let cache = &self.caches.borrow()[at];
-            if cache.tick == self.tick.get() {
-                return match &cache.failed {
-                    None => Ok(()),
-                    Some(why) => Err(BehaviorTreeError::CallError(CallError::Generic {
-                        message: format!(
-                            "detached node {} failed this tick: {why}",
-                            self.nodes[at].id
-                        ),
-                    })),
-                };
-            }
+        if let Some(outcome) = self.this_tick(at) {
+            return outcome;
         }
-        let outcome = self.evaluate(at, scope, caller);
-        let mut caches = self.caches.borrow_mut();
-        caches[at].tick = self.tick.get();
-        caches[at].failed = outcome.as_ref().err().map(ToString::to_string);
-        outcome
+        // Lowering alone borrows `lowered` mutably, so the borrow is held
+        // through the evaluation. Each node is evaluated once the nodes it
+        // reads are: depth-first, iteratively, so a chain of any depth runs.
+        let lowered = self.lowered.borrow();
+        let mut stack: Vec<(usize, usize)> = vec![(at, 0)];
+        while let Some((node, next)) = stack.last_mut() {
+            let node = *node;
+            let failure = if let Some(read) = lowered.reads[node].get(*next).copied() {
+                *next += 1;
+                match self.this_tick(read) {
+                    None => {
+                        stack.push((read, 0));
+                        continue;
+                    }
+                    Some(Ok(())) => continue,
+                    Some(Err(failure)) => failure,
+                }
+            } else {
+                match self.evaluate(node, &lowered, scope, caller) {
+                    Ok(()) => {
+                        stack.pop();
+                        self.mark(node, None);
+                        continue;
+                    }
+                    Err(failure) => failure,
+                }
+            };
+            // A failure fails every node waiting on it, for the rest of the
+            // tick: a later read fails alike without calling again.
+            let why = failure.to_string();
+            for (waiting, _) in &stack {
+                self.mark(*waiting, Some(why.clone()));
+            }
+            return Err(failure);
+        }
+        Ok(())
     }
 
-    /// Evaluate the detached node at `at`: the nodes it reads first, then its
-    /// call, when its arguments changed.
+    /// The outcome of the detached node at `at` this tick, once evaluated:
+    /// `None` while it is not.
+    fn this_tick(&self, at: usize) -> Option<Result<(), BehaviorTreeError>> {
+        let caches = self.caches.borrow();
+        let cache = &caches[at];
+        (cache.tick == self.tick.get()).then(|| match &cache.failed {
+            None => Ok(()),
+            Some(why) => Err(BehaviorTreeError::CallError(CallError::Generic {
+                message: format!(
+                    "detached node {} failed this tick: {why}",
+                    self.nodes[at].id
+                ),
+            })),
+        })
+    }
+
+    /// Mark the detached node at `at` evaluated this tick, with why it
+    /// failed if it did.
+    fn mark(&self, at: usize, failed: Option<String>) {
+        let mut caches = self.caches.borrow_mut();
+        caches[at].tick = self.tick.get();
+        caches[at].failed = failed;
+    }
+
+    /// Evaluate the detached node at `at`, whose reads are up to date: call
+    /// its function if its arguments changed.
     fn evaluate(
         &self,
         at: usize,
+        lowered: &Lowered,
         scope: Scope,
         caller: &mut dyn CallBridge,
     ) -> Result<(), BehaviorTreeError> {
-        let reads = self.lowered.borrow().reads[at].clone();
-        for read in reads {
-            self.bring_up_to_date(read, scope, caller)?;
-        }
-        let lowered = self.lowered.borrow();
         let scope = Scope {
             calls: &lowered.signatures,
             ..scope
@@ -770,44 +946,32 @@ impl Detached {
             }
         }
         let mut values = Vec::with_capacity(lowered.arguments[at].len());
-        for parameter in &lowered.arguments[at] {
-            let argument = &node.arguments[parameter];
-            let np = NodeParameterId {
-                node: node.id,
-                parameter: *parameter,
-            };
-            // An argument reads its cell, as a module leaf's does: the cell
-            // another detached node's output is bound to, or the store key it
-            // names. A call or a selection is computed.
-            let value = match argument {
-                Expression::Call(_) | Expression::Select { .. } => {
-                    Some(compute_expression(scope, argument, caller, &np)?)
+        for argument in &lowered.arguments[at] {
+            // An argument reads its cell, as a module leaf's does; a call or
+            // a selection is computed.
+            let value = match &argument.source {
+                Source::Computed(expression) => {
+                    let np = NodeParameterId {
+                        node: node.id,
+                        parameter: argument.parameter,
+                    };
+                    Some(compute_expression(scope, expression, caller, &np)?)
                         .filter(|value| *value != Value::Unit)
                 }
-                _ if lowered.fed.contains(&np) => scope
-                    .node_parameters_variables
-                    .get(&np)
-                    .and_then(VariableCell::get),
-                _ => self
-                    .bindings
-                    .get(&np)
-                    .or_else(|| scope.node_parameters_variables.get(&np))
-                    .and_then(VariableCell::get),
+                Source::Cell(cell) => cell.as_ref().and_then(VariableCell::get),
             };
-            let optional = signature.is_some_and(|f| is_optional(&f.function, parameter));
-            values.push(argument_value(value, optional));
+            values.push(argument_value(value, argument.optional));
         }
         let changed = self.caches.borrow()[at].arguments.as_ref() != Some(&values);
         if changed {
-            let signature =
-                signature.ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
-                    id: node.function,
-                }))?;
+            let module_id = lowered.modules[at].ok_or(BehaviorTreeError::CallError(
+                CallError::FunctionNotFound { id: node.function },
+            ))?;
             let args = lowered.arguments[at]
                 .iter()
                 .zip(&values)
-                .map(|(parameter, value)| StructureField {
-                    id: *parameter,
+                .map(|(argument, value)| StructureField {
+                    id: argument.parameter,
                     value: Box::new(value.clone()),
                 })
                 .collect();
@@ -815,42 +979,48 @@ impl Detached {
             self.caches.borrow_mut()[at].calls += 1;
             let result = caller
                 .arora_call(Call {
-                    module_id: Some(signature.module_id),
+                    module_id: Some(module_id),
                     id: node.function,
                     args,
                 })
                 .map_err(BehaviorTreeError::CallError)?;
             // A mutable parameter the call leaves as it was keeps the value it
             // was given; the ones it reports take their new value.
-            let mut outputs: HashMap<Uuid, Value> = lowered.arguments[at]
+            let mut outputs: Vec<(Uuid, Value)> = lowered.arguments[at]
                 .iter()
                 .zip(&values)
-                .filter(|(parameter, _)| {
+                .filter(|(argument, _)| {
                     lowered.outputs[at]
                         .iter()
-                        .any(|(port, ..)| port == *parameter)
+                        .any(|(port, ..)| *port == argument.parameter)
                 })
-                .map(|(parameter, value)| (*parameter, value.clone()))
+                .map(|(argument, value)| (argument.parameter, value.clone()))
                 .collect();
-            outputs.insert(_RET_PARAM_ID, result.ret);
+            outputs.push((_RET_PARAM_ID, result.ret));
             for mutated in result.mutated {
-                outputs.insert(mutated.id, *mutated.value);
+                match outputs.iter_mut().find(|(port, _)| *port == mutated.id) {
+                    Some((_, value)) => *value = *mutated.value,
+                    None => outputs.push((mutated.id, *mutated.value)),
+                }
             }
             // The ports now; the store keys after the tree ticks.
             for (port, cell, _) in &lowered.outputs[at] {
-                if let Some(value) = outputs.get(port) {
-                    write_back(cell, value.clone(), output_optional(Some(signature), port));
+                if let Some((_, value)) = outputs.iter().find(|(output, _)| output == port) {
+                    write_back(cell, value.clone(), output_optional(signature, port));
                 }
             }
             let mut caches = self.caches.borrow_mut();
             caches[at].arguments = Some(values);
             caches[at].outputs = outputs;
-        } else {
-            // A nested call of this node may have written an output's cell
-            // since: the cached outputs stand.
+        } else if lowered.rewrites[at] {
+            // A nested call of this node, or the store seeding a mutable
+            // port, may have written an output's cell since: the cached
+            // outputs stand.
             let caches = self.caches.borrow();
             for (port, cell, _) in &lowered.outputs[at] {
-                if let Some(value) = caches[at].outputs.get(port) {
+                if let Some((_, value)) =
+                    caches[at].outputs.iter().find(|(output, _)| output == port)
+                {
                     write_back(cell, value.clone(), output_optional(signature, port));
                 }
             }
@@ -1034,34 +1204,52 @@ fn ports_named(expression: &Expression, found: &mut Vec<NodeParameterId>) {
 
 /// Depth-first: push `at` after every node it reads. A node met again on the
 /// current `path` closes a cycle.
-fn visit(
-    at: usize,
-    reads: &[Vec<usize>],
-    nodes: &[Rc<Node>],
-    done: &mut HashSet<usize>,
-    path: &mut Vec<usize>,
-    sorted: &mut Vec<usize>,
-) -> Result<(), BehaviorTreeError> {
-    if done.contains(&at) {
-        return Ok(());
+/// The detached nodes in evaluation order: depth-first, each after every
+/// node it reads, otherwise in the order given. A node met again on the path
+/// that leads to it closes a cycle. Iterative, so a chain of any depth sorts.
+fn sorted(reads: &[Vec<usize>], nodes: &[Rc<Node>]) -> Result<Vec<usize>, BehaviorTreeError> {
+    let mut sorted = Vec::with_capacity(nodes.len());
+    let mut done = vec![false; nodes.len()];
+    let mut on_path = vec![false; nodes.len()];
+    // The path: each node on it, and the index of the next read to visit.
+    let mut path: Vec<(usize, usize)> = Vec::new();
+    for start in 0..nodes.len() {
+        if done[start] {
+            continue;
+        }
+        path.push((start, 0));
+        on_path[start] = true;
+        while let Some((at, next)) = path.last_mut() {
+            let at = *at;
+            if let Some(read) = reads[at].get(*next).copied() {
+                *next += 1;
+                if done[read] {
+                    continue;
+                }
+                if on_path[read] {
+                    let from = path
+                        .iter()
+                        .position(|(on, _)| *on == read)
+                        .expect("a node on the path is in it");
+                    let cycle: Vec<String> = path[from..]
+                        .iter()
+                        .map(|(at, _)| nodes[*at].id.to_string())
+                        .collect();
+                    return Err(inconsistent(format!(
+                        "the detached nodes {} read each other in a cycle: feed a value back \
+                         through a store key",
+                        cycle.join(", ")
+                    )));
+                }
+                on_path[read] = true;
+                path.push((read, 0));
+            } else {
+                path.pop();
+                on_path[at] = false;
+                done[at] = true;
+                sorted.push(at);
+            }
+        }
     }
-    if let Some(start) = path.iter().position(|on| *on == at) {
-        let cycle: Vec<String> = path[start..]
-            .iter()
-            .map(|at| nodes[*at].id.to_string())
-            .collect();
-        return Err(inconsistent(format!(
-            "the detached nodes {} read each other in a cycle: feed a value back through a \
-             store key",
-            cycle.join(", ")
-        )));
-    }
-    path.push(at);
-    for read in &reads[at] {
-        visit(*read, reads, nodes, done, path, sorted)?;
-    }
-    path.pop();
-    done.insert(at);
-    sorted.push(at);
-    Ok(())
+    Ok(sorted)
 }

@@ -88,6 +88,57 @@ impl BehaviorTree {
         self.detached.calls(id)
     }
 
+    /// Observe the detached nodes among `ids`: from the next lowering on,
+    /// each is brought up to date at every tick, after the tree ticks, as a
+    /// sink is, whether or not a node reads it. A host showing what every
+    /// node of a graph computes observes them all.
+    pub fn observe_detached(&self, ids: impl IntoIterator<Item = Uuid>) {
+        self.detached.observe(ids);
+    }
+
+    /// The outputs of the detached node `id` after its last call, by port:
+    /// its return value under [`_RET_PARAM_ID`], and each mutable parameter
+    /// under its id. `None` for a node that is not detached or has not been
+    /// called yet.
+    pub fn detached_outputs(&self, id: Uuid) -> Option<HashMap<Uuid, Value>> {
+        self.detached.outputs(id)
+    }
+
+    /// The output `port` of the detached node `id` after its last call: its
+    /// return value for [`_RET_PARAM_ID`]. `None` as for
+    /// [`detached_outputs`](Self::detached_outputs), or for a port the node
+    /// has not output.
+    pub fn detached_output(&self, id: Uuid, port: Uuid) -> Option<Value> {
+        self.detached.output(id, port)
+    }
+
+    /// The value the cell of `node`'s argument `parameter` holds: what a node
+    /// reading `@node.parameter` reads. A detached node's argument bound to a
+    /// store key has a cell of its own, apart from the key: the port the key
+    /// is published from. `None` for an argument the tree does not have, or a
+    /// cell that holds nothing.
+    pub fn argument_value(&self, node: Uuid, parameter: Uuid) -> Option<Value> {
+        self.node_arg_variables
+            .get(&NodeParameterId { node, parameter })
+            .and_then(VariableCell::get)
+    }
+
+    /// Set the cell of `node`'s argument `parameter` to `value`, as a write
+    /// of the node would: a host restoring a node's state into a tree built
+    /// again from a changed node. Returns whether the tree has the argument.
+    pub fn set_argument_value(&self, node: Uuid, parameter: Uuid, value: Option<Value>) -> bool {
+        match self
+            .node_arg_variables
+            .get(&NodeParameterId { node, parameter })
+        {
+            Some(cell) => {
+                cell.set_opt(value);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The tree's detached nodes as text, one per line, in the order the tree
     /// lists them.
     pub fn display_detached(&self, names: Names) -> String {
@@ -161,7 +212,7 @@ impl BehaviorTree {
     /// tree being replaced. A cell bound to another node's argument is that
     /// node's to carry, and a store-backed cell holds nothing of the tree's. A
     /// tree-local variable that only fresh nodes read starts afresh with them.
-    pub(crate) fn keep_state(&self, previous: &BehaviorTree, fresh: &HashSet<Uuid>) {
+    pub fn keep_state(&self, previous: &BehaviorTree, fresh: &HashSet<Uuid>) {
         let mut read = HashSet::new();
         for node in self.node_index.values() {
             if fresh.contains(&node.id) {
