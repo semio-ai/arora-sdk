@@ -371,7 +371,7 @@ const EXAMPLES = [
   {
     id: "order", title: "Order within a tick",
     summary: "The tree writes v, reads v × 10, writes again, reads again, in one tick. When does a read see a write? The readings below the views show what each design answers.",
-    from: "compute-node and control-node tests",
+    from: "detached-node and control-node tests",
     seed: { v: 0 },
     controls: [],
     plot: ["v"], range: null,
@@ -705,7 +705,7 @@ class CallsEngine extends TreeEngine {
   setValue(n) { return this.expr(n.node, new Set(), null, n.id); }
 }
 
-// ---- semio-ai/arora-sdk#396: compute nodes, on demand and cached -----------
+// ---- semio-ai/arora-sdk#396: detached nodes, on demand and cached ----------
 class ComputeEngine extends TreeEngine {
   compile() { this.cache = new Map(); this.state = new Map(); this.pulled = new Map(); }
   pull(id) {
@@ -735,7 +735,7 @@ class ComputeEngine extends TreeEngine {
   setValue(n) { return this.pull(n.node); }
 }
 
-// ---- semio-ai/arora-sdk#397: compute nodes as leaves, in data order --------
+// ---- semio-ai/arora-sdk#397: graph nodes as leaves, in data order ---------
 class LeavesEngine extends TreeEngine {
   compile() {
     const M = this.model; this.vars = new Map(); this.state = new Map();
@@ -965,7 +965,7 @@ const DESIGNS = [
   {
     id: "shape", tab: "NG as BT", sub: "#332 · one tree, guarded patterns", name: "Node graphs as a shape of the tree",
     pr: "https://github.com/semio-ai/arora-sdk/pull/332", prText: "semio-ai/arora-sdk#332",
-    doc: "https://github.com/semio-ai/arora-sdk/blob/docs/proposal-reactive-nodes/docs/proposal-behavior-languages.md", color: "--p-shape",
+    doc: "https://github.com/semio-ai/arora-sdk/blob/db4c533cb9a49765419bf67561b96fe3515485d7/docs/proposal-behavior-languages.md", color: "--p-shape",
     lede: "One language, the behavior tree. A node graph is a PARALLEL with one pattern per node, FALLBACK[SEQ[changed?, f], SUCCEED], and a RUNNING leaf last.",
     rules: ["Edges are tree-local variables. A write advances a variable's version only when the value differs; changed? compares integers.", "A halt drops a node graph's state: variables, seen versions, smoothing. Damping restarts from its initial input.", "Values pass between node graphs and the tree through keys: here a feeder graph under a root PARALLEL computes what the tree's conditions read."],
     make: (m) => new ShapeEngine(m),
@@ -1003,27 +1003,28 @@ const DESIGNS = [
     },
   },
   {
-    id: "compute", tab: "NG in BT detached", sub: "#396 · on demand, cached", name: "Compute nodes beside the tree",
+    id: "compute", tab: "NG in BT detached", sub: "#396 · on demand, cached", name: "Graph nodes detached from the tree",
     pr: "https://github.com/semio-ai/arora-sdk/pull/396", prText: "semio-ai/arora-sdk#396", color: "--p-compute",
-    lede: "The graph's calls are compute nodes held beside the tree, read as #node. A node runs when a ticking leaf reads it, once per tick, and only when its argument values changed.",
-    rules: ["The first read of a node in a tick brings it up to date; later reads reuse it, so the second write in Order sees the first one's cached value.", "A settled graph makes no calls. A changed input runs only the nodes downstream of it.", "Compute nodes have no lifecycle: a branch's damping keeps its state while the branch is not ticked."],
+    lede: "A graph node is written like a tree node, with inputs and outputs; the tree just does not hold it. Detached, it runs when a node that reads its output, as @node, is about to tick: once per tick, and only when its argument values changed.",
+    rules: ["The first read of a node in a tick brings it up to date; later reads reuse it, so the second write in Order sees the first one's cached value.", "A settled graph makes no calls. A changed input runs only the nodes downstream of it.", "Detached nodes have no lifecycle: a branch's damping keeps its state while the branch is not ticked."],
     make: (m) => new ComputeEngine(m),
     stored(model) {
-      const show = (x) => { if (typeof x !== "string") return fmt(x); const n = model.nodes[x]; return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `#${x}`; };
-      const out = ["compute nodes, beside the tree"];
-      model.order.filter((id) => !SOURCE.has(model.nodes[id].op) && model.nodes[id].op !== "output").forEach((id) => { const n = model.nodes[id]; out.push(`  #${id} = ${n.op}(${argText(n, show)})`); });
-      out.push("", "tree");
-      return out.concat(treeLines(model, (n, pad, o) => {
-        if (n.k === "block") { o.push(`${pad}PARALLEL   ${n.label}`); n.outputs.forEach((id) => o.push(`${pad}  {${model.nodes[id].key}} = #${model.nodes[id].a.in}`)); o.push(`${pad}  RUNNING`); }
-        else if (n.k === "check") o.push(`${pad}Truthy(#${n.node})   ${n.label}`);
-        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? `#${n.node}` : fmt(n.value)}   ${n.label}`);
-      }, 1)).join("\n");
+      const show = (x) => { if (typeof x !== "string") return fmt(x); const n = model.nodes[x]; return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `@${x}`; };
+      const out = ["tree, held from its root"];
+      out.push(...treeLines(model, (n, pad, o) => {
+        if (n.k === "block") { o.push(`${pad}PARALLEL   ${n.label}`); n.outputs.forEach((id) => o.push(`${pad}  {${model.nodes[id].key}} = @${model.nodes[id].a.in}`)); o.push(`${pad}  RUNNING`); }
+        else if (n.k === "check") o.push(`${pad}Truthy(@${n.node})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? `@${n.node}` : fmt(n.value)}   ${n.label}`);
+      }, 1));
+      out.push("", "detached nodes: listed after the tree, held by no node");
+      model.order.filter((id) => !SOURCE.has(model.nodes[id].op) && model.nodes[id].op !== "output").forEach((id) => { const n = model.nodes[id]; out.push(`  ${id}: ${n.op}(${argText(n, show)})`); });
+      return out.join("\n");
     },
   },
   {
-    id: "leaves", tab: "NG in BT ∥", sub: "#397 · data order, every tick", name: "Compute nodes as leaves in data order",
+    id: "leaves", tab: "NG in BT ∥", sub: "#397 · data order, every tick", name: "Graph nodes as leaves in data order",
     pr: "https://github.com/semio-ai/arora-sdk/pull/397", prText: "semio-ai/arora-sdk#397", color: "--p-leaves",
-    lede: "The same compute nodes, resolved the same way, compiled to plain module leaves under a root PARALLEL in data order, ahead of the tree.",
+    lede: "The same graph nodes, resolved the same way, attached as plain module leaves under a root PARALLEL in data order, ahead of the tree.",
     rules: ["Every leaf runs every tick, whatever branch the tree takes. A node read by three conditions is one leaf: it runs once.", "The tree reads this tick's values; what the tree writes reaches the leaves at the next tick.", "Damping runs every tick even while its branch is inactive, so a branch that starts again jumps to where its easing already is."],
     make: (m) => new LeavesEngine(m),
     stored(model) {
@@ -1342,7 +1343,7 @@ function treeRows(R) {
   const readPort = (name, x) => ({ name, ...{
     shape: { src: `feeder:${x}`, text: `{.${x}}` },
     interp: { src: `feeder:${x}`, text: `{behavior/${x}}`, via: "store" },
-    compute: isCompute(x) ? { src: `c:${x}`, text: `#${x}` } : { text: source(x) },
+    compute: isCompute(x) ? { src: `c:${x}`, text: `@${x}` } : { text: source(x) },
     leaves: E.leaves?.includes(x) ? { src: `l:${x}`, text: `{.#${x}}` } : { text: source(x) },
     calls: { text: exprShow(model)(x) },
   }[designId] });
@@ -1369,9 +1370,9 @@ function treeRows(R) {
   }
   if (designId === "compute") {
     // The diagram spreads these beside their readers; the text lists them.
-    rows.push({ section: "Compute nodes, beside the tree", textOnly: true });
-    model.order.filter(isCompute).forEach((id) => row(0, `#${id} = ${model.nodes[id].op}(…)`, "data", id, "data", `#${id} = ${model.nodes[id].op}`, "",
-      { ports: portsOf(id, (x) => isCompute(x) ? `c:${x}` : null, (x) => isCompute(x) ? `#${x}` : source(x)), out: `c:${id}`, float: true }));
+    rows.push({ section: "Detached nodes", textOnly: true });
+    model.order.filter(isCompute).forEach((id) => row(0, `${id}: ${model.nodes[id].op}(…)`, "data", id, "data", `${id}: ${model.nodes[id].op}`, "",
+      { ports: portsOf(id, (x) => isCompute(x) ? `c:${x}` : null, (x) => isCompute(x) ? `@${x}` : source(x)), out: `c:${id}`, float: true }));
     rows.push({ section: "", textOnly: true });
   }
   if (designId === "leaves") {
@@ -1439,7 +1440,7 @@ function treeRows(R) {
           const ports = viaVar ? [{ name: "in", src: `${scope}:${top}`, text: `{.${top}}` }] : portsOf(top, (x) => named(x) ? `${scope}:${x}` : null, show);
           row(d + 1, `${target} = ${exprShow(model, P.named, id)(id)}`, "data", id, "data", `${target} = ${viaVar ? "output" : model.nodes[top].op}`, "", { leaf: true, ports, out: isOut ? null : `${scope}:${id}` });
         });
-      } else n.outputs.forEach((id) => { const target = `{${model.nodes[id].key}}`, src = model.nodes[id].a.in; row(d + 1, `${target} = ${designId === "compute" ? `#${src}` : `{.#${src}}`}`, "data", id, "data", target, "write", { leaf: true, ports: [readPort("value", src)] }); });
+      } else n.outputs.forEach((id) => { const target = `{${model.nodes[id].key}}`, src = model.nodes[id].a.in; row(d + 1, `${target} = ${designId === "compute" ? `@${src}` : `{.#${src}}`}`, "data", id, "data", target, "write", { leaf: true, ports: [readPort("value", src)] }); });
       row(d + 1, "RUNNING", "fixed", null, "action", "RUNNING", "keeps the block ticking", { fixedStatus: "R" });
       return;
     }
@@ -1631,7 +1632,7 @@ function treeDiagram(R, rows, folds, refold) {
     const a = n.children[0], b = n.children.at(-1), mid = (a.x + a.w / 2 + b.x + b.w / 2) / 2;
     n.x = Math.min(Math.max(mid - n.w / 2, x), x + n.W - n.w);
   };
-  // Nodes outside the tree (#396's compute nodes) go in columns on its left,
+  // Nodes outside the tree (#396's detached nodes) go in columns on its left,
   // each column after the ones it reads from.
   const fcol = new Map(), outs = new Map(floats.map((f) => [f.r.out, f]));
   for (const f of floats) { let k = 0; for (const p of f.r.ports || []) { const pr = outs.get(p.src); if (pr && fcol.has(pr)) k = Math.max(k, fcol.get(pr) + 1); } fcol.set(f, k); }
@@ -1811,7 +1812,7 @@ function patternBody(model, id) {
 function checkText(design, model, n) {
   if (design === "interp") return `Truthy({behavior/${n.node}})`;
   if (design === "calls") return `Truthy(${exprShow(model)(n.node)})`;
-  if (design === "compute") return `Truthy(#${n.node})`;
+  if (design === "compute") return `Truthy(@${n.node})`;
   if (design === "leaves") return `Truthy({.#${n.node}})`;
   return `Truthy({.${n.node}})`;
 }
@@ -1819,7 +1820,7 @@ function setText(design, model, n) {
   if (!n.node) return fmt(n.value);
   if (design === "interp") return `{behavior/${n.node}}`;
   if (design === "calls") return exprShow(model)(n.node);
-  if (design === "compute") return "#" + n.node;
+  if (design === "compute") return "@" + n.node;
   if (design === "leaves") return `{.#${n.node}}`;
   return `{.${n.node}}`;
 }
@@ -1877,8 +1878,8 @@ function viewNote(id) {
     interp: "Each region is a node graph running as a branch of its own. A run's nodes stay faded at the tick its run_graph leaf spawns it: the run starts at the next step.",
     shape: "The dataflow each node graph computes. A dotted border is a pattern whose changed? guard failed: its call did not run.",
     calls: "Dataflow as the calls nest. A node evaluated inline more than once in a tick shows how many times.",
-    compute: "Compute nodes as pulled this tick: called when an argument changed, a cache hit otherwise, faded when nothing read them.",
-    leaves: "Compute nodes in the order their leaves run, every tick, ahead of the tree.",
+    compute: "Detached nodes as pulled this tick: called when an argument changed, a cache hit otherwise, faded when nothing read them.",
+    leaves: "Graph nodes in the order their leaves run, every tick, ahead of the tree.",
     control: "One Vizij graph: dataflow on the left, control nodes on the right, each child edge dashed into its child_N port. Faded nodes are lazy and were not ticked.",
   }[id];
 }

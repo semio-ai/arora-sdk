@@ -1,7 +1,7 @@
-# Proposal: a behavior tree with its node graph beside it
+# Proposal: node graphs as detached nodes of the behavior tree
 
 Status: accepted direction, for implementation.
-Date: 2026-10-21.
+Date: 2026-10-22.
 
 A device runs two kinds of behavior. A behavior tree decides what starts,
 runs and ends: actions, skills. A node graph turns values into values every
@@ -9,38 +9,39 @@ tick: rigs, mappings, controllers. Semio Studio runs its emulated devices on
 the same Arora runtime as real ones, so a robot gets node graphs and a face
 gets behavior trees. Neither language belongs to one kind of device.
 
-This document states how a device runs both as one behavior: a behavior tree
-that holds the decisions, and **compute nodes** beside it that hold the
-dataflow. It states how Vizij's node graphs and skills move onto it, and in
-which stages. It replaces the design that
-[semio-ai/arora-sdk#299](https://github.com/semio-ai/arora-sdk/pull/299)
+This document states how a device runs both as one behavior tree, whose nodes
+are described one way whether the tree holds them or not. It states how
+Vizij's node graphs and skills move onto it, and in which stages. It replaces
+the design that [semio-ai/arora-sdk#299](https://github.com/semio-ai/arora-sdk/pull/299)
 merged. §8 records why this design was chosen over that one and over the
 other proposals.
 
 In short:
 
-- **One behavior, two flows.** The tree is the decision flow. Compute nodes
-  are the data flow. A tree leaf reads a compute node's output, `#node`, as
-  one of its arguments. No bridge node stands between the two.
-- **A compute node is one call to a module function.** Its arguments are
-  expressions: literals, variables, store keys, nested calls, and other
-  compute nodes' outputs.
-- **Compute nodes are evaluated on demand.** A node runs when a ticking leaf
-  reads it, or when a node it feeds runs. It runs at most once per tick, and
-  calls its function only when its argument values changed. A settled graph
-  makes no calls.
-- **Sinks write the store every tick.** A compute node whose output is a
-  store key is brought up to date after the tree ticks, whether or not the
-  tree reads it. Of two sinks of one key, the later one wins.
-- **Either flow stands alone.** A tree with no compute nodes is a behavior
-  tree as today. A node graph is compute nodes whose sinks run beside a tree
+- **One node, attached or detached.** Every node is described the same way:
+  a function, and one argument per parameter. Its inputs take values, and its
+  outputs (its return value and its mutable parameters) bind to variables,
+  store keys or other nodes' inputs. A node the tree holds is **attached**: it
+  runs when its parent ticks it. A call no node holds is **detached**: it
+  runs when its outputs are about to be read.
+- **Detaching a node states a contract**: when it computes does not matter,
+  only that its outputs are up to date when they are used.
+- **Reads are deduced, not marked.** A node reads another node's output as
+  `@node` or `@node.parameter`, or through the variable the output is bound
+  to. Lowering finds which detached node writes what each node reads, and
+  brings it up to date first. No expression is added for it.
+- **A detached node runs at most once per tick, and only when its inputs
+  changed.** A settled graph makes no calls, and an untaken branch's graph
+  does not run.
+- **An output bound to a store key makes a sink**, written at every tick after
+  the tree ticks. Of two sinks of one key, the later one wins.
+- **Either flow stands alone.** A tree with no detached nodes is a behavior
+  tree as today. A node graph is detached nodes whose sinks run beside a tree
   that does nothing.
-- **One interpreter.** The behavior tree's runtime evaluates compute nodes in
-  its own expression evaluator. Vizij's `ProcessingGraph` retires once faces
-  run on the tree.
-- **The node vocabulary becomes module functions.** Vizij's generic nodes
-  move into arora-sdk with their history. Each becomes a function whose state
-  is a mutable parameter (§4).
+- **One interpreter.** Vizij's `ProcessingGraph` retires once faces run on the
+  tree. Vizij's generic node vocabulary moves into arora-sdk with its history,
+  as module functions whose state is a mutable parameter (§4), as animation
+  already did.
 - **The integration goes in stages** (§6). The first translates the current
   Vizij faces and measures them against `ProcessingGraph`.
 
@@ -75,148 +76,195 @@ Semio organization.
 **The behavior tree** (`arora-behavior-tree` 9.1) keeps a runner, a
 `PARALLEL` root. A LOAD grafts the main behavior under it, and each spawn
 grafts a run beside it. A leaf calls a module function. Its return value
-reaches the tree through the `_RET_PARAM_ID` binding to a variable.
+reaches a variable through its `_ret` argument, and each mutable parameter is
+written back to the cell its argument names. The shared `Graph` model carries
+nodes and links; a link from another node's port lowers to a
+`NodeArgument`, which shares that port's cell.
 
-**The node graph** is Vizij's (vizij-rs: `vizij-graph-core`, the engine;
-`vizij-arora-behavior`, its interpreter `ProcessingGraph`):
+**Animation is in arora-sdk.** `arora-animation` 1.0.0 is the clip format, its
+evaluation and its players. `arora-animation-module` 1.0.0 declares it as the
+module `@arora/animation` 3.0.0, which every device, emulated or real, loads
+from its module directory ([animation](proposal-animation.md)). They came from
+vizij-rs with their history.
+
+**The node graph** is Vizij's (vizij-rs: `vizij-graph-core` 3.1, the engine;
+`vizij-arora-behavior` 7.2, its interpreter `ProcessingGraph`):
+- A node has named input ports and named output ports, `out` by default. A
+  store key is written by an `output` node.
 - Its root is a `layers` runner: the main behavior as one `flow`, then one
   `flow` per run, in spawn order. A later run writes after an earlier one.
 - A face's main behavior composes its sources in precedence order: its own
-  graphs, the mappings (the Studio and ROS4HRI profiles), the animations.
+  graphs, the mappings (the Studio and ROS4HRI profiles), the animations. The
+  animations step vizij-rs's own animation module, which vizij-rs keeps until
+  it depends on arora-sdk's.
 - It evaluates every node of its plan at every tick.
 - **Skills are node-graph fragments**: `look_at`, `play_viseme` and `say`
   (vizij-rs `vizij-arora-host`). A fragment computes its own lifecycle as
   data: it latches its start time through the store and computes its
   `Status` value.
 
-**Compute nodes**, the design of §3, exist in `arora-behavior-tree` as a
+**Detached nodes**, the design of §3, exist in `arora-behavior-tree` as a
 proof of concept ([#396](https://github.com/semio-ai/arora-sdk/pull/396),
 over the call expressions of
-[#395](https://github.com/semio-ai/arora-sdk/pull/395)). A tree is built
-with them in Rust only, through `load_behavior_tree_with_compute`. No stored
-format carries them yet.
+[#395](https://github.com/semio-ai/arora-sdk/pull/395)): a tree loaded with
+`load_behavior_tree_nodes_with` runs the calls it lists and no node holds.
 
 ## 2. The cases the design holds
 
-1. **A robot** runs its own behavior tree, with no compute nodes.
-2. **A Vizij face** runs its composed node graph as compute nodes, with skill
+1. **A robot** runs its own behavior tree, with no detached nodes.
+2. **A Vizij face** runs its composed node graph as detached nodes, with skill
    runs and programs spawned and halted beside it.
 3. **A robot with a face** runs one tree for both: its decisions, and the
    face's dataflow beside them.
-4. **A skill that decides and computes**: a tree whose leaves read compute
+4. **A skill that decides and computes**: a tree whose leaves read detached
    nodes for as long as the skill runs.
-5. **A graph that only computes**: compute nodes and their sinks, under a
+5. **A graph that only computes**: detached nodes and their sinks, under a
    tree that does nothing.
 6. **Control around dataflow**, such as greeting a person and then resting:
-   the tree chooses a branch, and only the compute nodes the chosen branch
+   the tree chooses a branch, and only the detached nodes the chosen branch
    reads run.
 
 ## 3. Design
 
-### 3.1 Compute nodes
+### 3.1 One node, attached or detached
 
-A compute node is one call to a module function, held beside the tree:
+A node is the tree's `Node`, whether the tree holds it or not:
 
 | Field | Meaning |
 |---|---|
-| `id` | The node's id. Other nodes and the tree reference it by this id. |
-| `function` | The module function it calls. |
-| `inputs` | One argument per parameter, by parameter id. An argument is an expression, as a tree node's argument is. |
-| `output` | Optional. A tree-local variable its return value is written to, or a store key, which makes the node a sink. |
-| `volatile` | Call the function at every tick the node is read, even when its arguments did not change. |
+| `id` | The node's id, by which other nodes reference its ports. |
+| `function` | The function it calls. |
+| `arguments` | One per parameter, by parameter id: an expression, as for any node. |
+| `children` | The nodes it ticks, for a control node. A detached node has none. |
 
-- **A node's ports** are its return value, read as `#node`, and the value of
-  each of its mutable parameters after its last call, read as
-  `#node.parameter`.
-- **An argument** is a literal, a variable, a store key, a nested call, or a
-  reference to another compute node's port. The references join the compute
-  nodes into a graph.
-- **The tree reads the graph through the same references.** A leaf's argument
-  can be `#cm` as it can be `{sensor/distance}`.
+**Every node has inputs and outputs.**
+- **An input** is a parameter. Its argument is a literal, a variable, a store
+  key, a nested call, a selection, or another node's port.
+- **An output** is the return value or a mutable parameter. The return value
+  is bound by the `_ret` argument; a mutable parameter is written back to the
+  cell its argument names. Any number of outputs can be bound, each to a
+  tree-local variable or a store key.
+- **A port** is read as `@node` (its return value) or `@node.parameter` (a
+  mutable parameter's value), or through the variable it is bound to. A
+  detached node's return value is a port whether or not `_ret` is bound.
 
-The text form lists one node per line, inputs before their readers:
+A Vizij node maps port for port: its named output ports are the return value
+and the mutable parameters of the function it becomes (§4.3).
+
+**Attachment is the only difference.**
+- A node is **attached** when the tree holds it: it is the root, or a child of
+  an attached node. It runs when its parent ticks it, as today.
+- A call to a module function that no node holds, and that holds no
+  children, is **detached**. It runs when its outputs are about to be read.
+  Detaching a node says that when it computes does not matter, only that its
+  outputs are up to date when they are used.
+- Another node no node holds, such as a control node an edit adds before the
+  edit that places it, waits until a node holds it, as today.
+
+**The text form is one syntax** for both kinds: a name and a colon when the
+node is named, its bound return value before `=`, then the call. Detached
+nodes are listed beside the tree:
 
 ```text
-#raw = mul(a: {sensor/distance}, b: 100f64)
-#cm = clamp(x: #raw, lo: 0f64)
-#level = add(a: #cm, b: 1f64) -> {face/level}
-```
+raw: mul(a: {sensor/distance}, b: 100f64)
+cm: clamp(x: @raw, lo: 0f64)
+level: {face/level} = add(a: @cm, b: 1f64)
 
-```text
 FALLBACK
-  below(x: #cm, limit: 10f64)
-  below(x: #cm, limit: 30f64)
+  below(x: @cm, limit: 10f64)
+  below(x: @cm, limit: 30f64)
 ```
 
-### 3.2 Evaluation
+### 3.2 Reads are deduced from the source
 
-- **On demand.** A node runs when a tree node that ticks reads it, or when a
-  node it feeds runs. A node read only by a fallback child that does not
-  tick does not run that tick.
-- **Once per tick.** The first read of a node in a tick brings it up to
-  date. Later reads in the tick reuse that result, however many readers it
+Nothing marks a read of a graph node. When the tree is lowered, it finds which
+detached node writes each tree-local cell: a bound return value, a mutable
+parameter's cell, or a variable an output is bound to. A node that reads such
+a cell, at any depth of its arguments, reads that detached node. Before it
+ticks, the detached nodes it reads are brought up to date; a detached node
+brings up to date those it reads first.
+
+A **store key** is read as the store holds it. A value fed back through a key,
+or passed from one graph to another through a key, reaches its reader at the
+next tick, as between Vizij's sources today.
+
+The **shared `Graph` model already carries this**: a detached node is a graph
+node no structure holds, and an edge is a link from its port
+(`LinkSource::Port`), which lowers to a `NodeArgument`.
+
+### 3.3 Evaluation
+
+- **Before its reader.** A detached node runs when a node that reads it is
+  about to tick, or when a node it feeds runs. A detached node read only by a
+  fallback child that does not tick does not run that tick.
+- **Once per tick.** The first read of a detached node in a tick brings it up
+  to date. Later reads in the tick reuse that result, however many readers it
   has. What the tree writes before the first read reaches the node. What it
   writes after reaches the node at the next tick, so a tick sees one snapshot
   of the graph.
-- **Only when its inputs changed.** Bringing a node up to date first brings
-  up to date the nodes it reads. The node then calls its function only when
-  its argument values differ from those of its last call. A changed input
+- **Only when its inputs changed.** A detached node calls its function only
+  when its argument values differ from those of its last call. A changed input
   runs only the nodes downstream of it, and a result that does not change
   stops the propagation there.
-- **A volatile node calls its function at every tick it is read,** once
-  however many readers it has. A sensor, a clock or a random source read as a
-  function is volatile. A store key is not: a changed key is a changed input.
+- **What changes at every tick runs at every tick.** A node that reads the
+  clock (`arora/time`, `arora/dt`) is called once per tick, however many
+  readers it has. A function whose result follows from none of its arguments
+  is called once, so what it depends on is passed as an argument.
 - **State lives in a mutable parameter.** A literal argument to a mutable
   parameter is the node's own cell. It starts from the literal and holds what
   the function writes back. A changed state is a changed input, so a stateful
   node runs until its state settles.
-- **Sinks run every tick.** A node whose output is a store key is brought up
-  to date after the tree ticks, whether or not the tree reads it. It writes
-  its key at every tick, from its cache when its inputs did not change. Of two
-  sinks of one key, the later in the nodes' order wins, as the later writer
-  does in a Vizij `flow`.
-- **A node nothing reads never runs**, unless it is a sink or feeds one.
+- **Sinks run every tick.** A detached node with an output bound to a store
+  key is brought up to date after the tree ticks, whether or not the tree
+  reads it. It writes its keys at every tick, from its cache when its inputs
+  did not change, and only after the tree has ticked: within a tick, the tree
+  reads the store as it was. Of two sinks of one key, the later in the list
+  wins, as the later writer does in a Vizij `flow`.
+- **A detached node nothing reads never runs**, unless it is a sink or feeds
+  one.
 
-The **plan** classifies every node from what reads it: `every_tick` holds the
-sinks and what they read, `on_demand` what the tree reads, and `unused` the
-rest (`BehaviorTree::compute_plan()`).
+The **plan** classifies every detached node from what reads it: `every_tick`
+holds the sinks and what they read, `on_demand` what the tree reads, and
+`unused` the rest (`BehaviorTree::detached_plan()`).
 
-**The build refuses** two compute nodes with one id; a cycle, since feedback
-goes through a store key; a reference to no compute node; and a compute node
-that reads a tree node's argument. **Lowering refuses** a call to the
-interpreter module, an argument to no parameter of the function, a port that
-is neither a return value nor a mutable parameter, and a mutable parameter fed
-by another node's port, a call or a selection.
+**The build refuses** a reference to no node. **Lowering refuses** detached
+nodes that read each other in a cycle, since feedback goes through a store
+key; a read of a port that is neither a return value nor a mutable parameter;
+a tree-local cell that a detached node and another node both write; a call to
+the interpreter module; an argument to no parameter of the function; and a
+mutable parameter fed by a call or a selection, neither of which has a cell
+to hold what the function writes back.
 
-### 3.3 Either flow alone
+### 3.4 Either flow alone
 
-- **A tree alone** has no compute nodes, and runs as a behavior tree runs
+- **A tree alone** has no detached nodes, and runs as a behavior tree runs
   today, at no added cost.
-- **A graph alone** is compute nodes whose sinks write the store, beside a
+- **A graph alone** is detached nodes whose sinks write the store, beside a
   tree that does nothing. The sinks run at every tick whatever the tree does.
 - **Most content is both.** The tree states the control that a node graph
   encodes as data today: a latched start time, a `Status` value computed from
   comparisons, a `taskrun` or `spawn` node. The graph keeps only what turns
   values into values.
 
-### 3.4 Lifetime
+### 3.5 Lifetime
 
-Compute nodes belong to the tree they are loaded with: the main behavior, or
-a run. Their caches and state live as long as that tree. A run's compute
-nodes go when the run ends.
+Detached nodes belong to the graph they are listed in: the main behavior, or
+a run. A run's detached nodes go when the run ends. Their state lives in
+their mutable parameters' cells, which an edit carries over as it does any
+node's. Their caches start afresh after an edit, which costs one call.
 
 They have no lifecycle of their own. A branch the tree stops ticking leaves
-its compute nodes as they are, so a smoothing node continues from where it
+its detached nodes as they are, so a smoothing node continues from where it
 was when the branch is ticked again. A behavior that needs to restart from
 its input resets the state through an argument.
 
-### 3.5 Authoring
+### 3.6 Authoring
 
 A behavior is shown and edited in two views of one stored form:
-- **the decision flow**, as a tree;
-- **the data flow**, as a node graph;
-- joined by links, from the compute node that produces a value to each leaf
-  that reads it.
+- **the decision flow**, the attached nodes, as a tree;
+- **the data flow**, the detached nodes, as a node graph;
+- joined by links, from the port that produces a value to each port that
+  reads it.
 
 The text form of §3.1 is the stored form's readable rendering, for reviews,
 diffs and agents. The diagrams and the text form in
@@ -227,18 +275,18 @@ refined before they reach the editors.
 
 arora-sdk stays free of Vizij. What moves is the generic node vocabulary, the
 value vocabulary, and the engine, which stays as the reference evaluator until
-faces leave `ProcessingGraph` (§6).
+faces leave `ProcessingGraph` (§6). Animation has already moved the same way.
 
 ### 4.1 What moves, what stays
 
 | vizij-rs | In arora-sdk | Stays in vizij-rs |
 |---|---|---|
-| `vizij-graph-core` 2.2 | **`arora-node-graph`**: the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature) as module functions (§4.3); the engine and plan, as the reference evaluator; the importer from a Vizij graph to compute nodes and a tree | — |
-| `vizij-api-core` 2.0 | **`arora-shape`**: shapes, typed paths, the value vocabulary (vec2–4, quat, color, transform), blend, coercion, write batches, the graph-spec JSON forms | — |
-| `vizij-arora-behavior` 5.1 | — | `ProcessingGraph`, until faces run on the tree; then it retires |
+| `vizij-graph-core` 3.1 | **`arora-node-graph`**: the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature) as module functions (§4.3); the engine and plan, as the reference evaluator; the importer from a Vizij graph to a tree and its detached nodes | — |
+| `vizij-api-core` 2.1 | **`arora-shape`**: shapes, typed paths, the value vocabulary (vec2–4, quat, color, transform), blend, coercion, write batches, the graph-spec JSON forms | — |
+| `vizij-arora-behavior` 7.2 | — | `ProcessingGraph`, until faces run on the tree; then it retires |
 | `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the editor's wasm bindings and registry export, over `arora-node-graph` |
 | `vizij-arora-host` | — | the face's composition, the standard and ROS4HRI mappings, the profiles, the skills |
-| `vizij-animation-core`, `vizij-animation-module` | **`arora-animation`** and **`arora-animation-module`**: the clip format, its evaluation and players, and the module ([animation](proposal-animation.md)) | — |
+| `vizij-animation-core` 5.0, `vizij-animation-module`, `vizij-animation-wasm` | **Moved**: `arora-animation` and `arora-animation-module` (`@arora/animation`) | until vizij-rs depends on the arora crates, then removed |
 
 - **No Vizij node kind enters `arora-node-graph`.** What is specific to Vizij
   is content: the face's sources, the mappings, the skills. A node only Vizij
@@ -254,7 +302,8 @@ faces leave `ProcessingGraph` (§6).
 
 The history moves with `git filter-repo`, which rewrites every commit's paths,
 so `git log` and `git blame` on the new paths reach back to the first commit
-with no `--follow`.
+with no `--follow`. Animation moved by this procedure
+([#372](https://github.com/semio-ai/arora-sdk/pull/372)).
 
 ```sh
 # 1. Extract, in a fresh clone: filter-repo rewrites the clone it runs in.
@@ -289,7 +338,7 @@ git branch -D vizij-extract
 5. **The new crates' first versions are published by hand**, `1.0.0`. Then
    each crate's trusted publisher is registered, and the release workflow
    publishes every later version.
-6. **In vizij-rs**, the crates depend on the arora crates, and the two moved
+6. **In vizij-rs**, the crates depend on the arora crates, and the moved
    crates are removed. Their last published versions stay on crates.io.
 
 The vizij-rs crates are licensed "MIT OR Apache-2.0", which allows them under
@@ -301,22 +350,25 @@ A Vizij graph translates node for node. Counted over 64 unique graphs (13
 face GLBs, the fixtures, the perf scenes, the host's skill and mapping assets,
 the standard adaptations), about 23,050 nodes over 86 node kinds:
 
-| Vizij feature | As compute nodes |
+| Vizij feature | As detached nodes |
 |---|---|
-| arithmetic, ranges, vectors, logic, noise | one function each, called by one compute node per graph node |
+| arithmetic, ranges, vectors, logic, noise | one function each, called by one detached node per graph node |
 | `input` | a store key as an argument. A default for an unset key is an optional parameter with a default, or a `default(x, d)` function. |
-| `output` | a sink, with the later sink winning, as the later `output` does in a `flow` |
-| the keyed-batch `output`, which writes keys named by data | not yet: a sink writes one static key (§9) |
+| `output` | an output port bound to a store key, with the later sink winning, as the later `output` does in a `flow` |
+| the keyed-batch `output`, which writes keys named by data | not yet: an output binds one static key (§9) |
 | non-input params (`half_life`, `case_labels`, noise settings) | literal arguments |
 | variadic inputs (`operand_N`, `args_N`), most edges | an array parameter and an array-building function, or functions specialized by arity |
-| multi-output ports | the return value and mutable parameters, read as `#node.parameter`, or a record return read through a selection |
+| named output ports (`weightedsumvector`, `readrecord`, `urdffk`) | the return value and mutable parameters, each bindable and read as `@node.parameter`; or a record return read through a selection |
 | hidden state (`damp`, `spring`, `slew`, the URDF cache) | the function exposes its state as a mutable parameter |
-| `time`, `oscillator`, `dt` | functions reading `arora/time` and `arora/dt` as arguments |
+| `time`, `oscillator`, `dt` | functions taking `arora/time` and `arora/dt` as arguments, so they run once per tick |
 | implicit coercion and broadcasting | inside the functions, whose parameters stay dynamically typed |
 | `case` and `if` | functions that evaluate every branch, as Vizij does |
-| `taskrun`, `spawn` | tree leaves and spawned runs: they are control |
-| `externalfunction` | a compute node: it is a module call already |
-| unused nodes | never evaluated: no reader pulls them |
+| `taskrun`, `spawn` | attached leaves and spawned runs: they are control |
+| `externalfunction` | a detached node: it is a module call already. A face's animation step calls `@arora/animation`'s `step` with the clock. |
+| unused nodes | never evaluated: nothing reads them |
+
+The animation step returns its tracks as values named by data, which a face
+writes under the keys the tracks name: the keyed output of §9.
 
 ## 5. What carries over from the previous design
 
@@ -325,18 +377,18 @@ stay:
 
 - **A graph travels with its type and version** in load, edit and spawn, as
   it already does in `SPAWN_GRAPH`. The device declares one type,
-  `behavior-tree`, whose format gains compute nodes (§7).
+  `behavior-tree`, whose format gains detached nodes (§7).
 - **Every function of the behavior module is described**: `load` and `edit`
   join `spawn`, `spawn_graph` and `halt` in `DescribeMethods`, and
   `branches()` lists what runs and what each writes.
 - **Loaded graphs and runs tick in a stated order**: the loaded graphs in
   load order, then the runs in spawn order.
 - **Two runs writing one key is an error.** The keys a tree writes are
-  analyzed from the tree, and now include the store keys of its sinks. An
-  overlap refuses the spawn, or fails the write. `Replace` and `Overlap`
-  join `Concurrent` as run policies.
+  analyzed from the tree, and now include its sinks' keys. An overlap refuses
+  the spawn, or fails the write. `Replace` and `Overlap` join `Concurrent` as
+  run policies.
 - **Skills are behavior trees.** `look_at`, `play_viseme` and `say` become
-  trees whose computation is compute nodes of the run.
+  trees whose computation is detached nodes of the run.
 
 These parts no longer apply: the interpreter components and the `node-graph`
 component, the `layers` and `flow` composites, whose precedence becomes the
@@ -348,7 +400,8 @@ Each stage lands on its own and states what it hands to the next.
 
 1. **Faces translated and measured.** The node vocabulary moves into
    arora-sdk (§4.2) and gains its functions (§4.3). An importer translates
-   each composed face and fixture into compute nodes and a tree, in Rust.
+   each composed face and fixture into a tree and its detached nodes, in Rust,
+   the animation sources calling `@arora/animation`.
    - An equivalence test runs each graph over recorded inputs, on
      `ProcessingGraph` and on the tree, and compares every written key at
      every tick.
@@ -358,18 +411,17 @@ Each stage lands on its own and states what it hands to the next.
      tick against `ProcessingGraph`. Value comparison costs a pass over a
      large value at every read; if the measure shows it, versions replace it
      (§9).
-2. **Compute nodes in the stored format.** The shared `Graph` model, the
-   Groot import and the YAML form carry compute nodes, as `behavior-tree 1.2`.
-   An edit keeps the caches and state of the compute nodes it leaves, as it
-   keeps a tree node's. Traces cover compute nodes. `arora-behavior-tree`
-   takes a major: `Expression` gains `Computed`.
-3. **Runs and skills.** A run's compute nodes are scoped to it and removed
+2. **Detached nodes in the stored format.** `behavior-tree 1.2` runs the calls
+   a graph lists and no node holds. The shared `Graph` already carries them
+   and their links; the YAML form lists them after the tree. Traces cover
+   detached nodes, and an edit keeps their caches.
+3. **Runs and skills.** A run's detached nodes are scoped to it and removed
    with it. `look_at`, `play_viseme` and `say` become trees. A face's
-   `taskrun` and `spawn` nodes become tree leaves and spawned runs.
+   `taskrun` and `spawn` nodes become attached leaves and spawned runs.
 4. **Faces on the tree.** Vizij's host loads the imported face as a tree with
-   compute nodes. `ProcessingGraph` and `vizij-arora-behavior` retire.
+   detached nodes. `ProcessingGraph` and `vizij-arora-behavior` retire.
 5. **Authoring.** Studio and Vizij's editors show the decision flow and the
-   data flow joined by links, and edit both (§3.5).
+   data flow joined by links, and edit both (§3.6).
 6. **The device-level parts of §5**: `load` and `edit` described,
    `branches()`, write analysis with sinks, `Replace` and `Overlap`.
 
@@ -377,20 +429,20 @@ Each stage lands on its own and states what it hands to the next.
 
 | Crate or surface | Change |
 |---|---|
-| `arora-behavior-tree` (9.1) | Major: `Expression::Computed`, compute nodes, `behavior-tree 1.2`. |
-| `arora-behavior` (9.6) | Major: compute nodes in `Graph` and `GraphDiff`, whose fields are public. Minor: `Replace` and `Overlap`, since `RunPolicy` is non-exhaustive. |
+| `arora-behavior-tree` (9.1) | Minor: detached nodes, `behavior-tree 1.2`. `Expression` does not change. |
+| `arora-behavior` (9.6) | No change for detached nodes: `Graph` carries them. Minor with §5: `Replace` and `Overlap`, since `RunPolicy` is non-exhaustive. |
 | `arora` (13.6), `arora-web` | Minor: `load` and `edit` described. Major with §5: `Concurrent` refuses an overlap it accepted before. |
 | `arora-node-graph`, `arora-shape` | New, `1.0.0`. |
-| `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior` | No further release once vizij-rs depends on the arora crates. |
+| `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior`, `vizij-animation-core`, `vizij-animation-module` | No further release once vizij-rs depends on the arora crates. |
 | `vizij-arora-host` | Major: it registers the skills as trees. |
 | Studio Bridge, WebSocket and ROS 2 bridges | No change: they list and call described functions already. |
-| Graph formats | `behavior-tree 1.2` adds compute nodes. A Vizij node graph is read by the importer only. |
+| Graph formats | `behavior-tree 1.2` runs the calls no node holds. A Vizij node graph is read by the importer only. |
 
 ## 8. Decision record
 
 ### 8.1 The decision
 
-Node graphs run as compute nodes beside the behavior tree, the design of §3,
+Node graphs run as detached nodes of the behavior tree, the design of §3,
 first proposed in [#396](https://github.com/semio-ai/arora-sdk/pull/396).
 It was chosen over the five designs of §8.2, compared on the examples of
 [The NGBT spectrum](ngbt-spectrum.html). Its *Greet, then rest* example
@@ -402,17 +454,17 @@ The design was chosen because:
 - **It unifies both languages without giving up either.** A tree keeps every
   control node, task run and module leaf. A graph keeps its nodes, its sinks
   and their precedence.
-- **Its stored form is the most readable, for people and for agents.** The
-  tree holds control only. The graph is one line per node, and an edge is a
-  reference to a node.
+- **Its stored form is the most readable, for people and for agents.** Every
+  node is written one way, the tree holds control only, and an edge is a
+  reference to a node's port.
 - **It matches how behavior is presented to authors**: a decision flow and a
-  data flow, joined where the tree reads a value.
-- **It runs both efficiently.** Pull evaluation skips what no ticking leaf
+  data flow, joined where a node reads a value.
+- **It runs both efficiently.** Pull evaluation skips what no ticking node
   reads, and the input cache skips settled calls.
-- **A pure tree stays a pure tree,** with no compute nodes and no cost.
+- **A pure tree stays a pure tree,** with no detached nodes and no cost.
 - **A pure graph needs only a minimal tree** for its sinks to run beside.
 - **It covers Vizij's motion graphs, and simplifies their content.** The
-  control a graph encodes as data today moves into the tree (§3.3).
+  control a graph encodes as data today moves into the tree (§3.4).
 
 It is the compromise to build on now, for the short and middle term, given the
 current goals, timeframe and knowledge. It is not proven as the long-term
@@ -428,8 +480,8 @@ Each row is a design the comparison simulates, under its tab name there.
 | NG + BT | [semio-ai/arora-sdk#299](https://github.com/semio-ai/arora-sdk/pull/299) | On an interpreter of its own, as a branch the host ticks beside the tree's |
 | NG as BT | [semio-ai/arora-sdk#332](https://github.com/semio-ai/arora-sdk/pull/332) | As a fixed shape of plain tree nodes, one guarded pattern per graph node |
 | BT with expressions | [semio-ai/arora-sdk#395](https://github.com/semio-ai/arora-sdk/pull/395) | As nested call expressions in the arguments of tree leaves |
-| **NG in BT detached** (chosen) | [semio-ai/arora-sdk#396](https://github.com/semio-ai/arora-sdk/pull/396) | As compute nodes beside the tree, evaluated on demand and cached |
-| NG in BT ∥ | [semio-ai/arora-sdk#397](https://github.com/semio-ai/arora-sdk/pull/397) | As the same compute nodes, compiled to leaves under a root `PARALLEL`, in data order |
+| **NG in BT detached** (chosen) | [semio-ai/arora-sdk#396](https://github.com/semio-ai/arora-sdk/pull/396) | As detached nodes: calls the tree does not hold, run when their outputs are read, and cached |
+| NG in BT ∥ | [semio-ai/arora-sdk#397](https://github.com/semio-ai/arora-sdk/pull/397) | As the same nodes, attached as leaves under a root `PARALLEL`, in data order |
 | BT in NG | [vizij-ai/vizij-rs#257](https://github.com/vizij-ai/vizij-rs/pull/257) | The other way round: control nodes in Vizij's node graph tick the nodes wired into them |
 
 **NG + BT: interpreters running graphs as branches.** Behavior trees and
@@ -460,9 +512,9 @@ ticks. A cascade reads in place.
 - *Why not:* a value read by several leaves is computed by each, and nothing
   is cached. A shared value needs a leaf of its own and a variable.
 
-**NG in BT ∥: compute nodes as leaves in data order.** The compute nodes of
-the chosen design, resolved the same way, compiled to plain module leaves
-under a root `PARALLEL`, ahead of the tree.
+**NG in BT ∥: graph nodes as leaves in data order.** The nodes of the chosen
+design, resolved the same way, attached as plain module leaves under a root
+`PARALLEL`, ahead of the tree.
 - *What it keeps:* no evaluation rule beyond the tree's.
 - *Why not:* every leaf runs at every tick, whatever branch the tree takes.
   What the tree writes reaches the leaves at the next tick. A smoothing keeps
@@ -484,21 +536,29 @@ lazy, and runs only when its branch is ticked.
 
 The design holds without them. Each is settled before the stage it touches.
 
-- **Versions instead of value comparison.** A compute node compares its
+- **Versions instead of value comparison.** A detached node compares its
   argument values with those of its last call. For a transform or a
   52-element blend-shape array, that is a pass over the value at every read.
   Versions on cells cost one integer comparison, and need the store to
   version its writes.
-- **Keyed-batch outputs**, which write keys named by data: a sink with a
+- **Functions whose result follows from no argument**, such as a sensor or a
+  random source read as a function. Called once, they keep their first result.
+  An effect stated in the function's description would let them run at every
+  tick they are read.
+- **Keyed outputs**, which write keys named by data: Vizij's keyed-batch
+  `output`, and the tracks the animation step returns. An output with a
   dynamic key, and how the write analysis treats it.
 - **Variadic inputs**: an array parameter, or functions specialized by arity.
 - **Selections on records** read by field name, as Vizij's edges select a
   `KeyValue` field.
 - **Restarting state.** Whether a branch ticked anew restarts its smoothing
-  by default, or only through an argument (§3.4).
+  by default, or only through an argument (§3.5).
 - **Store hops between a face's sources** (ROS4HRI, adaptation, pose driver,
-  rig). Kept as sinks and inputs, each hop costs a tick, as today. Merged
-  into one graph, the hops resolve within the tick: a timing change to make
-  deliberately.
-- **Names**: the `#node` syntax, the crates, and the module of node
+  rig). Kept as sinks and inputs, each hop costs a tick, as today. Read as
+  ports within one graph, the hops resolve within the tick: a timing change to
+  make deliberately.
+- **A call an edit adds before the edit that places it** runs as a detached
+  node meanwhile. An authoring tool that adds a leaf and its placement in one
+  edit avoids it.
+- **Names**: the `@node` syntax, the crates, and the module of node
   functions.
