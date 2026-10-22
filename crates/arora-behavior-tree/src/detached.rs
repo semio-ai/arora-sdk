@@ -473,12 +473,19 @@ impl Detached {
                 if computed {
                     return refuse("an input a call or a selection computes, with no cell to feed");
                 }
-                if *port != _RET_PARAM_ID
-                    && self.bindings.contains_key(&NodeParameterId {
+                // The store binding is the port's when the input is a tree
+                // node's, and the input's own when it is a detached node's.
+                let store_bound = [
+                    &NodeParameterId {
                         node: node.id,
                         parameter: *port,
-                    })
-                {
+                    },
+                    input,
+                    target,
+                ]
+                .into_iter()
+                .any(|bound| self.bindings.contains_key(bound));
+                if *port != _RET_PARAM_ID && store_bound {
                     return refuse(
                         "an input that names a store key: bind both to a tree-local variable",
                     );

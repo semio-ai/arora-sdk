@@ -858,3 +858,34 @@ fn a_refused_tree_leaves_no_tick_registered() {
     assert!(crate::lower_behavior_tree(tree, &index(), &mut engine, false).is_err());
     assert!(engine.registered.is_empty(), "every tick is unregistered");
 }
+
+/// A mutable parameter whose id a call computes, fed by a call, has no cell to
+/// hold what the function writes back: the tick fails rather than drop it.
+#[test]
+fn a_mutation_with_no_cell_to_hold_it_fails_the_tick() {
+    const STATE_ID: u128 = 0x57A7;
+    let Expression::Call(mut smooth) =
+        call(SMOOTH, vec![(SMOOTH_X, f(1.0)), (SMOOTH_ALPHA, f(1.0))])
+    else {
+        unreachable!("call builds a call");
+    };
+    smooth
+        .arguments
+        .push((variable(STATE_ID), call(BATTERY, vec![])));
+    let tree = tree(vec![node(
+        1,
+        BELOW,
+        vec![(BELOW_X, Expression::Call(smooth)), (BELOW_LIMIT, f(30.0))],
+    )]);
+    tree.variables.borrow()[&Uuid::from_u128(STATE_ID)]
+        .set(Value::ArrayU8(SMOOTH_STATE.as_bytes().to_vec()));
+    let mut engine = Engine::default();
+    let error = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false)
+        .expect("it lowers")
+        .tick()
+        .expect_err("the state has nowhere to go");
+    assert!(
+        error.to_string().contains("has no cell to hold it"),
+        "{error}"
+    );
+}

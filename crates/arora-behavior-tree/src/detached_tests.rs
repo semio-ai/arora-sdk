@@ -1428,6 +1428,26 @@ fn lowering_refuses_an_output_bound_to_an_input_with_no_cell_to_feed() {
     );
     let error = lowering_error(vec![below(1, key("in"), 3.0)], vec![smooth]);
     assert!(error.contains("names a store key"), "{error}");
+
+    // The same, into a detached node's input naming a store key.
+    let smooth = compute(
+        50,
+        SMOOTH,
+        vec![
+            (SMOOTH_X, f(1.0)),
+            (SMOOTH_ALPHA, f(1.0)),
+            (SMOOTH_STATE, port(51, ADD_A)),
+        ],
+        None,
+    );
+    let consumer = compute(
+        51,
+        ADD,
+        vec![(ADD_A, key("in")), (ADD_B, f(1.0))],
+        Some("out"),
+    );
+    let error = lowering_error(vec![below(1, f(1.0), 3.0)], vec![consumer, smooth]);
+    assert!(error.contains("names a store key"), "{error}");
 }
 
 /// A sink that fails stops no other: the healthy sink publishes its key, and
@@ -1538,4 +1558,30 @@ fn lowering_refuses_an_output_bound_to_an_alias_of_a_computed_input() {
         vec![add],
     );
     assert!(error.contains("a call or a selection computes"), "{error}");
+}
+
+/// Two returns feeding inputs that alias one another, each naming a store
+/// key, feed one cell: lowering refuses the second writer at every load,
+/// whatever order the loader visits the aliases in.
+#[test]
+fn returns_feeding_aliased_inputs_share_one_cell() {
+    for load in 0..16 {
+        let feeding = |node: u128, target: Expression| {
+            let mut add = compute(node, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+            add.arguments.insert(_RET_PARAM_ID, target);
+            add
+        };
+        let error = lowering_error(
+            vec![
+                control(10, SEQ_FUNCTION_ID, &[1, 2]),
+                below(1, key("in"), 3.0),
+                below(2, port(1, BELOW_X), 3.0),
+            ],
+            vec![feeding(50, port(1, BELOW_X)), feeding(51, port(2, BELOW_X))],
+        );
+        assert!(
+            error.contains("one tree-local cell"),
+            "load {load}: {error}"
+        );
+    }
 }

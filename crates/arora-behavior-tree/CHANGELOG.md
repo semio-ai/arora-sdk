@@ -57,7 +57,8 @@ All notable changes to `arora-behavior-tree`. The format follows
     takes over each call site's state and the variables its calls name.
   - Lowering refuses a call to the interpreter module, an argument for a
     parameter the function does not have, and a mutable parameter fed by a
-    selection or a call.
+    selection or a call. When a call computes the parameter's id, the tick
+    fails if the function writes back such a parameter.
   - A leaf evaluates its arguments in its function's parameter order; the core
     string nodes compute theirs too, and read a selection's value. A call computing a module, function or
     parameter id keeps a call site's state as an argument's call does.

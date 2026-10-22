@@ -1242,7 +1242,9 @@ pub fn load_behavior_tree_nodes_with(
     }
 
     // An argument that reads a fed input, at any remove, shares the cell it
-    // now has, wherever the sweep set it up.
+    // now has, wherever the sweep set it up: the cell of the last fed input of
+    // its chain, which no fed input aliases, so the result does not depend on
+    // the order the arguments are visited in.
     if !fed_inputs.is_empty() {
         let sources: HashMap<NodeParameterId, NodeParameterId> = node_index
             .values()
@@ -1262,19 +1264,18 @@ pub fn load_behavior_tree_nodes_with(
             .collect();
         for reader in sources.keys() {
             let mut at = reader;
+            let mut fed = None;
             for _ in 0..sources.len() {
                 let Some(source) = sources.get(at) else {
                     break;
                 };
-                if let Some(cell) = fed_inputs
-                    .contains(source)
-                    .then(|| node_parameters_variables.get(source).cloned())
-                    .flatten()
-                {
-                    node_parameters_variables.insert(reader.clone(), cell);
-                    break;
+                if fed_inputs.contains(source) {
+                    fed = Some(source);
                 }
                 at = source;
+            }
+            if let Some(cell) = fed.and_then(|fed| node_parameters_variables.get(fed).cloned()) {
+                node_parameters_variables.insert(reader.clone(), cell);
             }
         }
     }
@@ -1645,12 +1646,14 @@ fn call_expression(
     let function = scope.calls.get(&function_id).map(|f| &f.function);
     let mut args = Vec::with_capacity(call.arguments.len());
     let mut written = Vec::new();
+    let mut unwritable = Vec::new();
     for (arg_id_expression, value_expression) in &call.arguments {
         let arg_id = compute_uuid(scope, arg_id_expression, caller, node_parameter)?;
         let value = compute_expression(scope, value_expression, caller, node_parameter)?;
         let optional = function.is_some_and(|function| is_optional(function, &arg_id));
-        if let Some(cell) = written_cell(scope, value_expression) {
-            written.push((arg_id, cell, optional));
+        match written_cell(scope, value_expression) {
+            Some(cell) => written.push((arg_id, cell, optional)),
+            None => unwritable.push(arg_id),
         }
         args.push(StructureField {
             id: arg_id,
@@ -1667,9 +1670,21 @@ fn call_expression(
             args,
         })
         .map_err(BehaviorTreeError::CallError)?;
+    // Lowering refuses a mutable parameter fed by a selection or a call when
+    // the call states its parameter; one it computes is checked here, when
+    // the function writes it back.
     for mutated in result.mutated {
         if let Some((_, cell, optional)) = written.iter().find(|(id, ..)| *id == mutated.id) {
             write_back(cell, *mutated.value, *optional);
+        } else if unwritable.contains(&mutated.id) {
+            return Err(BehaviorTreeError::InconsistentTreeError {
+                message: format!(
+                    "{node_parameter}: {} writes back parameter {}, whose argument, a selection \
+                     or a call, has no cell to hold it",
+                    Expression::Call(Box::new(call.clone())).display(Names::functions(scope.calls)),
+                    mutated.id
+                ),
+            });
         }
     }
     Ok(result.ret)
