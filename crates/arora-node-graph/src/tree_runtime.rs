@@ -14,7 +14,7 @@
 //! what a device runs.
 use std::collections::{HashMap, HashSet};
 
-use arora_behavior_tree::{lower_behavior_tree, BehaviorTree, FunctionIndex, LoweredTree};
+use arora_behavior_tree::{lower_behavior_tree, BehaviorTree, LoweredTree};
 use arora_shape::{Shape, TypedPath, Value, WriteBatch, WriteOp};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
@@ -60,6 +60,8 @@ pub struct TreeRuntime {
     pub spawns: Vec<SpawnRequest>,
     /// How many times a graph was loaded: the tree is built at each.
     loads: u64,
+    /// Whether an evaluation fills [`outputs`](Self::outputs).
+    collect_outputs: bool,
     evaluation: Evaluation,
     store: SimpleDataStore,
     module: NodeGraphModule,
@@ -80,6 +82,8 @@ struct Loaded {
     lowered: LoweredTree,
     /// The graph's node indices in the reference evaluator's order.
     order: Vec<usize>,
+    /// The indices of its `output` nodes, in that order.
+    outputs: Vec<usize>,
 }
 
 impl Default for TreeRuntime {
@@ -98,6 +102,7 @@ impl TreeRuntime {
             writes: WriteBatch::default(),
             spawns: Vec::new(),
             loads: 0,
+            collect_outputs: true,
             evaluation,
             store: SimpleDataStore::new(),
             module: NodeGraphModule::new(),
@@ -115,6 +120,13 @@ impl TreeRuntime {
     /// Stage `value` on `path` for the next evaluation, which alone sees it.
     pub fn set_input(&mut self, path: TypedPath, value: Value, declared: Option<Shape>) {
         self.staged.insert(path, (value, declared));
+    }
+
+    /// Whether an evaluation fills [`outputs`](Self::outputs) with what
+    /// every node computed (the default), or only makes the writes: a host
+    /// that only applies the writes saves a copy of every port.
+    pub fn set_collect_outputs(&mut self, collect: bool) {
+        self.collect_outputs = collect;
     }
 
     /// How many times a graph was loaded, the tree built at each.
@@ -219,14 +231,18 @@ impl TreeRuntime {
             .enumerate()
             .map(|(at, node)| (node.id.as_str(), at))
             .collect();
-        let order = order.iter().map(|id| index[id.as_str()]).collect();
-        let functions: FunctionIndex = function_index().clone();
+        let order: Vec<usize> = order.iter().map(|id| index[id.as_str()]).collect();
+        let outputs = order
+            .iter()
+            .copied()
+            .filter(|at| spec.nodes[*at].kind == NodeType::Output)
+            .collect();
         let mut bridge = self.module.bridge(inner);
         if let Some(previous) = &self.loaded {
             carry_state(&tree, previous, &imported);
         }
-        let lowered =
-            lower_behavior_tree(tree, &functions, &mut bridge, false).map_err(|e| e.to_string())?;
+        let lowered = lower_behavior_tree(tree, function_index(), &mut bridge, false)
+            .map_err(|e| e.to_string())?;
         if let Some(previous) = self.loaded.take() {
             previous.lowered.unregister(&mut bridge);
         }
@@ -237,6 +253,7 @@ impl TreeRuntime {
             imported,
             lowered,
             order,
+            outputs,
         });
         Ok(())
     }
@@ -306,7 +323,12 @@ impl TreeRuntime {
         // What every observed node computed, and what the outputs wrote.
         let tree = loaded.lowered.tree();
         let mut keyed = StateChange::new();
-        for at in &loaded.order {
+        let visited = if self.collect_outputs {
+            &loaded.order
+        } else {
+            &loaded.outputs
+        };
+        for at in visited {
             let (node, graph_node) = (&loaded.spec.nodes[*at], &loaded.imported.graph_nodes[*at]);
             let Some(returned) = loaded.imported.returned(tree, graph_node) else {
                 continue;
@@ -354,7 +376,9 @@ impl TreeRuntime {
                     }
                 }
             }
-            self.outputs.insert(node.id.clone(), ports);
+            if self.collect_outputs {
+                self.outputs.insert(node.id.clone(), ports);
+            }
         }
         if !keyed.set.is_empty() {
             self.store.write(keyed).map_err(|e| e.to_string())?;

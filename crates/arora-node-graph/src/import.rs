@@ -40,7 +40,7 @@ use uuid::Uuid;
 
 use crate::eval::plan::output_layout;
 use crate::functions::{
-    declared_inputs, dt_param, encode_params, encode_selector, external_function, function_id,
+    declares_input, dt_param, encode_params, encode_selector, external_function, function_id,
     input_param, is_action, is_stateful, node_param, output_field, output_shapes_param,
     ports_param, reads_dt, reads_time, select_function, selector_param, state_param, time_param,
     VARIADIC_PORTS,
@@ -178,7 +178,7 @@ impl ImportedGraph {
         if node.attached {
             tree.argument_value(node.tree_id, _RET_PARAM_ID)
         } else {
-            tree.detached_outputs(node.tree_id)?.remove(&_RET_PARAM_ID)
+            tree.detached_output(node.tree_id, _RET_PARAM_ID)
         }
     }
 }
@@ -279,12 +279,11 @@ pub fn import(spec: &GraphSpec, options: &ImportOptions) -> Result<ImportedGraph
     let no_connections = hashbrown::HashMap::new();
     for (node, graph_node) in spec.nodes.iter().zip(&graph_nodes) {
         let mut arguments: HashMap<Uuid, Expression> = HashMap::new();
-        let declared: HashSet<String> = declared_inputs(&node.kind).into_iter().collect();
         let wired = connections.get(&node.id).unwrap_or(&no_connections);
         let mut ports: Vec<(&String, &InputConnection)> = wired.iter().collect();
         ports.sort_by(|a, b| a.0.cmp(b.0));
         for (port, connection) in ports {
-            if !declared.contains(port.as_str()) {
+            if !declares_input(&node.kind, port) {
                 if is_variadic_past_the_last(&node.kind, port) {
                     return Err(format!(
                         "node '{}' wires its input '{port}', past the {VARIADIC_PORTS} ports \

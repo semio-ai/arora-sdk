@@ -34,8 +34,9 @@
 //! [`NodeGraphModule`] runs the functions in-process: [`NodeGraphModule::bridge`]
 //! wraps the device's [`CallBridge`] and answers the calls to this module
 //! itself, passing every other call through.
-use std::collections::HashMap;
 use std::sync::OnceLock;
+
+use hashbrown::HashMap;
 
 use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_shape::{Shape, TypedPath, Value};
@@ -173,13 +174,37 @@ pub fn function_id(kind: &NodeType) -> Uuid {
 
 /// The id of the input port `port`, as a parameter of any function.
 pub fn input_param(port: &str) -> Uuid {
-    derived(&format!("in:{port}"))
+    static IDS: OnceLock<HashMap<String, Uuid>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        input_ports()
+            .iter()
+            .map(|port| (port.clone(), derived(&format!("in:{port}"))))
+            .collect()
+    })
+    .get(port)
+    .copied()
+    .unwrap_or_else(|| derived(&format!("in:{port}")))
+}
+
+/// The id of the input port `in`.
+fn in_param() -> Uuid {
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| input_param("in"))
 }
 
 /// The id of the node parameter `field` (a [`NodeParams`] field), as a
 /// parameter of any function.
 pub fn param_field(field: &str) -> Uuid {
-    derived(&format!("param:{field}"))
+    static IDS: OnceLock<HashMap<&'static str, Uuid>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        FIELDS
+            .iter()
+            .map(|(field, _)| (*field, derived(&format!("param:{field}"))))
+            .collect()
+    })
+    .get(field)
+    .copied()
+    .unwrap_or_else(|| derived(&format!("param:{field}")))
 }
 
 /// The field id of the output port `port` in the structure a multi-port
@@ -190,49 +215,58 @@ pub fn output_field(port: &str) -> Uuid {
 
 /// The structure id of a multi-port node's outputs.
 pub fn outputs_structure() -> Uuid {
-    derived("structure:outputs")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("structure:outputs"))
 }
 
 /// The parameter holding a stateful node's state, which a call writes back.
 pub fn state_param() -> Uuid {
-    derived("state")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("state"))
 }
 
 /// The parameter holding the graph's time.
 pub fn time_param() -> Uuid {
-    derived("t")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("t"))
 }
 
 /// The parameter holding the step's duration.
 pub fn dt_param() -> Uuid {
-    derived("dt")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("dt"))
 }
 
 /// The parameter listing a multi-port node's output ports, in order.
 pub fn ports_param() -> Uuid {
-    derived("ports")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("ports"))
 }
 
 /// The parameter holding a node's declared output shapes, as JSON.
 pub fn output_shapes_param() -> Uuid {
-    derived("output_shapes")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("output_shapes"))
 }
 
 /// The parameter holding the node's id in the graph.
 pub fn node_param() -> Uuid {
-    derived("node")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("node"))
 }
 
 /// The parameter of [`SELECT`] holding the selector, as an array of field
 /// names (strings) and indices (`u64`).
 pub fn selector_param() -> Uuid {
-    derived("selector")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("selector"))
 }
 
 /// The function applying an edge's selector to the value it reads:
 /// `select(in, selector)`.
 pub fn select_function() -> Uuid {
-    derived("function:select")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("function:select"))
 }
 
 /// The name of [`select_function`].
@@ -242,7 +276,8 @@ pub const SELECT: &str = "select";
 /// `param.function` with its `args_<i>` inputs as the parameters
 /// `param.param_ids` names, and returns what it returns.
 pub fn external_function() -> Uuid {
-    derived("function:external")
+    static ID: OnceLock<Uuid> = OnceLock::new();
+    *ID.get_or_init(|| derived("function:external"))
 }
 
 /// The name of [`external_function`].
@@ -389,7 +424,8 @@ const FIELDS: &[(&str, FieldKind)] = &[
 /// What a parameter id stands for in a call.
 #[derive(Clone, Debug)]
 enum Role {
-    Input(String),
+    /// The input port at this index of [`input_ports`].
+    Input(usize),
     Field(usize),
     State,
     Time,
@@ -405,8 +441,8 @@ fn roles() -> &'static HashMap<Uuid, Role> {
     static ROLES: OnceLock<HashMap<Uuid, Role>> = OnceLock::new();
     ROLES.get_or_init(|| {
         let mut roles = HashMap::new();
-        for port in all_input_ports() {
-            roles.insert(input_param(&port), Role::Input(port));
+        for (at, port) in input_ports().iter().enumerate() {
+            roles.insert(input_param(port), Role::Input(at));
         }
         for (at, (field, _)) in FIELDS.iter().enumerate() {
             roles.insert(param_field(field), Role::Field(at));
@@ -453,19 +489,34 @@ fn variadic_ports(group: &str) -> impl Iterator<Item = String> + '_ {
         .chain((0..VARIADIC_PORTS).map(move |i| format!("{group}_{i}")))
 }
 
-/// Every input port some function declares.
-fn all_input_ports() -> Vec<String> {
-    let mut ports: Vec<String> = FIXED_INPUTS.iter().map(|port| port.to_string()).collect();
-    for signature in signatures().values() {
-        ports.extend(signature.inputs.iter().map(|port| port.id.to_string()));
-        if let Some(group) = &signature.variadic_inputs {
-            ports.extend(variadic_ports(group.id));
+/// Every input port some function declares, sorted.
+fn input_ports() -> &'static [String] {
+    static PORTS: OnceLock<Vec<String>> = OnceLock::new();
+    PORTS.get_or_init(|| {
+        let mut ports: Vec<String> = FIXED_INPUTS.iter().map(|port| port.to_string()).collect();
+        for signature in signatures().values() {
+            ports.extend(signature.inputs.iter().map(|port| port.id.to_string()));
+            if let Some(group) = &signature.variadic_inputs {
+                ports.extend(variadic_ports(group.id));
+            }
         }
-    }
-    ports.sort();
-    ports.dedup();
-    ports
+        ports.sort();
+        ports.dedup();
+        assert!(
+            ports.len() <= PORT_SET_BITS,
+            "{} input ports, past the {PORT_SET_BITS} a port set holds",
+            ports.len()
+        );
+        ports
+    })
 }
+
+/// How many input ports a [`PortSet`] holds.
+const PORT_SET_BITS: usize = 1024;
+
+/// A set of input ports, by their index in [`input_ports`]: what a call
+/// passes, which decides its input layout.
+type PortSet = [u64; PORT_SET_BITS / 64];
 
 /// The input ports `kind`'s function declares, in order: its signature's
 /// ports, every other fixed port, then its variadic group.
@@ -489,6 +540,21 @@ pub fn declared_inputs(kind: &NodeType) -> Vec<String> {
         ports.extend(variadic_ports(group));
     }
     ports
+}
+
+/// The input ports `kind`'s function declares, as a set.
+pub fn declares_input(kind: &NodeType, port: &str) -> bool {
+    static DECLARED: OnceLock<HashMap<NodeType, std::collections::HashSet<String>>> =
+        OnceLock::new();
+    DECLARED
+        .get_or_init(|| {
+            KINDS
+                .iter()
+                .map(|kind| (kind.clone(), declared_inputs(kind).into_iter().collect()))
+                .collect()
+        })
+        .get(kind)
+        .is_some_and(|ports| ports.contains(port))
 }
 
 /// Whether a node of `kind` keeps state from one call to the next in its
@@ -629,55 +695,116 @@ fn describe_kind_as(kind: &NodeType, name: &str) -> ModuleFunction {
 /// The node parameters of `params` that differ from their default, each as
 /// its parameter id and its value: the literal arguments of a node's call.
 pub fn encode_params(params: &NodeParams) -> Result<Vec<(Uuid, Value)>, String> {
-    let json = serde_json::to_value(params).map_err(|e| e.to_string())?;
     let mut encoded = Vec::new();
-    for (field, kind) in FIELDS {
-        let Some(value) = json.get(*field).filter(|value| !value.is_null()) else {
-            continue;
-        };
-        let encoded_value = match kind {
-            FieldKind::Value => params.value.clone().expect("a non-null value"),
-            FieldKind::F32 => {
-                let number = value.as_f64().unwrap_or(0.0) as f32;
-                if number == 0.0 {
-                    continue;
-                }
-                Value::F32(number)
-            }
-            FieldKind::OptF32 => Value::F32(value.as_f64().unwrap_or(0.0) as f32),
-            FieldKind::OptU32 => Value::U32(value.as_u64().unwrap_or(0) as u32),
-            FieldKind::OptBool => Value::Boolean(value.as_bool().unwrap_or(false)),
-            FieldKind::OptString | FieldKind::OptPath | FieldKind::OptUuid => {
-                Value::String(value.as_str().unwrap_or_default().to_string())
-            }
-            FieldKind::OptRoundMode => {
-                Value::String(value.as_str().unwrap_or_default().to_string())
-            }
-            FieldKind::OptVecF32 => Value::ArrayF32(
-                value
-                    .as_array()
-                    .map(|items| {
-                        items
-                            .iter()
-                            .map(|item| item.as_f64().unwrap_or(0.0) as f32)
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            ),
-            FieldKind::OptVecString | FieldKind::OptVecUuid => Value::ArrayString(
-                value
-                    .as_array()
-                    .map(|items| {
-                        items
-                            .iter()
-                            .map(|item| item.as_str().unwrap_or_default().to_string())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            ),
-            FieldKind::OptJson => Value::String(value.to_string()),
-        };
-        encoded.push((param_field(field), encoded_value));
+    let mut push = |field: &str, value: Value| encoded.push((param_field(field), value));
+    let floats = |values: &Vec<f32>| Value::ArrayF32(values.clone());
+    let strings = |values: &Vec<String>| Value::ArrayString(values.clone());
+    if let Some(value) = &params.value {
+        push("value", value.clone());
+    }
+    for (field, number) in [("min", params.min), ("max", params.max)] {
+        if number != 0.0 {
+            push(field, Value::F32(number));
+        }
+    }
+    for (field, number) in [
+        ("frequency", params.frequency),
+        ("phase", params.phase),
+        ("x", params.x),
+        ("y", params.y),
+        ("z", params.z),
+        ("in_min", params.in_min),
+        ("in_max", params.in_max),
+        ("out_min", params.out_min),
+        ("out_max", params.out_max),
+        ("in_low", params.in_low),
+        ("in_anchor", params.in_anchor),
+        ("in_high", params.in_high),
+        ("out_low", params.out_low),
+        ("out_anchor", params.out_anchor),
+        ("out_high", params.out_high),
+        ("bone1", params.bone1),
+        ("bone2", params.bone2),
+        ("bone3", params.bone3),
+        ("tol_pos", params.tol_pos),
+        ("tol_rot", params.tol_rot),
+        ("index", params.index),
+        ("noise_seed", params.noise_seed),
+        ("octaves", params.octaves),
+        ("lacunarity", params.lacunarity),
+        ("persistence", params.persistence),
+        ("stiffness", params.stiffness),
+        ("damping", params.damping),
+        ("mass", params.mass),
+        ("half_life", params.half_life),
+        ("max_rate", params.max_rate),
+    ] {
+        if let Some(number) = number {
+            push(field, Value::F32(number));
+        }
+    }
+    if let Some(mode) = &params.round_mode {
+        let name = serde_json::to_value(mode).map_err(|e| e.to_string())?;
+        push(
+            "round_mode",
+            Value::String(name.as_str().unwrap_or_default().to_string()),
+        );
+    }
+    if let Some(clamp) = params.clamp {
+        push("clamp", Value::Boolean(clamp));
+    }
+    for (field, text) in [
+        ("urdf_xml", &params.urdf_xml),
+        ("root_link", &params.root_link),
+        ("tip_link", &params.tip_link),
+        ("keys", &params.keys),
+    ] {
+        if let Some(text) = text {
+            push(field, Value::String(text.clone()));
+        }
+    }
+    for (field, values) in [
+        ("seed", &params.seed),
+        ("weights", &params.weights),
+        ("sizes", &params.sizes),
+    ] {
+        if let Some(values) = values {
+            push(field, floats(values));
+        }
+    }
+    if let Some(max_iters) = params.max_iters {
+        push("max_iters", Value::U32(max_iters));
+    }
+    if let Some(joint_defaults) = &params.joint_defaults {
+        let json = serde_json::to_string(joint_defaults).map_err(|e| e.to_string())?;
+        push("joint_defaults", Value::String(json));
+    }
+    for (field, values) in [
+        ("case_labels", &params.case_labels),
+        ("record_keys", &params.record_keys),
+    ] {
+        if let Some(values) = values {
+            push(field, strings(values));
+        }
+    }
+    if let Some(path) = &params.path {
+        push("path", Value::String(path.to_string()));
+    }
+    for (field, id) in [
+        ("function", params.function),
+        ("key_field", params.key_field),
+        ("value_field", params.value_field),
+        ("module", params.module),
+    ] {
+        if let Some(id) = id {
+            push(field, Value::String(id.to_string()));
+        }
+    }
+    if let Some(ids) = &params.param_ids {
+        push(
+            "param_ids",
+            Value::ArrayString(ids.iter().map(Uuid::to_string).collect()),
+        );
     }
     Ok(encoded)
 }
@@ -986,7 +1113,10 @@ pub struct NodeGraphModule {
     /// The runs `spawn` nodes requested since they were last taken.
     spawns: Vec<SpawnRequest>,
     /// The input layouts built, by function and the ports a call passes.
-    layouts: HashMap<(Uuid, Vec<Uuid>), PortLayout>,
+    layouts: HashMap<(Uuid, PortSet), std::rc::Rc<PortLayout>>,
+    /// The output layouts built, by function and output ports: `None` for a
+    /// node whose one port is `out`.
+    output_layouts: HashMap<(Uuid, Option<Vec<String>>), std::rc::Rc<OutputLayout>>,
     /// The callables registered through a [`Bridge`], by id: a tree's node
     /// ticks, which call back through the bridge that runs them.
     callables: HashMap<u64, std::rc::Rc<dyn Callable>>,
@@ -994,6 +1124,10 @@ pub struct NodeGraphModule {
     /// [`CALLABLE_IDS`], apart from the wrapped bridge's own.
     next_callable: u64,
 }
+
+/// An output layout, and the field id of each of its ports in the structure
+/// a multi-port node returns.
+type OutputLayout = (PortLayout, Vec<Uuid>);
 
 /// Where the ids of the callables a [`Bridge`] registers start.
 const CALLABLE_IDS: u64 = 1 << 62;
@@ -1006,8 +1140,11 @@ impl NodeGraphModule {
 
     /// Route each function of `function_modules` to its module, for the
     /// `external` and `taskrun` calls that name no module.
-    pub fn set_function_modules(&mut self, function_modules: HashMap<Uuid, Uuid>) {
-        self.function_modules = function_modules;
+    pub fn set_function_modules(
+        &mut self,
+        function_modules: std::collections::HashMap<Uuid, Uuid>,
+    ) {
+        self.function_modules = function_modules.into_iter().collect();
     }
 
     /// Route every function `function_modules` does not to `module`.
@@ -1053,14 +1190,15 @@ impl NodeGraphModule {
                 .ok_or_else(|| format!("{MODULE_NAME} has no function {function}"))?
         };
         let roles = roles();
-        let mut inputs: Vec<(String, Value)> = Vec::new();
+        let ports_table = input_ports();
+        let mut inputs: Vec<(usize, Value)> = Vec::new();
         let mut params = NodeParams::default();
         let mut state = None;
         let (mut t, mut dt) = (0.0, 0.0);
         let mut ports: Option<Vec<String>> = None;
         let mut output_shapes = HashMap::new();
         let mut node = String::new();
-        let mut input_ids = Vec::new();
+        let mut port_set: PortSet = [0; PORT_SET_BITS / 64];
         for argument in call.args {
             let Some(role) = roles.get(&argument.id) else {
                 return Err(format!(
@@ -1073,10 +1211,7 @@ impl NodeGraphModule {
                 continue;
             };
             match role {
-                Role::Input(port) => {
-                    input_ids.push(argument.id);
-                    inputs.push((port.clone(), value));
-                }
+                Role::Input(at) => inputs.push((*at, value)),
                 Role::Field(at) => set_field(&mut params, *at, value)?,
                 Role::State => state = Some(value),
                 Role::Time => t = seconds(&value),
@@ -1102,34 +1237,48 @@ impl NodeGraphModule {
 
         // An input node's value is what the host staged on its path.
         let staged = if kind == NodeType::Input {
-            let at = inputs.iter().position(|(port, _)| port == "in");
-            at.map(|at| {
-                input_ids.remove(at);
-                inputs.remove(at).1
-            })
+            let at = inputs
+                .iter()
+                .position(|(port, _)| ports_table[*port] == "in");
+            at.map(|at| inputs.remove(at).1)
         } else {
             None
         };
+        for (port, _) in &inputs {
+            port_set[port / 64] |= 1 << (port % 64);
+        }
 
         // The inputs in the layout the plan gives them.
         let layout = self
             .layouts
-            .entry((function, input_ids))
-            .or_insert_with(|| input_layout(&kind, inputs.iter().map(|(port, _)| port.as_str())))
+            .entry((function, port_set))
+            .or_insert_with(|| {
+                std::rc::Rc::new(input_layout(
+                    &kind,
+                    inputs.iter().map(|(port, _)| ports_table[*port].as_str()),
+                ))
+            })
             .clone();
         let mut slots = vec![PortValue::default(); layout.slots.len()];
         let mut present_slots = vec![false; layout.slots.len()];
         for (port, value) in inputs {
-            if let Some(slot) = layout.slot(&port) {
+            if let Some(slot) = layout.slot(&ports_table[port]) {
                 slots[slot] = PortValue::new(value);
                 present_slots[slot] = true;
             }
         }
         let inputs = eval_node::InputSlots::new(&slots, &present_slots, &layout);
 
-        let ports = ports.unwrap_or_else(|| vec!["out".to_string()]);
-        let variadics = output_variadics(&kind, &ports);
-        let output_layout = layout_of(ports.iter().cloned(), variadics);
+        let output_layout = self
+            .output_layouts
+            .entry((function, ports.clone()))
+            .or_insert_with(|| {
+                let ports = ports.clone().unwrap_or_else(|| vec!["out".to_string()]);
+                let variadics = output_variadics(&kind, &ports);
+                let fields = ports.iter().map(|port| output_field(port)).collect();
+                std::rc::Rc::new((layout_of(ports, variadics), fields))
+            })
+            .clone();
         let mut out = Vec::new();
         let mut rt = GraphRuntime {
             t,
@@ -1157,7 +1306,7 @@ impl NodeGraphModule {
             rt.node_states.insert(spec.id.clone(), state);
         }
         {
-            let mut outputs = eval_node::OutputSlots::new(&mut out, &output_layout);
+            let mut outputs = eval_node::OutputSlots::new(&mut out, &output_layout.0);
             let mut host = ModuleFunctions {
                 bridge: inner,
                 function_modules: &self.function_modules,
@@ -1171,7 +1320,7 @@ impl NodeGraphModule {
             crate::eval::urdfik::keep_chain(&mut self.chains, state);
         }
 
-        let ret = if ports.len() == 1 && ports[0] == "out" {
+        let ret = if ports.is_none() {
             out.into_iter()
                 .next()
                 .map(|port| port.value)
@@ -1180,10 +1329,11 @@ impl NodeGraphModule {
             let mut values = out.into_iter();
             Value::Structure(Structure {
                 id: outputs_structure(),
-                fields: ports
+                fields: output_layout
+                    .1
                     .iter()
-                    .map(|port| StructureField {
-                        id: output_field(port),
+                    .map(|field| StructureField {
+                        id: *field,
                         value: Box::new(values.next().map_or(Value::Unit, |port| port.value)),
                     })
                     .collect(),
@@ -1247,7 +1397,7 @@ fn select(call: Call) -> Result<CallResult, String> {
     let mut node = String::new();
     for argument in call.args {
         let value = present(*argument.value);
-        if argument.id == input_param("in") {
+        if argument.id == in_param() {
             input = value;
         } else if argument.id == selector_param() {
             selector = value;

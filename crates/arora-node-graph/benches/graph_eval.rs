@@ -1,3 +1,4 @@
+use arora_node_graph::tree_runtime::{Evaluation, TreeRuntime};
 use arora_node_graph::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, InputDefault, NodeParams, NodeSpec,
     NodeType,
@@ -5,6 +6,7 @@ use arora_node_graph::types::{
 use arora_node_graph::{evaluate_all, GraphRuntime};
 use arora_shape::json::normalize_graph_spec_value;
 use arora_shape::Shape;
+use arora_shape::TypedPath;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use hashbrown::HashMap;
 use std::hint::black_box;
@@ -511,6 +513,143 @@ fn bench_amortized_per_step(b: &mut criterion::Bencher, spec: &GraphSpec, steps:
     });
 }
 
+/// The input paths of `spec`'s input nodes.
+fn input_paths(spec: &GraphSpec) -> Vec<TypedPath> {
+    spec.nodes
+        .iter()
+        .filter(|node| node.kind == NodeType::Input)
+        .filter_map(|node| node.params.path.clone())
+        .collect()
+}
+
+/// How a benchmark feeds a graph's inputs at each step.
+#[derive(Clone, Copy)]
+enum Inputs {
+    /// Not at all: every input reads its default, and only what the clock
+    /// drives changes.
+    Defaults,
+    /// A new value on every input at every step: everything changes.
+    Moving,
+}
+
+/// The amortized cost of one step of `spec` on the reference evaluator.
+fn bench_reference_per_step(
+    b: &mut criterion::Bencher,
+    spec: &GraphSpec,
+    steps: u32,
+    inputs: Inputs,
+) {
+    let paths = input_paths(spec);
+    b.iter_custom(|iters| {
+        let mut total = Duration::ZERO;
+        for _ in 0..iters {
+            let mut rt = GraphRuntime {
+                dt: 1.0 / 60.0,
+                t: 0.0,
+                ..Default::default()
+            };
+            warm_runtime(&mut rt, spec);
+            let start = std::time::Instant::now();
+            for step in 0..steps {
+                rt.t = step as f32 * rt.dt;
+                if let Inputs::Moving = inputs {
+                    for (i, path) in paths.iter().enumerate() {
+                        rt.set_input(
+                            path.clone(),
+                            arora_shape::value::float((step + i as u32) as f32),
+                            None,
+                        );
+                    }
+                }
+                evaluate_all(&mut rt, spec).expect("graph evaluation");
+            }
+            total += start.elapsed() / steps;
+        }
+        total
+    });
+}
+
+/// The cost of importing, building and lowering `spec` on the tree, and
+/// evaluating it once.
+fn bench_tree_cold(b: &mut criterion::Bencher, spec: &GraphSpec, evaluation: Evaluation) {
+    b.iter(|| {
+        let mut rt = TreeRuntime::new(evaluation);
+        rt.dt = 1.0 / 60.0;
+        rt.load(black_box(spec)).expect("the graph loads");
+        rt.evaluate().expect("graph evaluation");
+    });
+}
+
+/// The amortized cost of one step of `spec` on the tree, once loaded and
+/// evaluated once.
+fn bench_tree_per_step(
+    b: &mut criterion::Bencher,
+    spec: &GraphSpec,
+    steps: u32,
+    evaluation: Evaluation,
+    inputs: Inputs,
+) {
+    let paths = input_paths(spec);
+    b.iter_custom(|iters| {
+        let mut total = Duration::ZERO;
+        for _ in 0..iters {
+            let mut rt = TreeRuntime::new(evaluation);
+            rt.dt = 1.0 / 60.0;
+            rt.load(spec).expect("the graph loads");
+            rt.evaluate().expect("graph evaluation");
+            let start = std::time::Instant::now();
+            for step in 0..steps {
+                rt.t = step as f32 * rt.dt;
+                if let Inputs::Moving = inputs {
+                    for (i, path) in paths.iter().enumerate() {
+                        rt.set_input(
+                            path.clone(),
+                            arora_shape::value::float((step + i as u32) as f32),
+                            None,
+                        );
+                    }
+                }
+                rt.evaluate().expect("graph evaluation");
+            }
+            total += start.elapsed() / steps;
+        }
+        total
+    });
+}
+
+/// The tree's benchmarks of `spec`, beside the reference's: cold, and per
+/// step with the inputs at their defaults and with every input moving, both
+/// evaluating what the outputs read (a device) and every node (an editor).
+fn bench_tree(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    name: &str,
+    spec: &GraphSpec,
+    steps: u32,
+) {
+    for (label, evaluation) in [
+        ("demanded", Evaluation::Demanded),
+        ("every", Evaluation::Every),
+    ] {
+        group.bench_with_input(
+            BenchmarkId::new(format!("tree_{label}/cold"), name),
+            spec,
+            |b, spec| bench_tree_cold(b, spec, evaluation),
+        );
+        for (inputs_label, inputs) in [("defaults", Inputs::Defaults), ("moving", Inputs::Moving)] {
+            group.bench_with_input(
+                BenchmarkId::new(format!("tree_{label}/per_step_{inputs_label}"), name),
+                spec,
+                |b, spec| bench_tree_per_step(b, spec, steps, evaluation, inputs),
+            );
+        }
+    }
+    group.bench_with_input(
+        BenchmarkId::new("reference/per_step_moving", name),
+        spec,
+        |b, spec| bench_reference_per_step(b, spec, steps, Inputs::Moving),
+    );
+}
+
 fn bench_graphs(c: &mut Criterion) {
     let kitchen_sizes = parse_list("GRAPH_KITCHEN_SIZES", DEFAULT_KITCHEN_SIZES);
     let cold_samples = parse_list("GRAPH_COLD_SAMPLES", DEFAULT_COLD_SAMPLES);
@@ -549,6 +688,7 @@ fn bench_graphs(c: &mut Criterion) {
             &spec,
             |b, spec| bench_amortized_per_step(b, black_box(spec), 100),
         );
+        bench_tree(&mut group, "tiny-smoke-8", &spec, 100);
     }
 
     // Fixture
@@ -576,6 +716,7 @@ fn bench_graphs(c: &mut Criterion) {
             &spec,
             |b, spec| bench_amortized_per_step(b, black_box(spec), 100),
         );
+        bench_tree(&mut group, "fixture/simple-gain-offset", &spec, 100);
     }
 
     // Kitchen variants
@@ -606,6 +747,7 @@ fn bench_graphs(c: &mut Criterion) {
             &spec,
             |b, spec| bench_amortized_per_step(b, black_box(spec), steps),
         );
+        bench_tree(&mut group, &name, &spec, steps);
     }
 
     group.finish();
