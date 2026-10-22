@@ -237,11 +237,26 @@ pub fn import(spec: &GraphSpec, options: &ImportOptions) -> Result<ImportedGraph
         .iter()
         .map(|node| {
             let layout = output_layout(node, referenced.get(node.id.as_str()).unwrap_or(&empty));
+            // A port an edge names but the node's evaluation never sets is
+            // no port: the edge reads as an input with no edge.
+            let set = output_layout(node, &empty);
+            let ports = layout
+                .slots
+                .iter()
+                .filter(|port| {
+                    set.slot(port).is_some()
+                        || layout.variadic_groups().values().any(|range| {
+                            let at = layout.slot(port).unwrap_or(usize::MAX);
+                            at >= range.start && at < range.start + range.len
+                        })
+                })
+                .cloned()
+                .collect();
             GraphNode {
                 id: node.id.clone(),
                 kind: node.kind.clone(),
                 tree_id: tree_node_id(&node.id),
-                ports: layout.slots.clone(),
+                ports,
                 attached: is_action(&node.kind),
             }
         })

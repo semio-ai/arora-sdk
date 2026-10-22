@@ -914,7 +914,7 @@ fn encode_state(state: NodeRuntimeState) -> Value {
 
 /// The runtime state `value` encodes for a node of `kind`, `None` for one it
 /// does not encode (a node's first call).
-fn decode_state(kind: &NodeType, value: Value) -> Option<NodeRuntimeState> {
+pub(crate) fn decode_state(kind: &NodeType, value: Value) -> Option<NodeRuntimeState> {
     let flat = |value: &Value| flatten_numeric(value);
     match (kind, value) {
         (NodeType::Spring, Value::ArrayValue(parts)) if parts.len() == 3 => {

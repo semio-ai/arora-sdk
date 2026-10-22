@@ -58,6 +58,8 @@ pub struct TreeRuntime {
     pub writes: WriteBatch,
     /// The runs the graph's `spawn` nodes requested in the last evaluation.
     pub spawns: Vec<SpawnRequest>,
+    /// How many times a graph was loaded: the tree is built at each.
+    loads: u64,
     evaluation: Evaluation,
     store: SimpleDataStore,
     module: NodeGraphModule,
@@ -95,6 +97,7 @@ impl TreeRuntime {
             outputs: HashMap::new(),
             writes: WriteBatch::default(),
             spawns: Vec::new(),
+            loads: 0,
             evaluation,
             store: SimpleDataStore::new(),
             module: NodeGraphModule::new(),
@@ -114,6 +117,11 @@ impl TreeRuntime {
         self.staged.insert(path, (value, declared));
     }
 
+    /// How many times a graph was loaded, the tree built at each.
+    pub fn loads(&self) -> u64 {
+        self.loads
+    }
+
     /// The store the graph reads its inputs from and writes its outputs to.
     pub fn store(&self) -> &SimpleDataStore {
         &self.store
@@ -127,6 +135,53 @@ impl TreeRuntime {
     /// The graph as the tree holds it, once loaded.
     pub fn imported(&self) -> Option<&ImportedGraph> {
         self.loaded.as_ref().map(|loaded| &loaded.imported)
+    }
+
+    /// The state the stateful node `id` of the graph holds, as the value of
+    /// its `state` argument: what its next call starts from.
+    pub fn state_value(&self, id: &str) -> Option<Value> {
+        let loaded = self.loaded.as_ref()?;
+        let node = loaded.imported.node(id)?;
+        loaded
+            .lowered
+            .tree()
+            .argument_value(node.tree_id, state_param())
+            .filter(|state| *state != Value::Unit)
+    }
+
+    /// The runtime state of every stateful node of the graph, as the
+    /// reference evaluator holds it, by node id.
+    #[cfg(test)]
+    pub(crate) fn node_states(
+        &self,
+    ) -> HashMap<String, crate::eval::graph_runtime::NodeRuntimeState> {
+        let Some(loaded) = &self.loaded else {
+            return HashMap::new();
+        };
+        loaded
+            .spec
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                let value = self.state_value(&node.id);
+                #[cfg(feature = "urdf_ik")]
+                if matches!(node.kind, NodeType::UrdfIkPosition | NodeType::UrdfIkPose) {
+                    return crate::eval::urdfik::prepared_state(
+                        &self.module.chains,
+                        &node.params,
+                        value.as_ref(),
+                    )
+                    .map(|state| {
+                        (
+                            node.id.clone(),
+                            crate::eval::graph_runtime::NodeRuntimeState::UrdfKinematics(state),
+                        )
+                    });
+                }
+                crate::functions::decode_state(&node.kind, value?)
+                    .map(|state| (node.id.clone(), state))
+            })
+            .collect()
     }
 
     /// Run `spec` from now on. Every node of `spec` the previous graph also
@@ -175,6 +230,7 @@ impl TreeRuntime {
         if let Some(previous) = self.loaded.take() {
             previous.lowered.unregister(&mut bridge);
         }
+        self.loads += 1;
         self.loaded = Some(Loaded {
             source: serde_json::to_string(spec).map_err(|e| e.to_string())?,
             spec: spec.clone(),
