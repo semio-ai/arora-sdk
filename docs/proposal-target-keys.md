@@ -35,7 +35,8 @@ In short:
   applies first (§5).
 - **A device has the keys it describes.** The component names the quantity
   (`position`, `color`, `intensity`), and no component implies another: a
-  position brings no velocity, a measured value no target (§2).
+  position brings no velocity, a measured value no target, and a value set
+  directly, with no dynamics behind it, takes `k.c` itself (§2).
 
 Keys are paths, and an `.attribute` is a naming convention of the consumers that
 adopt it ([keys are paths](design_decisions.md#keys-are-paths-attributes-are-a-convention)).
@@ -131,9 +132,15 @@ undescribed, and no component implies another:
   actuator driven feedforward, such as a light, describes its target and no
   measured value: a light described with a colour target has
   `light/target.color`, and no `light.color` unless it reports one.
+- **A value set directly has no target.** A target is the value a component
+  is commanded to reach, which a robot's joint does through its own dynamics.
+  A device with nothing between a write and its value, such as a Vizij face
+  that renders each value as it is written, describes `k.c` itself as open
+  and no target: a client writes `k.c`.
 
 The convention says how a described component's keys are spelled; it is not a
-list of components every actuator has.
+list of components every actuator has. A client drives each device by the keys
+that device describes (§3, rule 3).
 
 ### Why
 
@@ -168,9 +175,11 @@ current one. The rule:
    that describes its keys (HAL components 3.5) describes both for each target
    it reads.
 3. **A client resolves each input's key from what the device lists**
-   (`ListKeys`): `k/target.c` when listed, `k.target_c` otherwise. A key the
-   device does not list by name is written in the current form, which every
-   device reads.
+   (`ListKeys`): the first of `k/target.c`, `k.target_c` and `k.c` it lists
+   open. A device that lists none of an input's forms is written in the
+   current form, which every HAL in arora-sdk reads. That fallback lasts until
+   every device a client drives describes its keys; a client then drives only
+   what a device lists, and states the rest as not driven.
 4. **A client writes one form per target.** A change that sets both forms of
    one target applies `k/target.c` and ignores `k.target_c`, whatever value
    `k/target.c` holds: the keys of a `StateChange` carry no order, so "last
