@@ -17,12 +17,13 @@ use uuid::Uuid;
 use crate::core_nodes::core_node_parameters;
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
-    COS_FUNCTION_ID, EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID,
-    FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID, IS_STR_SET_FUNCTION_ID, PARALLEL_FUNCTION_ID,
-    REGEX_MATCH_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
-    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
-    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID,
-    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
+    COPY_FUNCTION_ID, COPY_OUT_PARAM_ID, COPY_VALUE_PARAM_ID, COS_FUNCTION_ID, EQUAL_A_PARAM_ID,
+    EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
+    INCREASE_FUNCTION_ID, IS_STR_SET_FUNCTION_ID, PARALLEL_FUNCTION_ID, REGEX_MATCH_FUNCTION_ID,
+    RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID, RUN_STATUS_FUNCTION_ID,
+    RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID,
+    SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
     STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
     UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, UNSET_STR_FUNCTION_ID, WAIT_STR_SET_FUNCTION_ID,
     WITH_FUNCTION_ID,
@@ -69,6 +70,7 @@ impl Node {
             FALLBACK_GROOT_ID => FALLBACK_FUNCTION_ID,
             PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
             WITH_GROOT_ID => WITH_FUNCTION_ID,
+            "Copy" => COPY_FUNCTION_ID,
             EQUAL_GROOT_ID => EQUAL_FUNCTION_ID,
             UNPACK_GROOT_ID => UNPACK_FUNCTION_ID,
             SCATTER_GROOT_ID => SCATTER_FUNCTION_ID,
@@ -196,6 +198,7 @@ impl Node {
             FALLBACK_FUNCTION_ID => FALLBACK_GROOT_ID,
             PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
             WITH_FUNCTION_ID => WITH_GROOT_ID,
+            COPY_FUNCTION_ID => "Copy",
             EQUAL_FUNCTION_ID => EQUAL_GROOT_ID,
             UNPACK_FUNCTION_ID => UNPACK_GROOT_ID,
             SCATTER_FUNCTION_ID => SCATTER_GROOT_ID,
@@ -351,6 +354,7 @@ fn pascal_case(name: &str) -> String {
 /// (see [`builtin_port_param`]).
 fn builtin_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
     match function {
+        COPY_FUNCTION_ID => &[("value", COPY_VALUE_PARAM_ID), ("out", COPY_OUT_PARAM_ID)],
         EQUAL_FUNCTION_ID => &[("a", EQUAL_A_PARAM_ID), ("b", EQUAL_B_PARAM_ID)],
         UNPACK_FUNCTION_ID => &[("values", UNPACK_VALUES_PARAM_ID)],
         SCATTER_FUNCTION_ID => &[
@@ -1321,7 +1325,7 @@ mod tests {
         assert!(format!("{error:?}").contains("key"), "{error:?}");
     }
 
-    /// `Equal`, `Unpack`, `RunCall` and `RunStatus` read from Groot with
+    /// `Equal`, `Copy`, `Unpack`, `RunCall` and `RunStatus` read from Groot with
     /// their ports, export back to the same ports, and the tree runs.
     #[test]
     fn native_data_and_run_nodes_round_trip_through_groot() {
@@ -1334,6 +1338,7 @@ mod tests {
         <Succeed/>
       </RunStatus>
       <With><Fail/><Succeed/></With>
+      <Copy value="{out/a}" out="{copy}"/>
     </Sequence>
   </BehaviorTree>
 </root>"#;
@@ -1374,6 +1379,7 @@ mod tests {
         );
         assert_eq!(children[2].function, RUN_STATUS_FUNCTION_ID);
         assert_eq!(children[3].function, WITH_FUNCTION_ID);
+        assert_eq!(children[4].function, COPY_FUNCTION_ID);
 
         // Export and import again: the same nodes and arguments.
         let mut by_id: HashMap<Uuid, String> =

@@ -83,10 +83,11 @@ use uuid::Uuid;
 use crate::display::{stated_id, Names};
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
-    REGEX_MATCH_FIRST_MATCH_PARAM_ID, REGEX_MATCH_FUNCTION_ID, RUN_STATUS_FUNCTION_ID,
-    RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-    SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID, SET_STR_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID,
-    UNPACK_OUT_PARAM_IDS, UNSET_STR_FUNCTION_ID, UNSET_STR_VARIABLE_PARAM_ID,
+    COPY_FUNCTION_ID, COPY_OUT_PARAM_ID, REGEX_MATCH_FIRST_MATCH_PARAM_ID, REGEX_MATCH_FUNCTION_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
+    SET_STR_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNSET_STR_FUNCTION_ID,
+    UNSET_STR_VARIABLE_PARAM_ID,
 };
 use crate::schema::{Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 use crate::variable::VariableCell;
@@ -668,6 +669,18 @@ impl Detached {
         self.bindings.contains_key(port)
     }
 
+    /// Whether this port is an output that actually publishes a key.
+    pub(crate) fn publishes_output(&self, port: &NodeParameterId) -> bool {
+        self.nodes
+            .iter()
+            .position(|node| node.id == port.node)
+            .is_some_and(|at| {
+                self.lowered.borrow().outputs[at]
+                    .iter()
+                    .any(|(parameter, _, key)| *parameter == port.parameter && key.is_some())
+            })
+    }
+
     /// The same dependency graph used for pulls, with all nodes in data order.
     pub(crate) fn placement(&self) -> PlacementAnalysis {
         let lowered = self.lowered.borrow();
@@ -932,6 +945,7 @@ fn claim_attached(
 /// The parameters a node of the tree's own vocabulary writes.
 pub(crate) fn native_writes(function: Uuid) -> &'static [Uuid] {
     match function {
+        COPY_FUNCTION_ID => &[COPY_OUT_PARAM_ID],
         UNPACK_FUNCTION_ID => &UNPACK_OUT_PARAM_IDS,
         SEQ_STAR_FUNCTION_ID => &[SEQ_STAR_CURRENT_INDEX_PARAM_ID],
         RUN_STATUS_FUNCTION_ID => &[RUN_STATUS_OUT_PARAM_ID, RUN_STATUS_LATCH_PARAM_ID],

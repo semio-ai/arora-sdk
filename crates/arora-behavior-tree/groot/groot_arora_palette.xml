@@ -12,6 +12,10 @@
             <input_port name="a"/>
             <input_port name="b"/>
         </Condition>
+        <Action ID="Copy">
+            <input_port name="value"/>
+            <output_port name="out"/>
+        </Action>
         <Action ID="Unpack">
             <input_port name="values"/>
             <output_port name="out_0"/>

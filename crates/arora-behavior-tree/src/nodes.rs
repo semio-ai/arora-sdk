@@ -425,3 +425,13 @@ pub const ADD_B_PARAM_ID: Uuid = Uuid::from_bytes([
 pub const ADD_RES_PARAM_ID: Uuid = Uuid::from_bytes([
     0x13, 0xd7, 0xa1, 0xc2, 0x2d, 0x37, 0x4d, 0x0e, 0xb3, 0x17, 0x29, 0x24, 0x67, 0x1d, 0x22, 0x10,
 ]);
+
+/// `Copy(value, out)`: copy a value's presence and contents into the bound
+/// output cell, returning Success. It performs no module call. Incremental
+/// execution caches it until either the source or destination changes, so a
+/// cached computation can republish a key overwritten by another writer.
+pub const COPY_FUNCTION_ID: Uuid = uuid::uuid!("a1434d2d-a838-4dc9-bd49-126f6c6aa800");
+/// [`COPY_FUNCTION_ID`]'s source value.
+pub const COPY_VALUE_PARAM_ID: Uuid = uuid::uuid!("a1434d2d-a838-4dc9-bd49-126f6c6aa801");
+/// [`COPY_FUNCTION_ID`]'s destination variable.
+pub const COPY_OUT_PARAM_ID: Uuid = uuid::uuid!("a1434d2d-a838-4dc9-bd49-126f6c6aa802");

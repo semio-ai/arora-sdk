@@ -163,6 +163,7 @@ impl Display for NodeDisplay<'_> {
         let head = match signature {
             Some(signature) => signature.function_name.clone(),
             None if node.function == crate::nodes::WITH_FUNCTION_ID => "WITH".into(),
+            None if node.function == crate::nodes::COPY_FUNCTION_ID => "Copy".into(),
             None => node.function.to_string(),
         };
         let arguments: Vec<(String, &Expression)> = ordered(&node.arguments, signature)

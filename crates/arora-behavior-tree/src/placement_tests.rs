@@ -3,7 +3,9 @@
 use crate::incremental_tests::fixture;
 
 use crate::nodes::*;
-use crate::schema::{Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
+use crate::schema::{
+    CallExpression, Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
+};
 use crate::{
     load_behavior_tree_nodes_with, lower_behavior_tree, place_detached, LoweredTree, PlacementScope,
 };
@@ -11,7 +13,7 @@ use arora_behavior::Status;
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key};
 use arora_types::value::Value;
-use fixture::{Bridge, Op, STATE, X, Y};
+use fixture::{Bridge, Op, MODULE, STATE, X, Y};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -245,15 +247,36 @@ fn placement_structures_are_explicit_and_deterministic() {
         (
             sink(),
             vec![
-                control(W1, WITH_FUNCTION_ID, &[G1_10, 1]),
+                control(
+                    W1,
+                    WITH_FUNCTION_ID,
+                    &[G1_10, 0x50554247000040008000000000000001, 1],
+                ),
                 control(1, SEQ_FUNCTION_ID, &[2]),
                 module(2, port(10)),
                 cached(node(
                     10,
                     id(20010),
-                    vec![(X, var(9000)), (Y, lit(2.0)), (_RET_PARAM_ID, var(9004))],
+                    vec![
+                        (X, var(9000)),
+                        (Y, lit(2.0)),
+                        (_RET_PARAM_ID, var(0xd04f520000004000df7265740000400a)),
+                    ],
                 )),
+                node(
+                    0xd055420000004000df7265740000400a,
+                    COPY_FUNCTION_ID,
+                    vec![
+                        (COPY_VALUE_PARAM_ID, port(10)),
+                        (COPY_OUT_PARAM_ID, var(9004)),
+                    ],
+                ),
                 control(G1_10, PARALLEL_FUNCTION_ID, &[10]),
+                control(
+                    0x50554247000040008000000000000001,
+                    PARALLEL_FUNCTION_ID,
+                    &[0xd055420000004000df7265740000400a],
+                ),
             ],
         ),
         (
@@ -278,6 +301,7 @@ fn placement_structures_are_explicit_and_deterministic() {
                 control(W1, WITH_FUNCTION_ID, &[G1_10, 1]),
                 module(1, port(10)),
                 cached(module(10, var(9000))),
+                module(12, lit(9.0)),
                 control(G1_10, PARALLEL_FUNCTION_ID, &[10]),
             ],
         ),
@@ -382,12 +406,22 @@ fn placement_and_a_hand_written_with_tree_run_in_lockstep() {
         ),
         module(10, var(9000)),
     ];
+    let mut hand_sink = source[2].clone();
+    hand_sink.arguments.insert(_RET_PARAM_ID, var(31011));
     let hand = vec![
         control(100, WITH_FUNCTION_ID, &[101, 1]),
-        control(101, PARALLEL_FUNCTION_ID, &[10, 11]),
+        control(101, PARALLEL_FUNCTION_ID, &[10, 11, 102]),
         control(1, SEQ_FUNCTION_ID, &[2]),
         source[1].clone(),
-        cached(source[2].clone()),
+        cached(hand_sink),
+        node(
+            102,
+            COPY_FUNCTION_ID,
+            vec![
+                (COPY_VALUE_PARAM_ID, port(11)),
+                (COPY_OUT_PARAM_ID, var(9004)),
+            ],
+        ),
         cached(source[3].clone()),
     ];
     let stores = [SimpleDataStore::new(), SimpleDataStore::new()];
@@ -527,6 +561,27 @@ fn pure_generated_detached_and_placed_trees_agree() {
                 || nodes.clone(),
                 |scope| place(nodes.clone(), scope, &bridges[mode], &stores[mode]),
             );
+            if scope.is_some() {
+                assert!(
+                    file.iter().any(|node| node.function == WITH_FUNCTION_ID),
+                    "case {case}"
+                );
+                let original = load_behavior_tree_nodes_with(
+                    nodes.clone(),
+                    &|name| Some(stores[mode].slot(&Key::from(name))),
+                    &names(),
+                )
+                .unwrap();
+                original.lower_detached(&bridges[mode].index()).unwrap();
+                let plan = original.detached_plan();
+                let attached = attached_ids(&file);
+                for used in plan.every_tick.iter().chain(&plan.on_demand) {
+                    assert!(
+                        attached.contains(used),
+                        "used node {used} stayed detached in case {case}"
+                    );
+                }
+            }
             trees.push(lower(file, &mut bridges[mode], &stores[mode], mode != 0));
         }
         let mut inputs = [0.0; 4];
@@ -819,15 +874,14 @@ fn placement_reuses_validation_and_handles_id_collisions() {
         .iter()
         .any(|node| node.id == id(W2) && node.function == SUCCEED_FUNCTION_ID));
     assert!(
-        !placed.iter().any(|node| node.id == id(11)),
-        "unused downstream node is omitted"
+        placed.iter().any(|node| node.id == id(11)),
+        "unused downstream node is retained"
     );
 }
 
-/// An unused downstream node can connect two live groups in the file's read
-/// graph. It affects grouping but does not become an evaluated leaf.
+/// An unread node neither merges live groups nor lifts their reader anchors.
 #[test]
-fn unread_nodes_connect_components_without_being_evaluated() {
+fn unread_nodes_do_not_connect_components_or_lift_anchors() {
     let source = vec![
         control(1, SEQ_FUNCTION_ID, &[2, 3]),
         module(2, port(10)),
@@ -837,22 +891,24 @@ fn unread_nodes_connect_components_without_being_evaluated() {
         module(11, var(9001)),
     ];
     let bridge = bridge(&source);
-    let group = 0x475250000000400c8000000000000001;
     assert_eq!(
         place(
-            source,
+            source.clone(),
             PlacementScope::Readers,
             &bridge,
             &SimpleDataStore::new()
         ),
         vec![
-            control(W1, WITH_FUNCTION_ID, &[group, 1]),
-            control(1, SEQ_FUNCTION_ID, &[2, 3]),
+            control(1, SEQ_FUNCTION_ID, &[W2, W3]),
             module(2, port(10)),
             module(3, port(11)),
+            source[3].clone(),
             cached(module(10, var(9000))),
             cached(module(11, var(9001))),
-            control(group, PARALLEL_FUNCTION_ID, &[10, 11])
+            control(W2, WITH_FUNCTION_ID, &[G2_10, 2]),
+            control(G2_10, PARALLEL_FUNCTION_ID, &[10]),
+            control(W3, WITH_FUNCTION_ID, &[G3_11, 3]),
+            control(G3_11, PARALLEL_FUNCTION_ID, &[11]),
         ]
     );
 }
@@ -882,4 +938,479 @@ fn repeated_child_edges_anchor_before_their_common_parent() {
             control(G1_10, PARALLEL_FUNCTION_ID, &[10])
         ]
     );
+}
+
+fn attached_ids(nodes: &[Node]) -> std::collections::HashSet<Uuid> {
+    let mut attached = std::collections::HashSet::new();
+    let mut stack = vec![nodes[0].id];
+    while let Some(id) = stack.pop() {
+        if attached.insert(id) {
+            stack.extend(
+                nodes
+                    .iter()
+                    .find(|node| node.id == id)
+                    .unwrap()
+                    .children
+                    .iter()
+                    .flatten(),
+            );
+        }
+    }
+    attached
+}
+fn calls_to(bridge: &Bridge, function: u128) -> usize {
+    bridge
+        .calls
+        .iter()
+        .filter(|(f, _)| *f == id(function))
+        .count()
+}
+fn get(store: &SimpleDataStore, key: &str) -> Option<Value> {
+    store.slot(&Key::from(key)).get()
+}
+fn add_call(x: Expression) -> Expression {
+    Expression::Call(Box::new(CallExpression {
+        module: Expression::Uuid(MODULE),
+        function: Expression::Uuid(id(29999)),
+        arguments: vec![(Expression::Uuid(X), x), (Expression::Uuid(Y), lit(0.0))],
+    }))
+}
+
+/// Attached writes, placed writes, and loose controls may all retain references
+/// to an unused detached port. Keeping it must neither load-fail nor evaluate it.
+#[test]
+fn unused_detached_ports_remain_valid_without_being_evaluated() {
+    for kind in 0..3 {
+        let mut source = vec![
+            control(1, SEQ_FUNCTION_ID, &[2]),
+            module(2, port(10)),
+            module(10, var(9000)),
+            module(11, lit(0.0)),
+        ];
+        match kind {
+            0 => {
+                source[1].arguments.insert(_RET_PARAM_ID, parameter(11, X));
+            }
+            1 => {
+                source[2].arguments.insert(_RET_PARAM_ID, parameter(11, X));
+            }
+            _ => source.push(node(
+                5,
+                EQUAL_FUNCTION_ID,
+                vec![(EQUAL_A_PARAM_ID, port(11)), (EQUAL_B_PARAM_ID, lit(1.0))],
+            )),
+        }
+        for scope in [PlacementScope::Readers, PlacementScope::Root] {
+            let stores = [SimpleDataStore::new(), SimpleDataStore::new()];
+            let mut results = Vec::new();
+            for (mode, store) in stores.iter().enumerate() {
+                put(store, "input/a", 1.0);
+                let mut b = bridge(&source);
+                let file = if mode == 0 {
+                    source.clone()
+                } else {
+                    let placed = place(source.clone(), scope, &b, store);
+                    assert_eq!(placed.iter().find(|n| n.id == id(11)), Some(&source[3]));
+                    assert!(!attached_ids(&placed).contains(&id(11)));
+                    placed
+                };
+                let tree = lower(file, &mut b, store, mode != 0);
+                for _ in 0..4 {
+                    assert_eq!(tick(&tree, &mut b), Status::Success);
+                    assert_eq!(calls_to(&b, 20011), 0);
+                }
+                results.push((value(&tree, 2, X), value(&tree, 11, X), store.snapshot()));
+            }
+            assert_eq!(results[0], results[1], "case {kind}, {scope:?}");
+        }
+    }
+}
+
+/// A nested call keeps its owner detached and argument-cached, including a
+/// selection around that call and dependencies crossing in either direction.
+#[test]
+fn call_arguments_stay_detached_and_interoperate_with_placed_ports() {
+    for direction in 0..6 {
+        let mut ten = module(10, add_call(var(9000)));
+        let mut source = vec![control(1, SEQ_FUNCTION_ID, &[2]), module(2, port(10))];
+        match direction {
+            0 => {}
+            1 => {
+                source[1] = module(2, port(11));
+                source.push(module(11, port(10)));
+            }
+            2..=4 => {
+                ten.arguments.insert(X, add_call(port(11)));
+                if direction == 3 {
+                    source[1] = module(2, port(12));
+                    source.push(module(12, port(10)));
+                }
+                if direction == 4 {
+                    ten.arguments.insert(_RET_PARAM_ID, var(9004));
+                    source[1] = module(2, lit(0.0));
+                }
+                source.push(module(11, var(9000)));
+            }
+            _ => {
+                ten.arguments.insert(
+                    X,
+                    Expression::Select {
+                        source: Box::new(add_call(var(9000))),
+                        path: Key::new(""),
+                    },
+                );
+            }
+        }
+        source.push(ten);
+        for scope in [PlacementScope::Readers, PlacementScope::Root] {
+            let stores = [SimpleDataStore::new(), SimpleDataStore::new()];
+            let mut bridges = [bridge(&source), bridge(&source)];
+            for b in &mut bridges {
+                b.ops.insert(id(29999), Op::Add);
+            }
+            let file = place(source.clone(), scope, &bridges[1], &stores[1]);
+            let attached = attached_ids(&file);
+            assert!(!attached.contains(&id(10)));
+            if (1..=4).contains(&direction) {
+                assert!(attached.contains(&id(11)));
+            }
+            let trees = [
+                lower(source.clone(), &mut bridges[0], &stores[0], false),
+                lower(file, &mut bridges[1], &stores[1], true),
+            ];
+            for step in 0..24 {
+                for store in &stores {
+                    put(store, "input/a", (step / 8) as f64);
+                }
+                assert_eq!(
+                    tick(&trees[0], &mut bridges[0]),
+                    tick(&trees[1], &mut bridges[1])
+                );
+                assert_eq!(
+                    value(&trees[0], 2, X),
+                    value(&trees[1], 2, X),
+                    "direction {direction}, step {step}"
+                );
+                assert_eq!(stores[0].snapshot(), stores[1].snapshot());
+                assert_eq!(calls_to(&bridges[0], 20010), calls_to(&bridges[1], 20010));
+                if step % 8 >= 3 {
+                    assert_eq!(calls_to(&bridges[1], 20010), 0);
+                }
+            }
+        }
+    }
+}
+
+/// Two sinks sharing a key retain distinct ports, and their module calls stop
+/// after settling even though their native publications keep overwriting it.
+#[test]
+fn sinks_sharing_a_key_keep_private_ports_and_settle() {
+    let mut s10 = module(10, var(9000));
+    s10.arguments.insert(_RET_PARAM_ID, var(9004));
+    let mut s11 = module(11, var(9001));
+    s11.arguments.insert(_RET_PARAM_ID, var(9004));
+    let source = vec![
+        control(1, SEQ_FUNCTION_ID, &[2]),
+        module(2, port(10)),
+        s10,
+        s11,
+    ];
+    for scope in [
+        None,
+        Some(PlacementScope::Readers),
+        Some(PlacementScope::Root),
+    ] {
+        let store = SimpleDataStore::new();
+        put(&store, "input/a", 1.0);
+        put(&store, "input/b", 100.0);
+        let mut b = bridge(&source);
+        let file = scope.map_or_else(|| source.clone(), |s| place(source.clone(), s, &b, &store));
+        let tree = lower(file, &mut b, &store, scope.is_some());
+        for step in 0..10 {
+            tick(&tree, &mut b);
+            assert_eq!(value(&tree, 2, X), Some(Value::F64(3.0)));
+            assert_eq!(value(&tree, 10, _RET_PARAM_ID), Some(Value::F64(3.0)));
+            assert_eq!(value(&tree, 11, _RET_PARAM_ID), Some(Value::F64(102.0)));
+            assert_eq!(get(&store, "out/a"), Some(Value::F64(102.0)));
+            if step >= 3 {
+                assert_eq!(calls_to(&b, 20010) + calls_to(&b, 20011), 0);
+            }
+        }
+    }
+}
+
+/// Publication order remains intentional: the tree's 100 wins after placed
+/// publication; detached publication writes 3 after the body. Neither form
+/// calls the sink's module on settled ticks when the body overwrites its key.
+#[test]
+fn tree_writes_win_after_placed_sinks_without_recalling_the_sink() {
+    let mut sink = module(10, var(9000));
+    sink.arguments.insert(_RET_PARAM_ID, var(9004));
+    let writer = node(
+        2,
+        id(20002),
+        vec![(X, var(9001)), (Y, lit(0.0)), (_RET_PARAM_ID, var(9004))],
+    );
+    let source = vec![control(1, SEQ_FUNCTION_ID, &[2]), writer, sink];
+    for scope in [
+        None,
+        Some(PlacementScope::Readers),
+        Some(PlacementScope::Root),
+    ] {
+        let store = SimpleDataStore::new();
+        put(&store, "input/a", 1.0);
+        put(&store, "input/b", 100.0);
+        let mut b = bridge(&source);
+        let file = scope.map_or_else(|| source.clone(), |s| place(source.clone(), s, &b, &store));
+        let tree = lower(file, &mut b, &store, scope.is_some());
+        for step in 0..10 {
+            tick(&tree, &mut b);
+            assert_eq!(
+                get(&store, "out/a"),
+                Some(Value::F64(if scope.is_some() { 100.0 } else { 3.0 }))
+            );
+            if step >= 3 {
+                assert_eq!(calls_to(&b, 20010), 0);
+            }
+        }
+    }
+}
+
+/// A single child cannot supply both a prerequisite and the WITH body.
+#[test]
+fn with_one_child_is_an_error() {
+    for incremental in [false, true] {
+        let mut b = Bridge::default();
+        let tree = lower(
+            vec![
+                control(1, WITH_FUNCTION_ID, &[2]),
+                node(2, SUCCEED_FUNCTION_ID, vec![]),
+            ],
+            &mut b,
+            &SimpleDataStore::new(),
+            incremental,
+        );
+        assert!(tree
+            .tick(&mut b)
+            .unwrap_err()
+            .to_string()
+            .contains("at least two"));
+    }
+}
+
+/// An explicitly empty child list is still a detached leaf; attachment clears
+/// it so the module receives scalar arguments rather than a children array.
+#[test]
+fn empty_children_on_a_detached_node_place_as_a_leaf() {
+    let mut ten = module(10, var(9000));
+    ten.children = Some(vec![]);
+    let source = vec![control(1, SEQ_FUNCTION_ID, &[2]), module(2, port(10)), ten];
+    let store = SimpleDataStore::new();
+    put(&store, "input/a", 1.0);
+    let mut b = bridge(&source);
+    let file = place(source, PlacementScope::Readers, &b, &store);
+    assert!(file
+        .iter()
+        .find(|n| n.id == id(10))
+        .unwrap()
+        .children
+        .is_none());
+    let tree = lower(file, &mut b, &store, true);
+    assert_eq!(tick(&tree, &mut b), Status::Success);
+    assert_eq!(value(&tree, 2, X), Some(Value::F64(3.0)));
+}
+
+/// Existing file variables reserve their ids against implicit generated ports;
+/// a later attached write must not overwrite the placed computation's port.
+#[test]
+fn generated_port_ids_do_not_alias_file_variables() {
+    let generated = 0x504f5200000040008000000000000000 ^ 10;
+    let mut ten = module(10, var(9000));
+    ten.arguments.remove(&_RET_PARAM_ID);
+    let source = vec![
+        control(1, SEQ_FUNCTION_ID, &[2, 3]),
+        module(2, port(10)),
+        node(
+            3,
+            id(20003),
+            vec![
+                (X, lit(500.0)),
+                (Y, lit(0.0)),
+                (_RET_PARAM_ID, var(generated)),
+            ],
+        ),
+        ten,
+    ];
+    let store = SimpleDataStore::new();
+    put(&store, "input/a", 1.0);
+    let mut b = bridge(&source);
+    let file = place(source, PlacementScope::Readers, &b, &store);
+    assert_ne!(
+        file.iter().find(|n| n.id == id(10)).unwrap().arguments[&_RET_PARAM_ID],
+        var(generated)
+    );
+    let tree = lower(file, &mut b, &store, true);
+    for _ in 0..4 {
+        tick(&tree, &mut b);
+        assert_eq!(value(&tree, 2, X), Some(Value::F64(3.0)));
+        assert_eq!(value(&tree, 3, _RET_PARAM_ID), Some(Value::F64(500.0)));
+    }
+}
+
+/// First-listed groups execute first, observable through shared-key writes
+/// and the ordered module calls. Reversing the file reverses the winner.
+#[test]
+fn with_prerequisites_run_in_first_listed_group_order() {
+    for reverse in [false, true] {
+        let mut a = module(10, var(9000));
+        a.arguments.insert(_RET_PARAM_ID, var(9004));
+        let mut b = module(11, var(9001));
+        b.arguments.insert(_RET_PARAM_ID, var(9004));
+        let source = if reverse {
+            vec![node(1, SUCCEED_FUNCTION_ID, vec![]), b, a]
+        } else {
+            vec![node(1, SUCCEED_FUNCTION_ID, vec![]), a, b]
+        };
+        let store = SimpleDataStore::new();
+        put(&store, "input/a", 1.0);
+        put(&store, "input/b", 100.0);
+        let mut b = bridge(&source);
+        let file = place(source, PlacementScope::Readers, &b, &store);
+        let tree = lower(file, &mut b, &store, true);
+        tick(&tree, &mut b);
+        assert_eq!(
+            b.calls
+                .iter()
+                .map(|(id, _)| id.as_u128())
+                .collect::<Vec<_>>(),
+            if reverse {
+                vec![20011, 20010]
+            } else {
+                vec![20010, 20011]
+            }
+        );
+        assert_eq!(
+            get(&store, "out/a"),
+            Some(Value::F64(if reverse { 3.0 } else { 102.0 }))
+        );
+    }
+}
+
+/// Mutable sink ports read the live key before computing, then publish their
+/// new private state.
+#[test]
+fn mutable_sink_ports_start_from_the_key_and_keep_their_own_state() {
+    let mut sink = module(10, var(9000));
+    sink.arguments.insert(STATE, var(9004));
+    let source = vec![
+        control(1, SEQ_FUNCTION_ID, &[2]),
+        module(2, parameter(10, STATE)),
+        sink,
+    ];
+    let stores = [SimpleDataStore::new(), SimpleDataStore::new()];
+    let mut bridges = [bridge(&source), bridge(&source)];
+    for b in &mut bridges {
+        b.ops.insert(id(20010), Op::Approach);
+    }
+    let file = place(
+        source.clone(),
+        PlacementScope::Readers,
+        &bridges[1],
+        &stores[1],
+    );
+    let trees = [
+        lower(source, &mut bridges[0], &stores[0], false),
+        lower(file, &mut bridges[1], &stores[1], true),
+    ];
+    for step in 0..24 {
+        for store in &stores {
+            put(store, "input/a", 8.0);
+            if step % 8 == 0 {
+                put(store, "out/a", (step + 2) as f64);
+            }
+        }
+        assert_eq!(
+            tick(&trees[0], &mut bridges[0]),
+            tick(&trees[1], &mut bridges[1])
+        );
+        assert_eq!(value(&trees[0], 2, X), value(&trees[1], 2, X));
+        assert_eq!(stores[0].snapshot(), stores[1].snapshot());
+    }
+}
+
+/// Copy preserves absence and a present Unit separately, and restores a
+/// foreign overwrite without a module call in either execution mode.
+#[test]
+fn native_copy_preserves_presence_and_republishes_without_module_calls() {
+    for incremental in [false, true] {
+        let store = SimpleDataStore::new();
+        let mut b = Bridge::default();
+        let tree = lower(
+            vec![node(
+                1,
+                COPY_FUNCTION_ID,
+                vec![
+                    (COPY_VALUE_PARAM_ID, var(9000)),
+                    (COPY_OUT_PARAM_ID, var(9004)),
+                ],
+            )],
+            &mut b,
+            &store,
+            incremental,
+        );
+        for value in [None, Some(Value::Unit), Some(Value::F64(3.0))] {
+            store
+                .slot(&Key::from("input/a"))
+                .set(value.clone())
+                .unwrap();
+            for _ in 0..3 {
+                put(&store, "out/a", 99.0);
+                assert_eq!(tick(&tree, &mut b), Status::Success);
+                assert_eq!(get(&store, "out/a"), value);
+                assert!(b.calls.is_empty());
+            }
+        }
+    }
+}
+
+/// Publication follows file order across interleaved components and reverse
+/// dependency order, after all sink computations, as detached publication does.
+#[test]
+fn placed_sink_publication_keeps_file_order_across_components() {
+    let mut a = module(10, var(9000));
+    a.arguments.insert(_RET_PARAM_ID, var(9004));
+    let mut b = module(11, port(10));
+    b.arguments.insert(_RET_PARAM_ID, var(9004));
+    let mut c = module(12, var(9001));
+    c.arguments.insert(_RET_PARAM_ID, var(9004));
+    for sinks in [vec![b.clone(), a.clone()], vec![a.clone(), c, b]] {
+        let source = std::iter::once(node(1, SUCCEED_FUNCTION_ID, vec![]))
+            .chain(sinks)
+            .collect::<Vec<_>>();
+        let mut results = Vec::new();
+        for scope in [
+            None,
+            Some(PlacementScope::Readers),
+            Some(PlacementScope::Root),
+        ] {
+            let store = SimpleDataStore::new();
+            put(&store, "input/a", 1.0);
+            put(&store, "input/b", 100.0);
+            let mut b = bridge(&source);
+            let file =
+                scope.map_or_else(|| source.clone(), |s| place(source.clone(), s, &b, &store));
+            let tree = lower(file, &mut b, &store, scope.is_some());
+            let mut values = Vec::new();
+            for step in 0..10 {
+                tick(&tree, &mut b);
+                values.push(get(&store, "out/a"));
+                if step >= 3 {
+                    assert!(b.calls.is_empty());
+                }
+            }
+            results.push(values);
+        }
+        assert_eq!(results[0], results[1]);
+        assert_eq!(results[0], results[2]);
+    }
 }

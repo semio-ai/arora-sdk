@@ -1,8 +1,10 @@
 //! Load-time placement of detached computations before their readers.
 //!
 //! Placement preserves port references and makes each used detached node an
-//! attached `_on_change` leaf. A store-bound output is written when that leaf
-//! runs: a tree node reading its key sees the new value in the same tick,
+//! attached `_on_change` leaf when its arguments contain no calls. Other
+//! detached nodes remain detached. Store-bound outputs keep private ports and
+//! publish through native `Copy` nodes after their computation: a tree node
+//! reading its key sees the new value in the same tick,
 //! instead of the next tick. Sinks run before the root rather than after it.
 //! Stateful functions, writes during a tick, errors, and store-key feedback
 //! therefore need not behave like demand-driven detached evaluation.
@@ -12,7 +14,10 @@ use arora_types::value::Value;
 use uuid::Uuid;
 
 use crate::error::BehaviorTreeError;
-use crate::nodes::{PARALLEL_FUNCTION_ID, WITH_FUNCTION_ID};
+use crate::nodes::{
+    COPY_FUNCTION_ID, COPY_OUT_PARAM_ID, COPY_VALUE_PARAM_ID, PARALLEL_FUNCTION_ID,
+    WITH_FUNCTION_ID,
+};
 use crate::schema::{Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 use crate::variable::{VariableCell, VariableResolver};
 use crate::{load_behavior_tree_nodes_with, FunctionIndex};
@@ -45,6 +50,9 @@ fn fresh(anchor: Uuid, group: Uuid, tag: u128, used: &mut HashSet<Uuid>) -> Uuid
 }
 const WITH: u128 = 0x57544800000040008000000000000000;
 const GROUP: u128 = 0x47525000000040008000000000000000;
+const INPUT: u128 = 0x494e5000000040008000000000000000;
+const PUBLICATIONS: u128 = 0x50554247000040008000000000000000;
+const PUBLISH: u128 = 0x50554200000040008000000000000000;
 const PORT: u128 = 0x504f5200000040008000000000000000;
 
 // The incoming child index distinguishes repeated children of one parent.
@@ -60,8 +68,11 @@ type ReaderPath = Vec<(Uuid, usize)>;
 /// Connected components of detached reads execute in data order in separate
 /// `PARALLEL` nodes. A `WITH` executes these groups before its body and returns
 /// the body's status. Groups at one anchor follow their first listed node.
+/// A final root prerequisite publishes placed sinks in file order from their
+/// private ports, after all prerequisite computations and before the body.
 /// Every path of a shared reader contributes to the common ancestor. A root
-/// reader or any sink forces a root anchor; unused non-sinks are omitted.
+/// reader or any sink forces a root anchor. Only used nodes without argument
+/// calls join groups; other detached nodes are retained without attachment.
 /// Inert loose controls are retained. Generated ids and list order are stable,
 /// including when an existing id collides with a generated one.
 ///
@@ -105,12 +116,30 @@ pub fn place_detached(
     }
     walk(root, &tree, 0, &mut Vec::new(), &mut paths)?;
     let active: HashSet<usize> = (0..detached.len())
-        .filter(|at| !analysis.unused.contains(&detached[*at].id))
+        .filter(|at| {
+            !analysis.unused.contains(&detached[*at].id)
+                && !crate::incremental::has_call(&detached[*at])
+        })
         .collect();
-    let mut edges = analysis.reads.clone();
-    for (reader, reads) in analysis.reads.iter().enumerate() {
-        for read in reads {
-            edges[*read].push(reader);
+    // Keep dependencies across retained detached calls: a placed consumer
+    // pulls those calls, so their placed inputs must already have executed.
+    let mut dependencies = vec![HashSet::new(); detached.len()];
+    for at in &analysis.order {
+        for read in &analysis.reads[*at] {
+            dependencies[*at].insert(*read);
+            let upstream = dependencies[*read].clone();
+            dependencies[*at].extend(upstream);
+        }
+    }
+    let mut edges = vec![Vec::new(); detached.len()];
+    for reader in 0..detached.len() {
+        if active.contains(&reader) {
+            for read in &dependencies[reader] {
+                if active.contains(read) {
+                    edges[reader].push(*read);
+                    edges[*read].push(reader);
+                }
+            }
         }
     }
     let mut used: HashSet<Uuid> = nodes
@@ -149,29 +178,74 @@ pub fn place_detached(
             }
         }
     }
+    let placeable_ids: HashSet<_> = active.iter().map(|at| detached[*at].id).collect();
+    let mut publications: HashMap<Uuid, Vec<Node>> = HashMap::new();
+    let mut inputs: HashMap<Uuid, Vec<Node>> = HashMap::new();
+    for node in &mut nodes {
+        if !placeable_ids.contains(&node.id) {
+            continue;
+        }
+        let mut parameters: Vec<_> = node.arguments.keys().copied().collect();
+        parameters.sort_unstable();
+        for parameter in parameters {
+            let port = NodeParameterId {
+                node: node.id,
+                parameter,
+            };
+            if !tree.detached.publishes_output(&port) {
+                continue;
+            }
+            let target = node
+                .arguments
+                .insert(
+                    parameter,
+                    Expression::VariableId(fresh(node.id, parameter, PORT, &mut used)),
+                )
+                .unwrap();
+            // Mutable store-backed state starts from the live key, as it
+            // does when evaluated by the detached layer. Returns only publish.
+            if parameter != _RET_PARAM_ID {
+                inputs.entry(node.id).or_default().push(Node {
+                    id: fresh(node.id, parameter, INPUT, &mut used),
+                    function: COPY_FUNCTION_ID,
+                    arguments: HashMap::from([
+                        (COPY_VALUE_PARAM_ID, target.clone()),
+                        (COPY_OUT_PARAM_ID, node.arguments[&parameter].clone()),
+                    ]),
+                    children: None,
+                });
+            }
+            publications.entry(node.id).or_default().push(Node {
+                id: fresh(node.id, parameter, PUBLISH, &mut used),
+                function: COPY_FUNCTION_ID,
+                arguments: HashMap::from([
+                    (COPY_VALUE_PARAM_ID, Expression::NodeArgument(port)),
+                    (COPY_OUT_PARAM_ID, target),
+                ]),
+                children: None,
+            });
+        }
+    }
     let mut seen = HashSet::new();
     let mut anchored: HashMap<Uuid, Vec<Node>> = HashMap::new();
     for first in 0..detached.len() {
-        if seen.contains(&first) {
+        if !active.contains(&first) || seen.contains(&first) {
             continue;
         }
         let mut group = HashSet::new();
         let mut stack = vec![first];
         while let Some(at) = stack.pop() {
             if group.insert(at) {
-                stack.extend(edges[at].iter().copied());
+                stack.extend(edges[at].iter().copied().filter(|at| active.contains(at)));
             }
         }
         seen.extend(group.iter().copied());
-        // Components come from the file's whole dependency graph. An unused
-        // downstream node may connect two live computations, but never runs.
-        group.retain(|at| active.contains(at));
-        if group.is_empty() {
-            continue;
-        }
+        let reads_group = |at: &usize| {
+            group.contains(at) || dependencies[*at].iter().any(|read| group.contains(read))
+        };
         let mut common: Option<ReaderPath> = None;
         for (reader, pulls) in &analysis.pulls {
-            if !pulls.iter().any(|at| group.contains(at)) {
+            if !pulls.iter().any(reads_group) {
                 continue;
             }
             for path in &paths[reader] {
@@ -184,9 +258,7 @@ pub fn place_detached(
                 }
             }
         }
-        let anchor = if scope == PlacementScope::Root
-            || analysis.sinks.iter().any(|at| group.contains(at))
-        {
+        let anchor = if scope == PlacementScope::Root || analysis.sinks.iter().any(reads_group) {
             root
         } else {
             common
@@ -199,7 +271,15 @@ pub fn place_detached(
             .order
             .iter()
             .filter(|at| group.contains(at))
-            .map(|at| detached[*at].id)
+            .flat_map(|at| {
+                let id = detached[*at].id;
+                inputs
+                    .get(&id)
+                    .into_iter()
+                    .flatten()
+                    .map(|node| node.id)
+                    .chain(std::iter::once(id))
+            })
             .collect();
         anchored.entry(anchor).or_default().push(Node {
             id: fresh(anchor, detached[first].id, GROUP, &mut used),
@@ -208,10 +288,30 @@ pub fn place_detached(
             ..Node::default()
         });
     }
-    let detached_ids: HashSet<Uuid> = detached.iter().map(|node| node.id).collect();
-    nodes.retain(|node| !analysis.unused.contains(&node.id));
+
+    // All sink computations finish before any key is published. Publication
+    // follows file order even when components interleave or data order differs.
+    let publication_ids: Vec<_> = nodes
+        .iter()
+        .flat_map(|node| {
+            publications
+                .get(&node.id)
+                .into_iter()
+                .flatten()
+                .map(|node| node.id)
+        })
+        .collect();
+    if !publication_ids.is_empty() {
+        anchored.entry(root).or_default().push(Node {
+            id: fresh(root, Uuid::nil(), PUBLICATIONS, &mut used),
+            function: PARALLEL_FUNCTION_ID,
+            children: Some(publication_ids),
+            ..Node::default()
+        });
+    }
+
     for node in &mut nodes {
-        if detached_ids.contains(&node.id) {
+        if placeable_ids.contains(&node.id) {
             node.children = None;
             node.arguments
                 .insert(_ON_CHANGE_PARAM_ID, Expression::Value(Value::Boolean(true)));
@@ -225,6 +325,14 @@ pub fn place_detached(
     // Traverse anchors in file order, not HashMap iteration order.
     let mut wrappers = HashMap::new();
     let mut added = Vec::new();
+    for node in &nodes {
+        if let Some(inputs) = inputs.remove(&node.id) {
+            added.extend(inputs);
+        }
+        if let Some(publications) = publications.remove(&node.id) {
+            added.extend(publications);
+        }
+    }
     for node in &nodes {
         if let Some(groups) = anchored.remove(&node.id) {
             let wrapper = fresh(node.id, Uuid::nil(), WITH, &mut used);
