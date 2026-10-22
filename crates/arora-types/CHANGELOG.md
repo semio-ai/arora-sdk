@@ -4,6 +4,15 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.9.0] - 2026-10-22
+
+### Added
+
+- `CallBridge::arora_call_borrowed`: a call whose arguments the bridge
+  borrows, so a bridge answering in-process answers it without copying
+  them. Its default makes the owned `Call` and dispatches it with
+  `arora_call`, so every bridge answers it.
+
 ## [3.8.0] - 2026-10-18
 
 ### Added
