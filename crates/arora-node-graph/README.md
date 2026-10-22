@@ -20,16 +20,17 @@ as the detached nodes of an `arora-behavior-tree`
 ## On the behavior tree
 
 ```rust
+use arora_node_graph::import::import_json;
 use arora_node_graph::tree_runtime::TreeRuntime;
-use arora_node_graph::types::GraphSpec;
 use arora_shape::{TypedPath, Value};
 
-let spec: GraphSpec = serde_json::from_str(include_str!("../fixtures/sine-driver.json"))?;
+// A graph's JSON as Vizij writes it: a spec, or a document holding one.
+let (spec, _) = import_json(include_str!("../fixtures/sine-driver.json"), &Default::default())?;
 let mut rt = TreeRuntime::default();
 rt.load(&spec)?;
 rt.dt = 1.0 / 60.0;
 rt.t += rt.dt;
-rt.set_input(TypedPath::parse("node.t")?, Value::F32(0.5), None);
+rt.set_input(TypedPath::parse("driver/time.seconds")?, Value::F32(0.5), None);
 rt.evaluate()?;
 for write in rt.writes.iter() {
     println!("{} = {:?}", write.path, write.value);
