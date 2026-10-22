@@ -147,7 +147,10 @@ A node is the tree's `Node`, whether the tree holds it or not:
   tree-local variable or a store key.
 - **A port** is read as `@node` (its return value) or `@node.parameter` (a
   mutable parameter's value), or through the variable it is bound to. A
-  detached node's return value is a port whether or not `_ret` is bound.
+  detached node's return value is a port whether or not `_ret` is bound. A
+  port bound to a store key is still read at its current value: `@node` is the
+  node's result this tick, while the key holds what the node last published
+  (§3.3).
 
 A Vizij node maps port for port: its named output ports are the return value
 and the mutable parameters of the function it becomes (§4.3).
@@ -217,10 +220,13 @@ node no structure holds, and an edge is a link from its port
   node runs until its state settles.
 - **Sinks run every tick.** A detached node with an output bound to a store
   key is brought up to date after the tree ticks, whether or not the tree
-  reads it. It writes its keys at every tick, from its cache when its inputs
-  did not change, and only after the tree has ticked: within a tick, the tree
-  reads the store as it was. Of two sinks of one key, the later in the list
-  wins, as the later writer does in a Vizij `flow`.
+  reads it. Once every sink is up to date, each writes its keys, from its
+  cache when its inputs did not change. Within a tick, the tree and the sinks
+  read the store as it was, so a sink reading another sink's key sees it a
+  tick late, as any value fed back through a key does. Of two sinks of one
+  key, the later in the list wins whatever reads what, as the later writer
+  does in a Vizij `flow`. The shared `Graph` holds its nodes unordered, so
+  its list is the root, then the other nodes by id.
 - **A detached node nothing reads never runs**, unless it is a sink or feeds
   one.
 
@@ -231,10 +237,11 @@ holds the sinks and what they read, `on_demand` what the tree reads, and
 **The build refuses** a reference to no node. **Lowering refuses** detached
 nodes that read each other in a cycle, since feedback goes through a store
 key; a read of a port that is neither a return value nor a mutable parameter;
-a tree-local cell that a detached node and another node both write; a call to
-the interpreter module; an argument to no parameter of the function; and a
-mutable parameter fed by a call or a selection, neither of which has a cell
-to hold what the function writes back.
+a tree-local cell that a detached node and another node both write, counting
+what a nested call or a native node such as `Unpack` writes; a call to the
+interpreter module; an argument to no parameter of the function; and a
+mutable parameter fed by a call or a selection, neither of which has a cell to
+hold what the function writes back.
 
 ### 3.4 Either flow alone
 

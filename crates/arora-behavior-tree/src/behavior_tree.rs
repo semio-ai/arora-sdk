@@ -155,10 +155,9 @@ impl BehaviorTree {
                 continue;
             }
             for (parameter, expression) in &node.arguments {
+                variable_ids_in(expression, &mut read);
                 match selected_source(expression) {
-                    Expression::VariableId(variable) => {
-                        read.insert(*variable);
-                    }
+                    Expression::VariableId(_) => {}
                     Expression::Value(_) | Expression::Uuid(_) | Expression::Call(_) => {
                         let at = NodeParameterId {
                             node: node.id,
@@ -193,6 +192,28 @@ impl BehaviorTree {
                 take_local(cell, held);
             }
         }
+    }
+}
+
+/// Every variable `expression` names by id, at any depth: a call's arguments
+/// and a selection's source included.
+fn variable_ids_in(expression: &Expression, found: &mut HashSet<Uuid>) {
+    match expression {
+        Expression::VariableId(id) => {
+            found.insert(*id);
+        }
+        Expression::Select { source, .. } => variable_ids_in(source, found),
+        Expression::Call(call) => {
+            let parts = [&call.module, &call.function].into_iter().chain(
+                call.arguments
+                    .iter()
+                    .flat_map(|(parameter, argument)| [parameter, argument]),
+            );
+            for part in parts {
+                variable_ids_in(part, found);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1103,8 +1124,10 @@ pub fn load_behavior_tree_nodes_with(
             }
         }
     }
-    let detached = Detached::new(&listed, &attached);
-    for node in detached.nodes() {
+    let detached_nodes = Detached::select(&listed, &attached);
+    let detached_ids: HashSet<Uuid> = detached_nodes.iter().map(|node| node.id).collect();
+    let mut bindings = HashMap::new();
+    for node in &detached_nodes {
         if !node.arguments.contains_key(&_RET_PARAM_ID) {
             node_parameters_variables.insert(
                 NodeParameterId {
@@ -1131,7 +1154,7 @@ pub fn load_behavior_tree_nodes_with(
                 unresolved.push((node_param, arg_expr));
                 continue;
             }
-            setup_node_parameter_variable(
+            let cell = setup_node_parameter_variable(
                 &node_param,
                 &arg_expr,
                 &mut variables,
@@ -1139,6 +1162,13 @@ pub fn load_behavior_tree_nodes_with(
                 resolver,
                 names,
             )?;
+            // A detached node's port bound to a store key keeps a tree-local
+            // cell of its own, which `@node` reads; the key is published to
+            // after the tree ticks.
+            if matches!(cell, VariableCell::Stored(_)) && detached_ids.contains(&node_param.node) {
+                node_parameters_variables.insert(node_param.clone(), VariableCell::local());
+                bindings.insert(node_param, cell);
+            }
         }
         if let Some((node_param, arg_expr)) =
             unresolved.first().filter(|_| unresolved.len() == before)
@@ -1161,6 +1191,7 @@ pub fn load_behavior_tree_nodes_with(
             outputs.insert(node.id, bound);
         }
     }
+    let detached = Detached::new(detached_nodes, bindings);
 
     Ok(BehaviorTree {
         root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
@@ -1703,6 +1734,9 @@ pub(crate) fn with_call_site_cells(expression: Expression) -> Expression {
                             Expression::Value(value) => {
                                 Expression::Variable(VariableCell::local_with(value))
                             }
+                            Expression::Uuid(id) => Expression::Variable(VariableCell::local_with(
+                                Value::ArrayU8(id.as_bytes().to_vec()),
+                            )),
                             argument => with_call_site_cells(argument),
                         };
                         (parameter, argument)

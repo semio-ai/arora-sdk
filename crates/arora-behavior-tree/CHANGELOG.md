@@ -15,19 +15,23 @@ All notable changes to `arora-behavior-tree`. The format follows
   its return value through `_ret`, each mutable parameter through the cell its
   argument names; its return value is a port whether or not `_ret` is bound.
   - A node reads it through `@node` or `@node.parameter` (a `NodeArgument` on
-    its port), or through the variable an output is bound to. Nothing marks
+    its port), or through the variable an output is bound to. A port bound to
+    a store key reads the node's current result, not the key. Nothing marks
     the read: lowering finds the detached node that writes each tree-local
     cell, and a node brings the detached nodes it reads up to date before it
     ticks.
   - It runs at most once per tick, and calls its function only when its
     argument values changed. A store key is read as the store holds it.
   - One with an output bound to a store key is a sink: it is brought up to
-    date at every tick, after the tree ticks, and writes its keys then, from
-    its cache when its inputs did not change. Of two sinks of one key, the
-    later wins.
+    date at every tick, after the tree ticks. Once every sink is up to date,
+    each writes its keys, from its cache when its inputs did not change, so a
+    sink reads another sink's key as it was before the tick. Of two sinks of
+    one key, the later listed wins. A shared `Graph` lists its root, then its
+    other nodes by id.
   - Lowering refuses detached nodes that read each other in a cycle, a read of
     a port that is neither a return value nor a mutable parameter, and a
-    tree-local cell that a detached node and another node both write.
+    tree-local cell that a detached node and another node both write,
+    counting what nested calls and native nodes such as `Unpack` write.
   - `BehaviorTree::detached_plan` (`DetachedPlan`: `every_tick`, `on_demand`,
     `unused`), `detached_calls` and `display_detached`.
 - A node's argument can nest calls to module functions (`Expression::Call`),
@@ -36,7 +40,7 @@ All notable changes to `arora-behavior-tree`. The format follows
     lowered, and an absent value passes `None` to an optional parameter.
   - A literal argument of a call is the call site's own cell, so a stateful
     function keeps its mutable parameter from tick to tick; a rebuilt tree
-    takes over each call site's state.
+    takes over each call site's state and the variables its calls name.
   - Lowering refuses a call to the interpreter module, an argument for a
     parameter the function does not have, and a mutable parameter fed by a
     selection or a call.

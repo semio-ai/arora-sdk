@@ -29,9 +29,11 @@
 //! every such cell, and gives each node the detached nodes it reads. A
 //! detached node's return value is a port even when `_ret` is not bound.
 //!
-//! A store key is not such a cell. A key a detached node writes is read as the
-//! store holds it, so a value fed back through a key, or passed from one graph
-//! to another through a key, reaches its reader at the next tick.
+//! A store key is not such a cell. A port bound to a store key keeps a
+//! tree-local cell of its own, which `@node` reads, and publishes to the key
+//! after the tree ticks. The key itself is read as the store holds it, so a
+//! value fed back through a key, or passed from one graph to another through a
+//! key, reaches its reader at the next tick.
 //!
 //! # Evaluation
 //!
@@ -56,9 +58,12 @@
 //!
 //! A detached node with an output bound to a **store key** is a sink. Its
 //! readers are outside the tree, so it is brought up to date at **every
-//! tick**, after the tree has ticked, and writes its keys then, even when its
-//! result comes from its cache. The nodes' order decides between two sinks of
-//! one key: the later one wins, as the later writer does in a node graph.
+//! tick**, after the tree has ticked. Once every sink is up to date, each
+//! publishes its keys, in the order the tree lists them, even when its result
+//! comes from its cache: a sink never reads another's key of the same tick,
+//! and of two sinks of one key, the later listed wins, as the later writer
+//! does in a node graph. A tree built from the shared `Graph`, which keeps no
+//! order among its nodes, lists them by id after the root.
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -68,8 +73,14 @@ use arora_types::call::{Call, CallBridge, CallError};
 use arora_types::value::{StructureField, Value};
 use uuid::Uuid;
 
-use crate::display::Names;
+use crate::display::{stated_id, Names};
 use crate::error::BehaviorTreeError;
+use crate::nodes::{
+    REGEX_MATCH_FIRST_MATCH_PARAM_ID, REGEX_MATCH_FUNCTION_ID, RUN_STATUS_FUNCTION_ID,
+    RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+    SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID, SET_STR_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID,
+    UNPACK_OUT_PARAM_IDS, UNSET_STR_FUNCTION_ID, UNSET_STR_VARIABLE_PARAM_ID,
+};
 use crate::schema::{Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use crate::variable::VariableCell;
 use crate::{
@@ -97,6 +108,9 @@ pub(crate) struct Detached {
     /// The detached nodes, in the order the tree lists them.
     nodes: Vec<Rc<Node>>,
     ids: HashSet<Uuid>,
+    /// The store keys the ports of detached nodes publish to, by port; the
+    /// port itself is the tree-local cell the node's argument has.
+    bindings: HashMap<NodeParameterId, VariableCell>,
     /// What lowering found: who reads whom, and what each node writes.
     lowered: RefCell<Lowered>,
     caches: RefCell<Vec<Cache>>,
@@ -113,9 +127,10 @@ struct Lowered {
     reads: Vec<Vec<usize>>,
     /// By node: its arguments in signature order, `_ret` aside.
     arguments: Vec<Vec<Uuid>>,
-    /// By node: its outputs, each a port and the cell it writes.
-    outputs: Vec<Vec<(Uuid, VariableCell)>>,
-    /// The sinks, by position, in evaluation order.
+    /// By node: its outputs, each a port, the tree-local cell it writes, and
+    /// the store key it publishes to after the tree ticks.
+    outputs: Vec<Vec<(Uuid, VariableCell, Option<VariableCell>)>>,
+    /// The sinks, by position, in the order the tree lists them.
     sinks: Vec<usize>,
     /// By attached node: the detached nodes it reads, by position.
     pulls: HashMap<Uuid, Rc<[usize]>>,
@@ -177,10 +192,10 @@ fn cells_read(
 }
 
 impl Detached {
-    /// The detached nodes of `nodes`: the calls to a module function, with no
-    /// children, that `attached` does not hold.
-    pub(crate) fn new(nodes: &[Rc<Node>], attached: &HashSet<Uuid>) -> Self {
-        let nodes: Vec<Rc<Node>> = nodes
+    /// The detached nodes of `nodes`, in their order: the calls to a module
+    /// function, with no children, that `attached` does not hold.
+    pub(crate) fn select(nodes: &[Rc<Node>], attached: &HashSet<Uuid>) -> Vec<Rc<Node>> {
+        nodes
             .iter()
             .filter(|node| {
                 !attached.contains(&node.id)
@@ -191,11 +206,20 @@ impl Detached {
                         .is_none_or(|children| children.is_empty())
             })
             .cloned()
-            .collect();
+            .collect()
+    }
+
+    /// The detached `nodes`, whose ports publish to the store keys
+    /// `bindings` name.
+    pub(crate) fn new(
+        nodes: Vec<Rc<Node>>,
+        bindings: HashMap<NodeParameterId, VariableCell>,
+    ) -> Self {
         let caches = RefCell::new(vec![Cache::default(); nodes.len()]);
         Self {
             ids: nodes.iter().map(|node| node.id).collect(),
             nodes,
+            bindings,
             lowered: RefCell::default(),
             caches,
             tick: Cell::new(1),
@@ -206,6 +230,7 @@ impl Detached {
         Self {
             nodes: Vec::new(),
             ids: HashSet::new(),
+            bindings: HashMap::new(),
             lowered: RefCell::default(),
             caches: RefCell::default(),
             tick: Cell::new(1),
@@ -338,8 +363,18 @@ impl Detached {
             for port in ports {
                 if let Some(cell) = output_cell(node.id, port) {
                     claim(&cell, Some(at), node.id)?;
-                    written.push((port, cell));
+                    let publish = self
+                        .bindings
+                        .get(&NodeParameterId {
+                            node: node.id,
+                            parameter: port,
+                        })
+                        .cloned();
+                    written.push((port, cell, publish));
                 }
+            }
+            for cell in call_writes(node, functions, variables, node_parameters_variables) {
+                claim(&cell, Some(at), node.id)?;
             }
             outputs.push(written);
             arguments.push(
@@ -350,10 +385,14 @@ impl Detached {
                     .collect::<Vec<_>>(),
             );
         }
-        // What attached nodes write: their bound return and the mutable
-        // parameters of the module functions they call.
+        // What attached nodes write: their bound return, the mutable
+        // parameters of the module functions they call, at any depth, and the
+        // outputs of the tree's own nodes.
         for node in attached {
             claim_attached(node, functions, &output_cell, &mut claim)?;
+            for cell in call_writes(node, functions, variables, node_parameters_variables) {
+                claim(&cell, None, node.id)?;
+            }
         }
 
         // A port read must be an output of a detached node.
@@ -432,11 +471,7 @@ impl Detached {
             )?;
         }
 
-        let sink = |at: usize| {
-            outputs[at]
-                .iter()
-                .any(|(_, cell)| matches!(cell, VariableCell::Stored(_)))
-        };
+        let sink = |at: usize| outputs[at].iter().any(|(_, _, publish)| publish.is_some());
         let closure = |starts: Vec<usize>| {
             let mut reached = HashSet::new();
             let mut stack = starts;
@@ -460,7 +495,7 @@ impl Detached {
                 plan.unused.push(id);
             }
         }
-        let sinks = order.iter().copied().filter(|at| sink(*at)).collect();
+        let sinks = (0..self.nodes.len()).filter(|at| sink(*at)).collect();
 
         *self.lowered.borrow_mut() = Lowered {
             signatures,
@@ -493,22 +528,24 @@ impl Detached {
         Ok(())
     }
 
-    /// Bring every sink up to date, in order, and write its store keys.
+    /// Bring every sink up to date, then publish each one's store keys, in
+    /// the order the tree lists them: no sink reads another's key of this tick.
     pub(crate) fn tick_sinks(
         &self,
         scope: Scope,
         caller: &mut dyn CallBridge,
     ) -> Result<(), BehaviorTreeError> {
         let sinks = self.lowered.borrow().sinks.clone();
+        for at in &sinks {
+            self.bring_up_to_date(*at, scope, caller)?;
+        }
+        let lowered = self.lowered.borrow();
+        let caches = self.caches.borrow();
         for at in sinks {
-            self.bring_up_to_date(at, scope, caller)?;
-            let lowered = self.lowered.borrow();
-            let caches = self.caches.borrow();
             let signature = lowered.signatures.get(&self.nodes[at].function);
-            for (port, cell) in &lowered.outputs[at] {
-                if let (VariableCell::Stored(_), Some(value)) = (cell, caches[at].outputs.get(port))
-                {
-                    write_back(cell, value.clone(), output_optional(signature, port));
+            for (port, _, publish) in &lowered.outputs[at] {
+                if let (Some(key), Some(value)) = (publish, caches[at].outputs.get(port)) {
+                    write_back(key, value.clone(), output_optional(signature, port));
                 }
             }
         }
@@ -549,9 +586,10 @@ impl Detached {
                     Some(compute_expression(scope, argument, caller, &np)?)
                         .filter(|value| *value != Value::Unit)
                 }
-                _ => scope
-                    .node_parameters_variables
+                _ => self
+                    .bindings
                     .get(&np)
+                    .or_else(|| scope.node_parameters_variables.get(&np))
                     .and_then(VariableCell::get),
             };
             let optional = signature.is_some_and(|f| is_optional(&f.function, parameter));
@@ -582,9 +620,9 @@ impl Detached {
             for mutated in result.mutated {
                 outputs.insert(mutated.id, *mutated.value);
             }
-            // The tree-local outputs now; the store keys after the tree ticks.
-            for (port, cell) in &lowered.outputs[at] {
-                if let (VariableCell::Local(_), Some(value)) = (cell, outputs.get(port)) {
+            // The ports now; the store keys after the tree ticks.
+            for (port, cell, _) in &lowered.outputs[at] {
+                if let Some(value) = outputs.get(port) {
                     write_back(cell, value.clone(), output_optional(Some(signature), port));
                 }
             }
@@ -622,6 +660,7 @@ fn claim_attached(
     if node.arguments.contains_key(&_RET_PARAM_ID) {
         ports.push(_RET_PARAM_ID);
     }
+    ports.extend(native_writes(node.function).iter().copied());
     if let Some(signature) = functions.get(&node.function) {
         ports.extend(
             node.arguments
@@ -642,6 +681,85 @@ fn claim_attached(
         }
     }
     Ok(())
+}
+
+/// The parameters a node of the tree's own vocabulary writes.
+fn native_writes(function: Uuid) -> &'static [Uuid] {
+    match function {
+        UNPACK_FUNCTION_ID => &UNPACK_OUT_PARAM_IDS,
+        SEQ_STAR_FUNCTION_ID => &[SEQ_STAR_CURRENT_INDEX_PARAM_ID],
+        RUN_STATUS_FUNCTION_ID => &[RUN_STATUS_OUT_PARAM_ID, RUN_STATUS_LATCH_PARAM_ID],
+        SET_STR_FUNCTION_ID => &[SET_STR_VARIABLE_PARAM_ID],
+        UNSET_STR_FUNCTION_ID => &[UNSET_STR_VARIABLE_PARAM_ID],
+        REGEX_MATCH_FUNCTION_ID => &[REGEX_MATCH_FIRST_MATCH_PARAM_ID],
+        _ => &[],
+    }
+}
+
+/// The cells the calls nested in `node`'s arguments write back to: the
+/// argument of each mutable parameter of a function `functions` has.
+fn call_writes(
+    node: &Node,
+    functions: &FunctionIndex,
+    variables: &HashMap<Uuid, VariableCell>,
+    node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+) -> Vec<VariableCell> {
+    fn walk(
+        expression: &Expression,
+        functions: &FunctionIndex,
+        variables: &HashMap<Uuid, VariableCell>,
+        node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
+        found: &mut Vec<VariableCell>,
+    ) {
+        match expression {
+            Expression::Select { source, .. } => walk(
+                source,
+                functions,
+                variables,
+                node_parameters_variables,
+                found,
+            ),
+            Expression::Call(call) => {
+                let signature = stated_id(&call.function).and_then(|id| functions.get(&id));
+                for (parameter, argument) in &call.arguments {
+                    let mutable = signature.is_some_and(|signature| {
+                        stated_id(parameter)
+                            .and_then(|id| signature.function.parameters.get(&id))
+                            .is_some_and(|parameter| parameter.mutable)
+                    });
+                    if mutable {
+                        found.extend(match argument {
+                            Expression::Variable(cell) => Some(cell.clone()),
+                            Expression::VariableId(id) => variables.get(id).cloned(),
+                            Expression::NodeArgument(at) => {
+                                node_parameters_variables.get(at).cloned()
+                            }
+                            _ => None,
+                        });
+                    }
+                    walk(
+                        argument,
+                        functions,
+                        variables,
+                        node_parameters_variables,
+                        found,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for argument in node.arguments.values() {
+        walk(
+            argument,
+            functions,
+            variables,
+            node_parameters_variables,
+            &mut found,
+        );
+    }
+    found
 }
 
 /// Every node port `expression` names, at any depth.

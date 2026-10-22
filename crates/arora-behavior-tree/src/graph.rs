@@ -99,15 +99,17 @@ fn lower_graph(
         }
     }
 
-    let mut ordered: Vec<&Uuid> = graph.nodes.keys().collect();
     // Root first; the loader's "first node is the root" contract depends on it.
+    // The others by id: the graph keeps no order among its nodes, and the
+    // order of detached sinks decides which one of two writing a key wins.
+    let mut ordered: Vec<&Uuid> = graph.nodes.keys().collect();
+    ordered.sort_by_key(|id| (graph.root.as_ref() != Some(*id), **id));
     if let Some(root) = &graph.root {
         if !graph.nodes.contains_key(root) {
             return Err(BehaviorTreeError::InconsistentTreeError {
                 message: format!("graph root {root} is not a node"),
             });
         }
-        ordered.sort_by_key(|id| *id != root);
     }
 
     let mut nodes = Vec::with_capacity(graph.nodes.len());
@@ -222,6 +224,31 @@ mod tests {
     /// A `Select` link lowers to a `Select` expression wrapping the lowered
     /// source, carrying the `Key` path — the tree applies it on read (the
     /// path semantics are unit-tested in `arora-behavior`).
+    /// The graph keeps no order among its nodes: they lower root first, then
+    /// by id, the same at every load.
+    #[test]
+    fn nodes_lower_root_first_then_by_id() {
+        let ids = [0x30, 0x10, 0x40, 0x20].map(Uuid::from_u128);
+        let mut graph = Graph::empty();
+        for id in ids {
+            graph.nodes.insert(
+                id,
+                GraphNode {
+                    id,
+                    function: SUCCEED_FUNCTION_ID,
+                    ..GraphNode::default()
+                },
+            );
+        }
+        graph.root = Some(ids[2]);
+        let order: Vec<Uuid> = graph_to_bt_nodes(&graph)
+            .unwrap()
+            .iter()
+            .map(|node| node.id)
+            .collect();
+        assert_eq!(order, [0x40, 0x10, 0x20, 0x30].map(Uuid::from_u128));
+    }
+
     #[test]
     fn a_select_link_lowers_to_a_select_expression() {
         use arora_behavior::graph::{Link, LinkSource, Port};

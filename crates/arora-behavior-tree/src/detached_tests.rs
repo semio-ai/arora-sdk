@@ -13,12 +13,15 @@ use arora_types::value::Value;
 use uuid::Uuid;
 
 use crate::call_expression_tests::{
-    centimetres, control, f, index, node, Calls, Engine, ADD, ADD_A, ADD_B, BELOW, BELOW_LIMIT,
-    BELOW_X, CLAMP, CLAMP_LO, CLAMP_X, DISTANCE, MUL, MUL_A, MUL_B, SMOOTH, SMOOTH_ALPHA,
-    SMOOTH_STATE, SMOOTH_X,
+    call, centimetres, control, f, index, node, Calls, Engine, ADD, ADD_A, ADD_B, BELOW,
+    BELOW_LIMIT, BELOW_X, CLAMP, CLAMP_LO, CLAMP_X, DISTANCE, MUL, MUL_A, MUL_B, SMOOTH,
+    SMOOTH_ALPHA, SMOOTH_STATE, SMOOTH_X,
 };
 use crate::display::Names;
-use crate::nodes::{FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, SEQ_FUNCTION_ID};
+use crate::nodes::{
+    FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, SEQ_FUNCTION_ID, UNPACK_FUNCTION_ID,
+    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
+};
 use crate::schema::{Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use crate::{load_behavior_tree_nodes_with, BehaviorTree, BehaviorTreeRuntime};
 use arora_behavior::Status;
@@ -727,6 +730,197 @@ fn a_sink_writes_its_keys_after_the_tree_ticks() {
     assert_eq!(get(&store, "out"), Some(Value::F64(1.0)), "written after");
     runtime.tick().unwrap();
     assert_eq!(readings(&calls), [Value::F64(1.5), Value::F64(1.0)]);
+}
+
+/// Sinks are all brought up to date before any publishes its keys: two
+/// graphs feeding each other through store keys each read the other's value
+/// of the previous tick, whatever their order.
+#[test]
+fn sinks_publish_after_every_sink_is_up_to_date() {
+    let store = SimpleDataStore::new();
+    set(&store, "x", 0.0);
+    set(&store, "y", 0.0);
+    let tree = build(
+        &store,
+        vec![below(1, f(1.0), 2.0)],
+        vec![
+            compute(30, ADD, vec![(ADD_A, key("y")), (ADD_B, f(1.0))], Some("x")),
+            compute(31, ADD, vec![(ADD_A, key("x")), (ADD_B, f(1.0))], Some("y")),
+        ],
+    );
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    assert_eq!(
+        (get(&store, "x"), get(&store, "y")),
+        (Some(Value::F64(1.0)), Some(Value::F64(1.0)))
+    );
+    runtime.tick().unwrap();
+    assert_eq!(
+        (get(&store, "x"), get(&store, "y")),
+        (Some(Value::F64(2.0)), Some(Value::F64(2.0)))
+    );
+}
+
+/// A port bound to a store key keeps a tree-local cell: `@node` reads the
+/// node's current result, while the key reads as the store holds it.
+#[test]
+fn a_port_bound_to_a_store_key_reads_its_current_value() {
+    let store = SimpleDataStore::new();
+    set(&store, "in", 3.0);
+    set(&store, "out", -1.0);
+    let tree = build(
+        &store,
+        vec![
+            control(1, SEQ_FUNCTION_ID, &[2, 3]),
+            below(2, read(30), 100.0),
+            below(3, key("out"), 100.0),
+        ],
+        vec![compute(
+            30,
+            MUL,
+            vec![(MUL_A, key("in")), (MUL_B, f(2.0))],
+            Some("out"),
+        )],
+    );
+    let mut engine = Engine::default();
+    let calls = engine.calls.clone();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    let readings: Vec<Value> = calls
+        .borrow()
+        .iter()
+        .filter(|(name, _)| *name == "below")
+        .map(|(_, args)| args[&BELOW_X].clone())
+        .collect();
+    assert_eq!(readings, [Value::F64(6.0), Value::F64(-1.0)]);
+    assert_eq!(get(&store, "out"), Some(Value::F64(6.0)));
+}
+
+/// Sinks publish in the order the tree lists them, not in the order they are
+/// evaluated: here the earlier-listed sink reads the later one's state, and the
+/// later one still wins their shared key.
+#[test]
+fn the_later_listed_sink_wins_whatever_reads_what() {
+    let store = SimpleDataStore::new();
+    set(&store, "target", 2.0);
+    let tree = build(
+        &store,
+        vec![below(1, f(1.0), 2.0)],
+        vec![
+            compute(
+                40,
+                ADD,
+                vec![(ADD_A, port(41, SMOOTH_STATE)), (ADD_B, f(100.0))],
+                Some("out"),
+            ),
+            compute(
+                41,
+                SMOOTH,
+                vec![
+                    (SMOOTH_X, key("target")),
+                    (SMOOTH_ALPHA, f(1.0)),
+                    (SMOOTH_STATE, f(0.0)),
+                ],
+                Some("out"),
+            ),
+        ],
+    );
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    assert_eq!(get(&store, "out"), Some(Value::F64(2.0)), "41, listed last");
+}
+
+/// A tree-local variable that only a nested call names, such as its state,
+/// is carried over when the tree is rebuilt, as any variable its nodes read.
+#[test]
+fn a_rebuilt_tree_keeps_the_variables_its_calls_name() {
+    let store = SimpleDataStore::new();
+    set(&store, "target", 2.0);
+    let nodes = || {
+        vec![below(
+            1,
+            call(
+                SMOOTH,
+                vec![
+                    (SMOOTH_X, key("target")),
+                    (SMOOTH_ALPHA, f(0.5)),
+                    (SMOOTH_STATE, key(".x")),
+                ],
+            ),
+            100.0,
+        )]
+    };
+    let before = build(&store, nodes(), Vec::new());
+    before.variables.borrow()[&var(".x")].set(Value::F64(0.0));
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&before, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    assert_eq!(
+        before.variables.borrow()[&var(".x")].get(),
+        Some(Value::F64(1.0))
+    );
+
+    let after = build(&store, nodes(), Vec::new());
+    after.keep_state(&before, &std::collections::HashSet::new());
+    assert_eq!(
+        after.variables.borrow()[&var(".x")].get(),
+        Some(Value::F64(1.0))
+    );
+}
+
+/// A uuid literal argument of a nested call is the call site's own cell, as
+/// any literal is, so a function that mutates it keeps what it wrote.
+#[test]
+fn a_uuid_literal_of_a_call_is_its_own_cell() {
+    let argument = Expression::Uuid(id(7));
+    let cells = crate::with_call_site_cells(call(ADD, vec![(ADD_A, argument)]));
+    let Expression::Call(call) = cells else {
+        panic!("a call");
+    };
+    match &call.arguments[0].1 {
+        Expression::Variable(cell) => {
+            assert_eq!(cell.get(), Some(Value::ArrayU8(id(7).as_bytes().to_vec())))
+        }
+        other => panic!("a cell, not {other:?}"),
+    }
+}
+
+/// A cell a detached node writes has that one writer: lowering refuses a
+/// nested call that writes it back, and an `Unpack` output bound to it.
+#[test]
+fn lowering_refuses_a_second_writer_of_a_detached_output() {
+    let detached = || compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], Some(".v"));
+    let error = lowering_error(
+        vec![below(
+            1,
+            call(
+                SMOOTH,
+                vec![
+                    (SMOOTH_X, f(1.0)),
+                    (SMOOTH_ALPHA, f(1.0)),
+                    (SMOOTH_STATE, key(".v")),
+                ],
+            ),
+            100.0,
+        )],
+        vec![detached()],
+    );
+    assert!(error.contains("one tree-local cell"), "{error}");
+
+    let error = lowering_error(
+        vec![node(
+            1,
+            UNPACK_FUNCTION_ID,
+            vec![
+                (UNPACK_VALUES_PARAM_ID, key("in")),
+                (UNPACK_OUT_PARAM_IDS[0], key(".v")),
+            ],
+        )],
+        vec![detached()],
+    );
+    assert!(error.contains("one tree-local cell"), "{error}");
 }
 
 /// Attached and detached nodes show alike: one line per node, its name in

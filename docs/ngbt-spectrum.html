@@ -766,8 +766,8 @@ class LeavesEngine extends TreeEngine {
     for (const id of n.outputs) { this.m.visits++; const node = this.model.nodes[id]; const v = this.vars.get(node.a.in); this.write(node.key, v); this.mark(id, v); }
     this.m.visits++; return "R";
   }
-  checkValue(n) { return this.vars.get(n.node); }
-  setValue(n) { return this.vars.get(n.node); }
+  checkValue(n) { return this.arg(n.node); }
+  setValue(n) { return this.arg(n.node); }
 }
 
 // ---- vizij-ai/vizij-rs#257: control nodes in the node graph -----------------
@@ -1034,8 +1034,8 @@ const DESIGNS = [
       E.leaves.forEach((id) => { const n = model.nodes[id]; out.push(`  {.#${id}} = ${n.op}(${argText(n, show)})`); });
       return out.concat(treeLines(model, (n, pad, o) => {
         if (n.k === "block") { o.push(`${pad}PARALLEL   ${n.label}`); n.outputs.forEach((id) => o.push(`${pad}  {${model.nodes[id].key}} = {.#${model.nodes[id].a.in}}`)); o.push(`${pad}  RUNNING`); }
-        else if (n.k === "check") o.push(`${pad}Truthy({.#${n.node}})   ${n.label}`);
-        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? `{.#${n.node}}` : fmt(n.value)}   ${n.label}`);
+        else if (n.k === "check") o.push(`${pad}Truthy(${show(n.node)})   ${n.label}`);
+        else if (n.k === "set") o.push(`${pad}{${n.key}} = ${n.node ? show(n.node) : fmt(n.value)}   ${n.label}`);
       }, 1)).join("\n");
     },
   },
@@ -1070,7 +1070,7 @@ const DESIGNS = [
 // ---------------------------------------------------------------------------
 // App state
 // ---------------------------------------------------------------------------
-const STATE = { tab: "compare", example: "readers", view: "graph", treeMode: "diagram", folds: {}, playing: true, rate: 30, structure: { root: "parallel" }, inputs: {} };
+const STATE = { tab: "compare", example: "readers", view: "graph", treeMode: "diagram", folds: {}, playing: true, rate: 30, structure: { root: "parallel" }, inputs: {}, pending: {} };
 const HIST = 240, SPARK = 120;
 let RUN = null;
 try { const saved = JSON.parse(localStorage.getItem("five-ways") || "{}"); if (saved.example) STATE.example = saved.example; if (saved.view) STATE.view = saved.view; if (saved.treeMode) STATE.treeMode = saved.treeMode; } catch (e) {}
@@ -1081,7 +1081,7 @@ function persist() { try { localStorage.setItem("five-ways", JSON.stringify({ ex
 function exampleById(id) { return EXAMPLES.find((e) => e.id === id); }
 function startRun() {
   const ex = exampleById(STATE.example);
-  STATE.inputs = { ...ex.seed };
+  STATE.inputs = { ...ex.seed }; STATE.pending = {};
   ex.controls.forEach((c) => { if (c.kind === "structure") STATE.structure[c.key] = STATE.structure[c.key] || c.value; });
   const engines = DESIGNS.map((d) => {
     const model = buildModel(ex, STATE.structure);
@@ -1090,10 +1090,13 @@ function startRun() {
   RUN = { ex, engines, tick: 0 };
   document.getElementById("tickno").textContent = "tick 0";
 }
+// A control writes its key on the tick after the person changes it, and only then,
+// so values the tree writes to the same key stay until the next change.
 function tickAll() {
   RUN.tick++;
+  const changes = STATE.pending; STATE.pending = {};
   for (const R of RUN.engines) {
-    for (const c of RUN.ex.controls) if (c.kind !== "structure") R.e.setInput(c.key, STATE.inputs[c.key]);
+    for (const key in changes) R.e.setInput(key, changes[key]);
     const t0 = performance.now(); R.e.tick(); const dt = performance.now() - t0;
     R.times.push(dt); if (R.times.length > SPARK) R.times.shift();
     R.spark.push({ ...R.e.m }); if (R.spark.length > SPARK) R.spark.shift();
@@ -1132,18 +1135,19 @@ function exampleList() {
     h("p", { class: "summary" }, RUN.ex.summary), h("p", { class: "fine" }, "From " + RUN.ex.from + "."));
 }
 
-function controlsCard() {
+function controlsCard(R) {
   const card = h("div", { class: "card" }, h("h3", {}, "Inputs"));
+  const boxes = [];
   if (!RUN.ex.controls.length) card.append(h("p", { class: "fine" }, "No input: the tree drives v itself. Reset starts v at 0."));
   for (const c of RUN.ex.controls) {
     const id = "in-" + c.key.replace(/\W/g, "-");
     if (c.kind === "slider") {
       const out = h("output", { for: id }, fmt(STATE.inputs[c.key]));
       card.append(h("div", { class: "control" }, h("label", { for: id }, c.key), out,
-        h("input", { type: "range", id, min: c.min, max: c.max, step: c.step, value: STATE.inputs[c.key], oninput: (e) => { STATE.inputs[c.key] = +e.target.value; out.textContent = fmt(+e.target.value); } })));
+        h("input", { type: "range", id, min: c.min, max: c.max, step: c.step, value: STATE.inputs[c.key], oninput: (e) => { STATE.inputs[c.key] = STATE.pending[c.key] = +e.target.value; out.textContent = fmt(+e.target.value); } })));
     } else if (c.kind === "toggle") {
-      const box = h("input", { type: "checkbox", id, onchange: (e) => { STATE.inputs[c.key] = e.target.checked; } });
-      box.checked = !!STATE.inputs[c.key];
+      const box = h("input", { type: "checkbox", id, onchange: (e) => { STATE.inputs[c.key] = STATE.pending[c.key] = e.target.checked; } });
+      box.checked = !!R.e.store.get(c.key); boxes.push([box, c.key]);
       card.append(h("div", { class: "control" }, h("label", { for: id, class: "switch" }, box, c.key), h("output", {}, "")));
     } else if (c.kind === "structure") {
       const sel = h("select", { id, onchange: (e) => { STATE.structure[c.key] = e.target.value; startRun(); renderAll(); } }, c.options.map((o) => h("option", { value: o }, o)));
@@ -1152,6 +1156,8 @@ function controlsCard() {
     }
   }
   if (RUN.ex.id === "greet") card.append(h("p", { class: "fine" }, "Turn person/visible on to wave. Turn social/greeted off again to greet once more."));
+  // A checkbox shows its key as the shown design's store holds it, unless a change is waiting for the next tick.
+  card._draw = () => { for (const [box, key] of boxes) if (!(key in STATE.pending)) box.checked = !!R.e.store.get(key); };
   return card;
 }
 
@@ -1861,10 +1867,11 @@ function proposalTab(d) {
   const view = views[STATE.view]();
   const readings = readingsLine(R);
   const plot = plotCard([R], true), meters = metersCard(R);
-  const side = h("div", { class: "side" }, exampleList(), controlsCard(), plot, meters);
+  const controls = controlsCard(R);
+  const side = h("div", { class: "side" }, exampleList(), controls, plot, meters);
   const main = h("div", { class: "views" }, h("div", { class: "viewbar" }, h("div", { class: "viewbar-left" }, seg, treeSeg, foldBar), STATE.view === "stored" ? "" : legend(d.id, STATE.view)), view, readings,
     h("p", { class: "note" }, STATE.view === "stored" ? "What the design stores and runs for this example, generated from the same definition every tab uses." : STATE.view === "graph" ? viewNote(d.id) : treeNote(d.id)));
-  return { el: h("div", { class: "views" }, head, h("div", { class: "bench" }, side, main)), draws: [view._draw, readings._draw, plot._draw, meters._draw] };
+  return { el: h("div", { class: "views" }, head, h("div", { class: "bench" }, side, main)), draws: [view._draw, readings._draw, plot._draw, meters._draw, controls._draw] };
 }
 function treeNote(id) {
   const pills = "Status pills show this tick's Success, Running or Failure; a dash means the node was not ticked.";
@@ -1913,9 +1920,10 @@ function compareTab() {
       drawSpark(cells.spark, R.spark.map((x) => x.calls), css(R.d.color));
     }
   };
-  const side = h("div", { class: "side" }, exampleList(), controlsCard());
+  const controls = controlsCard(RUN.engines.find((x) => x.d.id === "compute"));
+  const side = h("div", { class: "side" }, exampleList(), controls);
   const main = h("div", { class: "views" }, table, plot, bench, rustCard());
-  return { el: h("div", { class: "views" }, intro, h("div", { class: "bench" }, side, main)), draws: [draw, plot._draw] };
+  return { el: h("div", { class: "views" }, intro, h("div", { class: "bench" }, side, main)), draws: [draw, plot._draw, controls._draw] };
 }
 
 function benchCard() {
@@ -1941,9 +1949,11 @@ function runBench(out, btn) {
     const d = DESIGNS[i]; const best = [];
     for (let rep = 0; rep < 3; rep++) {
       const e = d.make(buildModel(ex, STATE.structure));
-      for (let w = 0; w < 200; w++) { const v = scriptInputs(ex, w); for (const k in v) e.setInput(k, v[k]); e.tick(); }
+      const was = { ...ex.seed };
+      const step = (k) => { const v = scriptInputs(ex, k); for (const key in v) if (v[key] !== was[key]) { e.setInput(key, v[key]); was[key] = v[key]; } e.tick(); };
+      for (let w = 0; w < 200; w++) step(w);
       const before = { ...e.totals }; const t0 = performance.now();
-      for (let k = 0; k < N; k++) { const v = scriptInputs(ex, k); for (const key in v) e.setInput(key, v[key]); e.tick(); }
+      for (let k = 0; k < N; k++) step(k);
       const ms = performance.now() - t0;
       best.push({ us: ms * 1000 / N, calls: (e.totals.calls - before.calls) / N, visits: (e.totals.visits - before.visits) / N, compares: (e.totals.compares - before.compares) / N });
     }
