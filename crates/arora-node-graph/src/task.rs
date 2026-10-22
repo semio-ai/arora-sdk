@@ -14,8 +14,8 @@ use arora_behavior::{
     STATUS_ENUMERATION_ID, STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID,
     STATUS_SUCCESS_VARIANT_ID,
 };
+use arora_shape::value::{Enumeration, Value};
 use uuid::Uuid;
-use vizij_api_core::value::{Enumeration, Value};
 
 fn status(variant_id: Uuid) -> Value {
     Value::Enumeration(Enumeration {

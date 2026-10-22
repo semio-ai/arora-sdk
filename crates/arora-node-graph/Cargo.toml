@@ -1,33 +1,30 @@
 [package]
-name        = "vizij-graph-core"
-version = "3.1.1"
-edition     = "2021"
-license     = "Apache-2.0"
-description = "Core node‑graph engine used by Vizij."
-repository  = "https://github.com/vizij-ai/vizij-rs"
-homepage    = "https://github.com/vizij-ai/vizij-rs"
-documentation = "https://docs.rs/vizij-graph-core"
-readme      = "README.md"
-keywords    = ["vizij", "node", "graph", "ecs"]
-categories  = ["rendering", "game-engines"]
+name = "arora-node-graph"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Node graphs for Arora: the node vocabulary as module functions, the importer from a Vizij graph to a behavior tree's detached nodes, and the reference evaluator."
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "README.md"
+keywords = ["arora", "node", "graph", "dataflow", "robotics"]
+categories = ["science::robotics", "game-engines"]
 
 [dependencies]
-serde    = { workspace = true }
-serde_json = { workspace = true }
-thiserror  = { workspace = true }
-hashbrown  = { workspace = true }
-anyhow     = { workspace = true }
-vizij-api-core = { version = "2.1", path = "../../api/vizij-api-core" }
+anyhow = "1"
+arora-shape = { path = "../arora-shape", version = "1" }
 # Declares the behavior `Status` enumeration (type + variant ids) a task run
 # speaks — the cross-interpreter run-status contract.
-arora-behavior = "9"
-uuid = { version = "1", features = ["serde"] }
+arora-behavior = { path = "../arora-behavior", version = "9.4" }
+hashbrown = { version = "0.17", features = ["serde"] }
 k = { version = "0.32", optional = true, default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
 urdf-rs = { version = "0.9", optional = true }
+uuid = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
 criterion = "0.8"
-vizij-test-fixtures = { path = "../../test-fixtures/vizij-test-fixtures" }
 
 [[bench]]
 name = "graph_eval"

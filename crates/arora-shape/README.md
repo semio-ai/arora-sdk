@@ -1,4 +1,4 @@
-# vizij-api-core
+# arora-shape
 
 > **The vizij vocabulary over `arora_types::value::Value`, plus the Shape/TypedPath/WriteBatch contracts used by every Vizij engine, adapter, and tooling surface.**
 
@@ -31,7 +31,7 @@ Vizij runs on Arora: the store, the modules, the behaviors, and Studio all speak
 ## Installation
 
 ```bash
-cargo add vizij-api-core
+cargo add arora-shape
 ```
 
 No feature flags are required; the crate is always built with the full surface enabled.
@@ -48,7 +48,7 @@ No feature flags are required; the crate is always built with the full surface e
 - **Type ids** (`value::VEC3_TYPE`, `value::TRANSFORM_TYPE`, ...) are UUIDs namespaced under the ASCII bytes of "vizij". Composites are `Value::Structure` with these ids; the ids are shared by module codegen and Studio introspection.
 - **Constructors** build the canonical encoding: `float`, `bool_`, `text`, `vector`, `vec2`, `vec3`, `vec4`, `quat`, `color_rgba`, `transform`, `record`, `array`, `enumeration`.
 - **Accessors** read values back into PODs: `as_float`, `as_bool`, `as_text`, `as_vector`, `as_vec2/3/4`, `as_quat`, `as_color_rgba`, `as_transform`, `as_record`, `as_array`, `as_enumeration`. Kernels decode a value once through these, do their math on plain Rust types, and re-encode at the store boundary.
-- **`kind(&Value) -> VizijKind`** classifies a value for dispatch; anything outside the vocabulary is `VizijKind::Other` and flows through untouched.
+- **`kind(&Value) -> ShapeKind`** classifies a value for dispatch; anything outside the vocabulary is `ShapeKind::Other` and flows through untouched.
 
 Mapping: `f32` -> `F32`, `bool` -> `Boolean`, text -> `String`, numeric vector -> `ArrayF32`, composites -> `Structure`, records -> `KeyValue` (field ids derived from key names), sequences -> `ArrayValue`, enums -> native `Enumeration` (variant ids derived from variant names via `value::variant_id`).
 
@@ -108,7 +108,7 @@ Graph specs are normalised so node shorthands stay ergonomic while the runtime a
   }
 }
 
-// normalised representation consumed by vizij-graph-core
+// normalised representation consumed by arora-node-graph
 {
   "id": "scale",
   "type": "multiply",
@@ -130,7 +130,7 @@ This means authors can skip boilerplate constant nodes, but hosts still receive 
 ## Examples
 
 ```rust
-use vizij_api_core::{json, value, Shape, ShapeId, TypedPath, WriteBatch, WriteOp};
+use arora_shape::{json, value, Shape, ShapeId, TypedPath, WriteBatch, WriteOp};
 
 let path = TypedPath::parse("robot/Arm/Joint3.rotation")?;
 let rotation = value::quat([0.0, 0.0, 0.0, 1.0]);
@@ -152,16 +152,16 @@ assert_eq!(value::as_vec3(&parsed), Some([0.0, 1.0, 0.0]));
 ## Development & Testing
 
 ```bash
-cargo test -p vizij-api-core
+cargo test -p arora-shape
 ```
 
-Modules include unit tests for the constructor/accessor round-trips, blending, coercion, and normalisation. Run `pnpm run test:rust` from the repo root to exercise the entire workspace.
+Modules include unit tests for the constructor/accessor round-trips, blending, coercion, and normalisation. Run `cargo test -p arora-shape`.
 
 ---
 
 ## Related Packages
 
-- [`vizij-api-wasm`](../vizij-api-wasm/README.md) – wasm helpers that mirror the same normalisation logic for JavaScript.
-- Engine stacks (`vizij-animation-core`, `vizij-graph-core`) all depend on these contracts.
+- [`vizij-api-wasm`](https://github.com/vizij-ai/vizij-rs/blob/main/crates/api/vizij-api-wasm/README.md) – wasm helpers that mirror the same normalisation logic for JavaScript.
+- Engine stacks (`vizij-animation-core`, `arora-node-graph`) all depend on these contracts.
 
 Questions or improvements? Open an issue—shared contracts are the backbone of Vizij interoperability. 🔗

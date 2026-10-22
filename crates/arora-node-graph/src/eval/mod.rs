@@ -201,7 +201,7 @@ fn holds_its_constant(node: &NodeSpec, ports: &[PortValue]) -> bool {
     };
     match &node.params.value {
         Some(value) => port.value == *value,
-        None => port.value == vizij_api_core::value::float(0.0),
+        None => port.value == arora_shape::value::float(0.0),
     }
 }
 

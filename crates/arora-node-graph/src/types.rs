@@ -3,10 +3,10 @@
 //! These structs are the serde-facing representation consumed by the evaluator, wasm bridge,
 //! fixture tooling, and orchestration layer.
 
+use arora_shape::{Shape, TypedPath, Value};
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use vizij_api_core::{Shape, TypedPath, Value};
 
 /// Stable node identifier within a single [`GraphSpec`].
 pub type NodeId = String;

@@ -18,7 +18,7 @@ use crate::coercion;
 use crate::value::{
     array, as_array, as_color_rgba, as_float, as_quat, as_record, as_transform, as_vec2, as_vec3,
     as_vec4, as_vector, color_rgba, float, kind, quat, record, transform, vec2, vec3, vec4, vector,
-    Transform, VizijKind,
+    ShapeKind, Transform,
 };
 use crate::Value;
 
@@ -110,7 +110,7 @@ fn blend_vector(a: &[f32], b: &[f32], t: f32) -> Vec<f32> {
 /// kinds: if either side is a generic vector, both coerce to vectors and
 /// blend elementwise; otherwise both coerce to scalars and lerp.
 pub fn blend_values(a: &Value, b: &Value, t: f32) -> Value {
-    use VizijKind as K;
+    use ShapeKind as K;
     match (kind(a), kind(b)) {
         (K::Float, K::Float) => float(lerp_f(
             as_float(a).unwrap_or(0.0),

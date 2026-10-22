@@ -9,11 +9,11 @@
 use std::borrow::Cow;
 
 use crate::types::{NodeSpec, SelectorSegment};
+use arora_shape::shape::Field;
+use arora_shape::value as vocab;
+use arora_shape::value::ShapeKind;
+use arora_shape::{Shape, ShapeId, Value};
 use hashbrown::HashMap;
-use vizij_api_core::shape::Field;
-use vizij_api_core::value as vocab;
-use vizij_api_core::value::VizijKind;
-use vizij_api_core::{Shape, ShapeId, Value};
 
 use super::value_layout::{flatten_numeric, PortValue};
 
@@ -31,22 +31,22 @@ pub fn infer_shape(value: &Value) -> Shape {
 /// `Scalar`, matching their scalar numeric coercion.
 pub fn infer_shape_id(value: &Value) -> ShapeId {
     match vocab::kind(value) {
-        VizijKind::Float => ShapeId::Scalar,
-        VizijKind::Bool => ShapeId::Bool,
-        VizijKind::Text => ShapeId::Text,
-        VizijKind::Vec2 => ShapeId::Vec2,
-        VizijKind::Vec3 => ShapeId::Vec3,
-        VizijKind::Vec4 => ShapeId::Vec4,
-        VizijKind::Quat => ShapeId::Quat,
-        VizijKind::ColorRgba => ShapeId::ColorRgba,
-        VizijKind::Transform => ShapeId::Transform,
-        VizijKind::Vector => {
+        ShapeKind::Float => ShapeId::Scalar,
+        ShapeKind::Bool => ShapeId::Bool,
+        ShapeKind::Text => ShapeId::Text,
+        ShapeKind::Vec2 => ShapeId::Vec2,
+        ShapeKind::Vec3 => ShapeId::Vec3,
+        ShapeKind::Vec4 => ShapeId::Vec4,
+        ShapeKind::Quat => ShapeId::Quat,
+        ShapeKind::ColorRgba => ShapeId::ColorRgba,
+        ShapeKind::Transform => ShapeId::Transform,
+        ShapeKind::Vector => {
             let len = vocab::as_vector(value).map(<[f32]>::len).unwrap_or(0);
             ShapeId::Vector {
                 len: if len == 0 { None } else { Some(len) },
             }
         }
-        VizijKind::Record => {
+        ShapeKind::Record => {
             // `as_record` yields entries sorted by name.
             let fields: Vec<Field> = vocab::as_record(value)
                 .unwrap_or_default()
@@ -58,7 +58,7 @@ pub fn infer_shape_id(value: &Value) -> ShapeId {
                 .collect();
             ShapeId::Record(fields)
         }
-        VizijKind::Array => {
+        ShapeKind::Array => {
             let items = vocab::as_array(value).unwrap_or_default();
             if let Some(first) = items.first() {
                 let first_shape = infer_shape_id(first);
@@ -72,13 +72,13 @@ pub fn infer_shape_id(value: &Value) -> ShapeId {
                 ShapeId::Array(Box::new(ShapeId::Scalar), 0)
             }
         }
-        VizijKind::Enum => match vocab::as_enumeration(value) {
+        ShapeKind::Enum => match vocab::as_enumeration(value) {
             Some((variant, payload)) => {
                 ShapeId::Enum(vec![(variant.to_string(), infer_shape_id(payload))])
             }
             None => ShapeId::Scalar,
         },
-        VizijKind::Other => ShapeId::Scalar,
+        ShapeKind::Other => ShapeId::Scalar,
     }
 }
 
@@ -116,15 +116,15 @@ pub fn enforce_output_shapes(
 /// Check whether `value` conforms to the expected `shape`.
 pub fn value_matches_shape(shape: &ShapeId, value: &Value) -> bool {
     match shape {
-        ShapeId::Scalar => vocab::kind(value) == VizijKind::Float,
-        ShapeId::Bool => vocab::kind(value) == VizijKind::Bool,
-        ShapeId::Vec2 => vocab::kind(value) == VizijKind::Vec2,
-        ShapeId::Vec3 => vocab::kind(value) == VizijKind::Vec3,
-        ShapeId::Vec4 => vocab::kind(value) == VizijKind::Vec4,
-        ShapeId::Quat => vocab::kind(value) == VizijKind::Quat,
-        ShapeId::ColorRgba => vocab::kind(value) == VizijKind::ColorRgba,
-        ShapeId::Transform => vocab::kind(value) == VizijKind::Transform,
-        ShapeId::Text => vocab::kind(value) == VizijKind::Text,
+        ShapeId::Scalar => vocab::kind(value) == ShapeKind::Float,
+        ShapeId::Bool => vocab::kind(value) == ShapeKind::Bool,
+        ShapeId::Vec2 => vocab::kind(value) == ShapeKind::Vec2,
+        ShapeId::Vec3 => vocab::kind(value) == ShapeKind::Vec3,
+        ShapeId::Vec4 => vocab::kind(value) == ShapeKind::Vec4,
+        ShapeId::Quat => vocab::kind(value) == ShapeKind::Quat,
+        ShapeId::ColorRgba => vocab::kind(value) == ShapeKind::ColorRgba,
+        ShapeId::Transform => vocab::kind(value) == ShapeKind::Transform,
+        ShapeId::Text => vocab::kind(value) == ShapeKind::Text,
         ShapeId::Vector { len } => match vocab::as_vector(value) {
             Some(items) => match len {
                 Some(expected) => items.len() == *expected,
@@ -271,14 +271,14 @@ pub fn project_by_selector(
 /// transform's part, an enumeration's payload when `field` names its variant.
 fn select_field<'a>(value: &'a Value, field: &str) -> Result<Cow<'a, Value>, String> {
     match vocab::kind(value) {
-        VizijKind::Record => vocab::record_field(value, field)
+        ShapeKind::Record => vocab::record_field(value, field)
             .map(Cow::Borrowed)
             .ok_or_else(|| format!("selector field '{}' missing in record", field)),
-        VizijKind::Transform => vocab::as_transform(value)
+        ShapeKind::Transform => vocab::as_transform(value)
             .and_then(|t| transform_field_value(field, &t))
             .map(Cow::Owned)
             .ok_or_else(|| format!("selector field '{}' invalid for transform", field)),
-        VizijKind::Enum => {
+        ShapeKind::Enum => {
             let (variant, payload) = vocab::as_enumeration(value)
                 .ok_or_else(|| format!("selector field '{}' invalid", field))?;
             if vocab::variant_id(field) == variant || variant.to_string() == *field {
@@ -324,14 +324,14 @@ fn select_index(value: &Value, idx: usize) -> Result<Cow<'_, Value>, String> {
             .ok_or_else(|| format!("selector index {} out of bounds for {}", idx, what))
     };
     match vocab::kind(value) {
-        VizijKind::Vector => {
+        ShapeKind::Vector => {
             let items = vocab::as_vector(value).unwrap_or_default();
             owned(
                 items.get(idx).copied().map(vocab::float),
                 &format!("vector of len {}", items.len()),
             )
         }
-        VizijKind::Array => {
+        ShapeKind::Array => {
             let items = vocab::as_array(value).unwrap_or_default();
             items.get(idx).map(Cow::Borrowed).ok_or_else(|| {
                 format!(
@@ -341,11 +341,11 @@ fn select_index(value: &Value, idx: usize) -> Result<Cow<'_, Value>, String> {
                 )
             })
         }
-        VizijKind::Vec2 => owned(component(vocab::as_vec2(value), idx), "vec2"),
-        VizijKind::Vec3 => owned(component(vocab::as_vec3(value), idx), "vec3"),
-        VizijKind::Vec4 => owned(component(vocab::as_vec4(value), idx), "vec4"),
-        VizijKind::Quat => owned(component(vocab::as_quat(value), idx), "quat"),
-        VizijKind::ColorRgba => owned(component(vocab::as_color_rgba(value), idx), "color"),
+        ShapeKind::Vec2 => owned(component(vocab::as_vec2(value), idx), "vec2"),
+        ShapeKind::Vec3 => owned(component(vocab::as_vec3(value), idx), "vec3"),
+        ShapeKind::Vec4 => owned(component(vocab::as_vec4(value), idx), "vec4"),
+        ShapeKind::Quat => owned(component(vocab::as_quat(value), idx), "quat"),
+        ShapeKind::ColorRgba => owned(component(vocab::as_color_rgba(value), idx), "color"),
         _ => Err(format!(
             "selector index {} unsupported for value {:?}",
             idx,

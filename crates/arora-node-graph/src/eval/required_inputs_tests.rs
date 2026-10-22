@@ -5,10 +5,10 @@
 use super::*;
 use crate::schema::{registry, required_inputs, NodeSignature, PortSpec, PortType};
 use crate::types::{InputDefault, NodeParams, NodeSpec, NodeType};
+use arora_shape::value as vocab;
+use arora_shape::{TypedPath, Value};
 use hashbrown::HashMap;
 use uuid::Uuid;
-use vizij_api_core::value as vocab;
-use vizij_api_core::{TypedPath, Value};
 
 /// The pose of the fixture arm's tool with its joints at [`REST`]: a target
 /// its IK nodes reach from there.
@@ -67,7 +67,7 @@ fn sample(port: &PortSpec, rest: &Rest) -> Value {
         // One value per joint of the fixture's arm.
         ("seed" | "joints", _) => vocab::vector(REST.to_vec()),
         // A run's live arguments are a bundle of call args.
-        ("args", _) => Value::Structure(vizij_api_core::value::Structure {
+        ("args", _) => Value::Structure(arora_shape::value::Structure {
             id: Uuid::from_u128(0xA265),
             fields: Vec::new(),
         }),
@@ -101,8 +101,7 @@ fn params(kind: &NodeType) -> NodeParams {
         #[cfg(feature = "urdf_ik")]
         NodeType::UrdfIkPosition | NodeType::UrdfIkPose | NodeType::UrdfFk => {
             let fixture: serde_json::Value =
-                vizij_test_fixtures::node_graphs::spec("urdf-ik-position")
-                    .expect("the urdf-ik-position fixture");
+                crate::fixtures::spec("urdf-ik-position").expect("the urdf-ik-position fixture");
             let urdf = fixture["spec"]["nodes"]
                 .as_array()
                 .and_then(|nodes| nodes.iter().find(|node| node["id"] == "ik"))

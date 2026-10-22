@@ -2,8 +2,8 @@
 
 use std::cmp::Ordering;
 
-use vizij_api_core::value as vocab;
-use vizij_api_core::Value;
+use arora_shape::value as vocab;
+use arora_shape::Value;
 
 use super::eval_node::InputSlots;
 use super::numeric::binary_numeric;

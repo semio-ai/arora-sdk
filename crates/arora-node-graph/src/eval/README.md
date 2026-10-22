@@ -1,6 +1,6 @@
 # Evaluation Module Guide
 
-This directory contains the modules that implement the `vizij-graph-core` evaluation pipeline. The goal is to keep the public entry points (`GraphRuntime`, `evaluate_all`) concise while domain-specific logic lives in focused submodules.
+This directory contains the modules that implement the `arora-node-graph` evaluation pipeline. The goal is to keep the public entry points (`GraphRuntime`, `evaluate_all`) concise while domain-specific logic lives in focused submodules.
 
 ---
 
@@ -48,7 +48,7 @@ This directory contains the modules that implement the `vizij-graph-core` evalua
 
 ## Testing
 
-- Run `cargo test -p vizij-graph-core` to cover all modules, including the evaluation tests here.
+- Run `cargo test -p arora-node-graph` to cover all modules, including the evaluation tests here.
 - The `blend_tests.rs` file complements `tests.rs` with additional coverage for blending operations.
 - When introducing new nodes or selector behaviour, add dedicated tests to keep regressions visible.
 

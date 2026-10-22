@@ -8,8 +8,8 @@
 
 use super::*;
 use crate::types::GraphSpec;
+use arora_shape::Value;
 use serde_json::json;
-use vizij_api_core::Value;
 
 /// A spring of `stiffness`, `damping` and `mass` behind a constant target.
 fn spring(stiffness: f32, damping: f32, mass: f32) -> GraphSpec {

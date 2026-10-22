@@ -5,11 +5,11 @@
 //! [`ExternalFunction`](crate::types::NodeType::ExternalFunction) node carries only a stable
 //! function id (a [`Uuid`]) plus opaque arg-key handles. Evaluating such a node calls out to a
 //! [`NodeFunctions`] host that owns all the domain meaning. Values are always the shared runtime
-//! type [`vizij_api_core::Value`].
+//! type [`arora_shape::Value`].
 
+use arora_shape::Value;
 use hashbrown::HashMap;
 use uuid::Uuid;
-use vizij_api_core::Value;
 
 /// A single external function a node can invoke.
 ///

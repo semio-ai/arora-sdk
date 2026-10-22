@@ -5,10 +5,10 @@ use crate::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, InputDefault, NodeParams, NodeSpec,
     NodeType, RoundMode, SelectorSegment,
 };
+use arora_shape::shape::Field;
+use arora_shape::value as vocab;
+use arora_shape::{Shape, ShapeId, TypedPath, Value, WriteBatch};
 use hashbrown::HashMap;
-use vizij_api_core::shape::Field;
-use vizij_api_core::value as vocab;
-use vizij_api_core::{Shape, ShapeId, TypedPath, Value, WriteBatch};
 
 fn expect_vec3(value: &Value) -> [f32; 3] {
     vocab::as_vec3(value).unwrap_or_else(|| panic!("expected vec3, got {value:?}"))
@@ -2538,8 +2538,8 @@ fn noise_nodes_are_deterministic_and_in_range() {
 
 // --- path-less Output: keyed record batches ----------------------------------
 
+use arora_shape::value::{StructureField, StructureWithoutId};
 use uuid::Uuid;
-use vizij_api_core::value::{StructureField, StructureWithoutId};
 
 const KEY_FIELD: Uuid = Uuid::from_u128(0x11);
 const VALUE_FIELD: Uuid = Uuid::from_u128(0x22);

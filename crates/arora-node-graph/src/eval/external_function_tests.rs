@@ -4,10 +4,10 @@ use super::*;
 use crate::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, NodeParams, NodeSpec, NodeType,
 };
+use arora_shape::value as vocab;
+use arora_shape::Value;
 use hashbrown::HashMap;
 use uuid::Uuid;
-use vizij_api_core::value as vocab;
-use vizij_api_core::Value;
 
 /// Records each `call` it receives and always returns Float(42.0).
 #[derive(Default)]
@@ -230,11 +230,11 @@ impl NodeFunctions for ArgsRecordingFunctions {
 }
 
 fn bundle(fields: &[(Uuid, Value)]) -> Value {
-    Value::Structure(vizij_api_core::value::Structure {
+    Value::Structure(arora_shape::value::Structure {
         id: Uuid::from_u128(0x2222),
         fields: fields
             .iter()
-            .map(|(id, value)| vizij_api_core::value::StructureField {
+            .map(|(id, value)| arora_shape::value::StructureField {
                 id: *id,
                 value: Box::new(value.clone()),
             })
@@ -326,7 +326,7 @@ fn spawn_graph(function: Uuid, shape: Uuid, weight: Uuid) -> GraphSpec {
                 id: "shape".to_string(),
                 kind: NodeType::Input,
                 params: NodeParams {
-                    path: Some(vizij_api_core::TypedPath::parse("test/shape").expect("path")),
+                    path: Some(arora_shape::TypedPath::parse("test/shape").expect("path")),
                     value: Some(vocab::text("sil")),
                     ..Default::default()
                 },
@@ -355,7 +355,7 @@ fn spawn_graph(function: Uuid, shape: Uuid, weight: Uuid) -> GraphSpec {
 /// Stage `shape` and evaluate once, returning the runs that evaluation
 /// requested.
 fn spawn_step(rt: &mut GraphRuntime, graph: &GraphSpec, shape: &str) -> Vec<SpawnRequest> {
-    let path = vizij_api_core::TypedPath::parse("test/shape").expect("path");
+    let path = arora_shape::TypedPath::parse("test/shape").expect("path");
     rt.set_input(path, vocab::text(shape), None);
     evaluate_all(rt, graph).expect("the graph evaluates without a host");
     rt.spawns.clone()
@@ -405,7 +405,7 @@ fn spawn_requests_a_run_each_time_its_when_changes() {
         id: "when".to_string(),
         kind: NodeType::Input,
         params: NodeParams {
-            path: Some(vizij_api_core::TypedPath::parse("test/when").expect("path")),
+            path: Some(arora_shape::TypedPath::parse("test/when").expect("path")),
             value: Some(Value::F32(0.0)),
             ..Default::default()
         },
@@ -415,7 +415,7 @@ fn spawn_requests_a_run_each_time_its_when_changes() {
     graph.edges.push(link("when", "spawn", "when"));
     let graph = graph.with_cache();
     let mut rt = GraphRuntime::default();
-    let when = vizij_api_core::TypedPath::parse("test/when").expect("path");
+    let when = arora_shape::TypedPath::parse("test/when").expect("path");
     let step = |rt: &mut GraphRuntime, at: f32| {
         rt.set_input(when.clone(), Value::F32(at), None);
         spawn_step(rt, &graph, "pp")
@@ -445,7 +445,7 @@ fn spawn_refuses_an_arg_slot_without_a_parameter_id() {
     graph.nodes[1].params.record_keys = Some(vec!["shape".to_string()]);
     let graph = graph.with_cache();
     let mut rt = GraphRuntime::default();
-    let path = vizij_api_core::TypedPath::parse("test/shape").expect("path");
+    let path = arora_shape::TypedPath::parse("test/shape").expect("path");
     rt.set_input(path, vocab::text("aa"), None);
     let err = evaluate_all(&mut rt, &graph).expect_err("a slot keyed by a name is refused");
     assert!(

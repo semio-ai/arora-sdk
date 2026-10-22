@@ -277,6 +277,8 @@ Quick reference:
 | `arora-behavior-tree-types` | BT primitive types |
 | `arora-animation` | Keyframe clips, exact evaluation, players on the device clock |
 | `arora-animation-module` | The module `@arora/animation` (`modules/animation`): a wasm guest in a module directory with its records, or host-linked |
+| `arora-shape` | Shapes, typed paths and the value vocabulary (vec2–4, quat, color, transform) over `Value`; blending, coercion, write batches, graph-spec JSON forms |
+| `arora-node-graph` | Node graphs: the node vocabulary, the reference evaluator, and the importer from a Vizij graph to a behavior tree's detached nodes |
 
 ## Tips for AI Agents
 

@@ -1,13 +1,13 @@
 //! URDF inverse kinematics helpers gated behind the `urdf_ik` feature.
 
+use arora_shape::value as vocab;
+use arora_shape::value::ShapeKind;
+use arora_shape::{coercion, Value};
 use hashbrown::HashMap;
 use k::InverseKinematicsSolver;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use vizij_api_core::value as vocab;
-use vizij_api_core::value::VizijKind;
-use vizij_api_core::{coercion, Value};
 
 /// Cached state for URDF chains shared by IK and FK nodes.
 pub struct UrdfKinematicsState {
@@ -299,20 +299,20 @@ pub fn solve_position(
 fn scalar_from_value(value: &Value) -> Result<f32, String> {
     let mismatch = || format!("expected numeric scalar, received {:?}", vocab::kind(value));
     match vocab::kind(value) {
-        VizijKind::Float => vocab::as_float(value).ok_or_else(mismatch),
-        VizijKind::Bool => Ok(if vocab::as_bool(value).unwrap_or(false) {
+        ShapeKind::Float => vocab::as_float(value).ok_or_else(mismatch),
+        ShapeKind::Bool => Ok(if vocab::as_bool(value).unwrap_or(false) {
             1.0
         } else {
             0.0
         }),
-        VizijKind::Vec2 => Ok(vocab::as_vec2(value).ok_or_else(mismatch)?[0]),
-        VizijKind::Vec3 => Ok(vocab::as_vec3(value).ok_or_else(mismatch)?[0]),
-        VizijKind::Vec4 => Ok(vocab::as_vec4(value).ok_or_else(mismatch)?[0]),
-        VizijKind::Quat => Ok(vocab::as_quat(value).ok_or_else(mismatch)?[0]),
-        VizijKind::Vector => vocab::as_vector(value)
+        ShapeKind::Vec2 => Ok(vocab::as_vec2(value).ok_or_else(mismatch)?[0]),
+        ShapeKind::Vec3 => Ok(vocab::as_vec3(value).ok_or_else(mismatch)?[0]),
+        ShapeKind::Vec4 => Ok(vocab::as_vec4(value).ok_or_else(mismatch)?[0]),
+        ShapeKind::Quat => Ok(vocab::as_quat(value).ok_or_else(mismatch)?[0]),
+        ShapeKind::Vector => vocab::as_vector(value)
             .and_then(|xs| xs.first().copied())
             .ok_or_else(|| "vector is empty".to_string()),
-        VizijKind::Array => {
+        ShapeKind::Array => {
             let items = vocab::as_array(value).ok_or_else(mismatch)?;
             if items.len() == 1 {
                 scalar_from_value(&items[0])
@@ -320,7 +320,7 @@ fn scalar_from_value(value: &Value) -> Result<f32, String> {
                 Err(mismatch())
             }
         }
-        VizijKind::Enum => {
+        ShapeKind::Enum => {
             let (_, payload) = vocab::as_enumeration(value).ok_or_else(mismatch)?;
             scalar_from_value(payload)
         }
@@ -362,7 +362,7 @@ pub fn fetch_joint_vector(
     }
 
     match vocab::kind(value) {
-        VizijKind::Record => {
+        ShapeKind::Record => {
             let entries = vocab::as_record(value).unwrap_or_default();
             let by_name: HashMap<&str, &Value> = entries.into_iter().collect();
             let mut result = Vec::with_capacity(expected);
@@ -377,7 +377,7 @@ pub fn fetch_joint_vector(
             }
             Ok(result)
         }
-        VizijKind::Array => {
+        ShapeKind::Array => {
             let items = vocab::as_array(value).unwrap_or_default();
             let mut sequence = Vec::with_capacity(items.len());
             for item in items {

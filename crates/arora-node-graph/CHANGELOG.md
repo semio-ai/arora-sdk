@@ -1,8 +1,19 @@
 # Changelog
 
-All notable changes to `vizij-graph-core`. The format follows
+All notable changes to `arora-node-graph`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
-[Semantic Versioning](https://semver.org/).
+[Semantic Versioning](https://semver.org/). Versions up to 3.1.1 were
+published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
+`vizij-graph-core`.
+
+## [1.0.0] - 2026-10-22
+
+### Changed
+
+- The crate is `arora-node-graph`, in arora-sdk, continuing `vizij-graph-core`
+  3.1.1 with its history. Its library is `arora_node_graph`, and it depends on
+  `arora-shape` where it depended on `vizij-api-core`. Its graph format and
+  its evaluation do not change.
 
 ## [3.1.1] - 2026-10-19
 

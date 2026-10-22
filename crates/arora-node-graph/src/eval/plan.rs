@@ -11,7 +11,7 @@ use std::hash::Hasher;
 use super::shape_helpers::project_by_selector;
 use super::value_layout::PortValue;
 use super::variadic::{compare_variadic_keys, parse_variadic_key};
-use vizij_api_core::Shape;
+use arora_shape::Shape;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VariadicRange {
@@ -573,7 +573,7 @@ fn resolve_constant_picks(spec: &GraphSpec, input_bindings: &mut [Vec<InputBindi
                 node.params
                     .value
                     .clone()
-                    .unwrap_or_else(|| vizij_api_core::value::float(0.0)),
+                    .unwrap_or_else(|| arora_shape::value::float(0.0)),
             )
         })
     };
@@ -756,7 +756,7 @@ pub fn fingerprint_spec(spec: &GraphSpec) -> u64 {
 mod tests {
     use super::*;
     use crate::types::{EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, NodeParams, NodeSpec};
-    use vizij_api_core::value::float;
+    use arora_shape::value::float;
 
     fn constant(id: &str) -> NodeSpec {
         NodeSpec {

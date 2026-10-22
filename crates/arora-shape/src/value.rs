@@ -17,7 +17,7 @@
 //!   back into plain Rust types. These are the kernel seam: hot code decodes
 //!   a `Value` once into PODs, does its math on those, and re-encodes at the
 //!   store boundary.
-//! - A coarse [`VizijKind`] classifier for dispatch.
+//! - A coarse [`ShapeKind`] classifier for dispatch.
 //!
 //! Primitive mapping: `f32` -> `Value::F32`, `bool` -> `Value::Boolean`,
 //! text -> `Value::String`, numeric vector -> `Value::ArrayF32`. Records map
@@ -118,7 +118,7 @@ pub struct Transform {
 /// (integers, unit, uuid, unknown structures, ...); such values still flow
 /// through the store untouched, they just have no vizij-specific semantics.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum VizijKind {
+pub enum ShapeKind {
     /// Scalar float (`F32` or `F64`).
     Float,
     /// Boolean.
@@ -150,7 +150,7 @@ pub enum VizijKind {
 }
 
 /// Classify a value against the vizij vocabulary.
-pub fn kind(value: &Value) -> VizijKind {
+pub fn kind(value: &Value) -> ShapeKind {
     match value {
         // The graph has one scalar kind; an integer from the store (the
         // runtime's `dt`, a frame's dimensions) is a number to its arithmetic.
@@ -163,23 +163,23 @@ pub fn kind(value: &Value) -> VizijKind {
         | Value::I8(_)
         | Value::I16(_)
         | Value::I32(_)
-        | Value::I64(_) => VizijKind::Float,
-        Value::Boolean(_) => VizijKind::Bool,
-        Value::String(_) => VizijKind::Text,
-        Value::ArrayF32(_) => VizijKind::Vector,
+        | Value::I64(_) => ShapeKind::Float,
+        Value::Boolean(_) => ShapeKind::Bool,
+        Value::String(_) => ShapeKind::Text,
+        Value::ArrayF32(_) => ShapeKind::Vector,
         Value::Structure(s) => match s.id {
-            t if t == VEC2_TYPE => VizijKind::Vec2,
-            t if t == VEC3_TYPE => VizijKind::Vec3,
-            t if t == VEC4_TYPE => VizijKind::Vec4,
-            t if t == QUAT_TYPE => VizijKind::Quat,
-            t if t == COLOR_RGBA_TYPE => VizijKind::ColorRgba,
-            t if t == TRANSFORM_TYPE => VizijKind::Transform,
-            _ => VizijKind::Other,
+            t if t == VEC2_TYPE => ShapeKind::Vec2,
+            t if t == VEC3_TYPE => ShapeKind::Vec3,
+            t if t == VEC4_TYPE => ShapeKind::Vec4,
+            t if t == QUAT_TYPE => ShapeKind::Quat,
+            t if t == COLOR_RGBA_TYPE => ShapeKind::ColorRgba,
+            t if t == TRANSFORM_TYPE => ShapeKind::Transform,
+            _ => ShapeKind::Other,
         },
-        Value::KeyValue(_) => VizijKind::Record,
-        Value::ArrayValue(_) => VizijKind::Array,
-        Value::Enumeration(_) => VizijKind::Enum,
-        _ => VizijKind::Other,
+        Value::KeyValue(_) => ShapeKind::Record,
+        Value::ArrayValue(_) => ShapeKind::Array,
+        Value::Enumeration(_) => ShapeKind::Enum,
+        _ => ShapeKind::Other,
     }
 }
 
@@ -569,38 +569,38 @@ mod tests {
 
     #[test]
     fn kinds_classify_the_vocabulary() {
-        assert_eq!(kind(&float(1.0)), VizijKind::Float);
-        assert_eq!(kind(&Value::F64(1.0)), VizijKind::Float);
-        assert_eq!(kind(&bool_(true)), VizijKind::Bool);
-        assert_eq!(kind(&text("x")), VizijKind::Text);
-        assert_eq!(kind(&vector(vec![1.0])), VizijKind::Vector);
-        assert_eq!(kind(&vec2([0.0; 2])), VizijKind::Vec2);
-        assert_eq!(kind(&vec3([0.0; 3])), VizijKind::Vec3);
-        assert_eq!(kind(&vec4([0.0; 4])), VizijKind::Vec4);
-        assert_eq!(kind(&quat([0.0, 0.0, 0.0, 1.0])), VizijKind::Quat);
-        assert_eq!(kind(&color_rgba([0.0; 4])), VizijKind::ColorRgba);
+        assert_eq!(kind(&float(1.0)), ShapeKind::Float);
+        assert_eq!(kind(&Value::F64(1.0)), ShapeKind::Float);
+        assert_eq!(kind(&bool_(true)), ShapeKind::Bool);
+        assert_eq!(kind(&text("x")), ShapeKind::Text);
+        assert_eq!(kind(&vector(vec![1.0])), ShapeKind::Vector);
+        assert_eq!(kind(&vec2([0.0; 2])), ShapeKind::Vec2);
+        assert_eq!(kind(&vec3([0.0; 3])), ShapeKind::Vec3);
+        assert_eq!(kind(&vec4([0.0; 4])), ShapeKind::Vec4);
+        assert_eq!(kind(&quat([0.0, 0.0, 0.0, 1.0])), ShapeKind::Quat);
+        assert_eq!(kind(&color_rgba([0.0; 4])), ShapeKind::ColorRgba);
         assert_eq!(
             kind(&transform(Transform {
                 translation: [0.0; 3],
                 rotation: [0.0, 0.0, 0.0, 1.0],
                 scale: [1.0; 3],
             })),
-            VizijKind::Transform
+            ShapeKind::Transform
         );
-        assert_eq!(kind(&record([])), VizijKind::Record);
-        assert_eq!(kind(&array(vec![])), VizijKind::Array);
-        assert_eq!(kind(&enumeration("v", float(0.0))), VizijKind::Enum);
+        assert_eq!(kind(&record([])), ShapeKind::Record);
+        assert_eq!(kind(&array(vec![])), ShapeKind::Array);
+        assert_eq!(kind(&enumeration("v", float(0.0))), ShapeKind::Enum);
         // Integers are scalars to the graph, like the runtime's `dt`.
-        assert_eq!(kind(&Value::U32(3)), VizijKind::Float);
-        assert_eq!(kind(&Value::U64(16_000_000)), VizijKind::Float);
+        assert_eq!(kind(&Value::U32(3)), ShapeKind::Float);
+        assert_eq!(kind(&Value::U64(16_000_000)), ShapeKind::Float);
         assert_eq!(as_float(&Value::U64(16_000_000)), Some(16_000_000.0));
-        assert_eq!(kind(&Value::Unit), VizijKind::Other);
+        assert_eq!(kind(&Value::Unit), ShapeKind::Other);
         // Unknown structure ids are outside the vocabulary.
         let foreign = Value::Structure(Structure {
             id: Uuid::from_u128(0x9999),
             fields: vec![],
         });
-        assert_eq!(kind(&foreign), VizijKind::Other);
+        assert_eq!(kind(&foreign), ShapeKind::Other);
         assert_eq!(as_vec2(&foreign), None);
     }
 

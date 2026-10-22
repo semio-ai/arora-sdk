@@ -1,8 +1,8 @@
 //! Numeric helper utilities shared across node evaluators.
 
-use vizij_api_core::value as vocab;
-use vizij_api_core::value::VizijKind;
-use vizij_api_core::{coercion, Value};
+use arora_shape::value as vocab;
+use arora_shape::value::ShapeKind;
+use arora_shape::{coercion, Value};
 
 use super::value_layout::{align_flattened, flatten_numeric};
 
@@ -47,8 +47,8 @@ pub fn as_float(v: &Value) -> f32 {
 /// Coerce a [`Value`] to a boolean, treating non-zero numeric entries as `true`.
 pub fn as_bool(v: &Value) -> bool {
     match vocab::kind(v) {
-        VizijKind::Bool => vocab::as_bool(v).unwrap_or(false),
-        VizijKind::Text => vocab::as_text(v).is_some_and(|s| !s.is_empty()),
+        ShapeKind::Bool => vocab::as_bool(v).unwrap_or(false),
+        ShapeKind::Text => vocab::as_text(v).is_some_and(|s| !s.is_empty()),
         _ => coercion::to_vector(v).iter().any(|x| *x != 0.0),
     }
 }

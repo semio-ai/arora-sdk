@@ -8,7 +8,7 @@
 //! anything without a numeric reading coerces to zero/empty.
 
 use crate::value::{
-    as_array, as_enumeration, as_record, as_transform, as_vec2, as_vec3, as_vec4, kind, VizijKind,
+    as_array, as_enumeration, as_record, as_transform, as_vec2, as_vec3, as_vec4, kind, ShapeKind,
 };
 use crate::Value;
 
@@ -67,25 +67,25 @@ pub fn to_float(v: &Value) -> f32 {
 /// value-less kinds yield an empty vector.
 pub fn to_vector(v: &Value) -> Vec<f32> {
     match kind(v) {
-        VizijKind::Float | VizijKind::Bool => vec![to_float(v)],
-        VizijKind::Text => vec![],
-        VizijKind::Vector => match v {
+        ShapeKind::Float | ShapeKind::Bool => vec![to_float(v)],
+        ShapeKind::Text => vec![],
+        ShapeKind::Vector => match v {
             Value::ArrayF32(xs) => xs.clone(),
-            _ => unreachable!("VizijKind::Vector is only ArrayF32"),
+            _ => unreachable!("ShapeKind::Vector is only ArrayF32"),
         },
-        VizijKind::Vec2 => as_vec2(v).map(|a| a.to_vec()).unwrap_or_default(),
-        VizijKind::Vec3 => as_vec3(v).map(|a| a.to_vec()).unwrap_or_default(),
-        VizijKind::Vec4 => as_vec4(v).map(|a| a.to_vec()).unwrap_or_default(),
-        VizijKind::Quat => crate::value::as_quat(v)
+        ShapeKind::Vec2 => as_vec2(v).map(|a| a.to_vec()).unwrap_or_default(),
+        ShapeKind::Vec3 => as_vec3(v).map(|a| a.to_vec()).unwrap_or_default(),
+        ShapeKind::Vec4 => as_vec4(v).map(|a| a.to_vec()).unwrap_or_default(),
+        ShapeKind::Quat => crate::value::as_quat(v)
             .map(|a| a.to_vec())
             .unwrap_or_default(),
-        VizijKind::ColorRgba => crate::value::as_color_rgba(v)
+        ShapeKind::ColorRgba => crate::value::as_color_rgba(v)
             .map(|a| a.to_vec())
             .unwrap_or_default(),
-        VizijKind::Transform => as_transform(v)
+        ShapeKind::Transform => as_transform(v)
             .map(|t| t.translation.to_vec())
             .unwrap_or_default(),
-        VizijKind::Record => as_record(v)
+        ShapeKind::Record => as_record(v)
             .map(|entries| {
                 entries
                     .iter()
@@ -93,13 +93,13 @@ pub fn to_vector(v: &Value) -> Vec<f32> {
                     .collect()
             })
             .unwrap_or_default(),
-        VizijKind::Array => as_array(v)
+        ShapeKind::Array => as_array(v)
             .map(|items| items.iter().flat_map(to_vector).collect())
             .unwrap_or_default(),
-        VizijKind::Enum => as_enumeration(v)
+        ShapeKind::Enum => as_enumeration(v)
             .map(|(_, payload)| to_vector(payload))
             .unwrap_or_default(),
-        VizijKind::Other => match v {
+        ShapeKind::Other => match v {
             Value::U8(_)
             | Value::U16(_)
             | Value::U32(_)
@@ -134,24 +134,24 @@ pub fn to_vector(v: &Value) -> Vec<f32> {
 /// (zero-padded).
 pub fn to_vec3(v: &Value) -> [f32; 3] {
     match kind(v) {
-        VizijKind::Vec3 => as_vec3(v).unwrap_or([0.0; 3]),
-        VizijKind::Vec2 => {
+        ShapeKind::Vec3 => as_vec3(v).unwrap_or([0.0; 3]),
+        ShapeKind::Vec2 => {
             let a = as_vec2(v).unwrap_or([0.0; 2]);
             [a[0], a[1], 0.0]
         }
-        VizijKind::Vec4 => {
+        ShapeKind::Vec4 => {
             let a = as_vec4(v).unwrap_or([0.0; 4]);
             [a[0], a[1], a[2]]
         }
-        VizijKind::Float | VizijKind::Bool => {
+        ShapeKind::Float | ShapeKind::Bool => {
             let f = to_float(v);
             [f, f, f]
         }
-        VizijKind::Transform => as_transform(v).map(|t| t.translation).unwrap_or([0.0; 3]),
-        VizijKind::Enum => as_enumeration(v)
+        ShapeKind::Transform => as_transform(v).map(|t| t.translation).unwrap_or([0.0; 3]),
+        ShapeKind::Enum => as_enumeration(v)
             .map(|(_, payload)| to_vec3(payload))
             .unwrap_or([0.0; 3]),
-        VizijKind::Text => [0.0; 3],
+        ShapeKind::Text => [0.0; 3],
         _ => {
             let flat = to_vector(v);
             let mut out = [0.0f32; 3];

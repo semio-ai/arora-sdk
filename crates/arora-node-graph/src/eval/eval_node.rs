@@ -5,10 +5,10 @@ use crate::eval::node_function::NodeFunctions;
 use crate::eval::plan::{PlanCache, PortLayout};
 use crate::eval::variadic::collect_operand_ports;
 use crate::types::{NodeParams, NodeSpec, NodeType, RoundMode};
+use arora_shape::value as vocab;
+use arora_shape::{coercion, Shape, TypedPath, Value, WriteOp};
 use hashbrown::HashMap;
 use uuid::Uuid;
-use vizij_api_core::value as vocab;
-use vizij_api_core::{coercion, Shape, TypedPath, Value, WriteOp};
 
 use super::noise;
 use super::numeric::{as_bool, as_float, binary_numeric, unary_numeric};

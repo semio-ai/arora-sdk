@@ -1,8 +1,8 @@
-# vizij-graph-core
+# arora-node-graph
 
 > **Deterministic data-flow evaluation for Vizij graphs – pure Rust with predictable staging, shapes, and side effects.**
 
-`vizij-graph-core` turns declarative `GraphSpec` documents into structured values and typed write operations. The crate powers Vizij’s node graph tooling and WebAssembly bindings.
+`arora-node-graph` turns declarative `GraphSpec` documents into structured values and typed write operations. The crate powers Vizij’s node graph tooling and WebAssembly bindings.
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## Overview
 
-- **Pure Rust runtime** that interprets `GraphSpec` documents using the shared `vizij-api-core` Value/Shape contract.
+- **Pure Rust runtime** that interprets `GraphSpec` documents using the shared `arora-shape` Value/Shape contract.
 - **GraphRuntime** retains staged inputs, node-local state, and cached outputs across frames.
 - **evaluate_all** walks the graph in topological order, performs selector projection, enforces declared shapes, and collects sink writes.
 - **Extensible node library** covering math, logic, vector ops, time/transition nodes (Spring/Damp/Slew), blending, range tools (including multi-segment piecewise remaps), and (optionally) robotics IK/FK helpers behind the `urdf_ik` feature flag.
@@ -44,7 +44,7 @@
 ## Installation
 
 ```bash
-cargo add vizij-graph-core
+cargo add arora-node-graph
 ```
 
 Features:
@@ -60,12 +60,12 @@ Disable defaults with `--no-default-features` if you want a minimal build.
 ## Quick Start
 
 ```rust
-use vizij_api_core::value::vec3;
-use vizij_api_core::{Shape, ShapeId, TypedPath};
-use vizij_graph_core::{evaluate_all, GraphRuntime};
-use vizij_graph_core::types::GraphSpec;
+use arora_shape::value::vec3;
+use arora_shape::{Shape, ShapeId, TypedPath};
+use arora_node_graph::{evaluate_all, GraphRuntime};
+use arora_node_graph::types::GraphSpec;
 
-let spec: GraphSpec = serde_json::from_str(include_str!("../../../../fixtures/node_graphs/simple-gain-offset.json"))?;
+let spec: GraphSpec = serde_json::from_str(include_str!("../fixtures/simple-gain-offset.json"))?;
 
 let mut runtime = GraphRuntime::default();
 
@@ -116,7 +116,7 @@ for write in runtime.writes.iter() {
 - `advance_epoch` bumps the staging epoch and evicts inputs not refreshed for the current frame.
 - Evaluation updates `t`/`dt` when driven by a host such as the Arora behavior interpreter (`vizij-arora-behavior`); if you embed the runtime directly, set them yourself before calling `evaluate_all` if time-based nodes are involved.
 - A `dt` of zero is a step with no time in it, and moves nothing that time drives: `Time` and `Oscillator` read the unchanged `t`, `Spring` records its new target and keeps its position and velocity, and `Damp` and `Slew` keep their value (so does a negative or non-finite `dt`). An evaluation at `dt = 0` therefore carries a changed input through every node that does not depend on time — a paused scene showing an edit — and a smoother it reaches takes it as its new target, which shows once time passes; the next step with time in it moves on as if the zero step had not been. An IK node answers a request equal to its last one with its last solution, so it holds too.
-- **Plan cache note:** `vizij-graph-core` caches a compiled execution plan (topological order + port layouts + resolved input bindings) inside `GraphRuntime`.
+- **Plan cache note:** `arora-node-graph` caches a compiled execution plan (topological order + port layouts + resolved input bindings) inside `GraphRuntime`.
   - The plan cache is a *structural* cache. It exists to avoid repeating "planning" work when the graph layout is unchanged frame-to-frame.
   - For best steady-state performance, call `GraphSpec::with_cache()` on load and after any *structural* edit. This seeds/bumps `spec.version` and refreshes `spec.fingerprint`, enabling O(1) cache validation in `PlanCache::ensure_versioned()`.
   - **What counts as structural?** Anything that can change topology, port layouts, or bindings (nodes/edges, selector wiring, input defaults, and variadic port counts like `Split.sizes`) — and the `value` of a `Constant` read through a selector: the plan resolves what such a selector reads when it is built, so the evaluation neither reads nor copies the constant for it.
@@ -136,7 +136,7 @@ for write in runtime.writes.iter() {
 
 ### Shapes & Values
 
-- Values are `vizij_api_core::Value` (Arora's `Value`, re-exported); the vizij composites (vec2/vec3/vec4/quat/color/transform) are built and read through the `vizij_api_core::value` constructors and accessors.
+- Values are `arora_shape::Value` (Arora's `Value`, re-exported); the vizij composites (vec2/vec3/vec4/quat/color/transform) are built and read through the `arora_shape::value` constructors and accessors.
 - Shapes (`ShapeId`) describe numeric layouts and support inference. Sequences travel as one wire kind, so declared `Array`/`List`/`Tuple` shapes carry the distinction.
 - Declared shapes on node outputs guard against schema drift and provide better error messages.
 
@@ -145,7 +145,7 @@ for write in runtime.writes.iter() {
 - `NodeParams` live on each `NodeSpec`. Mutate them before evaluation to tweak graph behaviour:
   ```rust
   if let Some(node) = spec.nodes.iter_mut().find(|n| n.id == "gain") {
-      node.params.value = Some(vizij_api_core::value::float(0.5));
+      node.params.value = Some(arora_shape::value::float(0.5));
   }
   evaluate_all(&mut runtime, &spec)?;
   ```
@@ -180,33 +180,31 @@ for write in runtime.writes.iter() {
 Run the crate tests (unit + integration):
 
 ```bash
-cargo test -p vizij-graph-core
+cargo test -p arora-node-graph
 ```
 
 Test the robotics nodes explicitly:
 
 ```bash
-cargo test -p vizij-graph-core --features urdf_ik
+cargo test -p arora-node-graph --features urdf_ik
 ```
 
-Useful scripts from the workspace root:
+The benchmark evaluates chains, a mixed "kitchen" graph and the fixtures:
 
 ```bash
-pnpm run test:rust              # Checks the entire workspace (fmt, clippy, test)
-pnpm run build:wasm:graph       # Rebuilds the WASM adapter that embeds this crate
-pnpm run watch:wasm:graph       # Rebuilds on change (requires cargo-watch)
+cargo bench -p arora-node-graph
 ```
 
 Benchmark ideas:
 
 - Evaluate large graphs under different topologies to profile numeric performance.
-- Leverage fixtures in `fixtures/node_graphs/` to validate schema migrations.
+- Leverage the graphs in `fixtures/` to validate schema migrations.
 
 ---
 
 ## Related Packages
 
-- [`vizij-graph-wasm`](../vizij-graph-wasm/README.md): wasm-bindgen binding that exposes JSON-friendly APIs plus normalization helpers.
-- [`@vizij/node-graph`](../../../npm/@vizij/node-graph/README.md): npm wrapper around the wasm build with ABI guards and utilities.
+- [`vizij-graph-wasm`](https://github.com/vizij-ai/vizij-rs/blob/main/crates/node-graph/vizij-graph-wasm/README.md): wasm-bindgen binding that exposes JSON-friendly APIs plus normalization helpers.
+- [`@vizij/node-graph`](https://github.com/vizij-ai/vizij-rs/blob/main/npm/@vizij/node-graph/README.md): npm wrapper around the wasm build with ABI guards and utilities.
 
 Need help or spotted an inconsistency? Open an issue in the main Vizij repo or ping the runtime team—accurate docs keep our tooling reliable. 💡

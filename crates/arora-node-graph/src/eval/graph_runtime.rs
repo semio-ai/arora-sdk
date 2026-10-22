@@ -1,9 +1,9 @@
 //! Mutable runtime state that persists across node evaluations.
 
 use crate::types::NodeId;
+use arora_shape::{Shape, TypedPath, Value, WriteBatch};
 use hashbrown::{hash_map::Entry, HashMap};
 use uuid::Uuid;
-use vizij_api_core::{Shape, TypedPath, Value, WriteBatch};
 
 use super::plan::PlanCache;
 #[cfg(feature = "urdf_ik")]

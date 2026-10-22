@@ -6,9 +6,9 @@
 //! data, and [`ValueLayout::reconstruct`] re-encodes the result through the
 //! vocabulary constructors.
 
-use vizij_api_core::value as vocab;
-use vizij_api_core::value::VizijKind;
-use vizij_api_core::{Shape, Value};
+use arora_shape::value as vocab;
+use arora_shape::value::ShapeKind;
+use arora_shape::{Shape, Value};
 
 use super::shape_helpers::infer_shape;
 
@@ -154,31 +154,31 @@ fn read_array<const N: usize>(data: &[f32], offset: usize) -> [f32; N] {
 /// Attempt to flatten a [`Value`] that contains only numeric content.
 pub fn flatten_numeric(value: &Value) -> Option<FlatValue> {
     match vocab::kind(value) {
-        VizijKind::Float => Some(FlatValue {
+        ShapeKind::Float => Some(FlatValue {
             layout: ValueLayout::Scalar,
             data: vec![vocab::as_float(value)?],
         }),
-        VizijKind::Vec2 => Some(FlatValue {
+        ShapeKind::Vec2 => Some(FlatValue {
             layout: ValueLayout::Vec2,
             data: vocab::as_vec2(value)?.to_vec(),
         }),
-        VizijKind::Vec3 => Some(FlatValue {
+        ShapeKind::Vec3 => Some(FlatValue {
             layout: ValueLayout::Vec3,
             data: vocab::as_vec3(value)?.to_vec(),
         }),
-        VizijKind::Vec4 => Some(FlatValue {
+        ShapeKind::Vec4 => Some(FlatValue {
             layout: ValueLayout::Vec4,
             data: vocab::as_vec4(value)?.to_vec(),
         }),
-        VizijKind::Quat => Some(FlatValue {
+        ShapeKind::Quat => Some(FlatValue {
             layout: ValueLayout::Quat,
             data: vocab::as_quat(value)?.to_vec(),
         }),
-        VizijKind::ColorRgba => Some(FlatValue {
+        ShapeKind::ColorRgba => Some(FlatValue {
             layout: ValueLayout::ColorRgba,
             data: vocab::as_color_rgba(value)?.to_vec(),
         }),
-        VizijKind::Transform => {
+        ShapeKind::Transform => {
             let t = vocab::as_transform(value)?;
             let mut data = Vec::with_capacity(10);
             data.extend_from_slice(&t.translation);
@@ -189,11 +189,11 @@ pub fn flatten_numeric(value: &Value) -> Option<FlatValue> {
                 data,
             })
         }
-        VizijKind::Vector => Some(FlatValue {
+        ShapeKind::Vector => Some(FlatValue {
             layout: ValueLayout::Vector(vocab::as_vector(value)?.len()),
             data: vocab::as_vector(value)?.to_vec(),
         }),
-        VizijKind::Record => {
+        ShapeKind::Record => {
             // `as_record` yields entries sorted by name, keeping the flat
             // ordering deterministic.
             let entries = vocab::as_record(value)?;
@@ -209,7 +209,7 @@ pub fn flatten_numeric(value: &Value) -> Option<FlatValue> {
                 data,
             })
         }
-        VizijKind::Array => {
+        ShapeKind::Array => {
             let items = vocab::as_array(value)?;
             let mut layouts = Vec::with_capacity(items.len());
             let mut data = Vec::new();

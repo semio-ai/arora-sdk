@@ -1,13 +1,19 @@
 # Changelog
 
-All notable changes to `vizij-api-core`. The format follows
+All notable changes to `arora-shape`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
-[Semantic Versioning](https://semver.org/).
+[Semantic Versioning](https://semver.org/). Versions up to 2.1.0 were
+published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
+`vizij-api-core`.
 
-## [Unreleased]
+## [1.0.0] - 2026-10-22
 
 ### Changed
 
+- The crate is `arora-shape`, in arora-sdk, continuing `vizij-api-core` 2.1.0
+  with its history. Its library is `arora_shape`. The value classifier
+  `VizijKind` is `ShapeKind`. The vocabulary's type and field ids, and the
+  JSON forms, do not change.
 - Licensed under Apache-2.0, where it was MIT OR Apache-2.0. Releases up
   to 2.1.0 keep the licence they were published under.
 

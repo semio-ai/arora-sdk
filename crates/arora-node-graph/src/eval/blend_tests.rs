@@ -4,9 +4,9 @@ use super::*;
 use crate::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, NodeParams, NodeSpec, NodeType,
 };
+use arora_shape::value as vocab;
+use arora_shape::Value;
 use hashbrown::HashMap;
-use vizij_api_core::value as vocab;
-use vizij_api_core::Value;
 
 /// Very small helpers duplicated from tests.rs for local use
 fn expect_vec3(value: &Value) -> [f32; 3] {

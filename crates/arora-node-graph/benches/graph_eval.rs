@@ -1,16 +1,17 @@
+use arora_node_graph::types::{
+    EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, InputDefault, NodeParams, NodeSpec,
+    NodeType,
+};
+use arora_node_graph::{evaluate_all, GraphRuntime};
+use arora_shape::json::normalize_graph_spec_value;
+use arora_shape::Shape;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use hashbrown::HashMap;
 use std::hint::black_box;
 use std::str::FromStr;
 use std::time::Duration;
-use vizij_api_core::json::normalize_graph_spec_value;
-use vizij_api_core::Shape;
-use vizij_graph_core::types::{
-    EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, InputDefault, NodeParams, NodeSpec,
-    NodeType,
-};
-use vizij_graph_core::{evaluate_all, GraphRuntime};
-use vizij_test_fixtures::node_graphs;
+#[path = "../src/fixtures.rs"]
+mod node_graphs;
 
 fn link(from: &str, to: &str, input: &str) -> EdgeSpec {
     EdgeSpec {
@@ -31,7 +32,7 @@ fn constant_node(id: impl Into<String>, value: f32) -> NodeSpec {
         id: id.into(),
         kind: NodeType::Constant,
         params: NodeParams {
-            value: Some(vizij_api_core::value::float(value)),
+            value: Some(arora_shape::value::float(value)),
             ..Default::default()
         },
         output_shapes: HashMap::<String, Shape>::new(),
@@ -77,7 +78,7 @@ fn input_node(id: impl Into<String>, path: impl Into<String>, default: f32) -> N
                     .parse()
                     .expect("bench input path parses to TypedPath"),
             ),
-            value: Some(vizij_api_core::value::float(default)),
+            value: Some(arora_shape::value::float(default)),
             ..Default::default()
         },
         output_shapes: HashMap::new(),

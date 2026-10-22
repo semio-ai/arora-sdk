@@ -9,6 +9,9 @@ pub mod task;
 pub mod topo;
 pub mod types;
 
+#[cfg(test)]
+mod fixtures;
+
 pub use eval::{
     eval_node, evaluate_all, evaluate_all_cached, evaluate_all_with_functions,
     evaluate_writes_with_functions, GraphRuntime, NodeFunction, NodeFunctionRegistry,

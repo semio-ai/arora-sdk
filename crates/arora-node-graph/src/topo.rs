@@ -61,7 +61,7 @@ mod tests {
     use crate::types::{
         EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, NodeParams, NodeType,
     };
-    use vizij_api_core::value::float;
+    use arora_shape::value::float;
     #[test]
     fn simple_topo() {
         let g = GraphSpec {

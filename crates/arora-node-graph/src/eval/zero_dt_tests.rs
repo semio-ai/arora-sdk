@@ -8,11 +8,11 @@
 
 use super::*;
 use crate::types::GraphSpec;
+use arora_shape::value as vocab;
+use arora_shape::Value;
 use serde_json::{json, Value as Json};
 use std::collections::BTreeMap;
 use uuid::Uuid;
-use vizij_api_core::value as vocab;
-use vizij_api_core::Value;
 
 const DT: f32 = 1.0 / 60.0;
 
@@ -214,8 +214,8 @@ fn cases() -> Vec<(&'static str, GraphSpec)> {
 /// and FK of joints that do.
 #[cfg(feature = "urdf_ik")]
 fn kinematics_cases() -> Vec<(&'static str, GraphSpec)> {
-    let fixture: Json = vizij_test_fixtures::node_graphs::spec("urdf-ik-position")
-        .expect("the urdf-ik-position fixture");
+    let fixture: Json =
+        crate::fixtures::spec("urdf-ik-position").expect("the urdf-ik-position fixture");
     let ik = fixture["spec"]["nodes"]
         .as_array()
         .and_then(|nodes| nodes.iter().find(|node| node["id"] == "ik"))
