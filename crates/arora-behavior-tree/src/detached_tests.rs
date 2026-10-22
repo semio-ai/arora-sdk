@@ -1339,6 +1339,11 @@ fn a_failed_call_is_not_repeated_within_the_tick() {
     for tick in 1..=2 {
         assert!(runtime.tick().is_err(), "tick {tick} fails");
         assert_eq!(take(&calls).get("mul"), Some(&1), "tick {tick}");
+        assert_eq!(
+            tree.detached_calls(id(50)),
+            Some(tick),
+            "the calls it counts"
+        );
     }
 }
 
@@ -1459,4 +1464,30 @@ fn a_failing_sink_stops_no_other() {
     assert!(runtime.tick().is_err(), "the failing sink's error");
     assert_eq!(get(&store, "face/level"), Some(Value::F64(2.0)));
     assert_eq!(get(&store, "out"), Some(Value::F64(9.0)));
+}
+
+/// A mutable parameter bound directly to another node's input writes it, as a
+/// return bound to it does: the input is no port read, and its reader reads
+/// the state the writer leaves there.
+#[test]
+fn a_mutable_parameter_bound_to_a_detached_input_feeds_it() {
+    let store = SimpleDataStore::new();
+    // smooth(x: 2, alpha: 1, state: @consumer.a) moves the state from 5 to 2.
+    let smooth = compute(
+        50,
+        SMOOTH,
+        vec![
+            (SMOOTH_X, f(2.0)),
+            (SMOOTH_ALPHA, f(1.0)),
+            (SMOOTH_STATE, port(51, ADD_A)),
+        ],
+        None,
+    );
+    let consumer = compute(51, ADD, vec![(ADD_A, f(5.0)), (ADD_B, f(1.0))], Some("out"));
+    let tree = build(&store, vec![below(1, f(1.0), 3.0)], vec![consumer, smooth]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    runtime.tick().expect("it ticks");
+    assert_eq!(get(&store, "out"), Some(Value::F64(3.0)));
 }

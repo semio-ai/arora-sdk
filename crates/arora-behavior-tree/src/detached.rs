@@ -470,10 +470,17 @@ impl Detached {
         }
 
         // A port read must be an output of a detached node. A port the return
-        // is bound to is where the node writes, not a read.
+        // or a mutable parameter is bound to directly is where the node
+        // writes, not a read.
         for node in self.nodes.iter().chain(attached) {
+            let signature = functions.get(&node.function);
             for (parameter, argument) in &node.arguments {
-                if *parameter == _RET_PARAM_ID {
+                let mutable = signature
+                    .and_then(|signature| signature.function.parameters.get(parameter))
+                    .is_some_and(|parameter| parameter.mutable);
+                let writes = *parameter == _RET_PARAM_ID
+                    || (mutable && matches!(argument, Expression::NodeArgument(_)));
+                if writes {
                     continue;
                 }
                 let mut ports = Vec::new();
@@ -771,6 +778,8 @@ impl Detached {
                     value: Box::new(value.clone()),
                 })
                 .collect();
+            // A call counts whether or not it succeeds.
+            self.caches.borrow_mut()[at].calls += 1;
             let result = caller
                 .arora_call(Call {
                     module_id: Some(signature.module_id),
@@ -791,7 +800,6 @@ impl Detached {
             let mut caches = self.caches.borrow_mut();
             caches[at].arguments = Some(values);
             caches[at].outputs = outputs;
-            caches[at].calls += 1;
         }
         Ok(())
     }
