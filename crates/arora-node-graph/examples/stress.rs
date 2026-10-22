@@ -11,7 +11,9 @@
 //! A step of `moving` stages a new value on every input; one of `settled`
 //! stages none, so only what the clock drives changes. `Demanded` runs what
 //! the outputs read and makes the writes alone, as a device does; `Every`
-//! runs every node and copies every port, as an editor does.
+//! runs every node and copies every port, as an editor does. An `edit` is an
+//! editor's: one constant's value changed, then an evaluation, in place
+//! ([`TreeRuntime::set_params`]) and by loading the edited spec.
 use std::time::{Duration, Instant};
 
 use arora_node_graph::import::tree_node_id;
@@ -21,7 +23,7 @@ use arora_node_graph::types::{
 };
 use arora_node_graph::{evaluate_all, GraphRuntime};
 use arora_shape::value::float;
-use arora_shape::TypedPath;
+use arora_shape::{TypedPath, Value};
 
 fn node(id: String, kind: NodeType, params: NodeParams) -> NodeSpec {
     NodeSpec {
@@ -213,5 +215,37 @@ fn main() {
                 (calls - calls_before) as f64 / f64::from(STEPS)
             );
         }
+    }
+
+    let constant = spec.nodes.iter().position(|node| {
+        matches!(node.params.value, Some(Value::F32(_))) && node.kind == NodeType::Constant
+    });
+    if let Some(at) = constant {
+        let mut tree = TreeRuntime::new(Evaluation::Every);
+        tree.dt = 1.0 / 60.0;
+        tree.load(&spec).expect("the tree loads");
+        tree.evaluate().expect("the tree evaluates");
+        let mut params = spec.nodes[at].params.clone();
+        if let Some(Value::F32(value)) = &mut params.value {
+            *value += 1.0;
+        }
+        let start = Instant::now();
+        let in_place = tree
+            .set_params(&spec.nodes[at].id, &params)
+            .expect("an edit");
+        assert!(in_place, "a constant's value is edited in place");
+        tree.evaluate().expect("the tree evaluates");
+        let in_place = start.elapsed();
+        let mut edited = spec.clone();
+        edited.nodes[at].params = params;
+        let start = Instant::now();
+        tree.load(&edited).expect("the tree loads");
+        tree.evaluate().expect("the tree evaluates");
+        let reload = start.elapsed();
+        println!(
+            "edit    tree Every        in place + eval {:>8.1} ms   load + eval {:>8.1} ms",
+            in_place.as_secs_f64() * 1e3,
+            reload.as_secs_f64() * 1e3
+        );
     }
 }

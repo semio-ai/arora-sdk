@@ -24,9 +24,9 @@ use uuid::Uuid;
 
 use crate::eval::shape_helpers::infer_shape;
 use crate::eval::{NodeFunctions, PortValue, SpawnRequest};
-use crate::functions::{function_index, is_stateful, state_param, NodeGraphModule};
-use crate::import::{import, ImportOptions, ImportedGraph};
-use crate::types::{GraphSpec, NodeId, NodeType};
+use crate::functions::{encode_params, function_index, is_stateful, state_param, NodeGraphModule};
+use crate::import::{import, ports_of, ImportOptions, ImportedGraph};
+use crate::types::{GraphSpec, NodeId, NodeParams, NodeSpec, NodeType};
 
 /// What an evaluation brings up to date.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -75,8 +75,10 @@ pub struct TreeRuntime {
 
 /// A graph imported and lowered.
 struct Loaded {
-    /// The spec's JSON text, which an evaluation of a spec compares with.
-    source: String,
+    /// The spec's JSON text, which an evaluation of a spec compares with:
+    /// written when first compared, and again after a node's parameters
+    /// change in place.
+    source: Option<String>,
     spec: GraphSpec,
     imported: ImportedGraph,
     lowered: LoweredTree,
@@ -132,6 +134,11 @@ impl TreeRuntime {
     /// How many times a graph was loaded, the tree built at each.
     pub fn loads(&self) -> u64 {
         self.loads
+    }
+
+    /// Drop the value staged on `path` for the next evaluation.
+    pub fn clear_input(&mut self, path: &TypedPath) {
+        self.staged.remove(path);
     }
 
     /// The store the graph reads its inputs from and writes its outputs to.
@@ -248,7 +255,7 @@ impl TreeRuntime {
         }
         self.loads += 1;
         self.loaded = Some(Loaded {
-            source: serde_json::to_string(spec).map_err(|e| e.to_string())?,
+            source: None,
             spec: spec.clone(),
             imported,
             lowered,
@@ -256,6 +263,70 @@ impl TreeRuntime {
             outputs,
         });
         Ok(())
+    }
+
+    /// Give node `id` of the loaded graph the parameters `params` in place:
+    /// the tree keeps running, every node keeping its state, and the node
+    /// runs with its new parameters at the next evaluation. This is the
+    /// cheap edit an editor makes when a slider moves; a
+    /// [`load`](Self::load) of the edited spec imports the whole graph.
+    ///
+    /// Returns `false`, changing nothing, for an edit only a load can make,
+    /// because it changes what the tree is: the node's output ports, the
+    /// store path an `input` or `output` node binds, or which parameters the
+    /// node sets. Also `false` when no graph is loaded or the loaded graph
+    /// has no node `id`.
+    pub fn set_params(&mut self, id: &str, params: &NodeParams) -> Result<bool, String> {
+        let Some(loaded) = &mut self.loaded else {
+            return Ok(false);
+        };
+        let Some(at) = loaded.spec.nodes.iter().position(|node| node.id == id) else {
+            return Ok(false);
+        };
+        let Some(graph_node) = loaded.imported.node(id) else {
+            return Ok(false);
+        };
+        let node = &loaded.spec.nodes[at];
+        let binding =
+            |params: &NodeParams| (params.path.clone(), params.key_field, params.value_field);
+        if matches!(node.kind, NodeType::Input | NodeType::Output)
+            && binding(&node.params) != binding(params)
+        {
+            return Ok(false);
+        }
+        let edited = NodeSpec {
+            params: params.clone(),
+            ..node.clone()
+        };
+        let referenced: hashbrown::HashSet<String> = loaded
+            .spec
+            .edges
+            .iter()
+            .filter(|edge| edge.from.node_id == id)
+            .map(|edge| edge.from.output.clone())
+            .collect();
+        if ports_of(&edited, &referenced) != graph_node.ports {
+            return Ok(false);
+        }
+        let before = encode_params(&node.params)?;
+        let after = encode_params(params)?;
+        if before.len() != after.len()
+            || before
+                .iter()
+                .zip(&after)
+                .any(|((old, _), (new, _))| old != new)
+        {
+            return Ok(false);
+        }
+        let tree = loaded.lowered.tree();
+        for ((_, old), (parameter, value)) in before.iter().zip(after) {
+            if *old != value {
+                tree.set_argument_value(graph_node.tree_id, parameter, Some(value));
+            }
+        }
+        loaded.spec.nodes[at].params = edited.params;
+        loaded.source = None;
+        Ok(true)
     }
 
     /// Evaluate `spec`, loading it first when it is not the graph loaded.
@@ -271,11 +342,18 @@ impl TreeRuntime {
         inner: &mut dyn CallBridge,
     ) -> Result<(), String> {
         let source = serde_json::to_string(spec).map_err(|e| e.to_string())?;
-        if self
-            .loaded
-            .as_ref()
-            .is_none_or(|loaded| loaded.source != source)
-        {
+        let same = match &mut self.loaded {
+            Some(loaded) => {
+                let loaded_source = match &mut loaded.source {
+                    Some(text) => text,
+                    unwritten => unwritten
+                        .insert(serde_json::to_string(&loaded.spec).map_err(|e| e.to_string())?),
+                };
+                *loaded_source == source
+            }
+            None => false,
+        };
+        if !same {
             self.load_with(spec, inner)?;
         }
         self.evaluate_with(inner)

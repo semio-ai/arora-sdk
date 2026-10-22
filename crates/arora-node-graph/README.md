@@ -1,23 +1,85 @@
 # arora-node-graph
 
-> **Deterministic data-flow evaluation for Vizij graphs – pure Rust with predictable staging, shapes, and side effects.**
+Node graphs for Arora: a Vizij node graph (`GraphSpec`, its JSON form) runs
+as the detached nodes of an `arora-behavior-tree`
+([proposal](../../docs/proposal-behavior-languages.md)). The crate holds:
 
-`arora-node-graph` turns declarative `GraphSpec` documents into structured values and typed write operations. The crate powers Vizij’s node graph tooling and WebAssembly bindings.
+- **the node vocabulary as module functions** (`functions`): one function of
+  the module `@arora/node-graph` per node kind, and `NodeGraphModule`, which
+  answers their calls in-process through a bridge over the device's;
+- **the importer** (`import`): a graph translated node for node into a tree
+  and its detached nodes, as `BehaviorTree::try_from_groot_xml` reads a Groot
+  file;
+- **`TreeRuntime`** (`tree_runtime`): a graph run on the tree behind the
+  reference evaluator's surface, for a host such as an editor or Vizij's
+  `ProcessingGraph`;
+- **the reference evaluator** (`GraphRuntime`, `evaluate_all`): the engine
+  the graph format was defined on. A node's function runs its per-node code,
+  and the equivalence test compares the two engines on every fixture.
+
+## On the behavior tree
+
+```rust
+use arora_node_graph::tree_runtime::TreeRuntime;
+use arora_node_graph::types::GraphSpec;
+use arora_shape::{TypedPath, Value};
+
+let spec: GraphSpec = serde_json::from_str(include_str!("../fixtures/sine-driver.json"))?;
+let mut rt = TreeRuntime::default();
+rt.load(&spec)?;
+rt.dt = 1.0 / 60.0;
+rt.t += rt.dt;
+rt.set_input(TypedPath::parse("node.t")?, Value::F32(0.5), None);
+rt.evaluate()?;
+for write in rt.writes.iter() {
+    println!("{} = {:?}", write.path, write.value);
+}
+```
+
+How a graph translates:
+
+| In the graph | On the tree |
+|---|---|
+| a node | a detached call of its kind's function: it runs when what it outputs is read, once per tick, and only when its arguments changed |
+| an input port | an optional parameter of the port's name; an edge reads the source's port: `@node`, or a field of the structure a node with ports beyond `out` returns |
+| an edge's selector | a `select` node between the two |
+| an inline default | a literal argument |
+| a node parameter | a literal argument, `param.<field>` |
+| hidden state (`spring`, `damp`, `slew`, IK) | the mutable parameter `state`, as a value: a smoother's buffers in its input's shape, an IK node's joints and last solve |
+| `time`, `oscillator`, the smoothers' step | the parameters `t` and `dt`, read from the variables `ImportOptions` names (`arora/time` and `arora/dt` by default) |
+| an `input` node | a read of the store key its path names |
+| an `output` node with a path | a sink: its return value bound to the store key of its path, written after the tree ticks; the later-listed writer of a key wins |
+| an `output` node with no path (a keyed batch) | listed in `ImportedGraph::keyed_outputs`, for its host to apply |
+| `externalfunction`, `taskrun`, `spawn` | leaves under the root `PARALLEL`, ticked at every tick, as they act at each evaluation |
+
+What differs from the reference evaluator:
+
+- **What runs.** The reference evaluates every node at every evaluation. On
+  the tree a node runs when something reads it and its arguments changed;
+  `Evaluation::Every` observes every node, as an editor does, and
+  `Evaluation::Demanded` runs what the outputs read, as a device does. A
+  node nothing reads does not fail a demanded evaluation.
+- **Shapes.** Ports carry values; a port's shape is its declared output
+  shape, the shape staged with an input, or the one its value infers.
+- **Variadic ports.** A function declares `VARIADIC_PORTS` (64) ports of its
+  kind's variadic group; the importer refuses a graph wiring one past them.
+- **Edits.** A node's parameter value is set in place on the loaded tree
+  (`TreeRuntime::set_params`). An edit that changes what the tree is (a
+  node's ports, the path an input or output binds, a node added or rewired)
+  takes a new load of the whole graph, which keeps every node's state.
+
+The stress example times loading and stepping, and counts each step's calls:
+
+```bash
+cargo run --release -p arora-node-graph --example stress -- chain 10000
+cargo run --release -p arora-node-graph --example stress -- file graph.json
+```
 
 ---
 
-## Table of Contents
+# The reference evaluator
 
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Installation](#installation)
-4. [Quick Start](#quick-start)
-5. [Usage](#usage)
-6. [Key Concepts](#key-concepts)
-7. [Development & Testing](#development--testing)
-8. [Related Packages](#related-packages)
-
----
+`GraphRuntime` and `evaluate_all` turn declarative `GraphSpec` documents into structured values and typed write operations, the semantics the node functions keep.
 
 ## Overview
 
@@ -25,8 +87,6 @@
 - **GraphRuntime** retains staged inputs, node-local state, and cached outputs across frames.
 - **evaluate_all** walks the graph in topological order, performs selector projection, enforces declared shapes, and collects sink writes.
 - **Extensible node library** covering math, logic, vector ops, time/transition nodes (Spring/Damp/Slew), blending, range tools (including multi-segment piecewise remaps), and (optionally) robotics IK/FK helpers behind the `urdf_ik` feature flag.
-
----
 
 ## Features
 
@@ -38,8 +98,6 @@
 - Selector support (`field`, `index`) on edges for structured projection.
 - External `WriteBatch` accumulation from sink nodes for host-controlled side effects.
 - Optional URDF IK/FK nodes compiled in via the `urdf_ik` feature (enabled by default).
-
----
 
 ## Installation
 
@@ -207,4 +265,4 @@ Benchmark ideas:
 - [`vizij-graph-wasm`](https://github.com/vizij-ai/vizij-rs/blob/main/crates/node-graph/vizij-graph-wasm/README.md): wasm-bindgen binding that exposes JSON-friendly APIs plus normalization helpers.
 - [`@vizij/node-graph`](https://github.com/vizij-ai/vizij-rs/blob/main/npm/@vizij/node-graph/README.md): npm wrapper around the wasm build with ABI guards and utilities.
 
-Need help or spotted an inconsistency? Open an issue in the main Vizij repo or ping the runtime team—accurate docs keep our tooling reliable. 💡
+

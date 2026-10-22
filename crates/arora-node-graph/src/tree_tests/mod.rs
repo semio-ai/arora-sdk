@@ -15,12 +15,16 @@
 //! | `a_selection_from_a_constant_is_planned_and_follows_its_value` | `a_selection_from_a_constant_reads_it_once_and_follows_its_value` |
 //!
 //! [`structure_tests`] holds the counterparts of the topology, plan and
-//! selection tests. [`equivalence`] runs every fixture on both engines.
+//! selection tests. [`equivalence`] runs every fixture on both engines, and
+//! again with its parameters edited in place halfway through.
+//! [`param_edit_tests`] holds the parameter edits the tree makes in place
+//! and those it refuses.
 //!
 //! [`TreeRuntime`]: crate::tree_runtime::TreeRuntime
 mod blend_tests;
 mod equivalence;
 mod external_function_tests;
+mod param_edit_tests;
 mod required_inputs_tests;
 mod spring_tests;
 mod structure_tests;

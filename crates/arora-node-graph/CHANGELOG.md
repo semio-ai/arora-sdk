@@ -8,6 +8,36 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
 
 ## [1.0.0] - 2026-10-22
 
+### Added
+
+- The node vocabulary as the functions of the module `@arora/node-graph`
+  (`functions`): one per node kind, named by its graph-JSON name. Input
+  ports, node parameters (`param.<field>`), the clock (`t`, `dt`) and a
+  stateful node's state (`state`, a mutable parameter holding a value) are
+  its parameters; a node with ports beyond `out` returns a structure of
+  them. `NodeGraphModule` answers the calls in-process, through a bridge
+  over the device's, and runs each with the reference evaluator's per-node
+  code.
+- The importer (`import`, `import_json`): a graph, or its JSON document,
+  translated node for node into the nodes of a behavior tree, each a
+  detached call, an `output` node with a path a sink on its key, and the
+  nodes that act at each evaluation (`externalfunction`, `taskrun`,
+  `spawn`) leaves under the root.
+- `TreeRuntime`: a graph run on the behavior tree behind the reference
+  evaluator's surface, evaluating every node (`Evaluation::Every`) or what
+  the outputs read (`Evaluation::Demanded`). A reload keeps every node's
+  state.
+- `TreeRuntime::set_params`: a node's parameters edited in place on the
+  loaded tree, the edit an editor's slider makes, at about a tenth of the
+  cost of loading the edited spec. It refuses, changing nothing, an edit
+  only a load can make: one changing the node's output ports, the path an
+  `input` or `output` node binds, or which parameters the node sets.
+- Every test of the reference evaluator has a counterpart on the tree
+  (`tree_tests`), and an equivalence test compares the two engines on every
+  fixture, port by port and write by write. The benchmark runs each graph on
+  both, and the `stress` example times loading and stepping a graph of any
+  size.
+
 ### Changed
 
 - The crate is `arora-node-graph`, in arora-sdk, continuing `vizij-graph-core`
