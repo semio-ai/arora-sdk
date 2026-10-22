@@ -221,13 +221,13 @@ node no structure holds, and an edge is a link from its port
 - **Sinks run every tick.** A detached node with an output bound to a store
   key is brought up to date after the tree ticks, whether or not the tree
   reads it, and even when the tree fails; a sink that fails stops no other,
-  and publishes nothing that tick. Once every sink is up to date, each writes its keys, from its
-  cache when its inputs did not change. Within a tick, the tree and the sinks
-  read the store as it was, so a sink reading another sink's key sees it a
-  tick late, as any value fed back through a key does. Of two sinks of one
-  key, the later in the list wins whatever reads what, as the later writer
-  does in a Vizij `flow`. The shared `Graph` holds its nodes unordered, so
-  its list is the root, then the other nodes by id.
+  and publishes nothing that tick. Once every sink is up to date, each writes
+  its keys, from its cache when its inputs did not change. Within a tick, the
+  tree and the sinks read the store as it was, so a sink reading another
+  sink's key sees it a tick late, as any value fed back through a key does.
+  Of two sinks of one key, the later in the list wins whatever reads what, as
+  the later writer does in a Vizij `flow`. The shared `Graph` holds its nodes
+  unordered, so its list is the root, then the other nodes by id.
 - **A detached node nothing reads never runs**, unless it is a sink or feeds
   one.
 
