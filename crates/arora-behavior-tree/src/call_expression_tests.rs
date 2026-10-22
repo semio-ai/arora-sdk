@@ -31,6 +31,8 @@ pub(crate) const SENSORS: Uuid = Uuid::from_u128(0x5E00);
 pub(crate) const DISTANCE: Uuid = Uuid::from_u128(0x5E01);
 pub(crate) const BATTERY: Uuid = Uuid::from_u128(0x5E02);
 pub(crate) const LABEL: Uuid = Uuid::from_u128(0x5E03);
+pub(crate) const RECORD: Uuid = Uuid::from_u128(0x5E04);
+pub(crate) const RECORD_NAME: Uuid = Uuid::from_u128(0x5E41);
 
 pub(crate) const MATH: Uuid = Uuid::from_u128(0x3A00);
 pub(crate) const ADD: Uuid = Uuid::from_u128(0x3A01);
@@ -98,6 +100,7 @@ pub(crate) fn index() -> FunctionIndex {
         function(SENSORS, DISTANCE, "distance", vec![]),
         function(SENSORS, BATTERY, "battery", vec![]),
         function(SENSORS, LABEL, "label", vec![]),
+        function(SENSORS, RECORD, "record", vec![]),
         function(
             MATH,
             ADD,
@@ -195,6 +198,13 @@ impl CallBridge for Engine {
             DISTANCE => returns(sensor(DISTANCE)),
             BATTERY => returns(sensor(BATTERY)),
             LABEL => returns(Value::String("ready".to_string())),
+            RECORD => returns(Value::Structure(arora_types::value::Structure {
+                id: RECORD,
+                fields: vec![StructureField {
+                    id: RECORD_NAME,
+                    value: Box::new(Value::String("near".to_string())),
+                }],
+            })),
             ADD => returns(Value::F64(number(&args, ADD_A)? + number(&args, ADD_B)?)),
             MUL => returns(Value::F64(number(&args, MUL_A)? * number(&args, MUL_B)?)),
             CLAMP => {
@@ -776,4 +786,54 @@ fn a_string_node_computes_a_call_argument() {
     assert_eq!(status, Status::Success);
     assert_eq!(read(&tree, NAME), Some(Value::String("ready".to_string())));
     assert_eq!(calls.borrow().len(), 1, "label is called once");
+}
+
+/// A core string node reads a selection of a call's result: the call is made,
+/// and the node reads the selected value.
+#[test]
+fn a_string_node_reads_a_selection_of_a_call() {
+    const NAME: u128 = 0x4A3F;
+    let name = Expression::Select {
+        source: Box::new(call(RECORD, vec![])),
+        path: arora_types::data::Key::new(format!(".{RECORD_NAME}")),
+    };
+    let tree = tree(vec![node(
+        1,
+        crate::nodes::SET_STR_FUNCTION_ID,
+        vec![
+            (crate::nodes::SET_STR_VARIABLE_PARAM_ID, variable(NAME)),
+            (crate::nodes::SET_STR_VALUE_PARAM_ID, name),
+        ],
+    )]);
+    let mut engine = Engine::default();
+    let status = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false)
+        .expect("it lowers")
+        .tick()
+        .expect("it ticks");
+    assert_eq!(status, Status::Success);
+    assert_eq!(read(&tree, NAME), Some(Value::String("near".to_string())));
+}
+
+/// A tree that does not lower leaves nothing registered in the engine: the
+/// ticks registered before the refusal are unregistered.
+#[test]
+fn a_refused_tree_leaves_no_tick_registered() {
+    let unknown = Uuid::from_u128(0xBAD);
+    let tree = tree(vec![
+        control(1, SEQ_FUNCTION_ID, &[2, 3]),
+        node(2, BELOW, vec![(BELOW_X, f(1.0)), (BELOW_LIMIT, f(2.0))]),
+        node(
+            3,
+            BELOW,
+            vec![
+                (BELOW_X, call(MUL, vec![(MUL_A, f(1.0)), (unknown, f(2.0))])),
+                (BELOW_LIMIT, f(2.0)),
+            ],
+        ),
+    ]);
+    let mut engine = Engine::default();
+    assert!(BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).is_err());
+    assert!(engine.registered.is_empty(), "every tick is unregistered");
+    assert!(crate::lower_behavior_tree(tree, &index(), &mut engine, false).is_err());
+    assert!(engine.registered.is_empty(), "every tick is unregistered");
 }

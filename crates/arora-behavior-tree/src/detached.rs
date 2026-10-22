@@ -27,7 +27,9 @@
 //! variable `_ret` is bound to, or one of its mutable parameters, as
 //! `@node.parameter` or through its variable. Lowering finds the writer of
 //! every such cell, and gives each node the detached nodes it reads. A
-//! detached node's return value is a port even when `_ret` is not bound.
+//! detached node's return value is a port even when `_ret` is not bound. An
+//! output bound to another node's input, as `_ret: @reader.x`, writes the cell
+//! that input reads, so the reader reads the detached node.
 //!
 //! A store key is not such a cell. A port bound to a store key keeps a
 //! tree-local cell of its own, which `@node` reads, and publishes to the key
@@ -60,7 +62,7 @@
 //!
 //! A detached node with an output bound to a **store key** is a sink. Its
 //! readers are outside the tree, so it is brought up to date at **every
-//! tick**, after the tree has ticked. Once every sink is up to date, each
+//! tick**, after the tree has ticked, even when the tree failed. Once every sink is up to date, each
 //! publishes its keys, in the order the tree lists them, even when its result
 //! comes from its cache: a sink never reads another's key of the same tick,
 //! and of two sinks of one key, the later listed wins, as the later writer
@@ -450,15 +452,24 @@ impl Detached {
             }
         }
 
-        // Who reads whom, from the cells each node's arguments read. A
-        // detached node reads its own state; any other output of its own it
-        // reads is feedback, which goes through a store key.
+        // Who reads whom, from the cells each node's arguments read and the
+        // cell each parameter reads, which another node's output may be bound
+        // to. A detached node reads its own state; any other output of its own
+        // it reads is feedback, which goes through a store key.
         let reads_of = |node: &Node, own: Option<usize>| {
             let mut cells = Vec::new();
             for (parameter, argument) in &node.arguments {
                 // The return's binding is where the node writes, not a read.
                 if *parameter != _RET_PARAM_ID {
                     cells_read(argument, variables, node_parameters_variables, &mut cells);
+                    cells.extend(
+                        node_parameters_variables
+                            .get(&NodeParameterId {
+                                node: node.id,
+                                parameter: *parameter,
+                            })
+                            .cloned(),
+                    );
                 }
             }
             let mut read = Vec::new();
@@ -732,7 +743,7 @@ fn claim_attached(
 }
 
 /// The parameters a node of the tree's own vocabulary writes.
-fn native_writes(function: Uuid) -> &'static [Uuid] {
+pub(crate) fn native_writes(function: Uuid) -> &'static [Uuid] {
     match function {
         UNPACK_FUNCTION_ID => &UNPACK_OUT_PARAM_IDS,
         SEQ_STAR_FUNCTION_ID => &[SEQ_STAR_CURRENT_INDEX_PARAM_ID],

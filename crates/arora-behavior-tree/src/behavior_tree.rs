@@ -116,24 +116,27 @@ impl BehaviorTree {
 
     /// Tick `root` once, its detached nodes around it: they are out of date
     /// until read, and the sinks are brought up to date and written after the
-    /// tree has ticked.
+    /// tree has ticked, whether or not the tree failed. The tick reports the
+    /// tree's error first, then the sinks'.
     fn tick_root(
         &self,
         root: &TickId,
         caller: &mut dyn CallBridge,
     ) -> Result<Status, BehaviorTreeError> {
         self.detached.begin_tick();
-        let status = root.tick(caller)?;
+        let status = root.tick(caller);
         let variables = self.variables.borrow();
         let calls = FunctionIndex::new();
-        self.detached.tick_sinks(
+        let sinks = self.detached.tick_sinks(
             Scope {
                 variables: &variables,
                 node_parameters_variables: &self.node_arg_variables,
                 calls: &calls,
             },
             caller,
-        )?;
+        );
+        let status = status?;
+        sinks?;
         Ok(status)
     }
 
@@ -247,24 +250,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
         caller: &'a mut dyn CallBridge,
         trace: bool,
     ) -> Result<Self, BehaviorTreeError> {
-        let mut callables = Vec::new();
-        tree.lower_detached(functions)?;
-        let tick = setup_tick_function(
-            tree.root.clone(),
-            &tree.node_index,
-            functions,
-            tree.variables.clone(),
-            tree.node_arg_variables.clone(),
-            tree.detached.clone(),
-            &tree.outputs,
-            caller,
-            if trace {
-                TraceTick::YesAll
-            } else {
-                TraceTick::No
-            },
-            &mut callables,
-        )?;
+        let (tick, _) = register_ticks(tree, functions, caller, trace)?;
         Ok(Self { caller, tick, tree })
     }
 
@@ -300,24 +286,7 @@ pub fn lower_behavior_tree(
     caller: &mut dyn CallBridge,
     trace: bool,
 ) -> Result<LoweredTree, BehaviorTreeError> {
-    let mut callables = Vec::new();
-    tree.lower_detached(functions)?;
-    let root = setup_tick_function(
-        tree.root.clone(),
-        &tree.node_index,
-        functions,
-        tree.variables.clone(),
-        tree.node_arg_variables.clone(),
-        tree.detached.clone(),
-        &tree.outputs,
-        caller,
-        if trace {
-            TraceTick::YesAll
-        } else {
-            TraceTick::No
-        },
-        &mut callables,
-    )?;
+    let (root, callables) = register_ticks(&tree, functions, caller, trace)?;
     Ok(LoweredTree {
         root,
         callables,
@@ -343,6 +312,45 @@ impl LoweredTree {
     pub fn unregister(&self, caller: &mut dyn CallBridge) {
         for callable in &self.callables {
             caller.arora_unregister_callable(callable);
+        }
+    }
+}
+
+/// Lower `tree`'s detached nodes and register every attached node's tick
+/// function on `caller`: the root's tick, and every callable registered. A
+/// tree that does not lower leaves nothing registered: the callables
+/// registered before the refusal are unregistered.
+fn register_ticks(
+    tree: &BehaviorTree,
+    functions: &FunctionIndex,
+    caller: &mut dyn CallBridge,
+    trace: bool,
+) -> Result<(TickId, Vec<CallableId>), BehaviorTreeError> {
+    tree.lower_detached(functions)?;
+    let mut callables = Vec::new();
+    let root = setup_tick_function(
+        tree.root.clone(),
+        &tree.node_index,
+        functions,
+        tree.variables.clone(),
+        tree.node_arg_variables.clone(),
+        tree.detached.clone(),
+        &tree.outputs,
+        caller,
+        if trace {
+            TraceTick::YesAll
+        } else {
+            TraceTick::No
+        },
+        &mut callables,
+    );
+    match root {
+        Ok(root) => Ok((root, callables)),
+        Err(error) => {
+            for callable in &callables {
+                caller.arora_unregister_callable(callable);
+            }
+            Err(error)
         }
     }
 }
@@ -710,14 +718,28 @@ fn tick_builtin(
         }
         // The core string nodes, value-based over their bound cells. A call is
         // computed into its argument's cell first, in the node's parameter
-        // order, as for every other node.
+        // order, as for every other node. A selection an input reads is
+        // computed too, and read from a cell of its own; a parameter the node
+        // writes keeps the cell it writes to.
         function => {
+            let writes = detached::native_writes(function);
+            let mut selected = HashMap::new();
             for parameter in core_nodes::core_node_parameters(function).unwrap_or_default() {
-                if matches!(node.arguments.get(&parameter.id), Some(Expression::Call(_))) {
-                    argument(caller, parameter.id)?;
+                match node.arguments.get(&parameter.id) {
+                    Some(Expression::Call(_)) => {
+                        argument(caller, parameter.id)?;
+                    }
+                    Some(Expression::Select { .. }) if !writes.contains(&parameter.id) => {
+                        let value = argument(caller, parameter.id)?;
+                        selected.insert(parameter.id, VariableCell::local_with(value));
+                    }
+                    _ => {}
                 }
             }
             return core_nodes::tick_core_node(function, node.id, |parameter| {
+                if let Some(cell) = selected.get(&parameter) {
+                    return Ok(cell.clone());
+                }
                 get_node_parameter_variable(
                     &NodeParameterId {
                         node: node.id,

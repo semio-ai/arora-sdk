@@ -15,7 +15,8 @@ All notable changes to `arora-behavior-tree`. The format follows
   its return value through `_ret`, each mutable parameter through the cell its
   argument names; its return value is a port whether or not `_ret` is bound.
   - A node reads it through `@node` or `@node.parameter` (a `NodeArgument` on
-    its port), or through the variable an output is bound to. A port bound to
+    its port), or through the variable an output is bound to. An output bound
+    to another node's input feeds it in place of its argument. A port bound to
     a store key reads the node's current result, not the key. Nothing marks
     the read: lowering finds the detached node that writes each tree-local
     cell, and a node brings the detached nodes it reads up to date before it
@@ -23,7 +24,8 @@ All notable changes to `arora-behavior-tree`. The format follows
   - It runs at most once per tick, and calls its function only when its
     argument values changed. A store key is read as the store holds it.
   - One with an output bound to a store key is a sink: it is brought up to
-    date at every tick, after the tree ticks. Once every sink is up to date,
+    date at every tick, after the tree ticks, even when the tree fails; the
+    tick then reports the tree's error. Once every sink is up to date,
     each writes its keys, from its cache when its inputs did not change, so a
     sink reads another sink's key as it was before the tick. Of two sinks of
     one key, the later listed wins. A shared `Graph` lists its root, then its
@@ -49,7 +51,7 @@ All notable changes to `arora-behavior-tree`. The format follows
     parameter the function does not have, and a mutable parameter fed by a
     selection or a call.
   - A leaf evaluates its arguments in its function's parameter order; the core
-    string nodes compute theirs too. A call computing a module, function or
+    string nodes compute theirs too, and read a selection's value. A call computing a module, function or
     parameter id keeps a call site's state as an argument's call does.
 - `display`: a text form of expressions and nodes, with names from the
   function index (`Names`), on one line with `{}` or broken over lines with
@@ -65,6 +67,12 @@ All notable changes to `arora-behavior-tree`. The format follows
   was never ticked. A node of another kind that no node holds, such as a
   control node an edit adds before the edit that places it, or a node with
   children, is still left aside until a node holds it.
+
+### Fixed
+
+- A tree that does not lower, such as one naming a child that does not exist,
+  leaves no tick registered in the engine: the ticks registered before the
+  refusal are unregistered.
 
 ## [9.2.0] - 2026-10-22
 

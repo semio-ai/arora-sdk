@@ -220,7 +220,7 @@ node no structure holds, and an edge is a link from its port
   node runs until its state settles.
 - **Sinks run every tick.** A detached node with an output bound to a store
   key is brought up to date after the tree ticks, whether or not the tree
-  reads it. Once every sink is up to date, each writes its keys, from its
+  reads it, and even when the tree fails. Once every sink is up to date, each writes its keys, from its
   cache when its inputs did not change. Within a tick, the tree and the sinks
   read the store as it was, so a sink reading another sink's key sees it a
   tick late, as any value fed back through a key does. Of two sinks of one

@@ -1194,3 +1194,44 @@ fn over_a_hundred_ticks_the_cascade_runs_once_per_change() {
     assert_eq!(row(&totals[0]), [300, 300, 300, 300]);
     assert_eq!(row(&totals[1]), [0, 10, 10, 300]);
 }
+
+/// The sinks run after the tree whether or not it failed: a failing leaf stops
+/// no data flow, and the tick reports its error.
+#[test]
+fn sinks_run_when_the_tree_fails() {
+    let store = SimpleDataStore::new();
+    let tree = build(
+        &store,
+        vec![node(1, Uuid::from_u128(0xBAD), vec![])],
+        vec![compute(
+            50,
+            ADD,
+            vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))],
+            Some("out"),
+        )],
+    );
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert!(
+        runtime.tick().is_err(),
+        "the leaf's function does not exist"
+    );
+    assert_eq!(get(&store, "out"), Some(Value::F64(2.0)));
+}
+
+/// An output bound to another node's input feeds it: the reader pulls the
+/// detached node, whose result replaces the input's literal.
+#[test]
+fn an_output_bound_to_an_input_feeds_its_reader() {
+    let store = SimpleDataStore::new();
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments.insert(_RET_PARAM_ID, port(1, BELOW_X));
+    // below(x: 5, limit: 3) fails; with x = add(1, 1) it holds.
+    let tree = build(&store, vec![below(1, f(5.0), 3.0)], vec![add]);
+    let mut engine = Engine::default();
+    let mut runtime =
+        BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+    assert_eq!(runtime.tick().expect("it ticks"), Status::Success);
+    assert_eq!(tree.detached_plan().on_demand, vec![id(50)]);
+}
