@@ -69,6 +69,11 @@ others: a settled prerequisite is a clean child, skipped whole.
   state, so placed it would be called at every tick. Detached, its main call
   is cached by argument value. Placed nodes around it read it, and are read
   by it, as attached and detached nodes read each other today.
+- **A sink that shares a key with a sink staying detached stays detached.** A
+  detached sink publishes after the tree and a placed one before the body, so
+  every publisher of one key stays on the same side, and they keep publishing
+  in file order. The rule repeats until no placed sink shares a key with a
+  detached one; two variables of one name name one key.
 
 ### 2.3 Groups and anchors
 
@@ -102,8 +107,14 @@ publishes the port to the key. The root's `WITH` holds one more `PARALLEL`,
 after every group, with the publications in file order, so two sinks of one
 key end with the value the later-listed one computed, as detached sinks do. A
 `Copy` whose key another writer overwrote publishes again, with no module
-call. A mutable parameter bound to a key starts from the key's value, as a
-detached one does.
+call. One sink's outputs publish in detached publication's order: its return,
+then its mutable parameters in signature order. A mutable parameter bound to a
+key starts from the key's value, as a detached one does.
+
+An input that another detached node's output feeds reads that output, not the
+store key its argument names: loading gives the two a private cell. Once both
+are placed, the input reads a fresh local variable instead, so the writer
+still does not write the key.
 
 New node and variable ids are derived from the anchor and the group, and
 probe past ids the file already uses, so placing a file twice gives the same
@@ -141,8 +152,8 @@ to before its body. Tests pin each of these, with the values:
   branch the tree does not take: detached, it is not called. Placed at the
   root, it advances every tick. Placed at its readers, it stays dormant while
   its anchor is not reached.
-- **A sink's key read by the tree.** Detached, a tree node sees last tick's
-  value; placed, this tick's.
+- **A placed sink's key read in the same tick.** Detached, a tree node, or a
+  node that stays detached, sees last tick's value; placed, this tick's.
 - **A sink's key written by the tree.** A sink computing 3 and a tree node
   writing 100 to one key: detached, the sink publishes last and the key ends at
   3; placed, the tree writes last and it ends at 100. Neither calls the sink's
@@ -204,6 +215,11 @@ At N = 10 and 100, settled: placed 0.27 and 1.1 µs, detached 1.9 and 22 µs.
   difference in §3 for a key the tree also writes.
 - **Calls in arguments.** Hoisting a nested call into a placed leaf of its own
   would let its owner be placed and cached too.
+- **An attached output feeding a detached input.** An attached node whose
+  output is bound to a detached node's input that names a store key writes a
+  private cell while the detached node reads the key; placed, the write
+  reaches the key. Whether the detached layer should feed that input, as it
+  does from a detached writer, is a question for detached lowering first.
 - **Errors in prerequisites.** Whether an erring group should stop the body,
   or be reported and skipped, as a failing detached sink is.
 - **Placing on edit.** A re-placement after an edit starts the incremental
