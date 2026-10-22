@@ -51,6 +51,9 @@ pub(crate) const SMOOTH: Uuid = Uuid::from_u128(0xF101);
 pub(crate) const SMOOTH_X: Uuid = Uuid::from_u128(0xF111);
 pub(crate) const SMOOTH_ALPHA: Uuid = Uuid::from_u128(0xF112);
 pub(crate) const SMOOTH_STATE: Uuid = Uuid::from_u128(0xF113);
+pub(crate) const TWIN: Uuid = Uuid::from_u128(0xF102);
+pub(crate) const TWIN_FIRST: Uuid = Uuid::from_u128(0xF121);
+pub(crate) const TWIN_SECOND: Uuid = Uuid::from_u128(0xF122);
 
 pub(crate) const CHECKS: Uuid = Uuid::from_u128(0xC400);
 pub(crate) const BELOW: Uuid = Uuid::from_u128(0xC401);
@@ -131,6 +134,15 @@ pub(crate) fn index() -> FunctionIndex {
                 (SMOOTH_X, number("x")),
                 (SMOOTH_ALPHA, number("alpha")),
                 (SMOOTH_STATE, parameter("state", f64_ty(), true)),
+            ],
+        ),
+        function(
+            FILTERS,
+            TWIN,
+            "twin",
+            vec![
+                (TWIN_FIRST, parameter("first", f64_ty(), true)),
+                (TWIN_SECOND, parameter("second", f64_ty(), true)),
             ],
         ),
         function(
@@ -239,6 +251,15 @@ impl CallBridge for Engine {
                     }],
                 }
             }
+            TWIN => CallResult {
+                ret: Value::F64(0.0),
+                mutated: [(TWIN_FIRST, 1.0), (TWIN_SECOND, 2.0)]
+                    .map(|(id, value)| StructureField {
+                        id,
+                        value: Box::new(Value::F64(value)),
+                    })
+                    .into(),
+            },
             BELOW => returns(if number(&args, BELOW_X)? < number(&args, BELOW_LIMIT)? {
                 Status::Success.into()
             } else {

@@ -349,13 +349,18 @@ impl Detached {
                 return refuse("calls the interpreter module, which a tree does not call".into());
             }
             let signature = functions.get(&node.function);
+            // The return first, then the mutable parameters in the function's
+            // parameter order: outputs that share a destination write it in an
+            // order that does not change from one load to the next.
             let mut ports = vec![_RET_PARAM_ID];
             if let Some(signature) = signature {
-                for (parameter, argument) in &node.arguments {
-                    if *parameter == _RET_PARAM_ID {
+                for (parameter, argument) in
+                    crate::display::ordered(&node.arguments, Some(signature))
+                {
+                    if parameter == _RET_PARAM_ID {
                         continue;
                     }
-                    let Some(declared) = signature.function.parameters.get(parameter) else {
+                    let Some(declared) = signature.function.parameters.get(&parameter) else {
                         return refuse(format!(
                             "names the parameter {parameter}, which {} does not have",
                             signature.function_name
@@ -370,7 +375,7 @@ impl Detached {
                                 argument.display(names)
                             ));
                         }
-                        ports.push(*parameter);
+                        ports.push(parameter);
                     }
                 }
                 signatures.insert(node.function, signature.clone());
@@ -444,15 +449,27 @@ impl Detached {
                         Expression::NodeArgument(input.clone()).display(names)
                     )))
                 };
-                let computed = self
-                    .nodes
-                    .iter()
-                    .chain(attached)
-                    .find(|reader| reader.id == input.node)
-                    .and_then(|reader| reader.arguments.get(&input.parameter))
-                    .is_some_and(|argument| {
-                        matches!(argument, Expression::Call(_) | Expression::Select { .. })
-                    });
+                // The input, through the ports that alias it: an input naming
+                // another node's input shares its cell.
+                let argument_of = |port: &NodeParameterId| {
+                    self.nodes
+                        .iter()
+                        .chain(attached)
+                        .find(|reader| reader.id == port.node)
+                        .and_then(|reader| reader.arguments.get(&port.parameter))
+                };
+                let mut target = input;
+                let mut computed = false;
+                for _ in 0..=self.nodes.len() + attached.len() {
+                    match argument_of(target) {
+                        Some(Expression::NodeArgument(aliased)) => target = aliased,
+                        Some(Expression::Call(_) | Expression::Select { .. }) => {
+                            computed = true;
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
                 if computed {
                     return refuse("an input a call or a selection computes, with no cell to feed");
                 }

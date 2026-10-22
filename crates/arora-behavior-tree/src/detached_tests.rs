@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::call_expression_tests::{
     call, centimetres, control, f, index, node, Calls, Engine, ADD, ADD_A, ADD_B, BELOW,
     BELOW_LIMIT, BELOW_X, CLAMP, CLAMP_LO, CLAMP_X, DISTANCE, MUL, MUL_A, MUL_B, SMOOTH,
-    SMOOTH_ALPHA, SMOOTH_STATE, SMOOTH_X,
+    SMOOTH_ALPHA, SMOOTH_STATE, SMOOTH_X, TWIN, TWIN_FIRST, TWIN_SECOND,
 };
 use crate::display::Names;
 use crate::nodes::{
@@ -1490,4 +1490,52 @@ fn a_mutable_parameter_bound_to_a_detached_input_feeds_it() {
         BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
     runtime.tick().expect("it ticks");
     assert_eq!(get(&store, "out"), Some(Value::F64(3.0)));
+}
+
+/// Two outputs of one node bound to one variable write it in the function's
+/// parameter order, the same at every load: the later parameter's value stays.
+#[test]
+fn outputs_sharing_a_destination_write_in_parameter_order() {
+    for load in 0..16 {
+        let store = SimpleDataStore::new();
+        // twin() writes 1 to `first`, then 2 to `second`.
+        let twin = compute(
+            50,
+            TWIN,
+            vec![(TWIN_FIRST, key(".v")), (TWIN_SECOND, key(".v"))],
+            None,
+        );
+        let tree = build(&store, vec![below(1, key(".v"), 3.0)], vec![twin]);
+        let mut engine = Engine::default();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).expect("it lowers");
+        runtime.tick().expect("it ticks");
+        assert_eq!(
+            tree.variables.borrow()[&var(".v")].get(),
+            Some(Value::F64(2.0)),
+            "load {load}"
+        );
+    }
+}
+
+/// The refusal of an output bound to a computed input follows the ports that
+/// alias it: an input naming another node's input, which a selection computes,
+/// shares the selection's source, which the output would overwrite.
+#[test]
+fn lowering_refuses_an_output_bound_to_an_alias_of_a_computed_input() {
+    let mut add = compute(50, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], None);
+    add.arguments.insert(_RET_PARAM_ID, port(2, BELOW_X));
+    let selection = Expression::Select {
+        source: Box::new(key(".x")),
+        path: Key::new(".field"),
+    };
+    let error = lowering_error(
+        vec![
+            control(10, SEQ_FUNCTION_ID, &[1, 2]),
+            below(1, selection, 3.0),
+            below(2, port(1, BELOW_X), 3.0),
+        ],
+        vec![add],
+    );
+    assert!(error.contains("a call or a selection computes"), "{error}");
 }

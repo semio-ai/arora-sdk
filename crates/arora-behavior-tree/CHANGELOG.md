@@ -24,7 +24,9 @@ All notable changes to `arora-behavior-tree`. The format follows
     ticks.
   - It runs at most once per tick, and calls its function only when its
     argument values changed. A failed evaluation fails every read of it in
-    that tick without calling again, and is tried again at the next. A store key is read as the store holds it.
+    that tick without calling again, and is tried again at the next. Its
+    outputs are written return first, then in its function's parameter order,
+    so two that share a destination leave the same value at every load. A store key is read as the store holds it.
   - One with an output bound to a store key is a sink: it is brought up to
     date at every tick, after the tree ticks, even when the tree fails; the
     tick then reports the tree's error. A sink that fails stops no other: the
@@ -36,7 +38,8 @@ All notable changes to `arora-behavior-tree`. The format follows
   - Lowering refuses detached nodes that read each other in a cycle, a
     detached node reading an output of its own other than its state, a call
     in a detached node's arguments writing back a store key, an output bound
-    to an input that a call or a selection computes, a mutable parameter bound
+    to an input that a call or a selection computes, directly or through the
+    ports that alias it, a mutable parameter bound
     to another node's input that names a store key, a read of a port that is
     neither a return value nor a mutable parameter, and a tree-local
     cell that a detached node and another node both write. The writes counted
