@@ -20,8 +20,9 @@ use crate::nodes::{
     COS_FUNCTION_ID, EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID,
     FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID, IS_STR_SET_FUNCTION_ID, PARALLEL_FUNCTION_ID,
     REGEX_MATCH_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
-    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID,
-    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
+    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID,
+    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
     STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
     UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, UNSET_STR_FUNCTION_ID, WAIT_STR_SET_FUNCTION_ID,
 };
@@ -68,6 +69,7 @@ impl Node {
             PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
             EQUAL_GROOT_ID => EQUAL_FUNCTION_ID,
             UNPACK_GROOT_ID => UNPACK_FUNCTION_ID,
+            SCATTER_GROOT_ID => SCATTER_FUNCTION_ID,
             RUN_CALL_GROOT_ID => RUN_CALL_FUNCTION_ID,
             RUN_STATUS_GROOT_ID => RUN_STATUS_FUNCTION_ID,
             COS_GROOT_ID => COS_FUNCTION_ID,
@@ -193,6 +195,7 @@ impl Node {
             PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
             EQUAL_FUNCTION_ID => EQUAL_GROOT_ID,
             UNPACK_FUNCTION_ID => UNPACK_GROOT_ID,
+            SCATTER_FUNCTION_ID => SCATTER_GROOT_ID,
             RUN_CALL_FUNCTION_ID => RUN_CALL_GROOT_ID,
             RUN_STATUS_FUNCTION_ID => RUN_STATUS_GROOT_ID,
             COS_FUNCTION_ID => COS_GROOT_ID,
@@ -291,7 +294,7 @@ impl Node {
 /// its snake_case name (`Walk` for `walk`, `PlayClip` for `play_clip`), the
 /// convention the palette's own tags follow. The palette is matched first, so
 /// a module export spelled like a palette entry (`cos`, `store`, `status`,
-/// `increase`, `equal`, `unpack`, `run_call`, `run_status`, …) is
+/// `increase`, `equal`, `unpack`, `scatter`, `run_call`, `run_status`, …) is
 /// reachable only under its exact snake_case name. The index
 /// spans every loaded module, host and guest alike, so a name two modules both
 /// export is refused as ambiguous rather than resolved to whichever the index
@@ -347,6 +350,11 @@ fn builtin_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
     match function {
         EQUAL_FUNCTION_ID => &[("a", EQUAL_A_PARAM_ID), ("b", EQUAL_B_PARAM_ID)],
         UNPACK_FUNCTION_ID => &[("values", UNPACK_VALUES_PARAM_ID)],
+        SCATTER_FUNCTION_ID => &[
+            ("values", SCATTER_VALUES_PARAM_ID),
+            ("keys", SCATTER_KEYS_PARAM_ID),
+            ("within", SCATTER_WITHIN_PARAM_ID),
+        ],
         RUN_CALL_FUNCTION_ID => &[("call", RUN_CALL_PARAM_ID)],
         RUN_STATUS_FUNCTION_ID => &[("status", RUN_STATUS_OUT_PARAM_ID)],
         _ => &[],
@@ -489,6 +497,7 @@ const PARALLEL_GROOT_ID: &str = "Parallel";
 const COS_GROOT_ID: &str = "Cos";
 const EQUAL_GROOT_ID: &str = "Equal";
 const UNPACK_GROOT_ID: &str = "Unpack";
+const SCATTER_GROOT_ID: &str = "Scatter";
 const RUN_CALL_GROOT_ID: &str = "RunCall";
 const RUN_STATUS_GROOT_ID: &str = "RunStatus";
 const SET_STR_GROOT_ID: &str = "SetString";

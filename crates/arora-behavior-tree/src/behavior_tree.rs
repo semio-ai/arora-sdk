@@ -3,6 +3,7 @@ pub mod core_nodes;
 pub mod error;
 pub mod graph;
 pub mod nodes;
+mod scatter;
 pub mod schema;
 pub mod schema_groot;
 #[cfg(test)]
@@ -33,9 +34,10 @@ use uuid::Uuid;
 use crate::nodes::{
     EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
     PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
-    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_FUNCTION_ID,
-    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
-    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
+    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID,
+    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
 };
 
 // Runtime.
@@ -50,13 +52,19 @@ pub struct BehaviorTree {
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     /// Variables associated to node arguments (node, arg).
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
-    /// Each `Unpack` node's output cells, bound at load.
-    unpack_outputs: HashMap<Uuid, UnpackOutputs>,
+    /// Each `Unpack` and `Scatter` node's outputs, bound at load.
+    outputs: HashMap<Uuid, Outputs>,
 }
 
-/// An `Unpack` node's output cells, by port index up to its last bound port:
-/// `None` for an unbound port.
-type UnpackOutputs = Rc<[Option<VariableCell>]>;
+/// Where a data node writes, bound when the tree is loaded.
+#[derive(Clone)]
+enum Outputs {
+    /// An `Unpack` node's output cells, by port index up to its last bound
+    /// port: `None` for an unbound port.
+    Ports(Rc<[Option<VariableCell>]>),
+    /// A `Scatter` node's key prefix, and the slots its keys resolved to.
+    Keys(Rc<scatter::Scatter>),
+}
 
 impl BehaviorTree {
     /// Take over the state `previous` holds for every node of this tree that
@@ -147,7 +155,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
             functions,
             tree.variables.clone(),
             tree.node_arg_variables.clone(),
-            &tree.unpack_outputs,
+            &tree.outputs,
             caller,
             if trace {
                 TraceTick::YesAll
@@ -198,7 +206,7 @@ pub fn lower_behavior_tree(
         functions,
         tree.variables.clone(),
         tree.node_arg_variables.clone(),
-        &tree.unpack_outputs,
+        &tree.outputs,
         caller,
         if trace {
             TraceTick::YesAll
@@ -269,7 +277,7 @@ fn setup_tick_function(
     functions: &FunctionIndex,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
-    unpack_outputs: &HashMap<Uuid, UnpackOutputs>,
+    outputs: &HashMap<Uuid, Outputs>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
     // Every callable registered on behalf of this (sub)tree, collected so the
@@ -297,7 +305,7 @@ fn setup_tick_function(
                 functions,
                 variables.clone(),
                 node_arg_variables.clone(),
-                unpack_outputs,
+                outputs,
                 caller,
                 trace,
                 callables,
@@ -310,7 +318,7 @@ fn setup_tick_function(
         function: functions.get(&node.function).cloned(),
         locals: variables.to_owned(),
         node_arg_variables: node_arg_variables.to_owned(),
-        outputs: unpack_outputs.get(&node.id).cloned(),
+        outputs: outputs.get(&node.id).cloned(),
         children: children_ticks,
         trace,
     });
@@ -339,20 +347,21 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | RUN_STATUS_FUNCTION_ID
             | EQUAL_FUNCTION_ID
             | UNPACK_FUNCTION_ID
+            | SCATTER_FUNCTION_ID
     ) || core_nodes::core_node_parameters(function).is_some()
 }
 
 /// Tick the native nodes (see [`is_native`]) — the control nodes, the status
-/// leaves, the task-run nodes, the data nodes `Equal` and `Unpack` and the
-/// core string nodes ([`core_nodes`]) — without consulting the function index
-/// or the wasm engine. Children are ticked through their registered tick functions
+/// leaves, the task-run nodes, the data nodes `Equal`, `Unpack` and `Scatter`
+/// and the core string nodes ([`core_nodes`]) — without consulting the
+/// function index or the wasm engine. Children are ticked through their registered tick functions
 /// ([`Tickable for TickId`]). Returns `Some(status)` for a built-in node and
 /// `None` for any other function (which the caller dispatches via the engine).
 fn tick_builtin(
     caller: &mut dyn CallBridge,
     variables: &HashMap<Uuid, VariableCell>,
     node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
-    outputs: Option<&[Option<VariableCell>]>,
+    outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
     node: &Node,
 ) -> Result<Option<Status>, BehaviorTreeError> {
@@ -385,9 +394,11 @@ fn tick_builtin(
             }
         }
         UNPACK_FUNCTION_ID => {
-            let outputs = outputs.ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
-                message: format!("Unpack node {} has no bound outputs", node.id),
-            })?;
+            let Some(Outputs::Ports(outputs)) = outputs else {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("Unpack node {} has no bound outputs", node.id),
+                });
+            };
             match argument(caller, UNPACK_VALUES_PARAM_ID)?.into_elements() {
                 Ok(values) if values.len() >= outputs.len() => {
                     // A slot notifies a change only when the value moves
@@ -401,6 +412,17 @@ fn tick_builtin(
                 }
                 _ => Status::Failure,
             }
+        }
+        SCATTER_FUNCTION_ID => {
+            let Some(Outputs::Keys(scatter)) = outputs else {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("Scatter node {} is not bound", node.id),
+                });
+            };
+            scatter.write(
+                argument(caller, SCATTER_KEYS_PARAM_ID)?,
+                argument(caller, SCATTER_VALUES_PARAM_ID)?,
+            )?
         }
         SUCCEED_FUNCTION_ID => Status::Success,
         FAIL_FUNCTION_ID => Status::Failure,
@@ -596,7 +618,7 @@ fn tick(
     function: Option<&ModuleFunction>,
     variables: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_parameters_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
-    outputs: Option<&[Option<VariableCell>]>,
+    outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
     node: Rc<Node>,
     trace: TraceTick,
@@ -852,8 +874,8 @@ struct TickFunction {
     function: Option<ModuleFunction>,
     locals: Rc<RefCell<HashMap<Uuid, VariableCell>>>,
     node_arg_variables: Rc<HashMap<NodeParameterId, VariableCell>>,
-    /// The node's output cells, for an `Unpack` node.
-    outputs: Option<UnpackOutputs>,
+    /// Where the node writes, for an `Unpack` or a `Scatter` node.
+    outputs: Option<Outputs>,
     children: Vec<TickId>,
     trace: TraceTick,
 }
@@ -865,7 +887,7 @@ impl Tickable for TickFunction {
             self.function.as_ref(),
             self.locals.clone(),
             self.node_arg_variables.clone(),
-            self.outputs.as_deref(),
+            self.outputs.as_ref(),
             &self.children,
             self.node.clone(),
             self.trace,
@@ -905,7 +927,7 @@ pub fn load_behavior_tree_nodes_with(
     let mut variables = HashMap::new();
     let mut node_parameters_variables = HashMap::new();
     let mut arguments = Vec::new();
-    let mut unpack_outputs = HashMap::new();
+    let mut outputs = HashMap::new();
     for node in nodes {
         let shared_node = Rc::new(node);
         if root.is_none() {
@@ -973,8 +995,8 @@ pub fn load_behavior_tree_nodes_with(
 
     // The data nodes, once every argument has its cell.
     for node in node_index.values() {
-        if let Some(outputs) = bind_data_node(node, names, &node_parameters_variables)? {
-            unpack_outputs.insert(node.id, outputs);
+        if let Some(bound) = bind_data_node(node, names, &node_parameters_variables)? {
+            outputs.insert(node.id, bound);
         }
     }
 
@@ -985,7 +1007,7 @@ pub fn load_behavior_tree_nodes_with(
         node_index,
         variables: Rc::new(RefCell::new(variables)),
         node_arg_variables: Rc::new(node_parameters_variables),
-        unpack_outputs,
+        outputs,
     })
 }
 
@@ -1008,18 +1030,19 @@ fn get_variable<'a>(
         })
 }
 
-/// Check a data node's arguments, and gather an `Unpack` node's output cells:
-/// `None` for any other node.
+/// Check a data node's arguments, and bind where an `Unpack` or a `Scatter`
+/// node writes: `None` for any other node.
 ///
-/// `Equal` needs both its arguments and `Unpack` its values, linked. Each of
-/// `Unpack`'s other arguments is an output port bound to a variable, whose cell
-/// the generic lowering already set up; two ports may not bind one variable, by
-/// id or by name.
+/// `Equal` needs both its arguments, `Unpack` its values and `Scatter` all
+/// three of its arguments, linked. Each of `Unpack`'s other arguments is an
+/// output port bound to a variable, whose cell the generic lowering already set
+/// up; two ports may not bind one variable, by id or by name. `Scatter`'s
+/// `within` is a literal key prefix (see [`scatter::Scatter::bind`]).
 pub(crate) fn bind_data_node(
     node: &Node,
     names: &HashMap<Uuid, String>,
     node_parameters_variables: &HashMap<NodeParameterId, VariableCell>,
-) -> Result<Option<UnpackOutputs>, BehaviorTreeError> {
+) -> Result<Option<Outputs>, BehaviorTreeError> {
     let refuse = |what: String| {
         Err(BehaviorTreeError::InconsistentTreeError {
             message: format!("node {}: {what}", node.id),
@@ -1028,10 +1051,18 @@ pub(crate) fn bind_data_node(
     let required: &[Uuid] = match node.function {
         EQUAL_FUNCTION_ID => &[EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID],
         UNPACK_FUNCTION_ID => &[UNPACK_VALUES_PARAM_ID],
+        SCATTER_FUNCTION_ID => &[
+            SCATTER_VALUES_PARAM_ID,
+            SCATTER_KEYS_PARAM_ID,
+            SCATTER_WITHIN_PARAM_ID,
+        ],
         _ => return Ok(None),
     };
     if let Some(missing) = required.iter().find(|id| !node.arguments.contains_key(id)) {
         return refuse(format!("argument {missing} is not linked"));
+    }
+    if node.function == SCATTER_FUNCTION_ID {
+        return Ok(Some(Outputs::Keys(Rc::new(scatter::Scatter::bind(node)?))));
     }
     if node.function != UNPACK_FUNCTION_ID {
         return Ok(None);
@@ -1068,7 +1099,7 @@ pub(crate) fn bind_data_node(
         outputs[index] =
             Some(get_node_parameter_variable(&port, node_parameters_variables)?.clone());
     }
-    Ok(Some(outputs.into()))
+    Ok(Some(Outputs::Ports(outputs.into())))
 }
 
 /// The other node's argument `expression` reads, through any selection.

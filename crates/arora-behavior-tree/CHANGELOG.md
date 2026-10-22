@@ -4,6 +4,37 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.2.0] - 2026-10-22
+
+### Added
+
+- `Scatter(values, keys, within)` (`SCATTER_FUNCTION_ID`,
+  `SCATTER_VALUES_PARAM_ID`, `SCATTER_KEYS_PARAM_ID`,
+  `SCATTER_WITHIN_PARAM_ID`), a natively ticked data node: writes element `i`
+  of the array `values` to the store key named by element `i` of the array
+  `keys`, and succeeds; a `Unit` element leaves its key as it is. The keys are
+  data, so a tree writes a table of any length in one tick, and a table whose
+  keys change needs no edit. `within`, a literal key prefix fixed at lowering,
+  bounds the keys: lowering refuses a `within` that is not a literal string, is
+  empty, ends with `/` or starts with `.`. A tick checks before it writes and
+  writes all its keys or none: it fails when `values` or `keys` is not an
+  array, a key is not a string, or the lengths differ; it errors when a key is
+  outside `within` or named twice. The node keeps the slots its keys resolved
+  to until a tick brings other keys. Groot reads and writes it as
+  `<Scatter values="…" keys="…" within="…"/>`, and the palette declares it.
+- `BehaviorTree::with_key_resolver`: the resolver a tree's `Scatter` nodes
+  resolve their keys through while it ticks. The interpreter gives its trees
+  the Direct convention's, over its own handle on the store
+  (`DataStore::clone_box`); a tree built without one runs, and its `Scatter`
+  nodes error when they write.
+- The interpreter reads `behavior-tree 1.2` (`GRAPH_TYPE_VERSION`), the
+  version that adds `Scatter`; it still runs `1.0` and `1.1` graphs.
+
+### Changed
+
+- The `arora-types` requirement is `3.6`: `Scatter` relies on its
+  change-only slots and `prefix_covers`.
+
 ## [9.1.0] - 2026-10-19
 
 ### Added
