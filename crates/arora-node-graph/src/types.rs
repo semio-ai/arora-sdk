@@ -331,17 +331,64 @@ pub struct NodeParams {
     pub module: Option<Uuid>,
 }
 
-/// Rounding strategy for [`NodeType::Round`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum RoundMode {
-    /// Round toward negative infinity.
-    #[default]
-    Floor,
-    /// Round toward positive infinity.
-    Ceil,
-    /// Round toward zero.
-    Trunc,
+pub use crate::params::RoundMode;
+
+impl NodeParams {
+    /// The parameters the node functions read: all but the store path and
+    /// the keyed-batch fields, which the importer and the tree read.
+    pub fn params(&self) -> crate::params::Params {
+        crate::params::Params {
+            value: self.value.clone(),
+            frequency: self.frequency,
+            phase: self.phase,
+            min: self.min,
+            max: self.max,
+            x: self.x,
+            y: self.y,
+            z: self.z,
+            in_min: self.in_min,
+            in_max: self.in_max,
+            out_min: self.out_min,
+            out_max: self.out_max,
+            round_mode: self.round_mode.clone(),
+            clamp: self.clamp,
+            in_low: self.in_low,
+            in_anchor: self.in_anchor,
+            in_high: self.in_high,
+            out_low: self.out_low,
+            out_anchor: self.out_anchor,
+            out_high: self.out_high,
+            bone1: self.bone1,
+            bone2: self.bone2,
+            bone3: self.bone3,
+            urdf_xml: self.urdf_xml.clone(),
+            root_link: self.root_link.clone(),
+            tip_link: self.tip_link.clone(),
+            seed: self.seed.clone(),
+            weights: self.weights.clone(),
+            max_iters: self.max_iters,
+            tol_pos: self.tol_pos,
+            tol_rot: self.tol_rot,
+            joint_defaults: self.joint_defaults.clone(),
+            index: self.index,
+            sizes: self.sizes.clone(),
+            noise_seed: self.noise_seed,
+            octaves: self.octaves,
+            lacunarity: self.lacunarity,
+            persistence: self.persistence,
+            stiffness: self.stiffness,
+            damping: self.damping,
+            mass: self.mass,
+            half_life: self.half_life,
+            max_rate: self.max_rate,
+            case_labels: self.case_labels.clone(),
+            record_keys: self.record_keys.clone(),
+            keys: self.keys.clone(),
+            function: self.function,
+            param_ids: self.param_ids.clone(),
+            module: self.module,
+        }
+    }
 }
 
 /// Single node declaration within a [`GraphSpec`].

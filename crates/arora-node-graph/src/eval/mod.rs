@@ -11,6 +11,8 @@
 //! - `shape_helpers` validates declared output shapes and applies selectors.
 //! - `numeric` and `variadic` provide shared math helpers.
 //! - `urdfik` is gated behind the `urdf_ik` feature and packages the IK solver helpers.
+//! - `vizij` holds what belongs to Vizij's graph format: the `input` node,
+//!   declared output shapes and a keyed batch's writes.
 
 pub mod eval_node;
 pub(crate) mod graph_runtime;
@@ -23,7 +25,8 @@ pub(crate) mod shape_helpers;
 pub(crate) mod urdfik;
 pub(crate) mod value_layout;
 pub(crate) mod variadic;
+pub(crate) mod vizij;
 
-pub use graph_runtime::{GraphRuntime, SpawnRequest, StagedInput};
+pub use graph_runtime::{GraphRuntime, SpawnRequest};
 pub use node_function::{NodeFunction, NodeFunctionRegistry, NodeFunctions};
 pub use value_layout::PortValue;

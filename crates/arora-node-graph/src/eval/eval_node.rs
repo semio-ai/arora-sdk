@@ -1,20 +1,19 @@
-//! Per-node evaluation logic for the Vizij graph runtime.
+//! What each node kind computes: the per-node code the module's functions
+//! run, over a node's inputs, parameters, clock and state.
 
-use crate::eval::graph_runtime::{GraphRuntime, StagedInput};
+use crate::eval::graph_runtime::GraphRuntime;
 use crate::eval::node_function::NodeFunctions;
 use crate::eval::plan::PortLayout;
 use crate::eval::variadic::collect_operand_ports;
-use crate::types::{NodeParams, NodeSpec, NodeType, RoundMode};
+use crate::params::{Params, RoundMode};
+use crate::types::NodeType;
 use arora_shape::value as vocab;
-use arora_shape::{Shape, TypedPath, Value, WriteOp};
+use arora_shape::Value;
 use hashbrown::HashMap;
 use uuid::Uuid;
 
 use super::noise;
 use super::numeric::{as_bool, as_float, as_vector, binary_numeric, unary_numeric};
-use super::shape_helpers::{
-    coerce_numeric_to_shape, is_numeric_like, null_of_shape_numeric, value_matches_shape,
-};
 #[cfg(feature = "urdf_ik")]
 use super::urdfik::{
     apply_joint_positions, describe, fetch_joint_vector, hash_urdf_config, quat_from_value,
@@ -165,81 +164,36 @@ fn single_output(outputs: &mut OutputSlots, value: Value) -> Result<(), String> 
     keyed_output(outputs, "out", value)
 }
 
+/// The node a call evaluates: its id in the graph, which names it in errors
+/// and keys its state, its kind and its parameters.
+#[derive(Clone, Copy, Debug)]
+pub struct Node<'a> {
+    pub id: &'a str,
+    pub kind: &'a NodeType,
+    pub params: &'a Params,
+}
+
 /// Evaluate a single node, optionally threading a [`NodeFunctions`] host through to
 /// `ExternalFunction` nodes, which error without one.
 pub fn eval_node_inner(
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
+    node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
     functions: Option<&mut dyn NodeFunctions>,
 ) -> Result<(), String> {
-    evaluate_kind_inner(rt, spec, inputs, outputs, functions)?;
-    enforce_output_shapes_slots(spec, outputs.layout, outputs.as_slice())
-}
-
-/// The writes a keyed record batch makes, in batch order: how a
-/// **path-less** [`NodeType::Output`] applies a value that names its own keys
-/// (e.g. a module call's "what changed") onto them.
-///
-/// The batch is a `Value::ArrayStructure`; in every record, `key_field` holds
-/// the target path as a string and `value_field` the value to write. A record
-/// missing either (or keying on a non-string) is an **evaluation error** — a
-/// miswired batch, not data — while an empty batch simply writes nothing.
-/// Records repeating a key produce writes in batch order, and the per-tick
-/// flush keeps the last one; explicit combination of concurrent publishers is
-/// VIZ-76's ground (https://linear.app/semio-ai/issue/VIZ-76).
-pub fn keyed_batch_writes(
-    batch: &Value,
-    key_field: Uuid,
-    value_field: Uuid,
-) -> Result<Vec<WriteOp>, String> {
-    let Value::ArrayStructure { elements, .. } = batch else {
-        return Err(
-            "a path-less Output applies a keyed record batch (an array of structures); \
-             set `path` to write a single value"
-                .to_string(),
-        );
-    };
-    let mut writes = Vec::with_capacity(elements.len());
-    for (index, record) in elements.iter().enumerate() {
-        let mut key: Option<&str> = None;
-        let mut value: Option<&Value> = None;
-        for field in &record.fields {
-            if field.id == key_field {
-                key = match field.value.as_ref() {
-                    Value::String(s) => Some(s.as_str()),
-                    other => {
-                        return Err(format!(
-                            "record {index}: key field must be a string path, got {other:?}"
-                        ));
-                    }
-                };
-            } else if field.id == value_field {
-                value = Some(field.value.as_ref());
-            }
-        }
-        let (Some(key), Some(value)) = (key, value) else {
-            return Err(format!(
-                "record {index}: missing key field {key_field} or value field {value_field}"
-            ));
-        };
-        let path = TypedPath::parse(key)
-            .map_err(|e| format!("record {index}: key {key:?} is not a path: {e}"))?;
-        writes.push(WriteOp::new(path, value.clone()));
-    }
-    Ok(writes)
+    evaluate_kind_inner(rt, node, inputs, outputs, functions)
 }
 
 fn evaluate_kind_inner(
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
+    node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
     functions: Option<&mut dyn NodeFunctions>,
 ) -> Result<(), String> {
-    let params = &spec.params;
-    match &spec.kind {
+    let params = node.params;
+    match &node.kind {
         NodeType::Constant => eval_constant(params, outputs),
         NodeType::Slider => eval_slider(params, outputs),
         NodeType::MultiSlider => eval_multi_slider(params, outputs),
@@ -261,7 +215,7 @@ fn evaluate_kind_inner(
         NodeType::Time => eval_time(rt, outputs),
         NodeType::Oscillator => eval_oscillator(rt, inputs, outputs),
         node_type @ (NodeType::Spring | NodeType::Damp | NodeType::Slew) => {
-            eval_stateful(node_type, rt, spec, params, inputs, outputs)
+            eval_stateful(node_type, rt, node, params, inputs, outputs)
         }
         node_type @ (NodeType::And | NodeType::Or | NodeType::Not | NodeType::Xor) => {
             eval_logic(node_type, inputs, outputs)
@@ -309,17 +263,17 @@ fn evaluate_kind_inner(
         }
         NodeType::InverseKinematics => eval_inverse_kinematics(inputs, outputs),
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfIkPosition => eval_urdf_position(rt, spec, params, inputs, outputs),
+        NodeType::UrdfIkPosition => eval_urdf_position(rt, node, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
         NodeType::UrdfIkPosition => {
             Err("UrdfIkPosition node requires the 'urdf_ik' feature".to_string())
         }
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfIkPose => eval_urdf_pose(rt, spec, params, inputs, outputs),
+        NodeType::UrdfIkPose => eval_urdf_pose(rt, node, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
         NodeType::UrdfIkPose => Err("UrdfIkPose node requires the 'urdf_ik' feature".to_string()),
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfFk => eval_urdf_fk(rt, spec, params, inputs, outputs),
+        NodeType::UrdfFk => eval_urdf_fk(rt, node, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
         NodeType::UrdfFk => Err("UrdfFk node requires the 'urdf_ik' feature".to_string()),
         NodeType::Case => eval_case(params, inputs, outputs),
@@ -332,11 +286,14 @@ fn evaluate_kind_inner(
         NodeType::MathAddRecord => eval_math_record(inputs, outputs, |a, b| a + b),
         NodeType::MathDivRecord => eval_math_record(inputs, outputs, |a, b| a / b),
         NodeType::MathSubRecord => eval_math_record(inputs, outputs, |a, b| a - b),
-        NodeType::Input => eval_input_node(rt, spec, outputs),
+        NodeType::Input => Err(format!(
+            "node '{}': an input node's value is what its store key holds",
+            node.id
+        )),
         NodeType::Output => eval_output(inputs, outputs),
         NodeType::ExternalFunction => eval_external_function(params, inputs, outputs, functions),
-        NodeType::TaskRun => eval_task_run(rt, spec, inputs, outputs, functions),
-        NodeType::Spawn => eval_spawn(rt, spec, inputs, outputs),
+        NodeType::TaskRun => eval_task_run(rt, node, inputs, outputs, functions),
+        NodeType::Spawn => eval_spawn(rt, node, inputs, outputs),
     }
 }
 
@@ -356,7 +313,7 @@ fn bundle_fields(bundle: Option<&Value>) -> Result<Vec<(Uuid, Value)>, String> {
 
 fn eval_task_run(
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
+    node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
     functions: Option<&mut dyn NodeFunctions>,
@@ -366,16 +323,16 @@ fn eval_task_run(
     // A terminal run is latched: its function is not invoked again; the node
     // keeps emitting the terminal status (and the last out-parameters) until
     // its fragment is pruned.
-    if let Some(NodeRuntimeState::TaskRun(state)) = rt.node_states.get(&spec.id) {
+    if let Some(NodeRuntimeState::TaskRun(state)) = rt.node_states.get(node.id) {
         if let Some(latched) = state.latched.clone() {
             let mutated = state.outputs.clone().unwrap_or_else(|| vocab::record([]));
-            out_parameter_ports(&spec.params, outputs, &mutated)?;
+            out_parameter_ports(node.params, outputs, &mutated)?;
             keyed_output(outputs, "done", vocab::bool_(true))?;
             return single_output(outputs, latched);
         }
     }
 
-    let function = spec
+    let function = node
         .params
         .function
         .ok_or_else(|| "TaskRun node requires a function id".to_string())?;
@@ -388,13 +345,13 @@ fn eval_task_run(
     // the `args` input, the live bundle through which a goal update on the
     // run's update key reaches the call each tick. A live field wins over a
     // stated one for the same parameter.
-    let mut args = bundle_fields(spec.params.value.as_ref())?;
+    let mut args = bundle_fields(node.params.value.as_ref())?;
     for (id, value) in bundle_fields(inputs.get("args"))? {
         set_arg(&mut args, id, value);
     }
 
     let (status, out_parameters) =
-        functions.call_module_with_outputs(spec.params.module, function, &args)?;
+        functions.call_module_with_outputs(node.params.module, function, &args)?;
     let status = crate::task::coerce(status);
     // The out parameters, kept as one record keyed by parameter id (the
     // latched state) and emitted one per keyed `mutated` slot.
@@ -410,14 +367,14 @@ fn eval_task_run(
     let done = crate::task::is_terminal(&status);
     if done {
         rt.node_states.insert(
-            spec.id.clone(),
+            node.id.to_string(),
             NodeRuntimeState::TaskRun(TaskRunState {
                 latched: Some(status.clone()),
                 outputs: Some(mutated.clone()),
             }),
         );
     }
-    out_parameter_ports(&spec.params, outputs, &mutated)?;
+    out_parameter_ports(node.params, outputs, &mutated)?;
     keyed_output(outputs, "done", vocab::bool_(done))?;
     single_output(outputs, status)
 }
@@ -439,18 +396,18 @@ fn set_arg(args: &mut Vec<(Uuid, Value)>, id: Uuid, value: Value) {
 /// makes the same args a new run. The first evaluation only records them.
 fn eval_spawn(
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
+    node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     use super::graph_runtime::{NodeRuntimeState, SpawnRequest, SpawnState};
 
-    let function = spec
+    let function = node
         .params
         .function
         .ok_or_else(|| "Spawn node requires a function id".to_string())?;
-    let mut args = bundle_fields(spec.params.value.as_ref())?;
-    let keys = spec.params.record_keys.as_deref().unwrap_or(&[]);
+    let mut args = bundle_fields(node.params.value.as_ref())?;
+    let keys = node.params.record_keys.as_deref().unwrap_or(&[]);
     for (i, slot) in inputs.variadic("args").iter().enumerate() {
         let key = keys
             .get(i)
@@ -462,7 +419,7 @@ fn eval_spawn(
 
     let when = inputs.get("when").cloned();
 
-    let changed = match rt.node_states.get_mut(&spec.id) {
+    let changed = match rt.node_states.get_mut(node.id) {
         Some(NodeRuntimeState::Spawn(state)) => {
             let changed = state.args != args || state.when != when;
             if changed {
@@ -473,7 +430,7 @@ fn eval_spawn(
         }
         _ => {
             rt.node_states.insert(
-                spec.id.clone(),
+                node.id.to_string(),
                 NodeRuntimeState::Spawn(SpawnState {
                     args: args.clone(),
                     when,
@@ -484,7 +441,7 @@ fn eval_spawn(
     };
     if changed {
         rt.spawns.push(SpawnRequest {
-            module: spec.params.module,
+            module: node.params.module,
             function,
             args,
         });
@@ -498,7 +455,7 @@ fn eval_spawn(
 /// signature. A slot whose parameter the call did not set, or whose key is
 /// empty, reads 0.0 — the same fallback as `read_record`.
 fn out_parameter_ports(
-    params: &NodeParams,
+    params: &Params,
     outputs: &mut OutputSlots,
     mutated: &Value,
 ) -> Result<(), String> {
@@ -524,7 +481,7 @@ fn out_parameter_ports(
 }
 
 fn eval_external_function(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
     functions: Option<&mut dyn NodeFunctions>,
@@ -558,18 +515,18 @@ fn input_or_default<'a>(inputs: &'a InputSlots, key: &str) -> &'a Value {
     inputs.get(key).unwrap_or(&ZERO)
 }
 
-fn eval_constant(params: &NodeParams, outputs: &mut OutputSlots) -> Result<(), String> {
+fn eval_constant(params: &Params, outputs: &mut OutputSlots) -> Result<(), String> {
     single_output(outputs, params.value.clone().unwrap_or(vocab::float(0.0)))
 }
 
-fn eval_slider(params: &NodeParams, outputs: &mut OutputSlots) -> Result<(), String> {
+fn eval_slider(params: &Params, outputs: &mut OutputSlots) -> Result<(), String> {
     single_output(
         outputs,
         vocab::float(params.value.as_ref().map(as_float).unwrap_or(0.0)),
     )
 }
 
-fn eval_multi_slider(params: &NodeParams, outputs: &mut OutputSlots) -> Result<(), String> {
+fn eval_multi_slider(params: &Params, outputs: &mut OutputSlots) -> Result<(), String> {
     keyed_output(outputs, "x", vocab::float(params.x.unwrap_or(0.0)))?;
     keyed_output(outputs, "y", vocab::float(params.y.unwrap_or(0.0)))?;
     keyed_output(outputs, "z", vocab::float(params.z.unwrap_or(0.0)))
@@ -680,7 +637,7 @@ fn eval_min_max(
 }
 
 fn eval_round(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -856,8 +813,8 @@ impl SpringStep {
 fn eval_stateful(
     kind: &NodeType,
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
-    params: &NodeParams,
+    node: &Node,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -889,7 +846,7 @@ fn eval_stateful(
                 1.0
             };
 
-            let state = rt.spring_state_mut(&spec.id, &flat);
+            let state = rt.spring_state_mut(node.id, &flat);
             state.target = flat.data.clone();
 
             // No time passes at a zero dt, so the spring holds its position
@@ -935,7 +892,7 @@ fn eval_stateful(
             } else {
                 0.1
             };
-            let state = rt.damp_state_mut(&spec.id, &flat);
+            let state = rt.damp_state_mut(node.id, &flat);
             // A half-life of zero does not smooth, at any dt. Otherwise a
             // zero dt holds the value: no time passes for it to decay.
             if half_life <= 0.0 {
@@ -957,7 +914,7 @@ fn eval_stateful(
             };
             let max_rate = params.max_rate.unwrap_or(1.0);
             let max_rate = if max_rate.is_finite() { max_rate } else { 1.0 };
-            let state = rt.slew_state_mut(&spec.id, &flat);
+            let state = rt.slew_state_mut(node.id, &flat);
             // A max rate of zero does not limit, at any dt. Otherwise a zero
             // dt holds the value: no time passes for it to move.
             if max_rate <= 0.0 {
@@ -1131,7 +1088,7 @@ fn eval_centered_remap(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result
 }
 
 fn eval_piecewise_remap(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -1342,7 +1299,7 @@ fn eval_vec3_cross(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(),
     }
 }
 
-fn eval_vector_constant(params: &NodeParams, outputs: &mut OutputSlots) -> Result<(), String> {
+fn eval_vector_constant(params: &Params, outputs: &mut OutputSlots) -> Result<(), String> {
     if let Some(value) = &params.value {
         single_output(outputs, value.clone())
     } else {
@@ -1450,7 +1407,7 @@ fn eval_join(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), Strin
 }
 
 fn eval_split(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -1503,7 +1460,7 @@ fn eval_from_vector(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<()
 
 fn eval_noise(
     kind: &NodeType,
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -1965,7 +1922,7 @@ fn eval_blend_max(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), 
 }
 
 fn eval_case(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -2048,8 +2005,8 @@ fn eval_inverse_kinematics(inputs: &InputSlots, outputs: &mut OutputSlots) -> Re
 #[cfg(feature = "urdf_ik")]
 fn eval_urdf_fk(
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
-    params: &NodeParams,
+    node: &Node,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -2071,7 +2028,7 @@ fn eval_urdf_fk(
         root_link,
         tip_link,
     };
-    let state = rt.kinematics_state_mut(&spec.id, key)?;
+    let state = rt.kinematics_state_mut(node.id, key)?;
 
     let joints = fetch_joint_vector(
         joints_port,
@@ -2097,8 +2054,8 @@ fn eval_urdf_fk(
 #[cfg(feature = "urdf_ik")]
 fn eval_urdf_position(
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
-    params: &NodeParams,
+    node: &Node,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -2126,7 +2083,7 @@ fn eval_urdf_position(
         root_link,
         tip_link,
     };
-    let state = rt.kinematics_state_mut(&spec.id, key)?;
+    let state = rt.kinematics_state_mut(node.id, key)?;
     let dofs = state.dofs;
 
     let seed: Option<Vec<f32>> = inputs
@@ -2167,8 +2124,8 @@ fn eval_urdf_position(
 #[cfg(feature = "urdf_ik")]
 fn eval_urdf_pose(
     rt: &mut GraphRuntime,
-    spec: &NodeSpec,
-    params: &NodeParams,
+    node: &Node,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -2200,7 +2157,7 @@ fn eval_urdf_pose(
         root_link,
         tip_link,
     };
-    let state = rt.kinematics_state_mut(&spec.id, key)?;
+    let state = rt.kinematics_state_mut(node.id, key)?;
     let dofs = state.dofs;
 
     let seed: Option<Vec<f32>> = inputs
@@ -2247,7 +2204,7 @@ fn eval_output(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), Str
 }
 
 fn eval_build_record(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -2279,7 +2236,7 @@ fn record_from_map(map: &HashMap<String, Value>) -> Value {
 }
 
 fn eval_read_record(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -2329,7 +2286,7 @@ fn eval_merge_record(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(
 }
 
 fn eval_split_record(
-    params: &NodeParams,
+    params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -2372,136 +2329,4 @@ fn eval_math_record(
         .map(|(k, v)| (k, unary_numeric(v, |x| op(x, scalar))))
         .collect();
     single_output(outputs, vocab::record(result))
-}
-
-fn eval_input_node(
-    rt: &GraphRuntime,
-    spec: &NodeSpec,
-    outputs: &mut OutputSlots,
-) -> Result<(), String> {
-    let params = &spec.params;
-    let path = params
-        .path
-        .as_ref()
-        .ok_or_else(|| format!("Input node '{}' missing required 'path' parameter", spec.id))?;
-    let declared_shape = spec.output_shapes.get("out");
-    let staged = rt.get_input(path).cloned();
-
-    if let Some(target_shape) = declared_shape {
-        if let Some(staged_input) = staged {
-            let port = align_input_to_declared(
-                &spec.id,
-                path,
-                "staged input",
-                target_shape,
-                staged_input.declared.as_ref(),
-                staged_input.value,
-            )?;
-            return keyed_output(outputs, "out", port);
-        }
-
-        if let Some(default_value) = params.value.clone() {
-            let port = align_input_to_declared(
-                &spec.id,
-                path,
-                "default value",
-                target_shape,
-                None,
-                default_value,
-            )?;
-            return keyed_output(outputs, "out", port);
-        }
-
-        if is_numeric_like(&target_shape.id) {
-            return keyed_output(outputs, "out", null_of_shape_numeric(&target_shape.id));
-        }
-
-        return Err(format!(
-            "Input node '{}' missing staged value for '{}' and declared non-numeric shape {:?}",
-            spec.id, path, target_shape.id
-        ));
-    }
-
-    if let Some(StagedInput { value, .. }) = staged {
-        return keyed_output(outputs, "out", value);
-    }
-
-    if let Some(default_value) = params.value.clone() {
-        return keyed_output(outputs, "out", default_value);
-    }
-
-    Err(format!(
-        "Input node '{}' missing staged value for '{}' and no default provided",
-        spec.id, path
-    ))
-}
-
-fn align_input_to_declared(
-    node_id: &str,
-    path: &TypedPath,
-    source: &str,
-    declared: &Shape,
-    staged_shape: Option<&Shape>,
-    value: Value,
-) -> Result<Value, String> {
-    if let Some(shape) = staged_shape {
-        if shape.id != declared.id && !is_numeric_like(&declared.id) {
-            return Err(format!(
-                "Input node '{}' received {} for '{}' with incompatible shape {:?} (expected {:?})",
-                node_id, source, path, shape.id, declared.id
-            ));
-        }
-    }
-
-    if value_matches_shape(&declared.id, &value) {
-        return Ok(value);
-    }
-
-    if !is_numeric_like(&declared.id) {
-        return Err(format!(
-            "Input node '{}' cannot coerce {} for '{}' into declared shape {:?}",
-            node_id, source, path, declared.id
-        ));
-    }
-
-    if let Some(coerced) = coerce_numeric_to_shape(&declared.id, &value) {
-        return Ok(coerced);
-    }
-
-    Ok(null_of_shape_numeric(&declared.id))
-}
-
-/// Check each output a node declares a shape for against that shape.
-fn enforce_output_shapes_slots(
-    spec: &NodeSpec,
-    layout: &PortLayout,
-    outputs: &[Value],
-) -> Result<(), String> {
-    if spec.output_shapes.is_empty() {
-        return Ok(());
-    }
-
-    for (key, declared) in spec.output_shapes.iter() {
-        let slot = layout.slot(key).ok_or_else(|| {
-            format!(
-                "node '{}' missing declared output '{}' during evaluation",
-                spec.id, key
-            )
-        })?;
-        let port = outputs.get(slot).ok_or_else(|| {
-            format!(
-                "node '{}' missing declared output '{}' during evaluation",
-                spec.id, key
-            )
-        })?;
-
-        if !value_matches_shape(&declared.id, port) {
-            return Err(format!(
-                "node '{}' output '{}' does not match declared shape {:?}",
-                spec.id, key, declared.id
-            ));
-        }
-    }
-
-    Ok(())
 }

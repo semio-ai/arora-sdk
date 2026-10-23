@@ -1,8 +1,8 @@
 //! What a node's evaluation reads and writes besides its ports: the clock,
-//! the node's state, the inputs staged for it, and the runs it requests.
+//! the node's state, and the runs it requests.
 
 use crate::types::NodeId;
-use arora_shape::{Shape, TypedPath, Value};
+use arora_shape::Value;
 use hashbrown::{hash_map::Entry, HashMap};
 use uuid::Uuid;
 
@@ -139,17 +139,6 @@ pub struct SpawnRequest {
     pub args: Vec<(Uuid, Value)>,
 }
 
-/// Data staged by the host for consumption by [`NodeType::Input`](crate::types::NodeType::Input).
-#[derive(Debug, Clone)]
-pub struct StagedInput {
-    /// Incoming value for the staged epoch.
-    pub value: Value,
-    /// Optional caller-declared shape used by hosts that preserve explicit shape metadata.
-    pub declared: Option<Shape>,
-    /// Epoch at which this input becomes visible.
-    pub epoch: u64,
-}
-
 /// What a node's evaluation reads and writes besides its ports.
 #[derive(Debug, Default)]
 pub struct GraphRuntime {
@@ -162,55 +151,16 @@ pub struct GraphRuntime {
     pub spawns: Vec<SpawnRequest>,
     /// Per-node persistent state for smoothing, kinematics, and other stateful nodes.
     pub node_states: HashMap<NodeId, NodeRuntimeState>,
-    /// Host-staged inputs keyed by canonical typed path.
-    pub staged_inputs: HashMap<TypedPath, StagedInput>,
-    /// Current input epoch. Newly staged values target `input_epoch + 1`.
-    pub input_epoch: u64,
 }
 
 impl GraphRuntime {
-    /// Advance the staging epoch. Values staged for `epoch + 1` become visible for the
-    /// upcoming frame; older entries are dropped so stale data cannot leak through.
-    pub fn advance_epoch(&mut self) {
-        self.input_epoch = self.input_epoch.saturating_add(1);
-        let current = self.input_epoch;
-        self.staged_inputs
-            .retain(|_, staged| staged.epoch == current);
-    }
-
-    /// Stage an input value for the next evaluation epoch using a [`TypedPath`] key.
-    ///
-    /// A later call with the same path replaces the previously staged value for that future epoch.
-    pub fn set_input(
-        &mut self,
-        path: TypedPath,
-        value: Value,
-        declared: Option<Shape>,
-    ) -> Option<StagedInput> {
-        let staged = StagedInput {
-            value,
-            declared,
-            epoch: self.input_epoch.saturating_add(1),
-        };
-        self.staged_inputs.insert(path, staged)
-    }
-
-    /// Fetch a staged input for the current evaluation epoch, if present.
-    ///
-    /// Values staged for later epochs remain hidden until [`Self::advance_epoch`] promotes them.
-    pub fn get_input(&self, path: &TypedPath) -> Option<&StagedInput> {
-        self.staged_inputs
-            .get(path)
-            .filter(|staged| staged.epoch == self.input_epoch)
-    }
-
     /// Fetch the spring state for `node_id`, creating or reinitialising it from `flat` as needed.
     pub fn spring_state_mut<'a>(
         &'a mut self,
-        node_id: &NodeId,
+        node_id: &str,
         flat: &FlatValue,
     ) -> &'a mut SpringState {
-        match self.node_states.entry(node_id.clone()) {
+        match self.node_states.entry(node_id.to_string()) {
             Entry::Occupied(mut occupied) => {
                 {
                     let state = occupied.get_mut();
@@ -240,12 +190,8 @@ impl GraphRuntime {
     }
 
     /// Fetch the damp state for `node_id`, creating or reinitialising it from `flat` as needed.
-    pub fn damp_state_mut<'a>(
-        &'a mut self,
-        node_id: &NodeId,
-        flat: &FlatValue,
-    ) -> &'a mut DampState {
-        match self.node_states.entry(node_id.clone()) {
+    pub fn damp_state_mut<'a>(&'a mut self, node_id: &str, flat: &FlatValue) -> &'a mut DampState {
+        match self.node_states.entry(node_id.to_string()) {
             Entry::Occupied(mut occupied) => {
                 {
                     let state = occupied.get_mut();
@@ -275,12 +221,8 @@ impl GraphRuntime {
     }
 
     /// Fetch the slew state for `node_id`, creating or reinitialising it from `flat` as needed.
-    pub fn slew_state_mut<'a>(
-        &'a mut self,
-        node_id: &NodeId,
-        flat: &FlatValue,
-    ) -> &'a mut SlewState {
-        match self.node_states.entry(node_id.clone()) {
+    pub fn slew_state_mut<'a>(&'a mut self, node_id: &str, flat: &FlatValue) -> &'a mut SlewState {
+        match self.node_states.entry(node_id.to_string()) {
             Entry::Occupied(mut occupied) => {
                 {
                     let state = occupied.get_mut();
@@ -314,7 +256,7 @@ impl GraphRuntime {
     /// changes.
     pub fn kinematics_state_mut<'a>(
         &'a mut self,
-        node_id: &NodeId,
+        node_id: &str,
         key: IkKey<'_>,
     ) -> Result<&'a mut UrdfKinematicsState, String> {
         let build_state = || -> Result<UrdfKinematicsState, String> {
@@ -323,7 +265,7 @@ impl GraphRuntime {
             Ok(UrdfKinematicsState::new(key.hash, chain, joint_names))
         };
 
-        match self.node_states.entry(node_id.clone()) {
+        match self.node_states.entry(node_id.to_string()) {
             Entry::Occupied(occupied) => {
                 let state = occupied.into_mut();
                 match state {

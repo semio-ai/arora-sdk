@@ -203,7 +203,7 @@ impl TreeRuntime {
                 if matches!(node.kind, NodeType::UrdfIkPosition | NodeType::UrdfIkPose) {
                     return crate::eval::urdfik::prepared_state(
                         &self.module.chains,
-                        &node.params,
+                        &node.params.params(),
                         value.as_ref(),
                     )
                     .map(|state| {
@@ -513,12 +513,9 @@ impl TreeRuntime {
                 } else if let (Some(key_field), Some(value_field), Some(port)) =
                     (node.params.key_field, node.params.value_field, port)
                 {
-                    for op in crate::eval::eval_node::keyed_batch_writes(
-                        &port.value,
-                        key_field,
-                        value_field,
-                    )
-                    .map_err(|message| format!("node '{}': {message}", node.id))?
+                    for op in
+                        crate::eval::vizij::keyed_batch_writes(&port.value, key_field, value_field)
+                            .map_err(|message| format!("node '{}': {message}", node.id))?
                     {
                         keyed
                             .set
