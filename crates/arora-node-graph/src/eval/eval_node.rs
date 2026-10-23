@@ -18,8 +18,8 @@ use super::shape_helpers::{
 };
 #[cfg(feature = "urdf_ik")]
 use super::urdfik::{
-    apply_joint_positions, fetch_joint_vector, hash_urdf_config, quat_from_value, tip_pose,
-    vector_from_value, IkKey, IkRequest, IkTarget,
+    apply_joint_positions, describe, fetch_joint_vector, hash_urdf_config, quat_from_value,
+    tip_pose, vector_from_value, IkKey, IkRequest, IkTarget,
 };
 use super::value_layout::{align_flattened, flatten_numeric, FlatValue, PortValue};
 use super::variadic::fold_numeric_variadic;
@@ -1430,7 +1430,7 @@ fn eval_vec3_cross(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(),
         }
         (Some(a_flat), _) => single_output(outputs, a_flat.layout.fill_with(f32::NAN)),
         (_, Some(b_flat)) => single_output(outputs, b_flat.layout.fill_with(f32::NAN)),
-        _ => single_output(outputs, vocab::vec3([f32::NAN; 3])),
+        _ => single_output(outputs, arora_geometry::vec3([f32::NAN; 3])),
     }
 }
 
@@ -2136,13 +2136,13 @@ fn eval_inverse_kinematics(inputs: &InputSlots, outputs: &mut OutputSlots) -> Re
     let dist_sq = wx * wx + wy * wy;
 
     let value = if dist_sq > (l1 + l2) * (l1 + l2) || dist_sq < (l1 - l2) * (l1 - l2) {
-        vocab::vec3([f32::NAN; 3])
+        arora_geometry::vec3([f32::NAN; 3])
     } else {
         let cos_angle2 = (dist_sq - l1 * l1 - l2 * l2) / (2.0 * l1 * l2);
         let angle2 = cos_angle2.acos();
         let angle1 = wy.atan2(wx) - (l2 * angle2.sin()).atan2(l1 + l2 * angle2.cos());
         let angle3 = theta - angle1 - angle2;
-        vocab::vec3([angle1, angle2, angle3])
+        arora_geometry::vec3([angle1, angle2, angle3])
     };
 
     single_output(outputs, value)
@@ -2186,14 +2186,14 @@ fn eval_urdf_fk(
     apply_joint_positions(state, &joints)?;
 
     let (pos_arr, rot_arr) = tip_pose(state);
-    let transform_value = vocab::transform(vocab::Transform {
+    let transform_value = arora_geometry::transform(arora_geometry::Transform {
         translation: pos_arr,
         rotation: rot_arr,
         scale: [1.0, 1.0, 1.0],
     });
 
-    outputs.set_port("position", PortValue::new(vocab::vec3(pos_arr)))?;
-    outputs.set_port("rotation", PortValue::new(vocab::quat(rot_arr)))?;
+    outputs.set_port("position", PortValue::new(arora_geometry::vec3(pos_arr)))?;
+    outputs.set_port("rotation", PortValue::new(arora_geometry::quat(rot_arr)))?;
     outputs.set_port("transform", PortValue::new(transform_value))
 }
 
@@ -2207,10 +2207,10 @@ fn eval_urdf_position(
 ) -> Result<(), String> {
     let target_pos = {
         let port = input_or_default(inputs, "target_pos");
-        vocab::as_vec3(&port.value).ok_or_else(|| {
+        arora_geometry::as_vec3(&port.value).ok_or_else(|| {
             format!(
-                "UrdfIkPosition input 'target_pos' expects Vec3, received {:?}",
-                vocab::kind(&port.value)
+                "UrdfIkPosition input 'target_pos' expects a vec3, received {}",
+                describe(&port.value)
             )
         })?
     };
@@ -2277,10 +2277,10 @@ fn eval_urdf_pose(
 ) -> Result<(), String> {
     let target_pos = {
         let port = input_or_default(inputs, "target_pos");
-        vocab::as_vec3(&port.value).ok_or_else(|| {
+        arora_geometry::as_vec3(&port.value).ok_or_else(|| {
             format!(
-                "UrdfIkPose input 'target_pos' expects Vec3, received {:?}",
-                vocab::kind(&port.value)
+                "UrdfIkPose input 'target_pos' expects a vec3, received {}",
+                describe(&port.value)
             )
         })?
     };

@@ -1,11 +1,11 @@
 //! Lossy numeric coercions from any [`Value`] into scalar/vector PODs.
 //!
-//! These helpers give every value a numeric reading so mixed-kind blends and
-//! adapters always have something sensible to work with: scalars pass
-//! through, composites decode via the vocabulary accessors, records and
-//! sequences flatten (records in name order, for determinism over the
-//! unordered field map), enumerations read through to their payload, and
-//! anything without a numeric reading coerces to zero/empty.
+//! These helpers give every value a numeric reading so adapters always have
+//! something sensible to work with: scalars pass through, composites decode
+//! via the vocabulary accessors, records and sequences flatten (records in
+//! name order, for determinism over the unordered field map), enumerations
+//! read through to their payload, and anything without a numeric reading
+//! coerces to zero/empty.
 
 use crate::value::{
     as_array, as_enumeration, as_record, as_transform, as_vec2, as_vec3, as_vec4, kind, ShapeKind,
@@ -126,43 +126,6 @@ pub fn to_vector(v: &Value) -> Vec<f32> {
     }
 }
 
-/// Coerce a value into a `[f32; 3]`.
-///
-/// `vec3` passes through; `vec2` zero-extends; `vec4`/`quat` truncate;
-/// scalars/booleans broadcast; a transform yields its translation; anything
-/// else flattens via [`to_vector`] and takes the first three components
-/// (zero-padded).
-pub fn to_vec3(v: &Value) -> [f32; 3] {
-    match kind(v) {
-        ShapeKind::Vec3 => as_vec3(v).unwrap_or([0.0; 3]),
-        ShapeKind::Vec2 => {
-            let a = as_vec2(v).unwrap_or([0.0; 2]);
-            [a[0], a[1], 0.0]
-        }
-        ShapeKind::Vec4 => {
-            let a = as_vec4(v).unwrap_or([0.0; 4]);
-            [a[0], a[1], a[2]]
-        }
-        ShapeKind::Float | ShapeKind::Bool => {
-            let f = to_float(v);
-            [f, f, f]
-        }
-        ShapeKind::Transform => as_transform(v).map(|t| t.translation).unwrap_or([0.0; 3]),
-        ShapeKind::Enum => as_enumeration(v)
-            .map(|(_, payload)| to_vec3(payload))
-            .unwrap_or([0.0; 3]),
-        ShapeKind::Text => [0.0; 3],
-        _ => {
-            let flat = to_vector(v);
-            let mut out = [0.0f32; 3];
-            for (slot, x) in out.iter_mut().zip(flat) {
-                *slot = x;
-            }
-            out
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,16 +187,5 @@ mod tests {
             scale: [1.0; 3],
         });
         assert_eq!(to_vector(&t), vec![1.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn vec3_broadcasts_and_truncates() {
-        assert_eq!(to_vec3(&vec3([1.0, 2.0, 3.0])), [1.0, 2.0, 3.0]);
-        assert_eq!(to_vec3(&vec2([1.0, 2.0])), [1.0, 2.0, 0.0]);
-        assert_eq!(to_vec3(&vec4([1.0, 2.0, 3.0, 4.0])), [1.0, 2.0, 3.0]);
-        assert_eq!(to_vec3(&float(2.0)), [2.0, 2.0, 2.0]);
-        assert_eq!(to_vec3(&bool_(true)), [1.0, 1.0, 1.0]);
-        assert_eq!(to_vec3(&vector(vec![5.0])), [5.0, 0.0, 0.0]);
-        assert_eq!(to_vec3(&text("hi")), [0.0, 0.0, 0.0]);
     }
 }

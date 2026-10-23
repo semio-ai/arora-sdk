@@ -1,7 +1,6 @@
 //! URDF inverse kinematics helpers gated behind the `urdf_ik` feature.
 
 use arora_shape::value as vocab;
-use arora_shape::value::ShapeKind;
 use arora_shape::Value;
 
 use super::numeric;
@@ -298,35 +297,61 @@ pub fn solve_position(
     Ok(state.chain.joint_positions())
 }
 
+/// Read a joint's value as one number: a number, a boolean as `1` or `0`,
+/// the first item of a numeric vector, the one item of a sequence, an
+/// enumeration's payload, or the first field of a structure of numbers.
 fn scalar_from_value(value: &Value) -> Result<f32, String> {
-    let mismatch = || format!("expected numeric scalar, received {:?}", vocab::kind(value));
-    match vocab::kind(value) {
-        ShapeKind::Float => vocab::as_float(value).ok_or_else(mismatch),
-        ShapeKind::Bool => Ok(if vocab::as_bool(value).unwrap_or(false) {
-            1.0
-        } else {
-            0.0
-        }),
-        ShapeKind::Vec2 => Ok(vocab::as_vec2(value).ok_or_else(mismatch)?[0]),
-        ShapeKind::Vec3 => Ok(vocab::as_vec3(value).ok_or_else(mismatch)?[0]),
-        ShapeKind::Vec4 => Ok(vocab::as_vec4(value).ok_or_else(mismatch)?[0]),
-        ShapeKind::Quat => Ok(vocab::as_quat(value).ok_or_else(mismatch)?[0]),
-        ShapeKind::Vector => vocab::as_vector(value)
-            .and_then(|xs| xs.first().copied())
+    let mismatch = || format!("expected numeric scalar, received {}", describe(value));
+    match value {
+        Value::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        Value::ArrayF32(xs) => xs
+            .first()
+            .copied()
             .ok_or_else(|| "vector is empty".to_string()),
-        ShapeKind::Array => {
-            let items = vocab::as_array(value).ok_or_else(mismatch)?;
-            if items.len() == 1 {
-                scalar_from_value(&items[0])
-            } else {
-                Err(mismatch())
-            }
+        Value::ArrayValue(items) if items.len() == 1 => scalar_from_value(&items[0]),
+        Value::Enumeration(e) => scalar_from_value(&e.value),
+        Value::Structure(s)
+            if !s.fields.is_empty() && s.fields.iter().all(|f| is_number(&f.value)) =>
+        {
+            Ok(numeric::as_float(value))
         }
-        ShapeKind::Enum => {
-            let (_, payload) = vocab::as_enumeration(value).ok_or_else(mismatch)?;
-            scalar_from_value(payload)
-        }
+        _ if is_number(value) => Ok(numeric::as_float(value)),
         _ => Err(mismatch()),
+    }
+}
+
+fn is_number(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::F32(_)
+            | Value::F64(_)
+            | Value::U8(_)
+            | Value::U16(_)
+            | Value::U32(_)
+            | Value::U64(_)
+            | Value::I8(_)
+            | Value::I16(_)
+            | Value::I32(_)
+            | Value::I64(_)
+    )
+}
+
+/// What `value` is, for an error message: its geometry type, or its form.
+pub(crate) fn describe(value: &Value) -> &'static str {
+    if let Some(kind) = arora_geometry::kind(value) {
+        return kind.name();
+    }
+    match value {
+        Value::Unit => "unit",
+        Value::Boolean(_) => "boolean",
+        Value::String(_) => "text",
+        Value::ArrayF32(_) => "vector",
+        Value::ArrayValue(_) => "sequence",
+        Value::KeyValue(_) => "record",
+        Value::Structure(_) => "structure",
+        Value::Enumeration(_) => "enumeration",
+        v if is_number(v) => "number",
+        _ => "value",
     }
 }
 
@@ -363,13 +388,15 @@ pub fn fetch_joint_vector(
         }
     }
 
-    match vocab::kind(value) {
-        ShapeKind::Record => {
-            let entries = vocab::as_record(value).unwrap_or_default();
-            let by_name: HashMap<&str, &Value> = entries.into_iter().collect();
+    match value {
+        Value::KeyValue(record) => {
             let mut result = Vec::with_capacity(expected);
             for joint in joint_names {
-                if let Some(entry) = by_name.get(joint.as_str()) {
+                let entry = record
+                    .fields
+                    .get(joint.as_str())
+                    .and_then(|field| field.value.as_deref());
+                if let Some(entry) = entry {
                     result.push(scalar_from_value(entry)?);
                 } else if let Some(default_value) = default_map.get(joint.as_str()) {
                     result.push(*default_value);
@@ -379,8 +406,7 @@ pub fn fetch_joint_vector(
             }
             Ok(result)
         }
-        ShapeKind::Array => {
-            let items = vocab::as_array(value).unwrap_or_default();
+        Value::ArrayValue(items) => {
             let mut sequence = Vec::with_capacity(items.len());
             for item in items {
                 sequence.push(scalar_from_value(item)?);
@@ -475,34 +501,34 @@ pub fn solve_pose(
 
 /// Extract the numeric components from a supported value type.
 pub fn vector_from_value(value: &Value, label: &str) -> Result<Vec<f32>, String> {
-    if let Some(xs) = vocab::as_vector(value) {
-        return Ok(xs.to_vec());
+    if let Value::ArrayF32(xs) = value {
+        return Ok(xs.clone());
     }
-    vocab::as_vec2(value)
+    arora_geometry::as_vec2(value)
         .map(|a| a.to_vec())
-        .or_else(|| vocab::as_vec3(value).map(|a| a.to_vec()))
-        .or_else(|| vocab::as_vec4(value).map(|a| a.to_vec()))
-        .or_else(|| vocab::as_quat(value).map(|a| a.to_vec()))
+        .or_else(|| arora_geometry::as_vec3(value).map(|a| a.to_vec()))
+        .or_else(|| arora_geometry::as_vec4(value).map(|a| a.to_vec()))
+        .or_else(|| arora_geometry::as_quat(value).map(|a| a.to_vec()))
         .ok_or_else(|| {
             format!(
-                "{label} expects a numeric vector, received {:?}",
-                vocab::kind(value)
+                "{label} expects a numeric vector, received {}",
+                describe(value)
             )
         })
 }
 
 /// Interpet a [`Value`] as a quaternion `[x, y, z, w]`.
 pub fn quat_from_value(value: &Value, label: &str) -> Result<[f32; 4], String> {
-    vocab::as_quat(value)
-        .or_else(|| vocab::as_vec4(value))
-        .or_else(|| match vocab::as_vector(value) {
-            Some(xs) if xs.len() == 4 => Some([xs[0], xs[1], xs[2], xs[3]]),
+    arora_geometry::as_quat(value)
+        .or_else(|| arora_geometry::as_vec4(value))
+        .or_else(|| match value {
+            Value::ArrayF32(xs) if xs.len() == 4 => Some([xs[0], xs[1], xs[2], xs[3]]),
             _ => None,
         })
         .ok_or_else(|| {
             format!(
-                "{label} expects a quaternion (x, y, z, w), received {:?}",
-                vocab::kind(value)
+                "{label} expects a quaternion (x, y, z, w), received {}",
+                describe(value)
             )
         })
 }
@@ -641,4 +667,66 @@ fn decode_solve(value: &Value) -> Option<(IkRequest, Vec<f32>)> {
         },
         floats(parts.get(5)?)?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arora_shape::value::{Structure, StructureField};
+
+    #[test]
+    fn a_joint_value_reads_as_one_number() {
+        let structure = |fields: Vec<Value>| {
+            Value::Structure(Structure {
+                id: uuid::Uuid::from_u128(0xF0),
+                fields: fields
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, value)| StructureField {
+                        id: uuid::Uuid::from_u128(i as u128),
+                        value: Box::new(value),
+                    })
+                    .collect(),
+            })
+        };
+        assert_eq!(scalar_from_value(&Value::F64(0.5)), Ok(0.5));
+        assert_eq!(scalar_from_value(&Value::I32(-2)), Ok(-2.0));
+        assert_eq!(scalar_from_value(&Value::Boolean(true)), Ok(1.0));
+        assert_eq!(scalar_from_value(&Value::ArrayF32(vec![3.0, 4.0])), Ok(3.0));
+        assert_eq!(
+            scalar_from_value(&Value::ArrayValue(vec![Value::F32(5.0)])),
+            Ok(5.0)
+        );
+        assert_eq!(
+            scalar_from_value(&vocab::enumeration("on", vocab::float(6.0))),
+            Ok(6.0)
+        );
+        assert_eq!(
+            scalar_from_value(&arora_geometry::vec3([7.0, 8.0, 9.0])),
+            Ok(7.0)
+        );
+        assert_eq!(
+            scalar_from_value(&structure(vec![Value::F64(1.5), Value::F32(2.0)])),
+            Ok(1.5)
+        );
+
+        assert_eq!(
+            scalar_from_value(&vocab::text("x")),
+            Err("expected numeric scalar, received text".to_string())
+        );
+        assert_eq!(
+            scalar_from_value(&arora_geometry::transform(
+                arora_geometry::Transform::IDENTITY
+            )),
+            Err("expected numeric scalar, received transform".to_string())
+        );
+        assert_eq!(
+            scalar_from_value(&structure(vec![Value::F32(1.0), vocab::text("x")])),
+            Err("expected numeric scalar, received structure".to_string())
+        );
+        assert_eq!(
+            scalar_from_value(&Value::ArrayF32(vec![])),
+            Err("vector is empty".to_string())
+        );
+    }
 }

@@ -270,23 +270,21 @@ pub fn project_by_selector(
 /// The value field `field` of `value` selects: a record's field, a
 /// transform's part, an enumeration's payload when `field` names its variant.
 fn select_field<'a>(value: &'a Value, field: &str) -> Result<Cow<'a, Value>, String> {
-    match vocab::kind(value) {
-        ShapeKind::Record => vocab::record_field(value, field)
+    match value {
+        Value::KeyValue(_) => vocab::record_field(value, field)
             .map(Cow::Borrowed)
             .ok_or_else(|| format!("selector field '{}' missing in record", field)),
-        ShapeKind::Transform => vocab::as_transform(value)
-            .and_then(|t| transform_field_value(field, &t))
-            .map(Cow::Owned)
+        Value::Structure(s) if s.id == arora_geometry::TRANSFORM_TYPE => transform_field_id(field)
+            .and_then(|id| s.fields.iter().find(|f| f.id == id))
+            .map(|f| Cow::Borrowed(f.value.as_ref()))
             .ok_or_else(|| format!("selector field '{}' invalid for transform", field)),
-        ShapeKind::Enum => {
-            let (variant, payload) = vocab::as_enumeration(value)
-                .ok_or_else(|| format!("selector field '{}' invalid", field))?;
-            if vocab::variant_id(field) == variant || variant.to_string() == *field {
-                Ok(Cow::Borrowed(payload))
+        Value::Enumeration(e) => {
+            if vocab::variant_id(field) == e.variant_id || e.variant_id.to_string() == *field {
+                Ok(Cow::Borrowed(e.value.as_ref()))
             } else {
                 Err(format!(
                     "selector field '{}' does not match enum variant '{}'",
-                    field, variant
+                    field, e.variant_id
                 ))
             }
         }
@@ -315,37 +313,29 @@ fn field_shape<'a>(shape: &'a ShapeId, field: &str) -> Option<Cow<'a, ShapeId>> 
     }
 }
 
-/// The value index `idx` of `value` selects: a component of a numeric
-/// value, an item of an array.
+/// The value index `idx` of `value` selects: an element of a numeric
+/// vector, an item of a sequence, a structure's field in declaration order.
 fn select_index(value: &Value, idx: usize) -> Result<Cow<'_, Value>, String> {
-    let owned = |component: Option<Value>, what: &str| {
-        component
-            .map(Cow::Owned)
-            .ok_or_else(|| format!("selector index {} out of bounds for {}", idx, what))
-    };
-    match vocab::kind(value) {
-        ShapeKind::Vector => {
-            let items = vocab::as_vector(value).unwrap_or_default();
-            owned(
-                items.get(idx).copied().map(vocab::float),
-                &format!("vector of len {}", items.len()),
-            )
-        }
-        ShapeKind::Array => {
-            let items = vocab::as_array(value).unwrap_or_default();
-            items.get(idx).map(Cow::Borrowed).ok_or_else(|| {
-                format!(
-                    "selector index {} out of bounds for array of len {}",
-                    idx,
-                    items.len()
-                )
-            })
-        }
-        ShapeKind::Vec2 => owned(component(vocab::as_vec2(value), idx), "vec2"),
-        ShapeKind::Vec3 => owned(component(vocab::as_vec3(value), idx), "vec3"),
-        ShapeKind::Vec4 => owned(component(vocab::as_vec4(value), idx), "vec4"),
-        ShapeKind::Quat => owned(component(vocab::as_quat(value), idx), "quat"),
-        ShapeKind::ColorRgba => owned(component(vocab::as_color_rgba(value), idx), "color"),
+    let out_of_bounds = |what: String| format!("selector index {} out of bounds for {}", idx, what);
+    match value {
+        Value::ArrayF32(items) => items
+            .get(idx)
+            .map(|x| Cow::Owned(vocab::float(*x)))
+            .ok_or_else(|| out_of_bounds(format!("vector of len {}", items.len()))),
+        Value::ArrayValue(items) => items
+            .get(idx)
+            .map(Cow::Borrowed)
+            .ok_or_else(|| out_of_bounds(format!("array of len {}", items.len()))),
+        Value::Structure(s) => s
+            .fields
+            .get(idx)
+            .map(|f| Cow::Borrowed(f.value.as_ref()))
+            .ok_or_else(|| {
+                out_of_bounds(match arora_geometry::kind(value) {
+                    Some(kind) => kind.name().to_string(),
+                    None => format!("a structure of {} fields", s.fields.len()),
+                })
+            }),
         _ => Err(format!(
             "selector index {} unsupported for value {:?}",
             idx,
@@ -368,10 +358,6 @@ fn index_shape(shape: &ShapeId, idx: usize) -> Option<Cow<'_, ShapeId>> {
         ShapeId::Tuple(entries) => entries.get(idx).map(Cow::Borrowed),
         _ => None,
     }
-}
-
-fn component<const N: usize>(arr: Option<[f32; N]>, idx: usize) -> Option<Value> {
-    arr.and_then(|a| a.get(idx).copied()).map(vocab::float)
 }
 
 /// Attempt to coerce a numeric value into a declared numeric-like shape.
@@ -460,11 +446,11 @@ fn take_components<const N: usize>(scalars: &[f32], offset: &mut usize) -> Optio
     Some(arr)
 }
 
-fn transform_field_value(field: &str, t: &vocab::Transform) -> Option<Value> {
+fn transform_field_id(field: &str) -> Option<uuid::Uuid> {
     match field {
-        "translation" | "position" => Some(vocab::vec3(t.translation)),
-        "rotation" => Some(vocab::quat(t.rotation)),
-        "scale" => Some(vocab::vec3(t.scale)),
+        "translation" | "position" => Some(arora_geometry::TRANSFORM_TRANSLATION),
+        "rotation" => Some(arora_geometry::TRANSFORM_ROTATION),
+        "scale" => Some(arora_geometry::TRANSFORM_SCALE),
         _ => None,
     }
 }
@@ -570,5 +556,65 @@ mod tests {
             error(&[field("e"), field("off")]).starts_with("selector field 'off' does not match")
         );
         assert!(error(&[field("v"), field("x")]).starts_with("selector field 'x' unsupported"));
+    }
+
+    /// An index selects a structure's field in declaration order, whatever
+    /// the structure's type, and a transform's parts select by name.
+    #[test]
+    fn an_index_selects_a_structure_field_and_a_name_a_transform_part() {
+        let foreign = Value::Structure(arora_shape::value::Structure {
+            id: uuid::Uuid::from_u128(0xF0),
+            fields: vec![
+                arora_shape::value::StructureField {
+                    id: uuid::Uuid::from_u128(0xF1),
+                    value: Box::new(Value::F64(1.5)),
+                },
+                arora_shape::value::StructureField {
+                    id: uuid::Uuid::from_u128(0xF2),
+                    value: Box::new(vocab::text("x")),
+                },
+            ],
+        });
+        let select = |value: &Value, selector: &[SelectorSegment]| {
+            project_by_selector(value, None, selector).map(|(value, _)| value)
+        };
+        assert_eq!(
+            select(&foreign, &[SelectorSegment::Index(0)]),
+            Ok(Value::F64(1.5))
+        );
+        assert_eq!(
+            select(&foreign, &[SelectorSegment::Index(1)]),
+            Ok(vocab::text("x"))
+        );
+        assert_eq!(
+            select(&foreign, &[SelectorSegment::Index(2)]),
+            Err("selector index 2 out of bounds for a structure of 2 fields".to_string())
+        );
+        assert_eq!(
+            select(&vocab::vec3([1.0, 2.0, 3.0]), &[SelectorSegment::Index(2)]),
+            Ok(vocab::float(3.0))
+        );
+
+        let transform = vocab::transform(vocab::Transform {
+            translation: [1.0, 2.0, 3.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: [4.0; 3],
+        });
+        assert_eq!(
+            select(&transform, &[field("position")]),
+            Ok(vocab::vec3([1.0, 2.0, 3.0]))
+        );
+        assert_eq!(
+            select(&transform, &[field("rotation"), SelectorSegment::Index(3)]),
+            Ok(vocab::float(1.0))
+        );
+        assert_eq!(
+            select(&transform, &[field("scale")]),
+            Ok(vocab::vec3([4.0; 3]))
+        );
+        assert_eq!(
+            select(&transform, &[field("skew")]),
+            Err("selector field 'skew' invalid for transform".to_string())
+        );
     }
 }

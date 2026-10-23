@@ -437,6 +437,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-geometry"
+version = "1.0.0"
+dependencies = [
+ "arora-types",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "arora-hal"
 version = "4.3.0"
 dependencies = [
@@ -679,6 +688,7 @@ dependencies = [
  "anyhow",
  "arora-behavior",
  "arora-behavior-tree",
+ "arora-geometry",
  "arora-shape",
  "arora-simple-data-store",
  "arora-types",
@@ -731,6 +741,7 @@ dependencies = [
 name = "arora-shape"
 version = "1.0.0"
 dependencies = [
+ "arora-geometry",
  "arora-types",
  "hashbrown 0.17.1",
  "serde",
