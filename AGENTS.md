@@ -287,8 +287,7 @@ Quick reference:
 | `arora-animation` | Keyframe clips, exact evaluation, players on the device clock |
 | `arora-animation-module` | The module `@arora/animation` (`modules/animation`): a wasm guest in a module directory with its records, or host-linked |
 | `arora-geometry` | Geometry types over `Value` (vec2–4, quat, transform) and the blending of values |
-| `arora-shape` | Shapes, typed paths and Vizij's value vocabulary over `Value` (the geometry types, color, records, enumerations); coercion, write batches, graph-spec JSON forms |
-| `arora-dataflow-nodes` | Dataflow nodes: the node vocabulary as the functions of `@arora/dataflow`, `@arora/geometry` and `@arora/kinematics`, the importer from a Vizij graph to a behavior tree's detached nodes, and `TreeRuntime`, which evaluates a graph on the tree |
+| `arora-dataflow-nodes` | Dataflow nodes: the node vocabulary as the functions of `@arora/dataflow`, `@arora/geometry` and `@arora/kinematics`, computing on `Value`, for a loader to put on a behavior tree (Vizij's graph format is vizij-rs's `vizij-graph-core`) |
 
 ## Tips for AI Agents
 

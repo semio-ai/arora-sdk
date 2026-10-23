@@ -206,19 +206,18 @@ mod tests {
         assert_eq!(payload, &float(0.5));
     }
 
-    /// The ids are the ones Vizij's vocabulary declares for the same
-    /// records and enumerations, so a value built by either reads in both.
+    /// The ids are the ones values were first stored under, in the
+    /// namespace of the geometry types, so a stored record or enumeration
+    /// and a reader that hard-codes them keep reading them.
     #[test]
-    fn the_ids_are_vizij_s() {
-        assert_eq!(RECORD_TYPE, arora_shape::value::RECORD_TYPE);
-        assert_eq!(ENUM_TYPE, arora_shape::value::ENUM_TYPE);
+    fn the_ids_are_the_stored_ones() {
         assert_eq!(
-            record([("x", float(1.0))]),
-            arora_shape::value::record([("x", float(1.0))])
+            RECORD_TYPE,
+            Uuid::from_u128(0x7669_7a69_6a00_0000_0000_0000_0000_0050)
         );
         assert_eq!(
-            enumeration("on", float(1.0)),
-            arora_shape::value::enumeration("on", float(1.0))
+            ENUM_TYPE,
+            Uuid::from_u128(0x7669_7a69_6a00_0000_0000_0000_0000_0040)
         );
     }
 }

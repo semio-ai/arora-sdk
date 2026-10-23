@@ -26,8 +26,8 @@ use uuid::Uuid;
 /// each hold four numbers, and do not combine.
 ///
 /// Sequences flatten to a single `Array` layout: the wire value is one
-/// sequence kind (`ArrayValue`), so any declared array/list/tuple distinction
-/// lives in the path's [`Shape`], not here.
+/// sequence kind (`ArrayValue`), so an array, a list and a tuple flatten
+/// alike.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValueLayout {
     /// A number on its own, in a record or in a sequence, rebuilt as `F32`,

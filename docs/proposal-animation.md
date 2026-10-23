@@ -143,8 +143,8 @@ consumer that keyed a typed input by it is not broken. Every other number is
 
 Composite values (vectors, quaternions, colours, transforms) are not part
 of format 2.0: Studio splits a composite into one number track per axis. A
-1.x clip carrying one is refused. Composites join when the value vocabulary
-moves into arora-sdk as `arora-shape`.
+1.x clip carrying one is refused. Composites join through `arora-geometry`,
+which holds the geometry types and the blending of values.
 
 ### 3.3 The curve
 
@@ -474,5 +474,5 @@ it depends on, so it needs no package.
 
 - vizij-rs plays faces through `arora-animation-module` and drops its own
   copy, on vizij's schedule.
-- Composite values, once `arora-shape` moves into arora-sdk.
+- Composite values, through `arora-geometry`'s types and blending.
 - animation-player is archived, its history now here.

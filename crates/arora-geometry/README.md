@@ -56,5 +56,5 @@ cargo test -p arora-geometry
 
 ## Related Packages
 
-- [`arora-dataflow-nodes`](../arora-dataflow-nodes/README.md): its geometry and kinematics nodes, and its edge selection, use these types.
-- [`arora-shape`](../arora-shape/README.md): Vizij's vocabulary, which re-exports these types and adds colour, records and enumerations.
+- [`arora-dataflow-nodes`](../arora-dataflow-nodes/README.md): its geometry and kinematics nodes, and its selectors, use these types.
+- [`vizij-api-core`](https://github.com/vizij-ai/vizij-rs/tree/main/crates/api/vizij-api-core): Vizij's value vocabulary, which re-exports these types and adds colour, shapes and typed paths.
