@@ -45,13 +45,13 @@ use arora_types::record::{FrozenReference, Version};
 use arora_types::value::{Structure, StructureField};
 use uuid::Uuid;
 
-use crate::eval::graph_runtime::{
+use crate::eval::context::{
     DampState, NodeRuntimeState, SlewState, SpawnRequest, SpawnState, SpringState, TaskRunState,
 };
 use crate::eval::plan::{input_layout, layout_of, signatures, PortLayout, VariadicRange};
 use crate::eval::value_layout::flatten_numeric;
 use crate::eval::vizij;
-use crate::eval::{eval_node, GraphRuntime, NodeFunctions};
+use crate::eval::{eval_node, Context, NodeFunctions};
 use crate::params::Params;
 use crate::types::{NodeParams, NodeSpec, NodeType, Selector, SelectorSegment};
 
@@ -1191,7 +1191,7 @@ pub struct NodeGraphModule {
     /// graph.
     sites: HashMap<String, Box<Site>>,
     /// The runtime a call evaluates its node in, kept between calls.
-    scratch: GraphRuntime,
+    scratch: Context,
     /// The buffer a call collects its inputs in, kept between calls.
     inputs: Vec<(usize, Value)>,
 }
@@ -1425,7 +1425,7 @@ impl NodeGraphModule {
         let rt = &mut self.scratch;
         rt.t = t;
         rt.dt = dt;
-        rt.node_states.clear();
+        rt.state = None;
         rt.spawns.clear();
         let node = eval_node::Node {
             id: &site.id,
@@ -1440,13 +1440,12 @@ impl NodeGraphModule {
             if let Some(prepared) =
                 crate::eval::urdfik::prepared_state(&self.chains, node.params, state.as_ref())
             {
-                rt.node_states
-                    .insert(site.id.clone(), NodeRuntimeState::UrdfKinematics(prepared));
+                rt.state = Some(NodeRuntimeState::UrdfKinematics(prepared));
             }
             state = None;
         }
         if let Some(state) = state.and_then(|state| decode_state(&kind, state)) {
-            rt.node_states.insert(site.id.clone(), state);
+            rt.state = Some(state);
         }
         let output_layout = site
             .output_layout
@@ -1478,7 +1477,7 @@ impl NodeGraphModule {
         site.out = out;
         self.spawns.append(&mut rt.spawns);
         #[cfg(feature = "urdf_ik")]
-        if let Some(NodeRuntimeState::UrdfKinematics(state)) = rt.node_states.get(&site.id) {
+        if let Some(NodeRuntimeState::UrdfKinematics(state)) = &rt.state {
             crate::eval::urdfik::keep_chain(&mut self.chains, state);
         }
 
@@ -1499,8 +1498,8 @@ impl NodeGraphModule {
             })
         };
         let mutated = if is_stateful(&kind) {
-            rt.node_states
-                .remove(&site.id)
+            rt.state
+                .take()
                 .map(|state| {
                     vec![StructureField {
                         id: state_param(),

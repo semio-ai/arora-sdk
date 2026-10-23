@@ -1,6 +1,6 @@
 # Evaluation Module Guide
 
-This directory contains the modules that implement the `arora-node-graph` evaluation pipeline. The goal is to keep the public entry points (`GraphRuntime`, `evaluate_all`) concise while domain-specific logic lives in focused submodules.
+This directory contains the modules that implement the `arora-node-graph` evaluation pipeline. The goal is to keep the public entry points (`Context`, `evaluate_all`) concise while domain-specific logic lives in focused submodules.
 
 ---
 
@@ -8,7 +8,7 @@ This directory contains the modules that implement the `arora-node-graph` evalua
 
 | File | Responsibility |
 |------|----------------|
-| `mod.rs` | Re-exports the key types (`GraphRuntime`, `StagedInput`, `evaluate_all`) and wires submodules together. |
+| `mod.rs` | Re-exports the key types (`Context`, `StagedInput`, `evaluate_all`) and wires submodules together. |
 | `graph_runtime.rs` | Maintains per-node state, staged inputs, output caches, and frame timing (`t`/`dt`). |
 | `value_layout.rs` | Flattens structured `Value` instances into contiguous numeric buffers, supports reconstruction, and handles scalar broadcasting. |
 | `shape_helpers.rs` | Enforces declared output shapes and performs numeric coercions/null-of-shape fills. |
@@ -22,7 +22,7 @@ This directory contains the modules that implement the `arora-node-graph` evalua
 
 ## Evaluation Flow
 
-1. **Staging** – Hosts call `GraphRuntime::advance_epoch` and `GraphRuntime::set_input` to queue inputs for the upcoming frame.
+1. **Staging** – Hosts call `Context::advance_epoch` and `Context::set_input` to queue inputs for the upcoming frame.
 2. **Topology** – `evaluate_all` computes a topological ordering, clears cached outputs, and retains node state for nodes still present in the spec.
 3. **Per-node evaluation** – For each node ID, `eval_node.rs`:
    - Reads inputs via `graph_runtime.rs` staging helpers.
@@ -30,7 +30,7 @@ This directory contains the modules that implement the `arora-node-graph` evalua
    - Leverages `numeric.rs` / `variadic.rs` for math-heavy nodes.
    - Applies selectors and enforces output shapes through `shape_helpers.rs`.
    - Records `WriteOp`s for sink nodes (`Output`).
-4. **Result aggregation** – Outputs and write batches are returned to the caller; persistent state remains in `GraphRuntime`.
+4. **Result aggregation** – Outputs and write batches are returned to the caller; persistent state remains in `Context`.
 
 ---
 

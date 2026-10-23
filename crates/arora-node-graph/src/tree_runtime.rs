@@ -187,9 +187,7 @@ impl TreeRuntime {
     /// The runtime state of every stateful node of the graph, decoded, by
     /// node id.
     #[cfg(test)]
-    pub(crate) fn node_states(
-        &self,
-    ) -> HashMap<String, crate::eval::graph_runtime::NodeRuntimeState> {
+    pub(crate) fn node_states(&self) -> HashMap<String, crate::eval::context::NodeRuntimeState> {
         let Some(loaded) = &self.loaded else {
             return HashMap::new();
         };
@@ -209,7 +207,7 @@ impl TreeRuntime {
                     .map(|state| {
                         (
                             node.id.clone(),
-                            crate::eval::graph_runtime::NodeRuntimeState::UrdfKinematics(state),
+                            crate::eval::context::NodeRuntimeState::UrdfKinematics(state),
                         )
                     });
                 }

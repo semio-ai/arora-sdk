@@ -3,9 +3,8 @@
 //!
 //! - [`mod@eval_node`] dispatches a node to the code of its
 //!   [`NodeType`](crate::types::NodeType).
-//! - `graph_runtime` holds what a node's evaluation reads and writes besides
-//!   its ports: the clock, its state, the inputs staged for it and the writes
-//!   and runs it makes.
+//! - `context` holds what a node's evaluation reads and writes besides its
+//!   ports: the clock, its state and the runs it requests.
 //! - `plan` lays out each node's ports.
 //! - `value_layout` flattens structured values for numeric operators.
 //! - `shape_helpers` validates declared output shapes and applies selectors.
@@ -14,8 +13,8 @@
 //! - `vizij` holds what belongs to Vizij's graph format: the `input` node,
 //!   declared output shapes and a keyed batch's writes.
 
+pub(crate) mod context;
 pub mod eval_node;
-pub(crate) mod graph_runtime;
 mod node_function;
 mod noise;
 mod numeric;
@@ -27,6 +26,6 @@ pub(crate) mod value_layout;
 pub(crate) mod variadic;
 pub(crate) mod vizij;
 
-pub use graph_runtime::{GraphRuntime, SpawnRequest};
+pub use context::{Context, SpawnRequest};
 pub use node_function::{NodeFunction, NodeFunctionRegistry, NodeFunctions};
 pub use value_layout::PortValue;

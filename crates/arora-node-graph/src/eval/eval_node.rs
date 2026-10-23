@@ -1,7 +1,7 @@
 //! What each node kind computes: the per-node code the module's functions
 //! run, over a node's inputs, parameters, clock and state.
 
-use crate::eval::graph_runtime::GraphRuntime;
+use crate::eval::context::Context;
 use crate::eval::node_function::NodeFunctions;
 use crate::eval::plan::PortLayout;
 use crate::eval::variadic::collect_operand_ports;
@@ -176,7 +176,7 @@ pub struct Node<'a> {
 /// Evaluate a single node, optionally threading a [`NodeFunctions`] host through to
 /// `ExternalFunction` nodes, which error without one.
 pub fn eval_node_inner(
-    rt: &mut GraphRuntime,
+    rt: &mut Context,
     node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
@@ -186,7 +186,7 @@ pub fn eval_node_inner(
 }
 
 fn evaluate_kind_inner(
-    rt: &mut GraphRuntime,
+    rt: &mut Context,
     node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
@@ -215,7 +215,7 @@ fn evaluate_kind_inner(
         NodeType::Time => eval_time(rt, outputs),
         NodeType::Oscillator => eval_oscillator(rt, inputs, outputs),
         node_type @ (NodeType::Spring | NodeType::Damp | NodeType::Slew) => {
-            eval_stateful(node_type, rt, node, params, inputs, outputs)
+            eval_stateful(node_type, rt, params, inputs, outputs)
         }
         node_type @ (NodeType::And | NodeType::Or | NodeType::Not | NodeType::Xor) => {
             eval_logic(node_type, inputs, outputs)
@@ -263,17 +263,17 @@ fn evaluate_kind_inner(
         }
         NodeType::InverseKinematics => eval_inverse_kinematics(inputs, outputs),
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfIkPosition => eval_urdf_position(rt, node, params, inputs, outputs),
+        NodeType::UrdfIkPosition => eval_urdf_position(rt, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
         NodeType::UrdfIkPosition => {
             Err("UrdfIkPosition node requires the 'urdf_ik' feature".to_string())
         }
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfIkPose => eval_urdf_pose(rt, node, params, inputs, outputs),
+        NodeType::UrdfIkPose => eval_urdf_pose(rt, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
         NodeType::UrdfIkPose => Err("UrdfIkPose node requires the 'urdf_ik' feature".to_string()),
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfFk => eval_urdf_fk(rt, node, params, inputs, outputs),
+        NodeType::UrdfFk => eval_urdf_fk(rt, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
         NodeType::UrdfFk => Err("UrdfFk node requires the 'urdf_ik' feature".to_string()),
         NodeType::Case => eval_case(params, inputs, outputs),
@@ -312,18 +312,18 @@ fn bundle_fields(bundle: Option<&Value>) -> Result<Vec<(Uuid, Value)>, String> {
 }
 
 fn eval_task_run(
-    rt: &mut GraphRuntime,
+    rt: &mut Context,
     node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
     functions: Option<&mut dyn NodeFunctions>,
 ) -> Result<(), String> {
-    use super::graph_runtime::{NodeRuntimeState, TaskRunState};
+    use super::context::{NodeRuntimeState, TaskRunState};
 
     // A terminal run is latched: its function is not invoked again; the node
     // keeps emitting the terminal status (and the last out-parameters) until
     // its fragment is pruned.
-    if let Some(NodeRuntimeState::TaskRun(state)) = rt.node_states.get(node.id) {
+    if let Some(NodeRuntimeState::TaskRun(state)) = rt.state.as_ref() {
         if let Some(latched) = state.latched.clone() {
             let mutated = state.outputs.clone().unwrap_or_else(|| vocab::record([]));
             out_parameter_ports(node.params, outputs, &mutated)?;
@@ -366,13 +366,10 @@ fn eval_task_run(
     );
     let done = crate::task::is_terminal(&status);
     if done {
-        rt.node_states.insert(
-            node.id.to_string(),
-            NodeRuntimeState::TaskRun(TaskRunState {
-                latched: Some(status.clone()),
-                outputs: Some(mutated.clone()),
-            }),
-        );
+        rt.state = Some(NodeRuntimeState::TaskRun(TaskRunState {
+            latched: Some(status.clone()),
+            outputs: Some(mutated.clone()),
+        }));
     }
     out_parameter_ports(node.params, outputs, &mutated)?;
     keyed_output(outputs, "done", vocab::bool_(done))?;
@@ -395,12 +392,12 @@ fn set_arg(args: &mut Vec<(Uuid, Value)>, id: Uuid, value: Value) {
 /// parameter both name. `when` is not passed to the call: a new value of it
 /// makes the same args a new run. The first evaluation only records them.
 fn eval_spawn(
-    rt: &mut GraphRuntime,
+    rt: &mut Context,
     node: &Node,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
-    use super::graph_runtime::{NodeRuntimeState, SpawnRequest, SpawnState};
+    use super::context::{NodeRuntimeState, SpawnRequest, SpawnState};
 
     let function = node
         .params
@@ -419,7 +416,7 @@ fn eval_spawn(
 
     let when = inputs.get("when").cloned();
 
-    let changed = match rt.node_states.get_mut(node.id) {
+    let changed = match rt.state.as_mut() {
         Some(NodeRuntimeState::Spawn(state)) => {
             let changed = state.args != args || state.when != when;
             if changed {
@@ -429,13 +426,10 @@ fn eval_spawn(
             changed
         }
         _ => {
-            rt.node_states.insert(
-                node.id.to_string(),
-                NodeRuntimeState::Spawn(SpawnState {
-                    args: args.clone(),
-                    when,
-                }),
-            );
+            rt.state = Some(NodeRuntimeState::Spawn(SpawnState {
+                args: args.clone(),
+                when,
+            }));
             false
         }
     };
@@ -666,12 +660,12 @@ fn eval_trig(
     single_output(outputs, unary_numeric(input, op))
 }
 
-fn eval_time(rt: &GraphRuntime, outputs: &mut OutputSlots) -> Result<(), String> {
+fn eval_time(rt: &Context, outputs: &mut OutputSlots) -> Result<(), String> {
     single_output(outputs, vocab::float(rt.t))
 }
 
 fn eval_oscillator(
-    rt: &GraphRuntime,
+    rt: &Context,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -812,8 +806,7 @@ impl SpringStep {
 
 fn eval_stateful(
     kind: &NodeType,
-    rt: &mut GraphRuntime,
-    node: &Node,
+    rt: &mut Context,
     params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
@@ -846,7 +839,7 @@ fn eval_stateful(
                 1.0
             };
 
-            let state = rt.spring_state_mut(node.id, &flat);
+            let state = rt.spring_state_mut(&flat);
             state.target = flat.data.clone();
 
             // No time passes at a zero dt, so the spring holds its position
@@ -892,7 +885,7 @@ fn eval_stateful(
             } else {
                 0.1
             };
-            let state = rt.damp_state_mut(node.id, &flat);
+            let state = rt.damp_state_mut(&flat);
             // A half-life of zero does not smooth, at any dt. Otherwise a
             // zero dt holds the value: no time passes for it to decay.
             if half_life <= 0.0 {
@@ -914,7 +907,7 @@ fn eval_stateful(
             };
             let max_rate = params.max_rate.unwrap_or(1.0);
             let max_rate = if max_rate.is_finite() { max_rate } else { 1.0 };
-            let state = rt.slew_state_mut(node.id, &flat);
+            let state = rt.slew_state_mut(&flat);
             // A max rate of zero does not limit, at any dt. Otherwise a zero
             // dt holds the value: no time passes for it to move.
             if max_rate <= 0.0 {
@@ -2004,8 +1997,7 @@ fn eval_inverse_kinematics(inputs: &InputSlots, outputs: &mut OutputSlots) -> Re
 
 #[cfg(feature = "urdf_ik")]
 fn eval_urdf_fk(
-    rt: &mut GraphRuntime,
-    node: &Node,
+    rt: &mut Context,
     params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
@@ -2028,7 +2020,7 @@ fn eval_urdf_fk(
         root_link,
         tip_link,
     };
-    let state = rt.kinematics_state_mut(node.id, key)?;
+    let state = rt.kinematics_state_mut(key)?;
 
     let joints = fetch_joint_vector(
         joints_port,
@@ -2053,8 +2045,7 @@ fn eval_urdf_fk(
 
 #[cfg(feature = "urdf_ik")]
 fn eval_urdf_position(
-    rt: &mut GraphRuntime,
-    node: &Node,
+    rt: &mut Context,
     params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
@@ -2083,7 +2074,7 @@ fn eval_urdf_position(
         root_link,
         tip_link,
     };
-    let state = rt.kinematics_state_mut(node.id, key)?;
+    let state = rt.kinematics_state_mut(key)?;
     let dofs = state.dofs;
 
     let seed: Option<Vec<f32>> = inputs
@@ -2123,8 +2114,7 @@ fn eval_urdf_position(
 
 #[cfg(feature = "urdf_ik")]
 fn eval_urdf_pose(
-    rt: &mut GraphRuntime,
-    node: &Node,
+    rt: &mut Context,
     params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
@@ -2157,7 +2147,7 @@ fn eval_urdf_pose(
         root_link,
         tip_link,
     };
-    let state = rt.kinematics_state_mut(node.id, key)?;
+    let state = rt.kinematics_state_mut(key)?;
     let dofs = state.dofs;
 
     let seed: Option<Vec<f32>> = inputs

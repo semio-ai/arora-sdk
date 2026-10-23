@@ -20,7 +20,7 @@ mod fixtures;
 #[cfg(test)]
 mod tree_tests;
 
-pub use eval::{GraphRuntime, NodeFunction, NodeFunctionRegistry, NodeFunctions, PortValue};
+pub use eval::{Context, NodeFunction, NodeFunctionRegistry, NodeFunctions, PortValue};
 pub use schema::registry;
 pub use topo::topo_order;
 pub use types::*;

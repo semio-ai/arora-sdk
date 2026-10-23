@@ -379,7 +379,7 @@ fn a_smoother_records_a_target_changed_at_a_zero_step() {
         );
         if kind == "spring" {
             let states = paused.node_states();
-            let Some(graph_runtime::NodeRuntimeState::Spring(spring)) = states.get("node") else {
+            let Some(context::NodeRuntimeState::Spring(spring)) = states.get("node") else {
                 panic!("the spring keeps its state");
             };
             assert_eq!(spring.target, vec![-1.0], "the new target is recorded");
