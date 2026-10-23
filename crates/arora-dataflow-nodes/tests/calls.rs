@@ -187,6 +187,35 @@ fn a_stateful_node_writes_its_state_back() {
     assert!(nodes.state(&Kind::Damp, &params, None).is_none());
 }
 
+/// A URDF node has no state before its first call, though the module keeps
+/// the chain another node of the same configuration built.
+#[cfg(feature = "urdf_ik")]
+#[test]
+fn a_urdf_node_has_no_state_before_its_first_call() {
+    const URDF: &str = r#"<robot name="arm">
+        <link name="base"/><link name="tip"/>
+        <joint name="j" type="revolute">
+            <parent link="base"/><child link="tip"/>
+            <origin xyz="0 0 1"/><axis xyz="0 0 1"/>
+            <limit lower="-3" upper="3" effort="1" velocity="1"/>
+        </joint>
+    </robot>"#;
+    let mut nodes = DataflowNodes::new();
+    let params = Params {
+        urdf_xml: Some(URDF.to_string()),
+        root_link: Some("base".to_string()),
+        tip_link: Some("tip".to_string()),
+        ..Default::default()
+    };
+    let mut args = encode(&params).expect("the parameters encode");
+    args.push((input_param("joints"), Value::ArrayF32(vec![0.5])));
+    let ports = output_layout(&Kind::UrdfFk, &params, &[], &Default::default()).slots;
+    args.push((ports_param(), Value::ArrayString(ports)));
+    call(&mut nodes, &Kind::UrdfFk, &args).expect("the call succeeds");
+    assert!(nodes.state(&Kind::UrdfIkPosition, &params, None).is_none());
+    assert!(nodes.state(&Kind::UrdfFk, &params, None).is_none());
+}
+
 #[test]
 fn select_reads_the_part_a_selector_names() {
     let mut nodes = DataflowNodes::new();

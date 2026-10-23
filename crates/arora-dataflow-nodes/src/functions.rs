@@ -1272,14 +1272,17 @@ impl DataflowNodes {
         params: &Params,
         value: Option<&Value>,
     ) -> Option<NodeRuntimeState> {
+        // No state before the first call, whatever the module keeps for
+        // other nodes of the same configuration.
+        let value = value?;
         #[cfg(feature = "urdf_ik")]
         if matches!(kind, Kind::UrdfIkPosition | Kind::UrdfIkPose | Kind::UrdfFk) {
-            return crate::eval::urdfik::prepared_state(&self.chains, params, value)
+            return crate::eval::urdfik::prepared_state(&self.chains, params, Some(value))
                 .map(NodeRuntimeState::UrdfKinematics);
         }
         #[cfg(not(feature = "urdf_ik"))]
         let _ = params;
-        decode_state(kind, value?.clone())
+        decode_state(kind, value.clone())
     }
 
     /// A bridge answering this module's calls and passing every other to
