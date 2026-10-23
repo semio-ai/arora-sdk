@@ -481,7 +481,10 @@ const _: () = {
         send(&connect_with_description(description));
         send(&connect_with_device_dir(device_dir));
         send(&connect_with_operator(operator));
-        send(&connect_with_operator_and_description(operator, description));
+        send(&connect_with_operator_and_description(
+            operator,
+            description,
+        ));
     }
 };
 
