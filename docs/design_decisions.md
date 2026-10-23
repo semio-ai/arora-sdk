@@ -851,9 +851,11 @@ nothing else describes, stays the record's.
 A run that asked for Studio and finds the device not enrolled enrolls it then,
 without a separate command: asking for Studio is the opt-in, and a person's
 approval in Studio is the consent the enrollment needs. Without an enrollment
-token, it enrolls by code, headless included: the code is in the log, and the
-run waits for a person's decision, so a service started with `--studio` joins
-Studio once someone approves it, and never before. A refused code, or a
+token, it enrolls by code, headless included: the code is in the log — or on
+standard error when the log shows no info lines, since the run waits on
+someone seeing it — and the run waits for a person's decision, so a service
+started with `--studio` joins Studio once someone approves it, and never
+before. A refused code, or a
 refused token, fails the run instead of serving the local bridge: the run
 asked for Studio, and serving something else would hide that Studio refused
 the device.

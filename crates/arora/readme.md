@@ -227,7 +227,9 @@ arora 13 and earlier signed a device up as. It enrolls:
   visible to the host's other users — and never logs it.
 - **by code** otherwise: the run shows a code, which a person enters in
   Studio, choosing the device's owner. The terminal UI shows it in its prompt
-  line; the log says it too, headless included:
+  line; the log says it too, headless included, and a headless run whose log
+  shows no info lines — the default without `RUST_LOG` — writes it to
+  standard error:
 
   ```text
   Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio, or open https://<studio>/approve?code=BCDF-GHJK

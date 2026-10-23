@@ -59,7 +59,9 @@
 //!   is visible to the host's other users, and the run never logs it.
 //! - otherwise by code: the run shows a code, which a person enters in Studio,
 //!   choosing the device's owner. Each code is logged, and shown to the
-//!   operator under the terminal UI ([`Operator::show_enrollment_code`]), with
+//!   operator under the terminal UI ([`Operator::show_enrollment_code`]);
+//!   with no operator and a log showing no info lines — the headless log's
+//!   default without `RUST_LOG` — it goes to standard error. It comes with
 //!   the Studio page approving it when the client knows Studio's web address
 //!   (`STUDIO_URL`, else the one baked into `arora-studio-bridge-client`). A
 //!   code that expires undecided is replaced by another; the run waits for a
@@ -655,9 +657,27 @@ struct Codes<'a> {
 
 impl Codes<'_> {
     fn show(&self, code: &EnrollmentCode) {
-        info!("{}", code_line(code));
-        if let Some(operator) = self.operator {
-            operator.show_enrollment_code(Some(code));
+        self.show_on(
+            code,
+            log::log_enabled!(log::Level::Info),
+            &mut std::io::stderr(),
+        );
+    }
+
+    /// [`show`](Self::show), with `logged` whether the log shows info lines,
+    /// and `console` where a code goes that nothing else shows. The run waits
+    /// on a person entering the code, so someone must see it: with no
+    /// operator, and a log showing no info lines — the headless log's default
+    /// without `RUST_LOG` — it goes to `console`.
+    fn show_on(&self, code: &EnrollmentCode, logged: bool, console: &mut dyn std::io::Write) {
+        let line = code_line(code);
+        info!("{line}");
+        match self.operator {
+            Some(operator) => operator.show_enrollment_code(Some(code)),
+            None if !logged => {
+                let _ = writeln!(console, "{line}");
+            }
+            None => {}
         }
     }
 }
@@ -1047,6 +1067,31 @@ mod tests {
                 Some(code("LMNP-QRST", Some("https://studio.example/approve"))),
                 None
             ]
+        );
+    }
+
+    #[test]
+    fn a_code_nothing_else_shows_goes_to_the_console() {
+        // The headless front end's log shows errors alone without RUST_LOG.
+        let mut console = Vec::new();
+        Codes { operator: None }.show_on(&code("BCDF-GHJK", None), false, &mut console);
+        assert_eq!(
+            String::from_utf8(console).unwrap(),
+            "Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio\n"
+        );
+
+        // Shown by the log, or by the operator, it is not repeated there.
+        let mut console = Vec::new();
+        Codes { operator: None }.show_on(&code("BCDF-GHJK", None), true, &mut console);
+        let operator = Scripted::default();
+        Codes {
+            operator: Some(&operator),
+        }
+        .show_on(&code("BCDF-GHJK", None), false, &mut console);
+        assert!(console.is_empty(), "{:?}", String::from_utf8(console));
+        assert_eq!(
+            operator.shown().first(),
+            Some(&Some(code("BCDF-GHJK", None)))
         );
     }
 

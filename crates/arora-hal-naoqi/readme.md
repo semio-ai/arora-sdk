@@ -203,7 +203,8 @@ A device enrolls with Studio the first time it connects: a person approves it in
 chooses its owner, a person or an organization, and Studio creates the device.
 
 1. **Start the device with `--studio`.** It shows a code: in the terminal UI's prompt line,
-   and in the log, headless included.
+   and in the log; headless, on standard error too when the log shows no info lines (the
+   default without `RUST_LOG`).
 
    ```sh
    cargo run --release -p arora-hal-naoqi --features runner,studio --bin arora-naoqi -- --studio tcp://<robot_name>.local:9559
