@@ -5,8 +5,9 @@ use arora_node_graph::types::{
 };
 use arora_node_graph::{evaluate_all, GraphRuntime};
 use arora_shape::json::normalize_graph_spec_value;
-use arora_shape::Shape;
+use arora_shape::value as vocab;
 use arora_shape::TypedPath;
+use arora_shape::{Shape, Value};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use hashbrown::HashMap;
 use std::hint::black_box;
@@ -134,6 +135,61 @@ fn chain_graph(length: usize) -> GraphSpec {
         prev = add_id;
     }
 
+    GraphSpec {
+        nodes,
+        edges,
+        ..Default::default()
+    }
+    .with_cache()
+}
+
+/// Two chains of Add nodes on composite values, a vec3 chain and a
+/// transform chain, both fed by one moving number and ending in a Spring:
+/// every step flattens and rebuilds structures.
+fn composite_chain_graph(length: usize) -> GraphSpec {
+    let constant = |id: String, value: Value| NodeSpec {
+        id,
+        kind: NodeType::Constant,
+        params: NodeParams {
+            value: Some(value),
+            ..Default::default()
+        },
+        output_shapes: HashMap::<String, Shape>::new(),
+        input_defaults: HashMap::<String, InputDefault>::new(),
+    };
+    let mut nodes = vec![input_node("in", "bench/composite/in", 0.0)];
+    let mut edges = Vec::new();
+    for (chain, bias) in [
+        ("vec3", vocab::vec3([0.5, 0.25, 0.125])),
+        (
+            "transform",
+            vocab::transform(vocab::Transform {
+                translation: [0.5, 0.25, 0.125],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0, 1.0, 1.0],
+            }),
+        ),
+    ] {
+        let mut prev = "in".to_string();
+        for i in 0..length.max(1) {
+            let bias_id = format!("{chain}_bias_{i}");
+            let add_id = format!("{chain}_add_{i}");
+            nodes.push(constant(bias_id.clone(), bias.clone()));
+            nodes.push(add_node(&add_id));
+            edges.push(link(&prev, &add_id, "operand_1"));
+            edges.push(link(&bias_id, &add_id, "operand_2"));
+            prev = add_id;
+        }
+        let spring_id = format!("{chain}_spring");
+        nodes.push(NodeSpec {
+            id: spring_id.clone(),
+            kind: NodeType::Spring,
+            params: NodeParams::default(),
+            output_shapes: HashMap::<String, Shape>::new(),
+            input_defaults: HashMap::<String, InputDefault>::new(),
+        });
+        edges.push(link(&prev, &spring_id, "in"));
+    }
     GraphSpec {
         nodes,
         edges,
@@ -689,6 +745,18 @@ fn bench_graphs(c: &mut Criterion) {
             |b, spec| bench_amortized_per_step(b, black_box(spec), 100),
         );
         bench_tree(&mut group, "tiny-smoke-8", &spec, 100);
+    }
+
+    // Composite values
+    {
+        let spec = composite_chain_graph(32);
+        group.sample_size(20);
+        group.bench_with_input(
+            BenchmarkId::new("amortized_per_step", "composite-chain-32"),
+            &spec,
+            |b, spec| bench_amortized_per_step(b, black_box(spec), 100),
+        );
+        bench_tree(&mut group, "composite-chain-32", &spec, 100);
     }
 
     // Fixture
