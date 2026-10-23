@@ -730,3 +730,192 @@ fn nested_call_results_remain_in_argument_cells_for_later_nodes() {
         assert_eq!(reads, [Value::F64(2.0), Value::F64(2.0)]);
     }
 }
+
+/// Full detached nodes register even when unused, keep Success for bound
+/// returns and the returned Status otherwise, and retain that status on cache
+/// hits. Releasing a lowering releases its callables and their cells.
+#[test]
+fn full_detached_nodes_register_keep_status_and_unregister() {
+    use crate::{lower_behavior_tree_with_options, LoweringOptions};
+    let make = || {
+        load_behavior_tree_nodes(vec![
+            node(1, RUN_FUNCTION_ID, vec![]),
+            node(10, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(2.0))]),
+            node(
+                11,
+                ADD,
+                vec![
+                    (ADD_A, f(1.0)),
+                    (ADD_B, f(2.0)),
+                    (_RET_PARAM_ID, Expression::VariableId(Uuid::from_u128(99))),
+                ],
+            ),
+            node(12, DISTANCE, vec![]),
+        ])
+        .unwrap()
+    };
+    let mut bridge = Bridge::default();
+    let direct = lower_behavior_tree(make(), &index(), &mut bridge, false).unwrap();
+    assert_eq!(bridge.registered.len(), 1);
+    assert_eq!(direct.tree().detached_tick_id(Uuid::from_u128(10)), None);
+    direct.unregister(&mut bridge);
+    let tree = make();
+    tree.observe_detached([Uuid::from_u128(10), Uuid::from_u128(11)]);
+    let tree = lower_behavior_tree_with_options(
+        tree,
+        &index(),
+        &mut bridge,
+        LoweringOptions {
+            trace: false,
+            detached_tree_nodes: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(bridge.registered.len(), 4);
+    for id in 10..=12 {
+        let id = Uuid::from_u128(id);
+        let tick = tree.tree().detached_tick_id(id).unwrap();
+        assert!(bridge.registered.contains_key(&tick.callable_id));
+        assert_eq!(tree.tree().detached_status(id), None);
+    }
+    for status in [Status::Running, Status::Failure, Status::Success] {
+        bridge
+            .responses
+            .extend([status, Status::Failure].map(|ret| CallResult {
+                ret: ret.into(),
+                mutated: vec![],
+            }));
+        for id in [10, 11] {
+            tree.tree().set_argument_value(
+                Uuid::from_u128(id),
+                ADD_A,
+                Some(Value::F64(bridge.calls.len() as f64)),
+            );
+        }
+        assert_eq!(tree.tick(&mut bridge).unwrap(), Status::Running);
+        assert_eq!(
+            tree.tree().detached_status(Uuid::from_u128(10)),
+            Some(status)
+        );
+        assert_eq!(
+            tree.tree().detached_status(Uuid::from_u128(11)),
+            Some(Status::Success)
+        );
+        let calls = bridge.calls.len();
+        tree.tick(&mut bridge).unwrap();
+        assert_eq!(
+            bridge.calls.len(),
+            calls,
+            "cached ticks keep status without calling"
+        );
+        assert_eq!(
+            tree.tree().detached_status(Uuid::from_u128(10)),
+            Some(status)
+        );
+    }
+    assert_eq!(
+        tree.tree().detached_status(Uuid::from_u128(12)),
+        None,
+        "unused node has no status"
+    );
+    let weak: Vec<_> = bridge.registered.values().map(Rc::downgrade).collect();
+    tree.unregister(&mut bridge);
+    assert!(bridge.registered.is_empty());
+    drop(tree);
+    assert!(
+        weak.iter().all(|function| function.upgrade().is_none()),
+        "full ticks have no ownership cycle"
+    );
+}
+
+/// The detached and attached trace lines for the same node are identical;
+/// the cached second detached tick emits no line for its skipped module call.
+#[test]
+#[ignore = "run by full_detached_trace_matches_attached in a subprocess"]
+fn full_detached_trace_fixture() {
+    use crate::{lower_behavior_tree_with_options, LoweringOptions};
+    let make_node = || {
+        node(
+            10,
+            ADD,
+            vec![
+                (ADD_A, call(DISTANCE, vec![])),
+                (ADD_B, f(4.0)),
+                (_RET_PARAM_ID, Expression::VariableId(Uuid::from_u128(9))),
+            ],
+        )
+    };
+    let mut bridge = Bridge::default();
+    let attached = lower_behavior_tree(
+        load_behavior_tree_nodes(vec![make_node()]).unwrap(),
+        &index(),
+        &mut bridge,
+        true,
+    )
+    .unwrap();
+    attached.tick(&mut bridge).unwrap();
+    attached.tick(&mut bridge).unwrap();
+    attached.unregister(&mut bridge);
+    let full =
+        load_behavior_tree_nodes(vec![node(1, RUN_FUNCTION_ID, vec![]), make_node()]).unwrap();
+    full.observe_detached([Uuid::from_u128(10)]);
+    let full = lower_behavior_tree_with_options(
+        full,
+        &index(),
+        &mut bridge,
+        LoweringOptions {
+            trace: true,
+            detached_tree_nodes: true,
+        },
+    )
+    .unwrap();
+    full.tick(&mut bridge).unwrap();
+    full.tick(&mut bridge).unwrap();
+    assert_eq!(full.tree().detached_calls(Uuid::from_u128(10)), Some(1));
+}
+
+#[test]
+fn full_detached_trace_matches_attached() {
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "attached_tests::full_detached_trace_fixture",
+            "--nocapture",
+        ])
+        .env_remove("RUST_TEST_THREADS")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("trace fixture exceeded ten seconds");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let output = String::from_utf8(result.stdout).unwrap();
+    let lines: Vec<_> = output
+        .lines()
+        .filter_map(|line| {
+            line.find("tick 00000000-0000-0000-0000-00000000000a ")
+                .map(|at| &line[at..])
+        })
+        .collect();
+    assert_eq!(
+        lines.len(),
+        3,
+        "two attached calls, one detached call: {output}"
+    );
+    assert!(lines.iter().all(|line| *line == lines[0]));
+    assert!(lines[0].ends_with("add(a: distance(), b: 4f64) -> Success"));
+}

@@ -27,7 +27,7 @@ use crate::display::{stated_id, Names};
 use crate::variable::{is_tree_local, VariableCell, VariableResolver};
 use arora_behavior::Status;
 use arora_behavior_tree_types::TickId;
-use arora_types::call::{CallBridge, CallError, Callable, CallableId};
+use arora_types::call::{CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::record::module::frozen::Function;
 use arora_types::AroraType;
 use arora_types::{
@@ -37,7 +37,7 @@ use arora_types::{
 use error::BehaviorTreeError;
 use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -89,6 +89,17 @@ impl BehaviorTree {
     /// How many times the detached node `id` has called its function.
     pub fn detached_calls(&self, id: Uuid) -> Option<u64> {
         self.detached.calls(id)
+    }
+
+    /// The last status of a detached full tree node. `None` before its first
+    /// completed module call, or when the lowering uses the default representation.
+    pub fn detached_status(&self, id: Uuid) -> Option<Status> {
+        self.detached.status(id)
+    }
+
+    /// The engine tick registered for a detached full tree node, if enabled.
+    pub fn detached_tick_id(&self, id: Uuid) -> Option<TickId> {
+        self.detached.tick_id(id)
     }
 
     /// Observe the detached nodes among `ids`: from the next lowering on,
@@ -314,7 +325,7 @@ impl<'a> BehaviorTreeRuntime<'a> {
         caller: &'a mut dyn CallBridge,
         trace: bool,
     ) -> Result<Self, BehaviorTreeError> {
-        let (tick, _) = register_ticks(tree, functions, caller, trace)?;
+        let (tick, _) = register_ticks(tree, functions, caller, trace, false)?;
         Ok(Self { caller, tick, tree })
     }
 
@@ -350,7 +361,40 @@ pub fn lower_behavior_tree(
     caller: &mut dyn CallBridge,
     trace: bool,
 ) -> Result<LoweredTree, BehaviorTreeError> {
-    let (root, callables) = register_ticks(&tree, functions, caller, trace)?;
+    lower_behavior_tree_with_options(
+        tree,
+        functions,
+        caller,
+        LoweringOptions {
+            trace,
+            ..LoweringOptions::default()
+        },
+    )
+}
+
+/// Opt-in representations and tracing for a lowering.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LoweringOptions {
+    pub trace: bool,
+    /// Register detached calls as full tree nodes while preserving their
+    /// demand-driven scheduling, argument cache and deferred publication.
+    pub detached_tree_nodes: bool,
+}
+
+/// Lower with explicit options. The default uses lightweight detached calls.
+pub fn lower_behavior_tree_with_options(
+    tree: BehaviorTree,
+    functions: &FunctionIndex,
+    caller: &mut dyn CallBridge,
+    options: LoweringOptions,
+) -> Result<LoweredTree, BehaviorTreeError> {
+    let (root, callables) = register_ticks(
+        &tree,
+        functions,
+        caller,
+        options.trace,
+        options.detached_tree_nodes,
+    )?;
     Ok(LoweredTree {
         root,
         callables,
@@ -389,6 +433,7 @@ fn register_ticks(
     functions: &FunctionIndex,
     caller: &mut dyn CallBridge,
     trace: bool,
+    detached_tree_nodes: bool,
 ) -> Result<(TickId, Vec<CallableId>), BehaviorTreeError> {
     tree.lower_detached(functions)?;
     let mut callables = Vec::new();
@@ -408,6 +453,13 @@ fn register_ticks(
         },
         &mut callables,
     );
+    let root = root.and_then(|root| {
+        if detached_tree_nodes {
+            tree.detached
+                .register_tree_nodes(tree, functions, caller, trace, &mut callables)?;
+        }
+        Ok(root)
+    });
     match root {
         Ok(root) => Ok((root.id, callables)),
         Err(error) => {
@@ -443,6 +495,19 @@ pub fn run_behavior_tree(
 enum TraceTick {
     YesAll,
     No,
+}
+
+impl TraceTick {
+    fn line(self, node: &Node, calls: &FunctionIndex, status: Status) {
+        if self != Self::No {
+            println!(
+                "tick {} {} -> {:?}",
+                node.id,
+                node.display(Names::functions(calls)),
+                status
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -843,16 +908,7 @@ fn tick(
     node: Rc<Node>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
-    let trace_line = |status: Status| {
-        if trace != TraceTick::No {
-            println!(
-                "tick {} {} -> {:?}",
-                node.id,
-                node.display(Names::functions(calls)),
-                status
-            );
-        }
-    };
+    let trace_line = |status| trace.line(&node, calls, status);
     // The detached nodes the node reads are brought up to date first.
     if let (detached, Some(pulls)) = detached {
         detached.pull(
@@ -999,6 +1055,8 @@ struct AttachedCall {
     return_optional: bool,
     children: Option<(Uuid, Value)>,
     missing_children: bool,
+    /// Whether the node binds `_ret`, so a call succeeds whatever it returns.
+    returns_bound: bool,
 }
 
 impl AttachedCall {
@@ -1068,6 +1126,7 @@ impl AttachedCall {
                     )
                 }),
             missing_children: node.children.is_some() && child_parameter.is_none(),
+            returns_bound: node.arguments.contains_key(&_RET_PARAM_ID),
         }
     }
 
@@ -1077,17 +1136,7 @@ impl AttachedCall {
         scope: Scope,
         node: &Node,
     ) -> Result<Status, BehaviorTreeError> {
-        let module =
-            self.module
-                .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
-                    id: node.function,
-                }))?;
-        if self.missing_children {
-            return Err(BehaviorTreeError::MissingChildrenParameter {
-                node: node.id,
-                function: node.function,
-            });
-        }
+        let module = self.validate(node)?;
         let mut values = Vec::with_capacity(self.arguments.len());
         for argument in &self.arguments {
             let at = NodeParameterId {
@@ -1133,9 +1182,7 @@ impl AttachedCall {
             args.push((*parameter, children));
         }
         args.extend(values.iter().map(|(parameter, value)| (*parameter, value)));
-        let result = caller
-            .arora_call_borrowed(Some(module), node.function, &args)
-            .map_err(BehaviorTreeError::CallError)?;
+        let result = self.dispatch(caller, module, node, &args)?;
         for mutated in result.mutated {
             // The function receives a selection's selected part. A selection is
             // read-only, since the interpreter refuses one on a mutable
@@ -1164,6 +1211,55 @@ impl AttachedCall {
             result.ret.try_into().unwrap_or(Status::Success)
         })
     }
+
+    /// Dispatch already-framed arguments, lending their snapshots to the
+    /// bridge. Both attached and detached full nodes enter the module here.
+    fn call_borrowed(
+        &self,
+        caller: &mut dyn CallBridge,
+        node: &Node,
+        args: &[(Uuid, &Value)],
+    ) -> Result<CallResult, BehaviorTreeError> {
+        let module = self.validate(node)?;
+        self.dispatch(caller, module, node, args)
+    }
+
+    fn dispatch(
+        &self,
+        caller: &mut dyn CallBridge,
+        module: Uuid,
+        node: &Node,
+        args: &[(Uuid, &Value)],
+    ) -> Result<CallResult, BehaviorTreeError> {
+        caller
+            .arora_call_borrowed(Some(module), node.function, args)
+            .map_err(BehaviorTreeError::CallError)
+    }
+
+    fn validate(&self, node: &Node) -> Result<Uuid, BehaviorTreeError> {
+        let module =
+            self.module
+                .ok_or(BehaviorTreeError::CallError(CallError::FunctionNotFound {
+                    id: node.function,
+                }))?;
+        if self.missing_children {
+            return Err(BehaviorTreeError::MissingChildrenParameter {
+                node: node.id,
+                function: node.function,
+            });
+        }
+        Ok(module)
+    }
+
+    fn status(&self, _node: &Node, ret: &Value) -> Status {
+        if self.returns_bound {
+            Status::Success
+        } else if matches!(ret, Value::Enumeration(_)) {
+            ret.clone().try_into().unwrap_or(Status::Success)
+        } else {
+            Status::Success
+        }
+    }
 }
 
 /// The usual Tickable object in behavior trees, which is also Callable.
@@ -1184,6 +1280,22 @@ struct TickFunction {
     outputs: Option<Outputs>,
     children: Vec<ChildTick>,
     trace: TraceTick,
+}
+
+impl TickFunction {
+    /// A detached tick receives the evaluator's argument snapshots and hands
+    /// its raw outputs back for caching and deferred publication. Its module
+    /// dispatch, status interpretation and trace are those of an attached tick.
+    fn tick_borrowed(
+        &self,
+        caller: &mut dyn CallBridge,
+        args: &[(Uuid, &Value)],
+    ) -> Result<(Status, CallResult), BehaviorTreeError> {
+        let result = self.module_call.call_borrowed(caller, &self.node, args)?;
+        let status = self.module_call.status(&self.node, &result.ret);
+        self.trace.line(&self.node, &self.calls, status);
+        Ok((status, result))
+    }
 }
 
 impl Tickable for TickFunction {
@@ -1208,6 +1320,81 @@ impl Callable for TickFunction {
         self.tick(caller)
             .map(Into::<Value>::into)
             .map_err(Into::<CallError>::into)
+    }
+}
+
+/// A full detached node owns the same tick function as an attached node,
+/// plus its last status. Its evaluator lends prepared arguments; its engine
+/// callable remains available under the registered TickId.
+pub(crate) struct DetachedTreeNode {
+    function: TickFunction,
+    status: Cell<Option<Status>>,
+}
+
+impl DetachedTreeNode {
+    pub(crate) fn lower(
+        node: Rc<Node>,
+        tree: &BehaviorTree,
+        functions: &FunctionIndex,
+        trace: bool,
+        detached: Rc<Detached>,
+    ) -> Result<Self, BehaviorTreeError> {
+        let mut module_call = AttachedCall::lower(
+            &node,
+            functions.get(&node.function),
+            &tree.node_arg_variables,
+            &[],
+        );
+        // An empty children list is a detached call, not a composite call.
+        module_call.children = None;
+        module_call.missing_children = false;
+        Ok(Self {
+            function: TickFunction {
+                module_call,
+                calls: Rc::new(call_signatures(&node, functions)?),
+                locals: tree.variables.clone(),
+                node_arg_variables: tree.node_arg_variables.clone(),
+                node,
+                detached,
+                pulls: None,
+                outputs: None,
+                children: Vec::new(),
+                trace: if trace {
+                    TraceTick::YesAll
+                } else {
+                    TraceTick::No
+                },
+            },
+            status: Cell::new(None),
+        })
+    }
+
+    pub(crate) fn status(&self) -> Option<Status> {
+        self.status.get()
+    }
+
+    /// Tick through AttachedCall with arguments already read by the detached
+    /// evaluator. It alone writes and caches the outputs, including mutations
+    /// omitted from a response, and publishes sinks after the tree.
+    pub(crate) fn tick_borrowed(
+        &self,
+        caller: &mut dyn CallBridge,
+        args: &[(Uuid, &Value)],
+    ) -> Result<CallResult, BehaviorTreeError> {
+        let (status, result) = self.function.tick_borrowed(caller, args)?;
+        self.status.set(Some(status));
+        Ok(result)
+    }
+}
+
+impl Callable for DetachedTreeNode {
+    fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError> {
+        let status = self
+            .function
+            .tick(caller)
+            .map_err(Into::<CallError>::into)?;
+        self.status.set(Some(status));
+        Ok(status.into())
     }
 }
 

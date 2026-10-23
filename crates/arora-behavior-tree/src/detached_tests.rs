@@ -1790,3 +1790,293 @@ fn an_output_bound_through_a_detached_alias_feeds_the_input_it_aliases() {
         "the key is not written"
     );
 }
+
+/// Compare all interpreter cells and cached ports, not just published returns.
+/// The change feed also pins publication order when sinks share a key.
+fn compare_representations(nodes: impl Fn() -> (Vec<Node>, Vec<Node>), observed: &[Uuid]) {
+    use crate::{lower_behavior_tree_with_options, LoweringOptions};
+    let stores = [SimpleDataStore::new(), SimpleDataStore::new()];
+    let mut engines = [Engine::default(), Engine::default()];
+    let lower =
+        |full, store: &SimpleDataStore, engine: &mut Engine, previous: Option<&BehaviorTree>| {
+            let (attached, detached) = nodes();
+            let tree = build(store, attached, detached);
+            tree.observe_detached(observed.iter().copied());
+            if let Some(previous) = previous {
+                tree.keep_state(previous, &std::collections::HashSet::from([id(999)]));
+            }
+            lower_behavior_tree_with_options(
+                tree,
+                &index(),
+                engine,
+                LoweringOptions {
+                    trace: false,
+                    detached_tree_nodes: full,
+                },
+            )
+            .unwrap()
+        };
+    let mut trees = [
+        lower(false, &stores[0], &mut engines[0], None),
+        lower(true, &stores[1], &mut engines[1], None),
+    ];
+    assert_eq!(
+        trees[0].tree().detached_plan(),
+        trees[1].tree().detached_plan()
+    );
+    let feeds = [stores[0].subscribe(), stores[1].subscribe()];
+    for feed in &feeds {
+        feed.try_iter().for_each(drop);
+    }
+    for step in 0..24 {
+        for (store, engine) in stores.iter().zip(&engines) {
+            // Repeated values, changed values and absent inputs exercise both
+            // comparison paths, optional framing, failures and recovery.
+            for (i, name) in ["in", "left", "right", "sensor/distance", "target"]
+                .iter()
+                .enumerate()
+            {
+                let value = (step % 7 != 4).then_some(Value::F64(((step / 2 + i) % 5) as f64));
+                store.slot(&Key::from(*name)).set(value).unwrap();
+            }
+            if step == 0 {
+                for name in ["x", "y", "out"] {
+                    set(store, name, 0.0);
+                }
+            }
+            engine.set(DISTANCE, (step % 3) as f64);
+        }
+        for feed in &feeds {
+            feed.try_iter().for_each(drop);
+        }
+        let outcomes: Vec<_> = trees
+            .iter()
+            .zip(&mut engines)
+            .map(|(tree, engine)| tree.tick(engine).map_err(|error| error.to_string()))
+            .collect();
+        assert_eq!(outcomes[0], outcomes[1], "tick {step}: root/error");
+        assert_eq!(
+            *engines[0].calls.borrow(),
+            *engines[1].calls.borrow(),
+            "tick {step}: ordered calls and arguments"
+        );
+        engines
+            .iter()
+            .for_each(|engine| engine.calls.borrow_mut().clear());
+        assert_eq!(
+            feeds[0].try_iter().collect::<Vec<_>>(),
+            feeds[1].try_iter().collect::<Vec<_>>(),
+            "tick {step}: publication order"
+        );
+        for name in NAMES {
+            assert_eq!(
+                get(&stores[0], name),
+                get(&stores[1], name),
+                "tick {step}: key {name}"
+            );
+        }
+        let [left, right] = trees.each_ref().map(|tree| tree.tree());
+        for (id, cell) in left.variables.borrow().iter() {
+            assert_eq!(
+                cell.get(),
+                right.variables.borrow()[id].get(),
+                "tick {step}: variable {id}"
+            );
+        }
+        for (port, cell) in left.node_arg_variables.iter() {
+            assert_eq!(
+                cell.get(),
+                right.node_arg_variables[port].get(),
+                "tick {step}: port {port}"
+            );
+        }
+        for node in left.detached.nodes() {
+            assert_eq!(
+                left.detached_outputs(node.id),
+                right.detached_outputs(node.id),
+                "tick {step}: cached ports {}",
+                node.id
+            );
+            assert_eq!(left.detached_calls(node.id), right.detached_calls(node.id));
+            assert_eq!(left.detached_status(node.id), None);
+        }
+        // Transfer live mutable state, including nested call-site cells, into
+        // new lowerings halfway through the lockstep run.
+        if step == 11 {
+            for (i, (tree, engine)) in trees.iter_mut().zip(&mut engines).enumerate() {
+                let next = lower(i == 1, &stores[i], engine, Some(tree.tree()));
+                tree.unregister(engine);
+                *tree = next;
+            }
+        }
+    }
+    for (tree, engine) in trees.iter().zip(&mut engines) {
+        tree.unregister(engine);
+    }
+}
+
+/// Seeded DAGs exercise fan-out, optional inputs, unused calls and observed
+/// nodes with different changes each tick; every port and ordered call agrees.
+#[test]
+fn full_detached_generated_graphs_match_lightweight_nodes() {
+    for seed in 1..=8u64 {
+        compare_representations(
+            || {
+                let mut random = seed;
+                let mut graph = Vec::new();
+                for i in 0..64u128 {
+                    random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let source = if i < 4 {
+                        key("in")
+                    } else {
+                        read(10 + u128::from(random) % i)
+                    };
+                    let (function, args) = match random % 3 {
+                        0 => (ADD, vec![(ADD_A, source), (ADD_B, f(0.25))]),
+                        1 => (MUL, vec![(MUL_A, source), (MUL_B, f(0.5))]),
+                        _ => (CLAMP, vec![(CLAMP_X, source), (CLAMP_LO, f(0.0))]),
+                    };
+                    graph.push(compute(10 + i, function, args, (i == 63).then_some("out")));
+                }
+                (three_readers(|| read(72)), graph)
+            },
+            &[id(60)],
+        );
+    }
+}
+
+/// Existing detached shapes cover mutable state, omitted mutations, nested
+/// calls and selections, rewrites, aliases, feedback, sink failures and retry.
+#[test]
+fn full_detached_state_publication_and_errors_match_lightweight_nodes() {
+    let shapes: Vec<(Vec<Node>, Vec<Node>)> = vec![
+        (three_readers(|| read(11)), centimetres_nodes()),
+        (
+            vec![below(1, port(50, SMOOTH_STATE), 100.0)],
+            vec![
+                compute(
+                    50,
+                    SMOOTH,
+                    vec![
+                        (SMOOTH_X, key("target")),
+                        (SMOOTH_ALPHA, f(0.5)),
+                        (SMOOTH_STATE, f(0.0)),
+                    ],
+                    Some("out"),
+                ),
+                compute(51, KEEP, vec![(KEEP_STATE, key("x"))], None),
+                compute(
+                    52,
+                    TWIN,
+                    vec![(TWIN_FIRST, f(0.0)), (TWIN_SECOND, f(0.0))],
+                    Some("y"),
+                ),
+            ],
+        ),
+        (
+            vec![below(1, key(".v"), 3.0)],
+            vec![compute(
+                50,
+                ADD,
+                vec![
+                    (
+                        ADD_A,
+                        call(TWIN, vec![(TWIN_FIRST, key(".v")), (TWIN_SECOND, f(0.0))]),
+                    ),
+                    (ADD_B, f(0.0)),
+                ],
+                Some(".v"),
+            )],
+        ),
+        (
+            vec![below(1, f(1.0), 2.0)],
+            vec![
+                compute(30, ADD, vec![(ADD_A, key("y")), (ADD_B, f(1.0))], Some("x")),
+                compute(31, ADD, vec![(ADD_A, key("x")), (ADD_B, f(1.0))], Some("y")),
+                compute(
+                    40,
+                    ADD,
+                    vec![(ADD_A, port(41, SMOOTH_STATE)), (ADD_B, f(100.0))],
+                    Some("out"),
+                ),
+                compute(
+                    41,
+                    SMOOTH,
+                    vec![
+                        (SMOOTH_X, key("target")),
+                        (SMOOTH_ALPHA, f(1.0)),
+                        (SMOOTH_STATE, f(0.0)),
+                    ],
+                    Some("out"),
+                ),
+            ],
+        ),
+        (
+            vec![node(1, Uuid::from_u128(0xBAD), vec![])],
+            vec![
+                compute(
+                    50,
+                    MUL,
+                    vec![(MUL_A, key("in")), (MUL_B, f(2.0))],
+                    Some("out"),
+                ),
+                compute(51, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(1.0))], Some("y")),
+                compute(52, Uuid::from_u128(0xBAD), vec![], Some("x")),
+            ],
+        ),
+        (
+            three_readers(|| read(50)),
+            vec![compute(
+                50,
+                MUL,
+                vec![(MUL_A, key("in")), (MUL_B, f(2.0))],
+                Some("out"),
+            )],
+        ),
+        (
+            vec![below(1, f(0.0), 3.0)],
+            vec![
+                compute(
+                    50,
+                    ADD,
+                    vec![(ADD_A, call(DISTANCE, vec![])), (ADD_B, f(1.0))],
+                    None,
+                ),
+                compute(51, ADD, vec![(ADD_A, f(2.0)), (ADD_B, f(1.0))], None),
+            ],
+        ),
+    ];
+    for shape in &shapes {
+        // Build fresh expressions each time: call-site state belongs to one tree.
+        let serialized = serde_json::to_string(shape).unwrap();
+        compare_representations(|| serde_json::from_str(&serialized).unwrap(), &[id(50)]);
+    }
+    compare_representations(
+        || {
+            let mut producer = compute(50, ADD, vec![(ADD_A, key("in")), (ADD_B, f(1.0))], None);
+            producer.arguments.insert(_RET_PARAM_ID, port(1, BELOW_X));
+            producer.children = Some(vec![]);
+            (vec![below(1, key("in"), 3.0)], vec![producer])
+        },
+        &[],
+    );
+    compare_representations(
+        || {
+            use arora_types::data::Key;
+            let selected = Expression::Select {
+                source: Box::new(call(crate::call_expression_tests::RECORD, vec![])),
+                path: Key::new(format!(".{}", crate::call_expression_tests::RECORD_NAME)),
+            };
+            (
+                vec![below(1, f(0.0), 3.0)],
+                vec![compute(
+                    50,
+                    ADD,
+                    vec![(ADD_A, selected), (ADD_B, f(1.0))],
+                    Some("out"),
+                )],
+            )
+        },
+        &[],
+    );
+}
