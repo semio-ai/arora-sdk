@@ -1242,4 +1242,146 @@ exports:
             "{took:?}"
         );
     }
+    /// A guest calling `callee`'s `function` through `arora_dispatch`, from
+    /// its function `call`, and returning what it answers.
+    fn calling(call: Uuid, callee: Uuid, function: Uuid) -> String {
+        format!(
+            r#"(module
+                (import "env" "arora_dispatch" (func $dispatch (param i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 256) "{callee}")
+                (data (i32.const 272) "{function}")
+                (data (i32.const 512) "{arguments}")
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 4096)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{call}") (param i32) (result i32)
+                    (call $dispatch (i32.const 256) (i32.const 272) (i32.const 512))))"#,
+            callee = wat_bytes(callee.as_bytes()),
+            function = wat_bytes(function.as_bytes()),
+            arguments = no_arguments(function),
+            call = call.to_string().replace('-', "_"),
+        )
+    }
+
+    /// A module called back by its callee ends by the callee's deadline when
+    /// it is the earlier: `a` (one second) calls `b` (30 ms), which calls back
+    /// into `a`, looping; the loop ends at `b`'s budget.
+    #[test]
+    fn a_guest_called_back_ends_by_its_caller_s_earlier_deadline() {
+        use crate::limits::{GuestLimits, EPOCH};
+        use std::time::{Duration, Instant};
+        let (a, call, spin) = (
+            Uuid::from_u128(0xd8_0001),
+            Uuid::from_u128(0xd8_0002),
+            Uuid::from_u128(0xd8_0003),
+        );
+        let (b, back) = (Uuid::from_u128(0xd8_0004), Uuid::from_u128(0xd8_0005));
+        // `a`: `call` calls `b`'s `back`; `spin` loops forever.
+        let a_guest = format!(
+            r#"(module
+                (import "env" "arora_dispatch" (func $dispatch (param i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 256) "{b}")
+                (data (i32.const 272) "{back}")
+                (data (i32.const 512) "{arguments}")
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 4096)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{call_name}") (param i32) (result i32)
+                    (call $dispatch (i32.const 256) (i32.const 272) (i32.const 512)))
+                (func (export "arora_function_{spin_name}") (param i32) (result i32)
+                    (loop $forever (br $forever))
+                    i32.const 0))"#,
+            b = wat_bytes(b.as_bytes()),
+            back = wat_bytes(back.as_bytes()),
+            arguments = no_arguments(back),
+            call_name = call.to_string().replace('-', "_"),
+            spin_name = spin.to_string().replace('-', "_"),
+        );
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        for (header, guest) in [
+            (functions(a, "a", &[call, spin]), a_guest),
+            (functions(b, "b", &[back]), calling(back, a, spin)),
+        ] {
+            let compiled = CompiledModule::new(header, guest.as_bytes()).expect("compiles");
+            engine.load_compiled_module(&compiled).expect("loads");
+        }
+        let budget = |budget| GuestLimits {
+            call_budget: Some(budget),
+            ..GuestLimits::default()
+        };
+        engine.set_guest_limits(a, budget(Duration::from_secs(1)));
+        let short = Duration::from_millis(30);
+        engine.set_guest_limits(b, budget(short));
+        let started = Instant::now();
+        engine.dispatch(&a, &call, &[]).unwrap_err();
+        let took = started.elapsed();
+        assert!(
+            took >= short && took < short + 2 * EPOCH + Duration::from_millis(200),
+            "{took:?}"
+        );
+    }
+
+    /// A guest's initializer calling another guest gives it no more than the
+    /// load's own budget: the callee, allowed 30 s, is interrupted when the
+    /// load's second is out.
+    #[test]
+    fn a_guest_s_initializer_gives_its_callee_no_more_than_the_load_s_budget() {
+        use crate::limits::{GuestLimits, DEFAULT_CALL_BUDGET};
+        use std::time::{Duration, Instant};
+        let (spinner, spin) = (Uuid::from_u128(0xd9_0001), Uuid::from_u128(0xd9_0002));
+        let (loading, unused) = (Uuid::from_u128(0xd9_0003), Uuid::from_u128(0xd9_0004));
+        // `_initialize` calls `spinner`'s `spin`.
+        let initializing = format!(
+            r#"(module
+                (import "env" "arora_dispatch" (func $dispatch (param i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 256) "{spinner}")
+                (data (i32.const 272) "{spin}")
+                (data (i32.const 512) "{arguments}")
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 4096)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "_initialize")
+                    (drop (call $dispatch (i32.const 256) (i32.const 272) (i32.const 512))))
+                (func (export "arora_function_{unused}") (param i32) (result i32) i32.const 0))"#,
+            spinner = wat_bytes(spinner.as_bytes()),
+            spin = wat_bytes(spin.as_bytes()),
+            arguments = no_arguments(spin),
+            unused = unused.to_string().replace('-', "_"),
+        );
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        let compiled = CompiledModule::new(
+            functions(spinner, "spinner", &[spin]),
+            spinning(spin).as_bytes(),
+        )
+        .expect("compiles");
+        engine.load_compiled_module(&compiled).expect("loads");
+        engine.set_guest_limits(
+            spinner,
+            GuestLimits {
+                call_budget: Some(Duration::from_secs(30)),
+                ..GuestLimits::default()
+            },
+        );
+        let compiled = CompiledModule::new(
+            functions(loading, "loading", &[unused]),
+            initializing.as_bytes(),
+        )
+        .expect("compiles");
+        let started = Instant::now();
+        let _ = engine.load_compiled_module(&compiled);
+        let took = started.elapsed();
+        assert!(
+            took < DEFAULT_CALL_BUDGET + Duration::from_millis(500),
+            "{took:?}"
+        );
+        let refused = engine.dispatch(&spinner, &spin, &[]).unwrap_err();
+        assert!(
+            matches!(&refused, DispatchError::Trap { message } if message.contains(OVERRAN)),
+            "{refused:?}"
+        );
+    }
 }

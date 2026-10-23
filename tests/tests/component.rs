@@ -627,3 +627,43 @@ fn a_long_component_budget_is_kept_to_the_wall_clock() {
         "{took:?}"
     );
 }
+
+/// A component called back by its callee ends by the callee's deadline when
+/// it is the earlier: `a` (one second) calls `b` (30 ms), which calls `a`'s
+/// `spin`; the spin ends at `b`'s budget.
+#[test]
+fn a_component_called_back_ends_by_its_caller_s_earlier_deadline() {
+    use arora_engine::limits::{GuestLimits, EPOCH};
+    use std::time::{Duration, Instant};
+    const B_ID: &str = "3c5e7a91-8d24-4b6f-a0e3-5f19c2d84b70";
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    load_module_from_parts(&mut engine, header_as(B_ID, "b"), guest_bytes()).unwrap();
+    let (a, b, call, spin): (Uuid, Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        B_ID.parse().unwrap(),
+        CALL_FN.parse().unwrap(),
+        SPIN_FN.parse().unwrap(),
+    );
+    let budget = |budget| GuestLimits {
+        call_budget: Some(budget),
+        ..GuestLimits::default()
+    };
+    engine.set_guest_limits(a, budget(Duration::from_secs(1)));
+    let short = Duration::from_millis(30);
+    engine.set_guest_limits(b, budget(short));
+    // `a` calls `b`'s `call`, which calls `a`'s `spin`.
+    let mut arg = b.as_bytes().to_vec();
+    arg.extend_from_slice(call.as_bytes());
+    arg.extend_from_slice(a.as_bytes());
+    arg.extend_from_slice(spin.as_bytes());
+    let started = Instant::now();
+    engine.dispatch(&a, &call, &arg).unwrap_err();
+    let took = started.elapsed();
+    assert!(
+        took >= short && took < short + 2 * EPOCH + Duration::from_millis(200),
+        "{took:?}"
+    );
+}

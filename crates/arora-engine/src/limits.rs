@@ -20,10 +20,11 @@
 //! 16.7 ms. Loading a module (its `_initialize`, a component's `functions`)
 //! runs under [`DEFAULT_CALL_BUDGET`].
 //!
-//! A guest's call to another guest ends by its caller's deadline, and a guest
-//! calling back into itself keeps its call's deadline: the call under way is
-//! not extended. A caller whose callee ran past the caller's deadline is
-//! interrupted once the call returns.
+//! A guest's call to another guest ends by its caller's deadline, a guest
+//! loading counting as a call to its callees. A module called back while its
+//! call is under way ends by that call's deadline, or its caller's if
+//! earlier: the call under way is never extended. A caller whose callee ran
+//! past the caller's deadline is interrupted once the call returns.
 //!
 //! **Memory.** Each linear memory of a guest's instance may hold up to
 //! [`GuestLimits::memory`] bytes, [`DEFAULT_MEMORY`] by default: a
@@ -154,11 +155,10 @@ pub(crate) fn overran(module: &str, function: &uuid::Uuid, budget: Duration) -> 
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "wasmtime-host"))]
 mod tests {
     use super::*;
 
-    #[cfg(feature = "wasmtime-host")]
     #[test]
     fn a_deadline_is_counted_from_the_wall_clock_to_the_epoch_after_it() {
         use std::sync::atomic::AtomicU64;

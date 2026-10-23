@@ -138,12 +138,13 @@ pub struct Engine {
     /// When the step under way ends, which no guest call outlasts.
     #[cfg(not(target_arch = "wasm32"))]
     step_deadline: Option<std::time::Instant>,
-    /// The guest calls under way, outermost first, each with its deadline: a
-    /// guest calling another, or itself, through the host. A nested call
-    /// ends by its caller's deadline, and a module called again while its
-    /// call is under way keeps that call's deadline.
+    /// The guest calls under way, outermost first, each with its deadline and
+    /// budget: a guest calling another, or itself, through the host, and a
+    /// guest loading, whose initializer can call others. A nested call ends
+    /// by its caller's deadline, and a module called again while its call is
+    /// under way ends by the earlier of that call's deadline and its caller's.
     #[cfg(not(target_arch = "wasm32"))]
-    guest_calls: Vec<(Uuid, std::time::Instant)>,
+    guest_calls: Vec<(Uuid, std::time::Instant, std::time::Duration)>,
 }
 
 /// A module the engine dispatches to, and the executor that loaded it —
@@ -205,7 +206,13 @@ impl Engine {
             .executors
             .get_mut(executor_name)
             .ok_or(LoadModuleError::ExecutorNotFound)?;
-        let module = executor.load_module_limited(module_definition, limits)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.guest_calls
+            .push(loading(module_id, self.guest_calls.last()));
+        let module = executor.load_module_limited(module_definition, limits);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.guest_calls.pop();
+        let module = module?;
         self.modules.insert(
             module_id,
             Loaded {
@@ -233,7 +240,13 @@ impl Engine {
             .executors
             .get_mut(module.header().executor.name.as_str())
             .ok_or(LoadModuleError::ExecutorNotFound)?;
-        let instance = executor.load_compiled_module_limited(module, limits)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.guest_calls
+            .push(loading(module_id, self.guest_calls.last()));
+        let instance = executor.load_compiled_module_limited(module, limits);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.guest_calls.pop();
+        let instance = instance?;
         self.modules.insert(
             module_id,
             Loaded {
@@ -275,7 +288,13 @@ impl Engine {
             .executors
             .get_mut(module.header().executor.name.as_str())
             .ok_or(LoadModuleError::ExecutorNotFound)?;
-        let instance = executor.load_compiled_module_limited(module, limits)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.guest_calls
+            .push(loading(module_id, self.guest_calls.last()));
+        let instance = executor.load_compiled_module_limited(module, limits);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.guest_calls.pop();
+        let instance = instance?;
         self.modules.insert(
             module_id,
             Loaded {
@@ -372,7 +391,7 @@ impl Engine {
         };
         // A guest's call to another ends by its caller's deadline.
         let deadline = match self.guest_calls.last() {
-            Some((_, caller)) => deadline.min(*caller),
+            Some((_, caller, _)) => deadline.min(*caller),
             None => deadline,
         };
         (deadline, deadline.saturating_duration_since(now))
@@ -429,29 +448,60 @@ impl Engine {
         };
         #[cfg(not(target_arch = "wasm32"))]
         if guest {
-            // A module called again while its call is under way keeps that
-            // call's deadline and budget: setting them anew would extend the
-            // call under way, and an interrupted one would read as not.
+            // A module called again while its call is under way ends by that
+            // call's deadline, or its caller's if earlier: its own budget,
+            // counted anew, would extend the call under way. A tighter
+            // deadline holds for this call only; the call under way gets its
+            // own back when this one returns.
             let under_way = self
                 .guest_calls
                 .iter()
-                .find(|(id, _)| id == module_id)
-                .map(|(_, deadline)| *deadline);
-            let deadline = match under_way {
-                Some(deadline) => deadline,
+                .rev()
+                .find(|(id, _, _)| id == module_id)
+                .map(|(_, deadline, budget)| (*deadline, *budget));
+            let (deadline, budget, restore) = match under_way {
                 None => {
                     module.module.set_call_deadline(deadline, budget);
-                    deadline
+                    (deadline, budget, None)
                 }
+                Some((outer, outer_budget)) if deadline < outer => {
+                    module.module.set_call_deadline(deadline, budget);
+                    (deadline, budget, Some((outer, outer_budget)))
+                }
+                Some((outer, outer_budget)) => (outer, outer_budget, None),
             };
-            self.guest_calls.push((*module_id, deadline));
+            self.guest_calls.push((*module_id, deadline, budget));
             let result = module.module.dispatch(function_id, arg);
             self.guest_calls.pop();
+            if let Some((outer, outer_budget)) = restore {
+                // Reloading is not reachable from a dispatch: the module is
+                // still the one called.
+                if let Some(module) = self.modules.get_mut(module_id) {
+                    module.module.set_call_deadline(outer, outer_budget);
+                }
+            }
             return result;
         }
         let _ = guest;
         module.module.dispatch(function_id, arg)
     }
+}
+
+/// The call under way while the module `module` loads: its initializer runs
+/// to [`DEFAULT_CALL_BUDGET`](crate::limits::DEFAULT_CALL_BUDGET), as the
+/// executors bound it, or to its caller's deadline if earlier, so a guest it
+/// calls ends by then too.
+#[cfg(not(target_arch = "wasm32"))]
+fn loading(
+    module: Uuid,
+    caller: Option<&(Uuid, std::time::Instant, std::time::Duration)>,
+) -> (Uuid, std::time::Instant, std::time::Duration) {
+    let now = std::time::Instant::now();
+    let mut deadline = now + crate::limits::DEFAULT_CALL_BUDGET;
+    if let Some((_, caller, _)) = caller {
+        deadline = deadline.min(*caller);
+    }
+    (module, deadline, deadline.saturating_duration_since(now))
 }
 
 pub type EngineRef = *mut Engine;

@@ -291,8 +291,8 @@ engine bounds instead the core-module instances running at once — 1000 on
 64-bit targets, 100 on 32-bit, wasmtime's defaults. The component engine
 allocates its instances on demand, reserving address space per live instance:
 a second pool would reserve, when it is created, as much again as the first.
-Bounding a guest's memory and time per call is
-[ARORA-188](https://linear.app/semio-ai/issue/ARORA-188)'s.
+A guest's memory and the time of each call are bounded per store
+(`arora_engine::limits`).
 
 ### `arora-web` is a separate crate
 
