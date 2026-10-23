@@ -939,31 +939,38 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
           ::std::result::Result::Ok(#decode_ret)
         }
 
-        /// The entry point an executor looks up by name when this module is
-        /// built as an artifact — a wasm guest or a native shared library: the
-        /// size-prefixed argument buffer in, the size-prefixed result buffer
-        /// out, both in the `Value` wire format the engine speaks.
+        /// A call to the export as an artifact receives it: the size-prefixed
+        /// argument buffer, a structure under the function's id, and the
+        /// size-prefixed result buffer, a structure under the same id holding
+        /// the return value and the mutated arguments — both in the `Value`
+        /// wire format the engine speaks. A component's `dispatch` and a core
+        /// module's or shared library's entry point both call it.
+        pub fn dispatch_buffer(input: &[u8]) -> ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> {
+          let arora_types::value::Value::Structure(structure) = arora_buffers::serde_uuid::deserialize(input) else {
+            return Err("argument buffer is not a structure".to_string());
+          };
+          if structure.id != ids::FUNCTION {
+            return Err(format!("argument structure id {} differs from function id {}", structure.id, ids::FUNCTION));
+          }
+          let result = invoke(arora_types::call::Call { module_id: None, id: ids::FUNCTION, args: structure.fields })
+            .map_err(|e| e.to_string())?;
+          let mut fields = ::std::vec::Vec::with_capacity(1 + result.mutated.len());
+          fields.push(arora_types::value::StructureField { id: ids::FUNCTION, value: ::std::boxed::Box::new(result.ret) });
+          fields.extend(result.mutated);
+          Ok(arora_buffers::serde_uuid::serialize(&arora_types::value::Value::Structure(arora_types::value::Structure { id: ids::FUNCTION, fields })))
+        }
+
+        /// The entry point a core-module executor or the native executor
+        /// looks up by name when this module is built as a `wasm32-wasip1`
+        /// guest or a shared library: [`dispatch_buffer`] over the guest's
+        /// linear memory, an error buffer for an error.
         #[no_mangle]
         pub extern "C" fn #shim_ident(input_addr: usize) -> usize {
           let input = unsafe {
             let size = u32::from_le_bytes(*(input_addr as *const [u8; 4])) as usize;
             ::std::slice::from_raw_parts(input_addr as *const u8, size)
           };
-          let result = (|| -> ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> {
-            let arora_types::value::Value::Structure(structure) = arora_buffers::serde_uuid::deserialize(input) else {
-              return Err("argument buffer is not a structure".to_string());
-            };
-            if structure.id != ids::FUNCTION {
-              return Err(format!("argument structure id {} differs from function id {}", structure.id, ids::FUNCTION));
-            }
-            let result = invoke(arora_types::call::Call { module_id: None, id: ids::FUNCTION, args: structure.fields })
-              .map_err(|e| e.to_string())?;
-            let mut fields = ::std::vec::Vec::with_capacity(1 + result.mutated.len());
-            fields.push(arora_types::value::StructureField { id: ids::FUNCTION, value: ::std::boxed::Box::new(result.ret) });
-            fields.extend(result.mutated);
-            Ok(arora_buffers::serde_uuid::serialize(&arora_types::value::Value::Structure(arora_types::value::Structure { id: ids::FUNCTION, fields })))
-          })();
-          match result {
+          match dispatch_buffer(input) {
             Ok(buffer) => ::std::boxed::Box::leak(buffer).as_ptr() as usize,
             Err(message) => {
               let mut writer = arora_buffers::BufferWriter::new();
@@ -1315,6 +1322,28 @@ fn expand_aggregate(args: &ModuleArgs, _scope: Option<&Path>) -> syn::Result<Tok
 
       /// The module as a type: what generic code over declared modules names.
       pub struct Module;
+
+      /// The ids of the functions the module exports.
+      pub fn function_ids() -> ::std::vec::Vec<arora_types::Uuid> {
+        vec![ #(#export_mods::ids::FUNCTION),* ]
+      }
+
+      /// A call to the function `method` names, as an artifact receives it
+      /// ([`dispatch_buffer`](self) of that export), or `None` when the module
+      /// exports no such function. `arora_module::artifact!` routes a
+      /// component's `dispatch` through it.
+      pub fn dispatch_buffer(
+        method: arora_types::Uuid,
+        arg: &[u8],
+      ) -> ::std::option::Option<::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String>> {
+        #(
+          if method == #export_mods::ids::FUNCTION {
+            return ::std::option::Option::Some(#export_mods::dispatch_buffer(arg));
+          }
+        )*
+        let _ = arg;
+        ::std::option::Option::None
+      }
 
       impl arora_types::module::declared::AroraModule for Module {
         fn id() -> arora_types::Uuid { ids::MODULE }

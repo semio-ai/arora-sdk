@@ -21,12 +21,33 @@ Ids are pinned in the attributes, in hex; a parameter is a plain Rust type, or
 | `polly::record(parent)` | the frozen module record a store serves |
 | `polly::exports()` | every export callable, for `HostModule::of::<polly::Module>()` |
 | `polly::client::say(&mut bridge, …)` | the typed stub a caller programs against |
-| `arora_function_<id>` | the entry point an executor looks up in the built artifact |
+| `polly::function_ids()`, `polly::dispatch_buffer(method, arg)` | the functions the artifact serves, and a call as it receives one |
+| `arora_function_<id>` | the entry point a shared library exports per function |
 
 **The executor is not the declaration's to name.** Only the step that builds
 the artifact knows whether it is native or wasm, so `header` takes it there. A
 module linked into the host has no header at all: it is registered from its
 exports and described by its record.
+
+## The artifact
+
+The crate built as the artifact names the modules it carries, once, at its
+root:
+
+```rust
+arora_module::artifact!(polly);
+```
+
+Built for `wasm32-wasip2`, the artifact is a component of the `arora:module`
+world, what a device loads under the `wasm-component` executor: `functions`
+lists the functions of the modules it names, and `dispatch` routes a call to
+the one that exports it. Built otherwise, `artifact!` expands to nothing: a
+shared library exports each function as `arora_function_<id>`.
+
+The exports go wherever the crate that writes `artifact!` is linked: a crate
+whose library another builds into its own `wasm32-wasip2` artifact leaves
+`artifact!` to that artifact's crate, or the two sets of exports collide at
+link time.
 
 ## The two forms
 

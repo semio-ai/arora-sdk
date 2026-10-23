@@ -4,6 +4,17 @@ All notable changes to `arora-module-macros`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - 2026-10-23
+
+### Added
+
+- Each export's `dispatch_buffer(input)`, a call as an artifact receives it
+  (the size-prefixed argument buffer in, the result buffer out), which its
+  `arora_function_<id>` entry point calls; and each module's
+  `function_ids()` and `dispatch_buffer(method, arg)`, which
+  `arora_module::artifact!` serves a component's `functions` and `dispatch`
+  from.
+
 ## [3.0.0] - 2026-10-18
 
 ### Changed
