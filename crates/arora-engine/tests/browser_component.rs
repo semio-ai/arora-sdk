@@ -288,8 +288,9 @@ fn a_component_missing_a_declared_function_fails_to_load() {
 }
 
 /// A component of the `arora:module` world in WebAssembly text: the core
-/// module `guest` (named `$guest`), and its `functions` and `dispatch` lifted
-/// as `wit-component` lifts them, with `more` — imports, modules — beside it.
+/// module `guest` (named `$guest`), its instance `$main`, and its `functions`
+/// and `dispatch` lifted as `wit-component` lifts them, followed by `more` —
+/// imports, modules and their instances.
 fn world_component(guest: &str, more: &str) -> String {
     format!(
         r#"(component
@@ -298,7 +299,6 @@ fn world_component(guest: &str, more: &str) -> String {
                 (export "id" (type (eq 0)))))
             (import "arora:module/types@0.2.0" (instance $types (type $types)))
             (alias export $types "id" (type $id))
-            {more}
             {guest}
             (core instance $main (instantiate $guest))
             (alias core export $main "memory" (core memory $memory))
@@ -313,7 +313,8 @@ fn world_component(guest: &str, more: &str) -> String {
             (type $dispatch (func (param "method" $id) (param "arg" $bytes) (result $result)))
             (func $dispatch (type $dispatch)
                 (canon lift (core func $main "dispatch") (memory $memory) (realloc $realloc)))
-            (export "dispatch" (func $dispatch)))"#
+            (export "dispatch" (func $dispatch))
+            {more})"#
     )
 }
 
@@ -466,11 +467,92 @@ const REACTOR: &str = r#"(core module $guest
         (i32.store (i32.const 2056) (i32.const 1))
         (i32.const 2048)))"#;
 
-/// `wit-component`'s initializer: a module whose start function calls the
-/// import it is given.
-const INITIALIZER: &str = r#"(core module
+/// `wit-component`'s initializer — a module whose start function is the
+/// import it is given — instantiated as `wit-component` instantiates it,
+/// given the guest instance's `_initialize`.
+const INITIALIZER: &str = r#"(core module $initializer
     (import "" "" (func $initialize))
-    (start $initialize))"#;
+    (start $initialize))
+(alias core export $main "_initialize" (core func $initialize))
+(core instance $initialize-args (export "" (func $initialize)))
+(core instance (instantiate $initializer (with "" (instance $initialize-args))))"#;
+
+/// A component that defines an initializer and never instantiates it, so that
+/// natively nothing runs the guest's `_initialize`, is refused rather than
+/// initialized.
+#[wasm_bindgen_test]
+fn a_component_with_an_initializer_it_never_instantiates_is_refused() {
+    console_error_panic_hook::set_once();
+    let unused = r#"(core module (import "" "" (func $initialize)) (start $initialize))"#;
+    let error = load_error(&world_component(REACTOR, unused));
+    assert!(error.contains("initializer"), "unexpected error: {error}");
+}
+
+/// A guest writing `len` zeroes to standard output with the function `write`
+/// imports, under the function id whose low half is `len`: it serves `lens`.
+fn zeroes_writer(write: &str, [a, b]: [u64; 2]) -> String {
+    format!(
+        r#"(core module $guest
+            (import "wasi:cli/stdout@0.2.0" "get-stdout" (func $stdout (result i32)))
+            (import "wasi:io/streams@0.2.0" "[method]output-stream.{write}"
+                (func $write (param i32 i64 i32)))
+            (memory (export "memory") 1)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 4096)
+            (func (export "functions") (result i32)
+                (i64.store (i32.const 1024) (i64.const 0))
+                (i64.store (i32.const 1032) (i64.const {a}))
+                (i64.store (i32.const 1040) (i64.const 0))
+                (i64.store (i32.const 1048) (i64.const {b}))
+                (i32.store (i32.const 2048) (i32.const 1024))
+                (i32.store (i32.const 2052) (i32.const 2))
+                (i32.const 2048))
+            (func (export "dispatch") (param i64 i64 i32 i32) (result i32)
+                (call $write (call $stdout) (local.get 1) (i32.const 3072))
+                (i32.store8 (i32.const 2048) (i32.const 0))
+                (i32.store (i32.const 2052) (i32.const 0))
+                (i32.store (i32.const 2056) (i32.const 0))
+                (i32.const 2048)))"#
+    )
+}
+
+/// An engine with `component` loaded under a header declaring the functions
+/// whose ids' low halves are `functions`.
+fn loaded_with(component: &str, functions: [u64; 2]) -> (Pin<Box<Engine>>, Vec<String>) {
+    let (mut engine, _) = engine();
+    let ids: Vec<String> = functions
+        .iter()
+        .map(|lo| Uuid::from_u64_pair(0, *lo).to_string())
+        .collect();
+    let declared: Vec<(&str, &str)> = ids.iter().map(|id| (id.as_str(), "f")).collect();
+    let bytes = wat::parse_str(component).expect("assemble the component");
+    load_module_from_parts(
+        &mut engine,
+        header_with("wasm-component", &declared),
+        bytes.into(),
+    )
+    .expect("load");
+    (engine, ids)
+}
+
+/// Writing more zeroes than a stream writes at once traps, as natively, where
+/// wasmtime writes none of them, rather than writing some.
+#[wasm_bindgen_test]
+fn writing_more_zeroes_than_a_stream_takes_at_once_traps_in_browser() {
+    console_error_panic_hook::set_once();
+    let lens = [1 << 16, 100_000];
+    let component = world_component(&zeroes_writer("write-zeroes", lens), "");
+    let (mut engine, ids) = loaded_with(&component, lens);
+    dispatch(&mut engine, &ids[0], &[]).expect("as many as check-write permits");
+    let error = dispatch(&mut engine, &ids[1], &[]).unwrap_err();
+    assert!(error.contains("more than the 65536"), "{error}");
+
+    let lens = [4096, 4097];
+    let component = world_component(&zeroes_writer("blocking-write-zeroes-and-flush", lens), "");
+    let (mut engine, ids) = loaded_with(&component, lens);
+    dispatch(&mut engine, &ids[0], &[]).expect("as many as a blocking write takes");
+    let error = dispatch(&mut engine, &ids[1], &[]).unwrap_err();
+    assert!(error.contains("more than the 4096"), "{error}");
+}
 
 /// A reactor component's `_initialize` runs once, when it loads, before its
 /// first call — not again before each call.

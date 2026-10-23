@@ -153,8 +153,11 @@ is what a module registry can hold and every host can run.
   stands for: imports from the interfaces every host provides, and the
   world's `functions` and `dispatch` with the world's types, each lifting
   the guest module's export of that name with its memory, `cabi_realloc`,
-  UTF-8 strings and `cabi_post_` function (`component_layout`). Anything else
-  is refused, so a component a page runs is one a device runs alike.
+  UTF-8 strings and `cabi_post_` function, and a shim, fixups and initializer
+  that do what `wit-component`'s do (`component_layout`). Anything else it
+  reads is refused. It does not validate the rest of the binary, nor check how
+  the guest module's own imports are wired, which the browser implements by
+  name.
 - `wasip3` (WASI 0.3, native async) is the destination: the WIT world is
   shaped so its functions become `async` without structural changes. Not
   adopted yet because wasmtime's `p3` module is explicitly experimental,

@@ -139,37 +139,19 @@ __attribute__((import_module("arora:module/host@0.2.0"), import_name("dispatch")
     std::int64_t module_high, std::int64_t module_low, std::int64_t method_high, std::int64_t method_low,
     const std::uint8_t *arg, std::size_t arg_length, std::uint8_t *returned);
 
-// The callee's result buffer; an error the host returns comes back as an error
+// The callee's result buffer, which the guest owns and generated code frees
+// once it has read it; an error the host returns comes back as an error
 // buffer, as does a result that is not an Arora Buffer, which generated code
 // would misread (`arora_buffer_well_formed`).
-//
-// The buffer stays valid until the next call, which frees it, so a guest holds
-// one result however many calls it makes. Generated code reads a result before
-// it calls again: on a core module, the engine writes each result into a
-// buffer the guest's arora-buffers pool hands out again.
 std::uint8_t *arora_dispatch(const std::uint8_t *const module_id, const std::uint8_t *const method_id,
                              const std::uint8_t *const arg) {
-  // The latest result, and whether `arora_buffer_writer_finalize` made it.
-  static std::uint8_t *latest = nullptr;
-  static bool latest_finalized = false;
-  auto keep = [](std::uint8_t *result, bool finalized) {
-    if (latest_finalized) {
-      arora_buffer_writer_finalized_free(latest);
-    } else {
-      std::free(latest);
-    }
-    latest = result;
-    latest_finalized = finalized;
-    return result;
-  };
-
   alignas(4) std::uint8_t returned[12];
   arora_host_dispatch(static_cast<std::int64_t>(high_half(module_id)), static_cast<std::int64_t>(low_half(module_id)),
                       static_cast<std::int64_t>(high_half(method_id)), static_cast<std::int64_t>(low_half(method_id)),
                       arg, load_u32(arg), returned);
   auto *list = reinterpret_cast<std::uint8_t *>(static_cast<std::uintptr_t>(load_u32(returned + 4)));
   std::uint32_t length = load_u32(returned + 8);
-  if (returned[0] == 0 && arora_buffer_well_formed(list, length)) return keep(list, false);
+  if (returned[0] == 0 && arora_buffer_well_formed(list, length)) return list;
   arora_buffer_writer *writer = arora_buffer_writer_new();
   if (returned[0] == 0) {
     static const char not_a_buffer[] = "the result is not an Arora Buffer";
@@ -181,7 +163,7 @@ std::uint8_t *arora_dispatch(const std::uint8_t *const module_id, const std::uin
   free_list(list, length);
   std::uint8_t *error = arora_buffer_writer_finalize(writer, nullptr);
   arora_buffer_writer_free(writer);
-  return keep(error, true);
+  return error;
 }
 
 }  // extern "C"

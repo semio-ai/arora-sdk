@@ -546,8 +546,30 @@ const STDOUT: i32 = 2;
 const STDERR: i32 = 3;
 const READY: i32 = 1;
 
-/// What an output stream's `check-write` permits at once.
+/// What an output stream's `check-write` permits at once, as natively.
 const WRITE_BUDGET: u64 = 1 << 16;
+
+/// What a `blocking-…-and-flush` writes at once, as natively.
+const BLOCKING_WRITE_LIMIT: u64 = 4096;
+
+/// The most the output stream function `name` writes at once.
+fn write_limit(name: &str) -> u64 {
+    if name.starts_with("[method]output-stream.blocking-") {
+        BLOCKING_WRITE_LIMIT
+    } else {
+        WRITE_BUDGET
+    }
+}
+
+/// A write of `len` bytes past what `name` writes at once traps, as natively,
+/// where wasmtime writes nothing of it.
+fn check_write_limit(name: &str, len: u64, limit: u64) {
+    if len > limit {
+        trap(format!(
+            "{name}: {len} bytes is more than the {limit} it writes at once"
+        ));
+    }
+}
 
 /// Stop the guest: a trap, raised as a JavaScript exception through the
 /// guest's frames.
@@ -749,8 +771,11 @@ impl Imports {
             ("wasi:io/streams", "[method]output-stream.write")
             | ("wasi:io/streams", "[method]output-stream.blocking-write-and-flush") => {
                 let flush = name.contains("flush");
+                let limit = write_limit(name);
+                let name = name.to_string();
                 self.keep(Closure::<dyn Fn(i32, i32, i32, i32)>::new(
                     move |handle, ptr, len, ret| {
+                        check_write_limit(&name, len as u32 as u64, limit);
                         let guest = host.guest();
                         let bytes = guest
                             .read(ptr as u32, len as u32)
@@ -763,10 +788,12 @@ impl Imports {
             ("wasi:io/streams", "[method]output-stream.write-zeroes")
             | ("wasi:io/streams", "[method]output-stream.blocking-write-zeroes-and-flush") => {
                 let flush = name.contains("flush");
+                let limit = write_limit(name);
+                let name = name.to_string();
                 self.keep(Closure::<dyn Fn(i32, i64, i32)>::new(
                     move |handle, len, ret| {
-                        let len = (len as u64).min(WRITE_BUDGET) as usize;
-                        host.write(handle, &vec![0; len], flush);
+                        check_write_limit(&name, len as u64, limit);
+                        host.write(handle, &vec![0; len as usize], flush);
                         host.guest()
                             .write(ret as u32, &[0])
                             .unwrap_or_else(|e| trap(e));

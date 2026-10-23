@@ -26,8 +26,10 @@ All notable changes to `arora-engine`. The format follows
   nested component, one importing anything but those interfaces, and one
   whose exports are not the world's `functions` and `dispatch` with the
   world's types, each lifting its guest module's export of that name as the
-  browser calls it, so that a component the browser runs is one the native
-  executor runs alike.
+  browser calls it, or whose shim, fixups or initializer do more or other
+  than `wit-component`'s; it reads no further, and does not check how the
+  guest module's own imports are wired, which the browser implements by
+  name.
 - `SharedLoader::prepare` stages a component as it stages a core module, by
   the executable's preamble.
 - On `wasm32`, `CompiledModule::new` compiles a `wasm-component` module: the

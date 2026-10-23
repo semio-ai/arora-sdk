@@ -6,11 +6,14 @@
 //!
 //! - when the guest imports a function whose canonical-ABI form writes into
 //!   the guest's memory, a **shim** of indirect calls through a table it
-//!   exports as `$imports`, and the **fixups** that fill the table once that
-//!   memory exists, which export nothing;
+//!   exports as `$imports`, importing nothing, and the **fixups** that fill
+//!   the table once that memory exists, which export nothing and import only
+//!   functions and that table;
 //! - when the guest exports `_initialize` (a WASI reactor, as a C or C++
 //!   guest is), an **initializer**: a module exporting nothing whose start
-//!   function calls it when the component is instantiated.
+//!   function is its one import, which the component instantiates once,
+//!   giving it the guest's `_initialize`, so it runs when the component is
+//!   instantiated.
 //!
 //! Around those modules, the component implements the `arora:module` world:
 //! it imports interfaces every Arora host provides ([`HOST_INTERFACES`]), and
@@ -19,24 +22,27 @@
 //! `cabi_realloc`, UTF-8 strings and its `cabi_post_` function.
 //!
 //! [`guest_module`] finds the guest's module in such a component and refuses
-//! any other. The browser's component executor instantiates that module alone
-//! and calls its exports in their canonical-ABI form, so a component it runs
-//! is one whose own layer does what that does: one the native component
-//! executor runs with the same results. The guests' parity test holds every
-//! guest the repository builds to it.
+//! any other. The browser's component executor instantiates that module alone,
+//! runs its `_initialize` when the component has an initializer, and calls its
+//! exports in their canonical-ABI form; the component's own layer is to do no
+//! more and no other than that, as far as this reads it. The guests' parity
+//! test holds every guest the repository builds to it.
 //!
-//! The check reads the component's imports, exports, types and the wiring of
-//! its exports, and does not validate the rest of its binary as wasmtime does:
-//! a component malformed elsewhere, which no toolchain emits, runs in the
-//! browser as these checks read it, and is refused natively. It does not check
-//! how the guest module's imports are wired either: the browser implements
-//! each by the interface function its name gives, of those a host provides.
+//! It reads the component's imports, exports and their types, the wiring of
+//! its exports, and what its other modules are given; it does not validate the
+//! rest of its binary as wasmtime does, so a component malformed elsewhere,
+//! which no toolchain emits, runs in the browser as this reads it and is
+//! refused natively. Nor does it check how the guest module's own imports are
+//! wired: the browser implements each by the interface function its name
+//! gives, of those a host provides, whatever the component gives it.
+
+use std::cell::Cell;
 
 use wasmparser::{
     CanonicalFunction, CanonicalOption, ComponentAlias, ComponentDefinedType, ComponentExport,
     ComponentExternalKind, ComponentFuncType, ComponentImport, ComponentOuterAliasKind,
     ComponentType, ComponentTypeRef, ComponentValType, ExternalKind, Instance,
-    InstanceTypeDeclaration, Parser, Payload, PrimitiveValType, TypeBounds,
+    InstanceTypeDeclaration, Parser, Payload, PrimitiveValType, TypeBounds, TypeRef,
 };
 
 /// Whether `bytes` is a component rather than a core module: the layer field
@@ -133,15 +139,19 @@ struct CoreModule<'a> {
     bytes: &'a [u8],
     role: CoreRole,
     exports: Vec<&'a str>,
+    /// Its imports: each its module, name and kind.
+    imports: Vec<(&'a str, &'a str, ExternalKind)>,
+    /// The function its start section runs.
+    start: Option<u32>,
 }
 
 /// A module exporting `$imports` is the shim; any other module exporting
 /// something is the guest. Of the modules exporting nothing, one with a start
-/// function is the initializer — whichever export of the guest it calls, the
-/// guest's `_initialize` is the one `wit-component` calls at instantiation —
+/// function is the initializer, which the component is to instantiate with
+/// the guest's `_initialize` as that function ([`Outer::check_initializer`]),
 /// and one without is the fixups.
 fn core_module(bytes: &[u8]) -> Result<CoreModule<'_>, String> {
-    let (mut exports, mut starts) = (Vec::new(), false);
+    let (mut exports, mut imports, mut start) = (Vec::new(), Vec::new(), None);
     for payload in Parser::new(0).parse_all(bytes) {
         match payload.map_err(|e| format!("a core module does not read: {e}"))? {
             Payload::ExportSection(section) => {
@@ -149,10 +159,24 @@ fn core_module(bytes: &[u8]) -> Result<CoreModule<'_>, String> {
                     exports.push(export.map_err(|e| e.to_string())?.name);
                 }
             }
-            Payload::StartSection { .. } => starts = true,
+            Payload::ImportSection(section) => {
+                for import in section.into_imports() {
+                    let import = import.map_err(|e| e.to_string())?;
+                    let kind = match import.ty {
+                        TypeRef::Func(_) => ExternalKind::Func,
+                        TypeRef::Table(_) => ExternalKind::Table,
+                        TypeRef::Memory(_) => ExternalKind::Memory,
+                        TypeRef::Global(_) => ExternalKind::Global,
+                        _ => ExternalKind::Tag,
+                    };
+                    imports.push((import.module, import.name, kind));
+                }
+            }
+            Payload::StartSection { func, .. } => start = Some(func),
             _ => {}
         }
     }
+    let starts = start.is_some();
     let role = if exports.contains(&"$imports") {
         CoreRole::Shim
     } else if !exports.is_empty() {
@@ -165,11 +189,25 @@ fn core_module(bytes: &[u8]) -> Result<CoreModule<'_>, String> {
     Ok(CoreModule {
         bytes,
         role,
+        imports,
+        start,
         exports,
     })
 }
 
-/// Where a core function or memory of the component comes from.
+/// A core instance of the component.
+enum CoreInstance<'a> {
+    /// A module's instance, and its arguments: each a name and the core
+    /// instance given under it.
+    Instantiate {
+        module: u32,
+        args: Vec<(&'a str, u32)>,
+    },
+    /// Core items gathered under names: each its name, kind and index.
+    FromExports(Vec<(&'a str, ExternalKind, u32)>),
+}
+
+/// Where a core function, memory or table of the component comes from.
 #[derive(Clone, Copy, PartialEq)]
 enum CoreItem<'a> {
     /// The export of a core instance under a name.
@@ -266,26 +304,35 @@ fn world_signature(export: &str) -> Signature {
 /// go three deep.
 const TYPE_DEPTH: u32 = 16;
 
+/// How many types resolving the exports' types may visit in all; the world's
+/// visit a dozen. Types may share, so depth alone does not bound the work.
+const TYPE_BUDGET: u32 = 10_000;
+
 /// A component's own layer: its index spaces, as far as the checks read them.
 #[derive(Default)]
 struct Outer<'a> {
-    /// The core modules; `None` for one the component does not define.
-    modules: Vec<Option<CoreModule<'a>>>,
-    /// The core instances: the module each instantiates.
-    core_instances: Vec<Option<u32>>,
+    /// The core modules, each one the component defines: it aliases none.
+    modules: Vec<CoreModule<'a>>,
+    core_instances: Vec<CoreInstance<'a>>,
     core_funcs: Vec<CoreItem<'a>>,
     core_memories: Vec<CoreItem<'a>>,
+    core_tables: Vec<CoreItem<'a>>,
     funcs: Vec<Func>,
     types: Vec<Ty<'a>>,
     /// The instances: an imported one's type.
     instances: Vec<Option<u32>>,
     /// The functions exported, by name.
     exports: Vec<(&'a str, u32)>,
+    /// How many more types resolving the exports' types may visit.
+    type_budget: Cell<u32>,
 }
 
 impl<'a> Outer<'a> {
     fn read(component: &'a [u8]) -> Result<Self, String> {
-        let mut outer = Outer::default();
+        let mut outer = Outer {
+            type_budget: Cell::new(TYPE_BUDGET),
+            ..Outer::default()
+        };
         let read_error = |e: wasmparser::BinaryReaderError| format!("it does not read: {e}");
         // The core modules' own payloads come between their section and their
         // end; none of them is the component's.
@@ -302,7 +349,7 @@ impl<'a> Outer<'a> {
                 } => {
                     let (start, end) = (unchecked_range.start, unchecked_range.end);
                     let module = core_module(&component[start as usize..end as usize])?;
-                    outer.modules.push(Some(module));
+                    outer.modules.push(module);
                     in_module = true;
                 }
                 Payload::ComponentSection { .. } => return Err("it nests a component".into()),
@@ -317,14 +364,21 @@ impl<'a> Outer<'a> {
                         outer
                             .core_instances
                             .push(match instance.map_err(read_error)? {
-                                Instance::Instantiate { module_index, .. } => Some(module_index),
-                                Instance::FromExports(_) => None,
+                                Instance::Instantiate { module_index, args } => {
+                                    CoreInstance::Instantiate {
+                                        module: module_index,
+                                        args: args.iter().map(|a| (a.name, a.index)).collect(),
+                                    }
+                                }
+                                Instance::FromExports(exports) => CoreInstance::FromExports(
+                                    exports.iter().map(|e| (e.name, e.kind, e.index)).collect(),
+                                ),
                             });
                     }
                 }
                 Payload::ComponentAliasSection(section) => {
                     for alias in section {
-                        outer.alias(alias.map_err(read_error)?);
+                        outer.alias(alias.map_err(read_error)?)?;
                     }
                 }
                 Payload::ComponentCanonicalSection(section) => {
@@ -365,7 +419,9 @@ impl<'a> Outer<'a> {
         Ok(outer)
     }
 
-    fn alias(&mut self, alias: ComponentAlias<'a>) {
+    /// A module aliased, rather than defined, is refused: it would instantiate
+    /// without a role, as the guest's twin for one.
+    fn alias(&mut self, alias: ComponentAlias<'a>) -> Result<(), String> {
         match alias {
             ComponentAlias::CoreInstanceExport {
                 kind,
@@ -375,6 +431,9 @@ impl<'a> Outer<'a> {
                 ExternalKind::Func => self.core_funcs.push(CoreItem::Export(instance_index, name)),
                 ExternalKind::Memory => self
                     .core_memories
+                    .push(CoreItem::Export(instance_index, name)),
+                ExternalKind::Table => self
+                    .core_tables
                     .push(CoreItem::Export(instance_index, name)),
                 _ => {}
             },
@@ -388,15 +447,18 @@ impl<'a> Outer<'a> {
                     self.types.push(Ty::InstanceExport(instance_index, name))
                 }
                 ComponentExternalKind::Instance => self.instances.push(None),
-                ComponentExternalKind::Module => self.modules.push(None),
+                ComponentExternalKind::Module => return Err("it aliases a core module".into()),
                 ComponentExternalKind::Component | ComponentExternalKind::Value => {}
             },
             ComponentAlias::Outer { kind, .. } => match kind {
                 ComponentOuterAliasKind::Type => self.types.push(Ty::Other),
-                ComponentOuterAliasKind::CoreModule => self.modules.push(None),
+                ComponentOuterAliasKind::CoreModule => {
+                    return Err("it aliases a core module".into())
+                }
                 ComponentOuterAliasKind::CoreType | ComponentOuterAliasKind::Component => {}
             },
         }
+        Ok(())
     }
 
     /// An interface every host provides, or a type equal to one the
@@ -438,12 +500,7 @@ impl<'a> Outer<'a> {
 
     /// The guest module, once the layout and the world's exports check.
     fn guest(&self) -> Result<GuestModule<'a>, String> {
-        let defined = || {
-            self.modules
-                .iter()
-                .enumerate()
-                .filter_map(|(i, m)| Some((i, m.as_ref()?)))
-        };
+        let defined = || self.modules.iter().enumerate();
         let count = |role| defined().filter(|(_, m)| m.role == role).count();
         let (guests, shims, fixups, initializers) = (
             count(CoreRole::Guest),
@@ -461,10 +518,8 @@ impl<'a> Outer<'a> {
             .find(|(_, m)| m.role == CoreRole::Guest)
             .expect("one guest module");
 
-        let instances: Vec<u32> = (0..self.core_instances.len() as u32)
-            .filter(|&i| self.core_instances[i as usize] == Some(index as u32))
-            .collect();
-        let [instance] = instances[..] else {
+        let instances = self.instantiations(index);
+        let [(instance, _)] = instances[..] else {
             return Err(format!(
                 "it instantiates its guest module {} times",
                 instances.len()
@@ -481,10 +536,128 @@ impl<'a> Outer<'a> {
         for &(name, func) in &self.exports {
             self.check_export(name, func, instance, guest)?;
         }
+        let shim = defined().find(|(_, m)| m.role == CoreRole::Shim);
+        let fixups = defined().find(|(_, m)| m.role == CoreRole::Fixups);
+        if let (Some(shim), Some(fixups)) = (shim, fixups) {
+            self.check_shim(shim, fixups)?;
+        }
+        let initializer = defined().find(|(_, m)| m.role == CoreRole::Initializer);
+        if let Some((index, initializer)) = initializer {
+            self.check_initializer(index, initializer, instance, guest)?;
+        }
         Ok(GuestModule {
             bytes: guest.bytes,
-            initialize: initializers == 1,
+            initialize: initializer.is_some(),
         })
+    }
+
+    /// The instances of the module at `index`, each with its arguments.
+    fn instantiations(&self, index: usize) -> Vec<(u32, &[(&'a str, u32)])> {
+        (0..self.core_instances.len() as u32)
+            .filter_map(|i| match &self.core_instances[i as usize] {
+                CoreInstance::Instantiate { module, args } if *module as usize == index => {
+                    Some((i, &args[..]))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// What the instance made with `args` is given for the import
+    /// `module`/`name` of `kind`: the export of a module instance passed whole,
+    /// or the item an instance of exports gathers under that name.
+    fn given(
+        &self,
+        args: &[(&'a str, u32)],
+        module: &str,
+        name: &'a str,
+        kind: ExternalKind,
+    ) -> Option<CoreItem<'a>> {
+        let &(_, instance) = args.iter().find(|(arg, _)| *arg == module)?;
+        match self.core_instances.get(instance as usize)? {
+            CoreInstance::Instantiate { .. } => Some(CoreItem::Export(instance, name)),
+            CoreInstance::FromExports(exports) => {
+                let &(_, found, index) = exports.iter().find(|(export, _, _)| *export == name)?;
+                let space = match kind {
+                    ExternalKind::Func => &self.core_funcs,
+                    ExternalKind::Table => &self.core_tables,
+                    ExternalKind::Memory => &self.core_memories,
+                    _ => return None,
+                };
+                (found == kind).then(|| space.get(index as usize).copied())?
+            }
+        }
+    }
+
+    /// The shim and the fixups touch nothing of the guest's: the shim imports
+    /// nothing and starts nothing; the fixups, instantiated once, import only
+    /// functions and the shim instance's `$imports` table, which they fill.
+    /// So neither changes the guest's memory or tables, which the browser,
+    /// running neither, would not see changed.
+    fn check_shim(
+        &self,
+        (shim_index, shim): (usize, &CoreModule<'a>),
+        (fixups_index, fixups): (usize, &CoreModule<'a>),
+    ) -> Result<(), String> {
+        let refuse = || {
+            "its shim and fixups modules do more than wit-component's, which fill the shim's \
+             table"
+                .to_string()
+        };
+        if !shim.imports.is_empty() || shim.start.is_some() {
+            return Err(refuse());
+        }
+        let [(shim_instance, _)] = self.instantiations(shim_index)[..] else {
+            return Err(refuse());
+        };
+        let [(_, args)] = self.instantiations(fixups_index)[..] else {
+            return Err(refuse());
+        };
+        let table = Some(CoreItem::Export(shim_instance, "$imports"));
+        for &(module, name, kind) in &fixups.imports {
+            let wired = match kind {
+                ExternalKind::Func => true,
+                ExternalKind::Table => self.given(args, module, name, kind) == table,
+                _ => false,
+            };
+            if !wired {
+                return Err(refuse());
+            }
+        }
+        Ok(())
+    }
+
+    /// The initializer runs the guest instance's `_initialize` once, as the
+    /// browser does: instantiated once, its one import — the function its
+    /// start runs — given the guest instance's `_initialize`, which the guest
+    /// exports.
+    fn check_initializer(
+        &self,
+        index: usize,
+        initializer: &CoreModule<'a>,
+        instance: u32,
+        guest: &CoreModule<'a>,
+    ) -> Result<(), String> {
+        let refuse = || {
+            "its initializer does not run its guest module's _initialize once, as \
+             wit-component's does"
+                .to_string()
+        };
+        let [(module, name, ExternalKind::Func)] = initializer.imports[..] else {
+            return Err(refuse());
+        };
+        if initializer.start != Some(0) || !guest.exports.contains(&"_initialize") {
+            return Err(refuse());
+        }
+        let [(_, args)] = self.instantiations(index)[..] else {
+            return Err(refuse());
+        };
+        if self.given(args, module, name, ExternalKind::Func)
+            != Some(CoreItem::Export(instance, "_initialize"))
+        {
+            return Err(refuse());
+        }
+        Ok(())
     }
 
     /// The export `name` lifts the guest instance's export of that name as
@@ -599,9 +772,11 @@ impl<'a> Outer<'a> {
     /// The type at `index` of `scope`, resolved.
     fn ty(&self, scope: &Scope<'_, 'a>, index: u32, depth: u32) -> Result<Val, String> {
         let unsupported = || format!("its exports name a type the world's do not ({index})");
-        if depth > TYPE_DEPTH {
+        let budget = self.type_budget.get();
+        if depth > TYPE_DEPTH || budget == 0 {
             return Err(unsupported());
         }
+        self.type_budget.set(budget - 1);
         let depth = depth + 1;
         match scope.types.get(index as usize).ok_or_else(unsupported)? {
             Ty::Defined(defined) => match defined {
@@ -700,14 +875,31 @@ mod tests {
     /// A guest core module exporting what the world's lifts call.
     const GUEST: &str = r#"(core module $guest
         (memory (export "memory") 1)
+        (func (export "_initialize"))
         (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 8)
         (func (export "functions") (result i32) i32.const 0)
         (func (export "cabi_post_functions") (param i32))
         (func (export "dispatch") (param i64 i64 i32 i32) (result i32) i32.const 0)
         (func (export "cabi_post_dispatch") (param i32)))"#;
-    const SHIM: &str = r#"(core module (table (export "$imports") 1 1 funcref))"#;
-    const FIXUPS: &str = r#"(core module (import "" "$imports" (table 1 1 funcref)))"#;
-    const INITIALIZER: &str = r#"(core module (import "" "" (func $f)) (start $f))"#;
+    const SHIM: &str = r#"(core module $shim (table (export "$imports") 1 1 funcref))"#;
+    const FIXUPS: &str = r#"(core module $fixups (import "" "$imports" (table 1 1 funcref)))"#;
+    const ANOTHER_SHIM: &str = r#"(core module (table (export "$imports") 1 1 funcref))"#;
+    const ANOTHER_FIXUPS: &str = r#"(core module (import "" "$imports" (table 1 1 funcref)))"#;
+    /// The shim and the fixups instantiated as wit-component instantiates
+    /// them: the fixups given the shim instance's table.
+    const FILL: &str = r#"
+        (core instance $shim-instance (instantiate $shim))
+        (alias core export $shim-instance "$imports" (core table $imports))
+        (core instance $fixups-args (export "$imports" (table $imports)))
+        (core instance (instantiate $fixups (with "" (instance $fixups-args))))"#;
+    const INITIALIZER: &str = r#"(core module $initializer (import "" "" (func $f)) (start $f))"#;
+    const ANOTHER_INITIALIZER: &str = r#"(core module (import "" "" (func $f)) (start $f))"#;
+    /// The initializer instantiated as wit-component instantiates it: given
+    /// the guest instance's `_initialize`.
+    const INITIALIZE: &str = r#"
+        (alias core export $main "_initialize" (core func $initialize))
+        (core instance $initialize-args (export "" (func $initialize)))
+        (core instance (instantiate $initializer (with "" (instance $initialize-args))))"#;
 
     /// The world's `id` type, as wit-component imports it: from the `types`
     /// interface, then as the world's own type.
@@ -747,6 +939,12 @@ mod tests {
         let mut parts = vec![ID];
         parts.extend_from_slice(modules);
         parts.push(EXPORTS);
+        if modules.contains(&INITIALIZER) {
+            parts.push(INITIALIZE);
+        }
+        if modules.contains(&SHIM) && modules.contains(&FIXUPS) {
+            parts.push(FILL);
+        }
         guest_module(&component(&parts)).map(|guest| guest.initialize)
     }
 
@@ -773,8 +971,8 @@ mod tests {
             &[GUEST, other_guest][..],
             &[GUEST, SHIM],
             &[GUEST, FIXUPS],
-            &[GUEST, SHIM, FIXUPS, SHIM, FIXUPS],
-            &[GUEST, INITIALIZER, INITIALIZER],
+            &[GUEST, SHIM, FIXUPS, ANOTHER_SHIM, ANOTHER_FIXUPS],
+            &[GUEST, INITIALIZER, ANOTHER_INITIALIZER],
         ] {
             assert!(layout(modules).is_err(), "{modules:?}");
         }
@@ -784,6 +982,146 @@ mod tests {
             .contains("nests a component"));
         let core = wat::parse_str("(module)").unwrap();
         assert!(guest_module(&core).unwrap_err().contains("not a component"));
+    }
+
+    #[test]
+    fn an_initializer_not_running_the_guest_s_initialize_once_is_refused() {
+        let initialize = |parts: &[&str]| guest_module(&component(parts)).map(|g| g.initialize);
+        assert_eq!(
+            initialize(&[ID, GUEST, INITIALIZER, EXPORTS, INITIALIZE]),
+            Ok(true)
+        );
+        let twice = format!(
+            r#"{INITIALIZE} (core instance (instantiate $initializer (with "" (instance $initialize-args))))"#
+        );
+        let other_export = INITIALIZE.replace(r#""_initialize""#, r#""functions""#);
+        let other_argument = INITIALIZE.replace(r#"(with "" "#, r#"(with "other" "#);
+        let idle = r#"(core module $initializer (import "" "" (func)) (func $idle) (start $idle))"#;
+        let not_a_reactor = GUEST.replace(r#"(func (export "_initialize"))"#, "");
+        for parts in [
+            // Defined, never instantiated, so its start function never runs.
+            &[ID, GUEST, INITIALIZER, EXPORTS][..],
+            &[ID, GUEST, INITIALIZER, EXPORTS, &twice],
+            &[ID, GUEST, INITIALIZER, EXPORTS, &other_export],
+            &[ID, GUEST, INITIALIZER, EXPORTS, &other_argument],
+            // A start function other than the function it is given.
+            &[ID, GUEST, idle, EXPORTS, INITIALIZE],
+            &[ID, &not_a_reactor, INITIALIZER, EXPORTS, INITIALIZE],
+        ] {
+            let error = initialize(parts).unwrap_err();
+            assert!(error.contains("initializer"), "{parts:?}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_shim_or_fixups_touching_more_than_the_shim_s_table_is_refused() {
+        let layout = |shim: &str, fixups: &str, fill: &str| {
+            guest_module(&component(&[ID, GUEST, shim, fixups, EXPORTS, fill])).map(|_| ())
+        };
+        assert_eq!(layout(SHIM, FIXUPS, FILL), Ok(()));
+        // The fixups given the guest's own table to write into.
+        let guest_table = FILL.replace(
+            r#"(alias core export $shim-instance "$imports" (core table $imports))"#,
+            r#"(alias core export $main "table" (core table $imports))"#,
+        );
+        // Fixups that could write into the guest's memory.
+        let with_memory = FIXUPS.replace(")))", r#")) (import "" "memory" (memory 1)))"#);
+        let shim_importing = SHIM.replace("(table", r#"(import "" "f" (func)) (table"#);
+        let shim_starting = SHIM.replace("funcref)", "funcref) (func $s) (start $s)");
+        let never_filled = FILL.replace(
+            r#"(core instance (instantiate $fixups (with "" (instance $fixups-args))))"#,
+            "",
+        );
+        // Filled once as wit-component fills it, then once more with the
+        // guest's table.
+        let filled_twice = format!(
+            r#"{FILL}
+            (alias core export $main "table" (core table $guest-table))
+            (core instance $guest-args (export "$imports" (table $guest-table)))
+            (core instance (instantiate $fixups (with "" (instance $guest-args))))"#
+        );
+        for (shim, fixups, fill) in [
+            (SHIM, FIXUPS, guest_table.as_str()),
+            (SHIM, with_memory.as_str(), FILL),
+            (shim_importing.as_str(), FIXUPS, FILL),
+            (shim_starting.as_str(), FIXUPS, FILL),
+            (SHIM, FIXUPS, never_filled.as_str()),
+            (SHIM, FIXUPS, filled_twice.as_str()),
+        ] {
+            let error = layout(shim, fixups, fill).unwrap_err();
+            assert!(
+                error.contains("shim and fixups"),
+                "{fixups} {fill}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_component_aliasing_a_module_or_defining_a_component_instance_is_refused() {
+        let alias = changed(
+            EXPORTS,
+            &format!("{EXPORTS} (alias outer 0 0 (core module))"),
+        );
+        assert!(alias.unwrap_err().contains("aliases a core module"));
+        // A module an imported interface's instance exports.
+        let from_an_instance = changed(
+            EXPORTS,
+            &format!(
+                r#"{EXPORTS}
+                (import "wasi:io/poll@0.2.9" (instance $poll (export "m" (core module))))
+                (alias export $poll "m" (core module))"#
+            ),
+        );
+        assert!(from_an_instance
+            .unwrap_err()
+            .contains("aliases a core module"));
+        let instance = changed(EXPORTS, &format!("{EXPORTS} (instance)"));
+        assert!(instance.unwrap_err().contains("component instance"));
+    }
+
+    #[test]
+    fn types_the_world_s_are_not_are_refused_without_resolving_them_whole() {
+        // An export lifted with another memory than the guest's.
+        let other_memory = changed(
+            r#"(canon lift (core func $main "functions") (memory $memory)"#,
+            r#"(canon lift (core func $main "functions") (memory 1)"#,
+        );
+        assert!(other_memory.unwrap_err().contains("memory"));
+
+        // `dispatch`'s `method` of the type `types` define, as `$method`.
+        let method_of = |types: &str| {
+            let text = format!("{ID} {GUEST} {EXPORTS}")
+                .replace(
+                    "(type $bytes (list u8))",
+                    &format!("(type $bytes (list u8)) {types}"),
+                )
+                .replace(r#"(param "method" $id)"#, r#"(param "method" $method)"#);
+            guest_module(component(&[&text]).leak()).map(|_| ())
+        };
+        assert_eq!(
+            method_of(r#"(type $method (record (field "hi" u64) (field "lo" u64)))"#),
+            Ok(())
+        );
+        // A record holding itself.
+        assert!(method_of(r#"(type $method (record (field "a" $method)))"#).is_err());
+        // Records sharing their fields' types, 4 wide and 13 deep: 4^13
+        // visits whole, refused within the budget.
+        let mut dag = String::from(r#"(type $r0 (record (field "a" u64)))"#);
+        for depth in 1..=13 {
+            let below = depth - 1;
+            let field = |name| format!(r#"(field "{name}" $r{below})"#);
+            dag += &format!(
+                " (type $r{depth} (record {} {} {} {}))",
+                field("a"),
+                field("b"),
+                field("c"),
+                field("d")
+            );
+        }
+        dag += r#" (type $method (record (field "hi" $r13) (field "lo" $r13)))"#;
+        let started = std::time::Instant::now();
+        assert!(method_of(&dag).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]
