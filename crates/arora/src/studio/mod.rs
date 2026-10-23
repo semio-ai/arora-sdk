@@ -466,6 +466,25 @@ pub async fn connect_with_device_dir(device_dir: &Path) -> Result<Box<dyn Bridge
     .await
 }
 
+// The connection futures are `Send`, so an embedder can await them in a spawned
+// task: whatever they hold across an await is `Send`, and a reference to it
+// `Sync`.
+const _: () = {
+    fn send<T: Send>(_: &T) {}
+    #[allow(dead_code)]
+    fn connection_futures_are_send(
+        operator: &dyn Operator,
+        description: &HalDescription,
+        device_dir: &Path,
+    ) {
+        send(&connect());
+        send(&connect_with_description(description));
+        send(&connect_with_device_dir(device_dir));
+        send(&connect_with_operator(operator));
+        send(&connect_with_operator_and_description(operator, description));
+    }
+};
+
 /// Build the Studio bridge of the device whose Studio credentials
 /// `credentials` holds, reporting its model as `description` completes it,
 /// and enrolling it first through `operator`, if any, when it is not
@@ -765,7 +784,7 @@ impl Model {
 /// answers, else a generated one — and `model`, whose family, when nothing
 /// gives one, `operator` is asked for.
 async fn enrolling_device(
-    env: &dyn Fn(&str) -> Option<String>,
+    env: &(dyn Fn(&str) -> Option<String> + Sync),
     model: &Model,
     operator: Option<&dyn Operator>,
 ) -> DeviceDescription {
