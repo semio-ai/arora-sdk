@@ -22,7 +22,7 @@
 //! `assert` — is entered no more: every later call fails with the trap it
 //! met, until the module is reloaded, which instantiates it afresh.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use derive_more::{Display, Error, From};
@@ -71,6 +71,9 @@ struct HostState {
     /// re-enter the engine while it is already mutably borrowed further up
     /// the stack, hence the raw pointer (see [`EngineRef`]).
     engine: EnginePtr,
+    /// When the call under way must end ([`limits::bound`]): the load's
+    /// deadline until the first call sets its own.
+    deadline: std::time::Instant,
 }
 
 impl WasiView for HostState {
@@ -146,30 +149,18 @@ fn config() -> Config {
 /// it, so one engine is what lets the devices of a process share a compiled
 /// module; each instance keeps a store of its own. A failure to create it is
 /// kept: every later executor and compilation fails with it.
-fn runtime() -> Result<&'static (WasmEngine, Arc<limits::Clock>), LoadModuleError> {
-    static ENGINE: OnceLock<Result<(WasmEngine, Arc<limits::Clock>), String>> = OnceLock::new();
+fn engine() -> Result<&'static WasmEngine, LoadModuleError> {
+    static ENGINE: OnceLock<Result<WasmEngine, String>> = OnceLock::new();
     ENGINE
         .get_or_init(|| {
             let engine = WasmEngine::new(&config()).map_err(|e| format!("{e:#}"))?;
-            let clock = limits::tick(&engine);
-            Ok((engine, clock))
+            limits::tick(&engine);
+            Ok(engine)
         })
         .as_ref()
         .map_err(|e| {
             LoadModuleError::Internal(format!("failed to create the component engine: {e}"))
         })
-}
-
-fn engine() -> Result<&'static WasmEngine, LoadModuleError> {
-    runtime().map(|(engine, _)| engine)
-}
-
-/// The clock of the [`engine`]'s epochs, which a call's deadline is counted
-/// with. Only a module instantiated on that engine asks for it, so the engine
-/// exists.
-fn clock() -> &'static limits::Clock {
-    let (_, clock) = runtime().expect("a module runs on a created engine");
-    clock
 }
 
 /// Compile `executable` on the process-wide [`engine`].
@@ -252,13 +243,12 @@ impl ComponentExecutor {
             engine: EnginePtr(self.arora_engine.ok_or_else(|| {
                 LoadModuleError::Internal("ComponentExecutor: set_engine not called".into())
             })?),
+            // Instantiating runs the component's initializer and `functions`.
+            deadline: std::time::Instant::now() + limits::DEFAULT_CALL_BUDGET,
         };
         let mut store = Store::new(component.engine(), state);
         store.limiter(|state| &mut state.limits);
-        // Instantiating runs the component's initializer and `functions`.
-        store.set_epoch_deadline(
-            clock().epochs_until(std::time::Instant::now() + limits::DEFAULT_CALL_BUDGET),
-        );
+        limits::bound(&mut store, |state: &HostState| state.deadline);
 
         let bindings = Module::instantiate(&mut store, component, &self.linker)
             .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
@@ -362,8 +352,7 @@ struct ComponentModule {
 
 impl AroraModule for ComponentModule {
     fn set_call_deadline(&mut self, deadline: std::time::Instant, budget: std::time::Duration) {
-        self.store
-            .set_epoch_deadline(clock().epochs_until(deadline));
+        self.store.data_mut().deadline = deadline;
         self.budget = budget;
     }
 

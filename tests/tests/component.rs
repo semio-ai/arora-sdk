@@ -667,3 +667,121 @@ fn a_component_called_back_ends_by_its_caller_s_earlier_deadline() {
         "{took:?}"
     );
 }
+/// An executor whose load calls a guest function through the engine, as a
+/// guest's initializer would, then refuses the module.
+struct CallsWhileLoading {
+    engine: Option<arora_engine::engine::EngineRef>,
+    module: Uuid,
+    function: Uuid,
+}
+
+impl arora_engine::executor::Executor for CallsWhileLoading {
+    fn set_engine(&mut self, engine: arora_engine::engine::EngineRef) {
+        self.engine = Some(engine);
+    }
+
+    fn name(&self) -> &'static str {
+        "calls-while-loading"
+    }
+
+    fn load_module(
+        &mut self,
+        _: arora_types::module::low::ModuleDefinition,
+    ) -> Result<Box<dyn arora_engine::module::Module>, arora_engine::executor::LoadModuleError>
+    {
+        // SAFETY: the engine outlives its executors, and calls nothing else
+        // while it loads.
+        let engine = unsafe { &mut *self.engine.expect("set_engine") };
+        let _ = engine.dispatch(&self.module, &self.function, &[]);
+        Err(arora_engine::executor::LoadModuleError::Internal(
+            "loaded nothing".into(),
+        ))
+    }
+
+    fn unload_module(&mut self, _: Uuid) -> Result<(), arora_engine::executor::UnloadModuleError> {
+        Ok(())
+    }
+}
+
+/// A guest loading gives the guests it calls no more than the load's own
+/// budget: a component allowed 30 s, called while another module loads, is
+/// interrupted when the load's second is out.
+#[test]
+fn a_guest_called_while_another_loads_ends_by_the_load_s_budget() {
+    use arora_engine::limits::{GuestLimits, DEFAULT_CALL_BUDGET};
+    use std::time::{Duration, Instant};
+    let (spinner, spin): (Uuid, Uuid) = (MODULE_ID.parse().unwrap(), SPIN_FN.parse().unwrap());
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .add_executor(CallsWhileLoading {
+            engine: None,
+            module: spinner,
+            function: spin,
+        })
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    engine.set_guest_limits(
+        spinner,
+        GuestLimits {
+            call_budget: Some(Duration::from_secs(30)),
+            ..GuestLimits::default()
+        },
+    );
+    let mut loading = header_as("5b2d8e17-4c90-4a3f-9e61-07d4c8a2f5b3", "loading");
+    loading.executor.name = "calls-while-loading".to_string();
+    let started = Instant::now();
+    load_module_from_parts(&mut engine, loading, Box::new([])).unwrap_err();
+    let took = started.elapsed();
+    assert!(
+        took < DEFAULT_CALL_BUDGET + Duration::from_millis(500),
+        "{took:?}"
+    );
+    let refused = engine.dispatch(&spinner, &spin, &[]).unwrap_err();
+    assert!(
+        format!("{refused}").contains("trapped in an earlier call"),
+        "{refused}"
+    );
+}
+
+/// A module reloading, whose new instance's initializer calls the old one,
+/// gives that call no more than the load's own budget: the old instance is
+/// not a call under way, whose deadline it would keep. Its last call, allowed
+/// 30 s, left its store's deadline 30 s out.
+#[test]
+fn a_reload_s_initializer_calling_the_old_instance_ends_by_the_load_s_budget() {
+    use arora_engine::compiled::CompiledModule;
+    use arora_engine::limits::{GuestLimits, DEFAULT_CALL_BUDGET};
+    use std::time::{Duration, Instant};
+    let (module, spin, echo): (Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        SPIN_FN.parse().unwrap(),
+        ECHO_FN.parse().unwrap(),
+    );
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .add_executor(CallsWhileLoading {
+            engine: None,
+            module,
+            function: spin,
+        })
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    engine.set_guest_limits(
+        module,
+        GuestLimits {
+            call_budget: Some(Duration::from_secs(30)),
+            ..GuestLimits::default()
+        },
+    );
+    engine.dispatch(&module, &echo, &[]).unwrap();
+    let mut reloading = header();
+    reloading.executor.name = "calls-while-loading".to_string();
+    let reloading = CompiledModule::new(reloading, &[]).unwrap();
+    let started = Instant::now();
+    engine.reload_module(&reloading).unwrap_err();
+    let took = started.elapsed();
+    assert!(
+        took < DEFAULT_CALL_BUDGET + Duration::from_millis(500),
+        "{took:?}"
+    );
+}

@@ -125,8 +125,8 @@ linear memory is capped ([`limits`](src/limits.rs)):
   sets it outside a step. A guest's call to another guest ends by its
   caller's deadline, and a module called back while its call is under way
   ends by that call's deadline, or its caller's if earlier.
-  A call still running at its deadline is interrupted less than two
-  milliseconds past it: it fails with `DispatchError::Trap`, naming the
+  A call still running at its deadline is interrupted at the first epoch
+  tick past it, a millisecond apart, never before: it fails with `DispatchError::Trap`, naming the
   module, the function and the budget. The module then refuses its calls
   until it is reloaded, since the interrupted call can have left its state
   half updated. A caller whose callee ran past the caller's deadline is

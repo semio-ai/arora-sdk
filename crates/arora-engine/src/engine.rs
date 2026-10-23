@@ -144,7 +144,7 @@ pub struct Engine {
     /// by its caller's deadline, and a module called again while its call is
     /// under way ends by the earlier of that call's deadline and its caller's.
     #[cfg(not(target_arch = "wasm32"))]
-    guest_calls: Vec<(Uuid, std::time::Instant, std::time::Duration)>,
+    guest_calls: Vec<GuestCall>,
 }
 
 /// A module the engine dispatches to, and the executor that loaded it —
@@ -391,7 +391,7 @@ impl Engine {
         };
         // A guest's call to another ends by its caller's deadline.
         let deadline = match self.guest_calls.last() {
-            Some((_, caller, _)) => deadline.min(*caller),
+            Some(caller) => deadline.min(caller.deadline),
             None => deadline,
         };
         (deadline, deadline.saturating_duration_since(now))
@@ -453,12 +453,15 @@ impl Engine {
             // counted anew, would extend the call under way. A tighter
             // deadline holds for this call only; the call under way gets its
             // own back when this one returns.
+            // A module's call under way, not its load: a module reloading
+            // runs its new instance's initializer, and one it calls under its
+            // id is the old instance, which no call is under way in.
             let under_way = self
                 .guest_calls
                 .iter()
                 .rev()
-                .find(|(id, _, _)| id == module_id)
-                .map(|(_, deadline, budget)| (*deadline, *budget));
+                .find(|call| call.module == *module_id && !call.loading)
+                .map(|call| (call.deadline, call.budget));
             let (deadline, budget, restore) = match under_way {
                 None => {
                     module.module.set_call_deadline(deadline, budget);
@@ -470,7 +473,12 @@ impl Engine {
                 }
                 Some((outer, outer_budget)) => (outer, outer_budget, None),
             };
-            self.guest_calls.push((*module_id, deadline, budget));
+            self.guest_calls.push(GuestCall {
+                module: *module_id,
+                deadline,
+                budget,
+                loading: false,
+            });
             let result = module.module.dispatch(function_id, arg);
             self.guest_calls.pop();
             if let Some((outer, outer_budget)) = restore {
@@ -487,21 +495,33 @@ impl Engine {
     }
 }
 
+/// A guest call under way, or a guest loading, whose initializer can call
+/// others.
+#[cfg(not(target_arch = "wasm32"))]
+struct GuestCall {
+    module: Uuid,
+    deadline: std::time::Instant,
+    budget: std::time::Duration,
+    loading: bool,
+}
+
 /// The call under way while the module `module` loads: its initializer runs
 /// to [`DEFAULT_CALL_BUDGET`](crate::limits::DEFAULT_CALL_BUDGET), as the
 /// executors bound it, or to its caller's deadline if earlier, so a guest it
 /// calls ends by then too.
 #[cfg(not(target_arch = "wasm32"))]
-fn loading(
-    module: Uuid,
-    caller: Option<&(Uuid, std::time::Instant, std::time::Duration)>,
-) -> (Uuid, std::time::Instant, std::time::Duration) {
+fn loading(module: Uuid, caller: Option<&GuestCall>) -> GuestCall {
     let now = std::time::Instant::now();
     let mut deadline = now + crate::limits::DEFAULT_CALL_BUDGET;
-    if let Some((_, caller, _)) = caller {
-        deadline = deadline.min(*caller);
+    if let Some(caller) = caller {
+        deadline = deadline.min(caller.deadline);
     }
-    (module, deadline, deadline.saturating_duration_since(now))
+    GuestCall {
+        module,
+        deadline,
+        budget: deadline.saturating_duration_since(now),
+        loading: true,
+    }
 }
 
 pub type EngineRef = *mut Engine;

@@ -6,10 +6,10 @@
 //! cannot together outlast it; a call made outside any step gets
 //! [`DEFAULT_CALL_BUDGET`]. A module's [`GuestLimits::call_budget`] tightens
 //! the step's, and outside a step replaces the default. A guest still
-//! running at its deadline is interrupted: wasmtime checks an epoch counter,
-//! which a thread advances every [`EPOCH`], at function entries and loop
-//! back-edges, so a call is interrupted after its deadline and less than two
-//! epochs past it, as the counter's thread is scheduled. Time a guest spends in a host
+//! running at its deadline is interrupted: a thread advances an epoch counter
+//! every [`EPOCH`], and at each tick a running guest's store compares its
+//! deadline with the wall clock, so a call is interrupted at the first tick
+//! past its deadline, never before it. Time a guest spends in a host
 //! function, a WASI wait or a call to another module, is not interrupted:
 //! the guest is, once the host function returns. Its call fails with
 //! [`DispatchError::Trap`], naming the module, the function and the budget,
@@ -49,8 +49,8 @@ pub const DEFAULT_CALL_BUDGET: Duration = Duration::from_secs(1);
 /// otherwise: 256 MiB.
 pub const DEFAULT_MEMORY: usize = 256 << 20;
 
-/// How often the counter a guest's deadline is checked against advances: a
-/// call overruns its deadline by less than two of these, as its thread is
+/// How often a running guest's deadline is checked: a call overruns its
+/// deadline by about this much, as the thread advancing the epoch is
 /// scheduled.
 pub const EPOCH: Duration = Duration::from_millis(1);
 
@@ -74,75 +74,53 @@ impl Default for GuestLimits {
     }
 }
 
-/// The counter a wasmtime engine's deadlines are checked against, as its
-/// ticker advances it: one epoch per [`EPOCH`] since `start`, `ticked` of
-/// them made so far.
+/// Bound the calls into `store` by the deadline `deadline_of` reads from its
+/// data, which [`Module::set_call_deadline`](crate::module::Module::set_call_deadline)
+/// sets before each call. At each tick of the engine's epoch, the store's
+/// callback compares the deadline with the wall clock: a call is interrupted
+/// at the first tick past its deadline, never before it, whatever ticks the
+/// counter has or has not made.
 #[cfg(feature = "wasmtime-host")]
-pub(crate) struct Clock {
-    start: std::time::Instant,
-    ticked: std::sync::atomic::AtomicU64,
+pub(crate) fn bound<T: 'static>(
+    store: &mut wasmtime::Store<T>,
+    deadline_of: fn(&T) -> std::time::Instant,
+) {
+    store.epoch_deadline_callback(move |state| {
+        Ok(on_epoch(
+            deadline_of(state.data()),
+            std::time::Instant::now(),
+        ))
+    });
+    store.set_epoch_deadline(1);
 }
 
+/// What a store does at a tick of its engine's epoch, at `now`, to end its
+/// call by `deadline`: interrupt it once the deadline has passed, else check
+/// again at the next tick.
 #[cfg(feature = "wasmtime-host")]
-impl Clock {
-    /// The deadline a guest's store runs to, as wasmtime counts it: the
-    /// epochs still to tick until the one due after `deadline`, and at least
-    /// one, so a call made with no time left runs for an epoch rather than
-    /// fail unentered.
-    ///
-    /// It counts from the wall clock the ticker follows, not from the ticks
-    /// made: a ticker running late makes up its missed ticks at once, and a
-    /// deadline counted from its count would be reached early by as many.
-    /// The epoch after the one `deadline` falls in is due once `deadline` has
-    /// passed, so a call never ends before it.
-    pub(crate) fn epochs_until(&self, deadline: std::time::Instant) -> u64 {
-        let due = deadline
-            .saturating_duration_since(self.start)
-            .as_nanos()
-            .div_ceil(EPOCH.as_nanos()) as u64
-            + 1;
-        due.saturating_sub(self.ticked.load(std::sync::atomic::Ordering::Acquire))
-            .max(1)
+fn on_epoch(deadline: std::time::Instant, now: std::time::Instant) -> wasmtime::UpdateDeadline {
+    if now >= deadline {
+        wasmtime::UpdateDeadline::Interrupt
+    } else {
+        wasmtime::UpdateDeadline::Continue(1)
     }
 }
 
 /// Advance `engine`'s epoch every [`EPOCH`], from a thread of its own, for the
-/// life of the process; its deadlines are counted with the returned
-/// [`Clock`]. Called once per wasmtime engine, when it is created.
+/// life of the process. Called once per wasmtime engine, when it is created.
 #[cfg(feature = "wasmtime-host")]
-pub(crate) fn tick(engine: &wasmtime::Engine) -> std::sync::Arc<Clock> {
-    use std::sync::atomic::Ordering;
-    let clock = std::sync::Arc::new(Clock {
-        start: std::time::Instant::now(),
-        ticked: std::sync::atomic::AtomicU64::new(0),
-    });
+pub(crate) fn tick(engine: &wasmtime::Engine) {
     let engine = engine.weak();
-    let ticker = clock.clone();
     std::thread::Builder::new()
         .name("arora-epoch".into())
         .spawn(move || {
-            // The counter follows the wall clock, not the count of sleeps:
-            // every sleep overruns, and a deadline counted in sleeps would
-            // drift later by as much.
             while let Some(engine) = engine.upgrade() {
-                let due = (ticker.start.elapsed().as_nanos() / EPOCH.as_nanos()) as u64;
-                let mut ticked = ticker.ticked.load(Ordering::Relaxed);
-                while ticked < due {
-                    // The engine's epoch first: `ticked` never counts a tick
-                    // the engine has not seen, so a deadline counted from it
-                    // is late, if anything, never early.
-                    engine.increment_epoch();
-                    ticked += 1;
-                    ticker.ticked.store(ticked, Ordering::Release);
-                }
+                engine.increment_epoch();
                 drop(engine);
-                let next =
-                    ticker.start + Duration::from_nanos((ticked + 1) * EPOCH.as_nanos() as u64);
-                std::thread::sleep(next.saturating_duration_since(std::time::Instant::now()));
+                std::thread::sleep(EPOCH);
             }
         })
         .expect("spawn the epoch thread");
-    clock
 }
 
 /// The message of a call interrupted at its deadline.
@@ -158,24 +136,20 @@ pub(crate) fn overran(module: &str, function: &uuid::Uuid, budget: Duration) -> 
 #[cfg(all(test, feature = "wasmtime-host"))]
 mod tests {
     use super::*;
+    use std::time::Instant;
+    use wasmtime::UpdateDeadline;
 
     #[test]
-    fn a_deadline_is_counted_from_the_wall_clock_to_the_epoch_after_it() {
-        use std::sync::atomic::AtomicU64;
-        use std::time::Instant;
+    fn a_call_is_interrupted_once_its_deadline_has_passed_and_not_before() {
         let now = Instant::now();
-        let clock = Clock {
-            start: now,
-            ticked: AtomicU64::new(0),
-        };
-        assert_eq!(clock.epochs_until(now), 1);
-        assert_eq!(clock.epochs_until(now - Duration::from_secs(1)), 1);
-        assert_eq!(clock.epochs_until(now + Duration::from_millis(10)), 11);
-        // A ticker 50 epochs late: the deadline counts the ticks it makes up.
-        let late = Clock {
-            start: now - Duration::from_millis(100),
-            ticked: AtomicU64::new(50),
-        };
-        assert_eq!(late.epochs_until(now + Duration::from_millis(10)), 61);
+        assert!(matches!(on_epoch(now, now), UpdateDeadline::Interrupt));
+        assert!(matches!(
+            on_epoch(now, now + Duration::from_millis(1)),
+            UpdateDeadline::Interrupt
+        ));
+        assert!(matches!(
+            on_epoch(now + Duration::from_micros(1), now),
+            UpdateDeadline::Continue(1)
+        ));
     }
 }
