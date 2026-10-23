@@ -1,5 +1,5 @@
 # Artifact dependencies: the device crate depends on the policy module built
-# for wasm32-wasip1 and embeds the resulting `.wasm` (see crates/arora-microduck).
+# for wasm32-wasip2 and embeds the resulting `.wasm` (see crates/arora-microduck).
 [unstable]
 bindeps = true
 

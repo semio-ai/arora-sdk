@@ -32,9 +32,9 @@ env_logger = "0.11"
 log.workspace = true
 serde_json = "1"
 # The policy module twice over: its library (the declaration: ids, header,
-# signatures, and the in-process functions) and its wasm32-wasip1 build (the
+# signatures, and the in-process functions) and its wasm32-wasip2 build (the
 # guest the device loads), both from one dependency.
-microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip2", lib = true }
 # The voice's providers, host modules only (a speaker is the host's).
 say-piper = { path = "../../modules/say-piper", version = "0.1", optional = true }
 say-silent = { path = "../../../../modules/say-silent", version = "0.1" }
