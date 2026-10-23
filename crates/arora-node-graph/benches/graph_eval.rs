@@ -144,8 +144,8 @@ fn chain_graph(length: usize) -> GraphSpec {
 }
 
 /// Two chains of Add nodes on composite values, a vec3 chain and a
-/// transform chain, both fed by one moving number and ending in a Spring:
-/// every step flattens and rebuilds structures.
+/// transform chain, both fed by one moving number and ending in a Spring
+/// that an output reads: every step flattens and rebuilds structures.
 fn composite_chain_graph(length: usize) -> GraphSpec {
     let constant = |id: String, value: Value| NodeSpec {
         id,
@@ -189,6 +189,24 @@ fn composite_chain_graph(length: usize) -> GraphSpec {
             input_defaults: HashMap::<String, InputDefault>::new(),
         });
         edges.push(link(&prev, &spring_id, "in"));
+        // An output reads the spring, so an evaluation of what the outputs
+        // read evaluates the chain.
+        let output_id = format!("{chain}_out");
+        nodes.push(NodeSpec {
+            id: output_id.clone(),
+            kind: NodeType::Output,
+            params: NodeParams {
+                path: Some(
+                    format!("bench/composite/{chain}")
+                        .parse()
+                        .expect("bench output path parses to TypedPath"),
+                ),
+                ..Default::default()
+            },
+            output_shapes: HashMap::<String, Shape>::new(),
+            input_defaults: HashMap::<String, InputDefault>::new(),
+        });
+        edges.push(link(&spring_id, &output_id, "in"));
     }
     GraphSpec {
         nodes,
