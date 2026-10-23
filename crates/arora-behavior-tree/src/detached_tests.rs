@@ -23,7 +23,7 @@ use crate::nodes::{
     UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
 };
 use crate::schema::{Expression, Node, NodeParameterId, _RET_PARAM_ID};
-use crate::{load_behavior_tree_nodes_with, BehaviorTree, BehaviorTreeRuntime};
+use crate::{load_behavior_tree_nodes_with, BehaviorTree, BehaviorTreeRuntime, Tickable};
 use arora_behavior::Status;
 
 /// The variable id of the store key or tree-local name `name`.
@@ -1824,6 +1824,7 @@ fn compare_representations(nodes: impl Fn() -> (Vec<Node>, Vec<Node>), observed:
         trees[0].tree().detached_plan(),
         trees[1].tree().detached_plan()
     );
+    trees[1].tree().detached.assert_full_node_statuses();
     let feeds = [stores[0].subscribe(), stores[1].subscribe()];
     for feed in &feeds {
         feed.try_iter().for_each(drop);
@@ -1890,6 +1891,7 @@ fn compare_representations(nodes: impl Fn() -> (Vec<Node>, Vec<Node>), observed:
                 "tick {step}: port {port}"
             );
         }
+        right.detached.assert_full_node_statuses();
         for node in left.detached.nodes() {
             assert_eq!(
                 left.detached_outputs(node.id),
@@ -1908,6 +1910,7 @@ fn compare_representations(nodes: impl Fn() -> (Vec<Node>, Vec<Node>), observed:
                 tree.unregister(engine);
                 *tree = next;
             }
+            trees[1].tree().detached.assert_full_node_statuses();
         }
     }
     for (tree, engine) in trees.iter().zip(&mut engines) {
@@ -2079,4 +2082,207 @@ fn full_detached_state_publication_and_errors_match_lightweight_nodes() {
         },
         &[],
     );
+}
+
+fn lower_full(tree: BehaviorTree, engine: &mut Engine) -> crate::LoweredTree {
+    crate::lower_behavior_tree_with_options(
+        tree,
+        &index(),
+        engine,
+        crate::LoweringOptions {
+            detached_tree_nodes: true,
+            trace: false,
+        },
+    )
+    .unwrap()
+}
+
+/// Indirect reads use store bindings and the evaluator's once-per-tick cache,
+/// including when a store input changes between two reads in the same tick.
+#[test]
+fn full_detached_callable_reads_store_once_per_tick() {
+    let store = SimpleDataStore::new();
+    set(&store, "in", 3.0);
+    let mut engine = Engine::default();
+    let tree = lower_full(
+        build(
+            &store,
+            vec![node(1, crate::nodes::RUN_FUNCTION_ID, vec![])],
+            vec![compute(
+                10,
+                MUL,
+                vec![(MUL_A, key("in")), (MUL_B, f(2.0))],
+                None,
+            )],
+        ),
+        &mut engine,
+    );
+    let tick = tree.tree().detached_tick_id(id(10)).unwrap();
+    tree.tick(&mut engine).unwrap();
+    assert_eq!(tick.tick(&mut engine).unwrap(), Status::Success);
+    assert_eq!(engine.calls.borrow()[0].1[&MUL_A], Value::F64(3.0));
+    assert_eq!(
+        tree.tree().detached_output(id(10), _RET_PARAM_ID),
+        Some(Value::F64(6.0))
+    );
+    set(&store, "in", 4.0);
+    assert_eq!(tick.tick(&mut engine).unwrap(), Status::Success);
+    assert_eq!(engine.calls.borrow().len(), 1);
+    assert_eq!(tree.tree().detached_calls(id(10)), Some(1));
+    tree.tick(&mut engine).unwrap();
+    tick.tick(&mut engine).unwrap();
+    assert_eq!(
+        tree.tree().detached_output(id(10), _RET_PARAM_ID),
+        Some(Value::F64(8.0))
+    );
+    assert_eq!(tree.tree().detached_calls(id(10)), Some(2));
+    tree.unregister(&mut engine);
+}
+
+/// Reading a registered downstream node pulls fresh upstream ports first;
+/// an already cached previous tick cannot hide a changed upstream input.
+#[test]
+fn full_detached_callable_pulls_changed_dependencies() {
+    let store = SimpleDataStore::new();
+    let mut engine = Engine::default();
+    let tree = lower_full(
+        build(
+            &store,
+            vec![node(1, crate::nodes::RUN_FUNCTION_ID, vec![])],
+            vec![
+                compute(10, MUL, vec![(MUL_A, key("in")), (MUL_B, f(2.0))], None),
+                compute(11, ADD, vec![(ADD_A, read(10)), (ADD_B, f(1.0))], None),
+            ],
+        ),
+        &mut engine,
+    );
+    let tick = tree.tree().detached_tick_id(id(11)).unwrap();
+    for (input, expected) in [(3.0, 7.0), (5.0, 11.0)] {
+        set(&store, "in", input);
+        tree.tick(&mut engine).unwrap();
+        tick.tick(&mut engine).unwrap();
+        assert_eq!(
+            tree.tree().detached_output(id(11), _RET_PARAM_ID),
+            Some(Value::F64(expected))
+        );
+    }
+    assert_eq!(
+        engine
+            .calls
+            .borrow()
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>(),
+        ["mul", "add", "mul", "add"]
+    );
+    assert_eq!(engine.calls.borrow()[3].1[&ADD_A], Value::F64(10.0));
+    assert_eq!(tree.tree().detached_calls(id(10)), Some(2));
+    assert_eq!(tree.tree().detached_calls(id(11)), Some(2));
+    tree.unregister(&mut engine);
+}
+
+/// An indirect read between runtime ticks cannot advance mutable state behind
+/// the evaluator's cache or change the next value it publishes.
+#[test]
+fn full_detached_callable_preserves_state_publication_sequence() {
+    let mut sequences = Vec::new();
+    for interleave in [false, true] {
+        let store = SimpleDataStore::new();
+        let mut engine = Engine::default();
+        let tree = lower_full(
+            build(
+                &store,
+                vec![node(1, crate::nodes::RUN_FUNCTION_ID, vec![])],
+                vec![compute(
+                    10,
+                    SMOOTH,
+                    vec![
+                        (SMOOTH_X, f(8.0)),
+                        (SMOOTH_ALPHA, f(0.5)),
+                        (SMOOTH_STATE, f(0.0)),
+                    ],
+                    Some("out"),
+                )],
+            ),
+            &mut engine,
+        );
+        let tick = tree.tree().detached_tick_id(id(10)).unwrap();
+        let mut sequence = Vec::new();
+        for step in 1..=4 {
+            tree.tick(&mut engine).unwrap();
+            sequence.push(get(&store, "out"));
+            if interleave {
+                tick.tick(&mut engine).unwrap();
+            }
+            assert_eq!(tree.tree().detached_calls(id(10)), Some(step));
+        }
+        sequences.push(sequence);
+        tree.unregister(&mut engine);
+    }
+    assert_eq!(
+        sequences[0],
+        [4.0, 6.0, 7.0, 7.5].map(|x| Some(Value::F64(x)))
+    );
+    assert_eq!(sequences[0], sequences[1]);
+}
+
+/// A failed call clears its reported status and that of its waiting reader.
+/// The callable reuses the failure; recovery can reuse the last good outputs.
+#[test]
+fn full_detached_status_tracks_failed_call_and_dependency() {
+    let store = SimpleDataStore::new();
+    set(&store, "in", 3.0);
+    let mut engine = Engine::default();
+    let tree = lower_full(
+        build(
+            &store,
+            vec![node(1, crate::nodes::RUN_FUNCTION_ID, vec![])],
+            vec![
+                compute(10, MUL, vec![(MUL_A, key("in")), (MUL_B, f(2.0))], None),
+                compute(
+                    11,
+                    ADD,
+                    vec![(ADD_A, read(10)), (ADD_B, f(1.0))],
+                    Some("out"),
+                ),
+            ],
+        ),
+        &mut engine,
+    );
+    let tick = tree.tree().detached_tick_id(id(11)).unwrap();
+    tree.tick(&mut engine).unwrap();
+    for node in [10, 11] {
+        assert_eq!(tree.tree().detached_status(id(node)), Some(Status::Success));
+    }
+    store.slot(&Key::from("in")).set(None).unwrap();
+    let error = tree.tick(&mut engine).unwrap_err().to_string();
+    assert!(error.contains("expected an f64"), "{error}");
+    for node in [10, 11] {
+        assert_eq!(
+            tree.tree().detached_status(id(node)),
+            None,
+            "failed node {node}"
+        );
+    }
+    assert_eq!(tree.tree().detached_calls(id(10)), Some(2));
+    assert_eq!(tree.tree().detached_calls(id(11)), Some(1));
+    let error = tick.tick(&mut engine).unwrap_err().to_string();
+    assert!(error.contains("failed this tick"), "{error}");
+    assert_eq!(engine.calls.borrow().len(), 3, "the failure is cached");
+    assert_eq!(
+        get(&store, "out"),
+        Some(Value::F64(7.0)),
+        "failure does not publish"
+    );
+    set(&store, "in", 3.0);
+    tree.tick(&mut engine).unwrap();
+    for node in [10, 11] {
+        assert_eq!(tree.tree().detached_status(id(node)), Some(Status::Success));
+    }
+    assert_eq!(
+        engine.calls.borrow().len(),
+        3,
+        "recovery reuses good outputs"
+    );
+    tree.unregister(&mut engine);
 }

@@ -8,7 +8,7 @@
 //!
 //! Graphs have N = 10, 30, 100, 300 and 1000 module calls. The scenarios:
 //!
-//! - `settled`, `one-input`, `all-inputs`: the `incremental` bench's graph. K
+//! - `settled`, `one-input`, `all-inputs`: independent chains. K
 //!   = max(2, N/10) store inputs `input/j` feed K independent chains of add,
 //!   mul, clamp and remap; call `i` reads input `i` when `i < K`, else the
 //!   return of call `i - K`; the last call of each chain publishes to
@@ -33,9 +33,7 @@
 //!
 //! The forms. A lone graph's published call binds its `_ret` to its key, or is
 //! a sink. A branch's graph is published by its branch, so only the taken
-//! branch publishes, each form the way its code can: incremental leaves sit in
-//! their branch and bind `_ret` to the key; today's executor and detached
-//! nodes call `publish`, a module
+//! branch publishes. Attached and detached nodes call `publish`, a module
 //! function returning its argument with `_ret` bound to the key, since the
 //! tree has no native node that writes a number to a key.
 //!
@@ -108,8 +106,8 @@ const VALUE: Uuid = Uuid::from_u128(0x5ca1_0011);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Op {
-    /// The `incremental` bench's functions, with its signature: `x` and `y`,
-    /// and the mutable `state` and `out`, which the chains leave unbound.
+    /// Chain functions take `x` and `y`, and mutable `state` and `out`,
+    /// which the chains leave unbound.
     ChainAdd,
     ChainMul,
     ChainClamp,
@@ -336,7 +334,7 @@ impl Graph {
     }
 }
 
-/// The `incremental` bench's chains.
+/// Independent chains, each rooted in a store input and publishing its tail.
 fn chains(n: usize) -> Graph {
     let k = 2.max(n / 10);
     let mut graph = Graph {
@@ -551,12 +549,10 @@ impl Scenario {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-#[allow(dead_code)]
 enum Form {
     AttachedNaive,
     Detached,
     DetachedFull,
-    AttachedIncremental,
 }
 impl Form {
     const ALL: [Form; 3] = [Form::AttachedNaive, Form::Detached, Form::DetachedFull];
@@ -565,7 +561,6 @@ impl Form {
             Form::AttachedNaive => "attached-naive",
             Form::Detached => "detached",
             Form::DetachedFull => "detached-full",
-            Form::AttachedIncremental => "attached-incremental",
         }
     }
     fn detached(self) -> bool {
@@ -599,9 +594,8 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
         .enumerate()
         .map(|(k, (name, _))| (key_variable(k), name.clone()))
         .collect();
-    // A branch's graph is published by the branch, except by incremental
-    // leaves, which the branch holds and which bind their keys themselves.
-    let by_branch = graph.bodies[0].on.is_some() && !incremental_leaves(form);
+    // A branch publishes its graph only when the tree takes that branch.
+    let by_branch = graph.bodies[0].on.is_some();
     let bound = |c: usize| graph.calls[c].publishes.filter(|_| !by_branch);
     let source = |source: Source| match source {
         Source::Key(k) => Expression::VariableId(key_variable(k)),
@@ -643,18 +637,12 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
         }
     };
     let mut tree = Builder::default();
-    // What each branch ticks, or the lone graph: its own leaves on the
-    // incremental executor, else only `RUN`.
+    // Each branch ticks its publishers and `RUN`; a lone graph ticks `RUN`.
     let bodies: Vec<_> = graph
         .bodies
         .iter()
         .map(|body| {
             let run = tree.push(RUN_FUNCTION_ID, HashMap::new(), None);
-            if incremental_leaves(form) {
-                tree.nodes.extend(body.calls.iter().map(|&c| call(c)));
-                let leaves = body.calls.iter().map(|&c| call_id(c)).chain([run]);
-                return tree.push(PARALLEL_FUNCTION_ID, HashMap::new(), Some(leaves.collect()));
-            }
             if !by_branch {
                 return run;
             }
@@ -711,12 +699,6 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
     let root = nodes.remove(at);
     nodes.insert(0, root);
     (nodes, names)
-}
-
-/// Whether the form holds each graph's leaves in its branch, as the
-/// incremental executor's form does.
-fn incremental_leaves(form: Form) -> bool {
-    form == Form::AttachedIncremental
 }
 
 /// The leaf with which a branch publishes call `c`'s value to `key`: a call

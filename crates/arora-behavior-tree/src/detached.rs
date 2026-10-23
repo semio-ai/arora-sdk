@@ -137,7 +137,8 @@ pub(crate) struct Detached {
 #[derive(Default)]
 struct Lowered {
     /// Full nodes exist only in the opt-in representation. Their tick
-    /// functions hold an empty detached evaluator, avoiding an ownership cycle.
+    /// functions hold an empty scope; their registered callables read this
+    /// evaluator through a weak reference, avoiding an ownership cycle.
     tree_nodes: Option<Vec<(TickId, Rc<DetachedTreeNode>)>>,
     /// The functions the detached nodes call, and those their nested calls
     /// state.
@@ -858,7 +859,60 @@ impl Detached {
 
     pub(crate) fn status(&self, id: Uuid) -> Option<arora_behavior::Status> {
         let at = *self.ids.get(&id)?;
+        if self.caches.borrow()[at].failed.is_some() {
+            return None;
+        }
         self.lowered.borrow().tree_nodes.as_ref()?[at].1.status()
+    }
+
+    /// Read a registered full node in the current tick, using the same
+    /// dependency traversal and cache as a tree reader or a sink.
+    pub(crate) fn read_node(
+        &self,
+        id: Uuid,
+        scope: Scope,
+        caller: &mut dyn CallBridge,
+    ) -> Result<arora_behavior::Status, BehaviorTreeError> {
+        self.bring_up_to_date(self.ids[&id], scope, caller)?;
+        self.status(id)
+            .ok_or_else(|| BehaviorTreeError::InternalError {
+                message: format!("detached full node {id} has no status after evaluation"),
+            })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn assert_full_node_statuses(&self) {
+        for node in &self.nodes {
+            assert!(
+                self.tick_id(node.id).is_some(),
+                "full node {} has a tick",
+                node.id
+            );
+            let cache = &self.caches.borrow()[self.ids[&node.id]];
+            let expected = if cache.failed.is_some() {
+                None
+            } else {
+                cache
+                    .outputs
+                    .iter()
+                    .find(|(port, _)| *port == _RET_PARAM_ID)
+                    .map(|(_, ret)| {
+                        if node.arguments.contains_key(&_RET_PARAM_ID) {
+                            arora_behavior::Status::Success
+                        } else {
+                            ret.clone()
+                                .try_into()
+                                .unwrap_or(arora_behavior::Status::Success)
+                        }
+                    })
+            };
+            assert_eq!(
+                self.status(node.id),
+                expected,
+                "full node {} status",
+                node.id
+            );
+        }
     }
 
     pub(crate) fn tick_id(&self, id: Uuid) -> Option<TickId> {
@@ -1105,7 +1159,7 @@ impl Detached {
         // A call counts whether or not it succeeds.
         self.caches.borrow_mut()[at].calls += 1;
         let result = match &lowered.tree_nodes {
-            Some(ticks) => ticks[at].1.tick_borrowed(caller, &args)?,
+            Some(ticks) => ticks[at].1.tick_borrowed(caller, module_id, &args)?,
             None => caller
                 .arora_call_borrowed(Some(module_id), node.function, &args)
                 .map_err(BehaviorTreeError::CallError)?,

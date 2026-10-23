@@ -39,7 +39,7 @@ use schema::{CallExpression, Expression, Node, NodeParameterId, _RET_PARAM_ID};
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 use uuid::Uuid;
 
@@ -91,8 +91,10 @@ impl BehaviorTree {
         self.detached.calls(id)
     }
 
-    /// The last status of a detached full tree node. `None` before its first
-    /// completed module call, or when the lowering uses the default representation.
+    /// The status of a detached full tree node after its last evaluation.
+    /// `None` before its first call, after a failed evaluation (including a
+    /// failed dependency), or with the default lightweight representation.
+    /// A successful cached evaluation keeps the last call's status.
     pub fn detached_status(&self, id: Uuid) -> Option<Status> {
         self.detached.status(id)
     }
@@ -424,9 +426,10 @@ impl LoweredTree {
     }
 }
 
-/// Lower `tree`'s detached nodes and register every attached node's tick
-/// function on `caller`: the root's tick, and every callable registered. A
-/// tree that does not lower leaves nothing registered: the callables
+/// Lower `tree`'s detached nodes and register the attached nodes' ticks,
+/// plus detached ticks when enabled, on `caller`: the root's tick, and every
+/// callable registered. A tree that does not lower leaves nothing registered:
+/// the callables
 /// registered before the refusal are unregistered.
 fn register_ticks(
     tree: &BehaviorTree,
@@ -446,11 +449,7 @@ fn register_ticks(
         tree.detached.clone(),
         &tree.outputs,
         caller,
-        if trace {
-            TraceTick::YesAll
-        } else {
-            TraceTick::No
-        },
+        TraceTick::from(trace),
         &mut callables,
     );
     let root = root.and_then(|root| {
@@ -495,6 +494,16 @@ pub fn run_behavior_tree(
 enum TraceTick {
     YesAll,
     No,
+}
+
+impl From<bool> for TraceTick {
+    fn from(trace: bool) -> Self {
+        if trace {
+            Self::YesAll
+        } else {
+            Self::No
+        }
+    }
 }
 
 impl TraceTick {
@@ -1202,26 +1211,11 @@ impl AttachedCall {
                     })?;
             write_back(cell, *mutated.value, *optional);
         }
-        // A node with a `_ret` argument writes the return value to the
-        // variable it binds and succeeds; otherwise the return is its status.
-        Ok(if let Some((cell, _)) = self.outputs.get(&_RET_PARAM_ID) {
+        let status = self.status(&result.ret);
+        if let Some((cell, _)) = self.outputs.get(&_RET_PARAM_ID) {
             write_back(cell, result.ret, self.return_optional);
-            Status::Success
-        } else {
-            result.ret.try_into().unwrap_or(Status::Success)
-        })
-    }
-
-    /// Dispatch already-framed arguments, lending their snapshots to the
-    /// bridge. Both attached and detached full nodes enter the module here.
-    fn call_borrowed(
-        &self,
-        caller: &mut dyn CallBridge,
-        node: &Node,
-        args: &[(Uuid, &Value)],
-    ) -> Result<CallResult, BehaviorTreeError> {
-        let module = self.validate(node)?;
-        self.dispatch(caller, module, node, args)
+        }
+        Ok(status)
     }
 
     fn dispatch(
@@ -1251,13 +1245,13 @@ impl AttachedCall {
         Ok(module)
     }
 
-    fn status(&self, _node: &Node, ret: &Value) -> Status {
+    /// A bound return is data and succeeds; an unbound Status controls the
+    /// tree. Other returns succeed, allowing ordinary data functions as nodes.
+    fn status(&self, ret: &Value) -> Status {
         if self.returns_bound {
             Status::Success
-        } else if matches!(ret, Value::Enumeration(_)) {
-            ret.clone().try_into().unwrap_or(Status::Success)
         } else {
-            Status::Success
+            ret.clone().try_into().unwrap_or(Status::Success)
         }
     }
 }
@@ -1289,10 +1283,15 @@ impl TickFunction {
     fn tick_borrowed(
         &self,
         caller: &mut dyn CallBridge,
+        module: Uuid,
         args: &[(Uuid, &Value)],
     ) -> Result<(Status, CallResult), BehaviorTreeError> {
-        let result = self.module_call.call_borrowed(caller, &self.node, args)?;
-        let status = self.module_call.status(&self.node, &result.ret);
+        // The evaluator resolved the module and framed these arguments;
+        // detached nodes have no composite children to validate here.
+        let result = self
+            .module_call
+            .dispatch(caller, module, &self.node, args)?;
+        let status = self.module_call.status(&result.ret);
         self.trace.line(&self.node, &self.calls, status);
         Ok((status, result))
     }
@@ -1328,6 +1327,9 @@ impl Callable for TickFunction {
 /// callable remains available under the registered TickId.
 pub(crate) struct DetachedTreeNode {
     function: TickFunction,
+    /// The registered callable reads through the owning evaluator without
+    /// keeping it (and its full nodes) alive in a reference cycle.
+    evaluator: Weak<Detached>,
     status: Cell<Option<Status>>,
 }
 
@@ -1359,12 +1361,9 @@ impl DetachedTreeNode {
                 pulls: None,
                 outputs: None,
                 children: Vec::new(),
-                trace: if trace {
-                    TraceTick::YesAll
-                } else {
-                    TraceTick::No
-                },
+                trace: TraceTick::from(trace),
             },
+            evaluator: Rc::downgrade(&tree.detached),
             status: Cell::new(None),
         })
     }
@@ -1379,9 +1378,10 @@ impl DetachedTreeNode {
     pub(crate) fn tick_borrowed(
         &self,
         caller: &mut dyn CallBridge,
+        module: Uuid,
         args: &[(Uuid, &Value)],
     ) -> Result<CallResult, BehaviorTreeError> {
-        let (status, result) = self.function.tick_borrowed(caller, args)?;
+        let (status, result) = self.function.tick_borrowed(caller, module, args)?;
         self.status.set(Some(status));
         Ok(result)
     }
@@ -1389,12 +1389,21 @@ impl DetachedTreeNode {
 
 impl Callable for DetachedTreeNode {
     fn call(&self, caller: &mut dyn CallBridge) -> Result<Value, CallError> {
-        let status = self
-            .function
-            .tick(caller)
-            .map_err(Into::<CallError>::into)?;
-        self.status.set(Some(status));
-        Ok(status.into())
+        let evaluator = self.evaluator.upgrade().ok_or_else(|| CallError::Generic {
+            message: "detached node's tree has been released".into(),
+        })?;
+        evaluator
+            .read_node(
+                self.function.node.id,
+                Scope {
+                    variables: &self.function.locals.borrow(),
+                    node_parameters_variables: &self.function.node_arg_variables,
+                    calls: &self.function.calls,
+                },
+                caller,
+            )
+            .map(Into::<Value>::into)
+            .map_err(Into::<CallError>::into)
     }
 }
 

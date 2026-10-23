@@ -919,3 +919,66 @@ fn full_detached_trace_matches_attached() {
     assert!(lines.iter().all(|line| *line == lines[0]));
     assert!(lines[0].ends_with("add(a: distance(), b: 4f64) -> Success"));
 }
+
+/// Bound returns always succeed; unbound Status values control execution,
+/// while ordinary data returns succeed in both attached and full detached nodes.
+#[test]
+fn attached_and_full_detached_share_return_status_rules() {
+    use crate::{lower_behavior_tree_with_options, LoweringOptions};
+    for (ret, unbound_status) in [
+        (Value::from(Status::Running), Status::Running),
+        (Value::from(Status::Failure), Status::Failure),
+        (Value::from(Status::Success), Status::Success),
+        (Value::F64(42.0), Status::Success),
+        (Value::Unit, Status::Success),
+        (Value::Option(None), Status::Success),
+    ] {
+        for bound in [false, true] {
+            let expected = if bound {
+                Status::Success
+            } else {
+                unbound_status
+            };
+            for full in [false, true] {
+                let mut call = node(10, ADD, vec![(ADD_A, f(1.0)), (ADD_B, f(2.0))]);
+                if bound {
+                    call.arguments
+                        .insert(_RET_PARAM_ID, Expression::VariableId(Uuid::from_u128(99)));
+                }
+                let nodes = if full {
+                    vec![node(1, RUN_FUNCTION_ID, vec![]), call]
+                } else {
+                    vec![call]
+                };
+                let tree = load_behavior_tree_nodes(nodes).unwrap();
+                tree.observe_detached([Uuid::from_u128(10)]);
+                let mut bridge = Bridge::default();
+                bridge.responses.push_back(CallResult {
+                    ret: ret.clone(),
+                    mutated: vec![],
+                });
+                let tree = lower_behavior_tree_with_options(
+                    tree,
+                    &index(),
+                    &mut bridge,
+                    LoweringOptions {
+                        trace: false,
+                        detached_tree_nodes: full,
+                    },
+                )
+                .unwrap();
+                let status = tree.tick(&mut bridge).unwrap();
+                assert_eq!(
+                    if full {
+                        tree.tree().detached_status(Uuid::from_u128(10)).unwrap()
+                    } else {
+                        status
+                    },
+                    expected,
+                    "full={full} bound={bound} ret={ret:?}"
+                );
+                tree.unregister(&mut bridge);
+            }
+        }
+    }
+}

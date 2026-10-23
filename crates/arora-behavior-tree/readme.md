@@ -68,8 +68,11 @@ full tree nodes under the same demand-driven policy, use
 `lower_behavior_tree_with_options` with
 `LoweringOptions { detached_tree_nodes: true, trace: false }`. Each detached
 call then owns a registered `TickFunction` and retains its last status, read
-through `BehaviorTree::detached_status`. Cached calls keep that status without
-running or tracing again. Argument comparison, output caching and sink
+through `BehaviorTree::detached_status` (`None` before the first call or after
+an evaluation fails, including a failed dependency). Cached evaluations keep
+the last call's status without running or tracing again. A registered
+`BehaviorTree::detached_tick_id` reads through the same evaluator in the current
+tick, pulling dependencies and reusing that tick's result or failure. Argument comparison, output caching and sink
 publication keep their usual behavior. `LoweredTree::unregister` releases
 these registrations along with the attached ones.
 
