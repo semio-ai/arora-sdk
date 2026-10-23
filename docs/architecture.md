@@ -42,12 +42,12 @@ arora-sdk/
 │   │   └── cpp                C++ code generator
 │   ├── arora-buffers, arora-util, arora-vfs, wasi-sdk   support crates
 ├── modules/              Arora modules (guest code loaded by the engine)
-│   ├── test-rust-wasm         Rust → wasm32-wasip1; reference module
+│   ├── test-rust-wasm         Rust → wasm32-wasip2 component; reference module
 │   ├── test-behavior-tree-nodes  test-only module exercising BT dispatch
 │   ├── test-rust-component    Rust → wasm32-wasip2 component; arora:module world
-│   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip1 via WASI SDK + cmake
+│   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip2 component via WASI SDK + cmake
 │   ├── animation              arora-animation as the module @arora/animation:
-│   │                          a wasm32-wasip1 guest in a module directory,
+│   │                          a wasm32-wasip2 component in a module directory,
 │   │                          or host-linked
 │   ├── say-silent             the Say contract without a speaker (host)
 │   ├── polly                  host cdylib; AWS Polly TTS nodes
@@ -62,7 +62,6 @@ arora-sdk/
 ├── examples/
 │   ├── modules/cpp            example C++ module → a module directory
 │   └── policy-modules         control policies as modules (own workspace)
-├── wit/                  arora:module WIT world for component guests
 ├── .cargo/config.toml    unstable flags + i686-musl cross linker (NAO runner)
 ├── rust-toolchain.toml   pins nightly + wasm32-wasip1/p2
 ├── Cargo.toml            workspace root
@@ -87,14 +86,14 @@ graph TB
             native_exec["NativeExecutor\nlibloading · host only\nfeature: native-host"]
             wasm_exec["WebAssemblyExecutor\nwasmtime + WASI · host only\nfeature: wasmtime-host"]
             component_exec["ComponentExecutor\nwasmtime component + WASI p2 · host only\nfeature: wasmtime-host"]
+            browser_component_exec["BrowserComponentExecutor\njs-sys WebAssembly + canonical-ABI WASI 0.2\ncfg(target_arch = wasm32)"]
             browser_exec["BrowserExecutor\njs-sys WebAssembly + WASI stubs\ncfg(target_arch = wasm32)"]
         end
     end
 
     subgraph mods["Modules"]
-        rust_wasm["Rust → wasm32-wasip1\nbehavior-tree-nodes, test-rust-wasm"]
-        rust_component["Rust → wasm32-wasip2 component\ntest-rust-component"]
-        cpp_wasm["C++ → wasm32-wasip1\ntest-cpp, test-cpp-2, example-cpp"]
+        rust_component["Rust → wasm32-wasip2 component\nanimation, behavior-tree-nodes, test-rust-wasm, test-rust-component"]
+        cpp_component["C++ → wasm32-wasip2 component\ntest-cpp, test-cpp-2, example-cpp"]
         native_cdylib["Native cdylib\npolly"]
     end
 
@@ -183,12 +182,13 @@ loop:
 The engine library (`crates/arora-engine`) is dual-target:
 
 - On native (`cfg(not(target_arch = "wasm32"))`), it compiles `executor::native`
-  (libloading), `executor::wasm` (wasmtime core modules), and
-  `executor::component` (wasmtime component model against
-  `wit/arora-module.wit`). All are gated by Cargo features
-  (`native-host`, `wasmtime-host`), both default-on.
-- On `wasm32-*`, it compiles `executor::browser` instead and accepts
-  `--no-default-features` to drop the host-only deps.
+  (libloading), `executor::component` (wasmtime component model against
+  `wit/arora-module.wit`) and `executor::wasm` (wasmtime core modules). All
+  are gated by Cargo features (`native-host`, `wasmtime-host`), both
+  default-on.
+- On `wasm32-*`, it compiles `executor::browser` instead — the component
+  executor and the core-module one — and accepts `--no-default-features` to
+  drop the host-only deps.
 
 `arora::load::*` exposes header-yaml + bytes → `ModuleDefinition` helpers used
 by both `arora-cli` (host) and `arora-web` (browser).
@@ -199,7 +199,7 @@ through guest wasm.
 
 ## Modules
 
-A module is a binary (host cdylib, wasm32-wasip1 .wasm, or cross-compiled
+A module is a binary (host cdylib, wasm32-wasip2 component, or cross-compiled
 ELF) plus a header, written at export from the module's declaration. The
 device runners (`arora`, and the robot runners `arora-ros2`, `arora-restful`
 and `arora-naoqi`) load modules from *module directories* — the header as
@@ -262,14 +262,14 @@ heavier `test-cpp` / `test-cpp-2` / `example-cpp` members, which
   `artifact = "bin"`. Cargo exports `CARGO_BIN_FILE_<DEP>` (bin target names
   keep their dashes, so this short convenience name is set).
 - **Cross-target staticlibs** (`arora-buffers`, `arora-util` for
-  `wasm32-wasip1`) — `build-dependencies`
+  `wasm32-wasip2`) — `build-dependencies`
   with `artifact = "staticlib", target = "..."`. Cargo exports
   `CARGO_STATICLIB_DIR_<DEP>` and `CARGO_STATICLIB_FILE_<DEP>_<lib>` (lib
   name, dashes→underscores). The bare `CARGO_STATICLIB_FILE_<DEP>` is **not**
   set for dash-named crates — read the suffixed or `DIR` form. See
   [`design_decisions.md`](design_decisions.md).
 - **Cross-target cdylibs** (the Rust wasm guests in
-  `arora-integration-tests`) — `artifact = "cdylib", target = "wasm32-wasip1"`;
+  `arora-integration-tests`) — `artifact = "cdylib", target = "wasm32-wasip2"`;
   exported the same way as `CARGO_CDYLIB_FILE_<DEP>_<lib>`.
 
 For C++ modules, each `build.rs` calls into the module's
@@ -277,12 +277,13 @@ self-contained `CMakeLists.txt` via `cmake::Config`, passing the bindep'd
 paths as `-D` cache vars and forcing `cmake-rs`'s target via
 `.target(...).host(...).no_default_flags(true)`.
 
-The Rust wasm guests (`behavior-tree-nodes`, `test-rust-wasm`) are ordinary
-`cdylib`+`rlib` crates built for the host by default — no `forced-target` is
-used. Their wasm32-wasip1 build is forced on demand by the `arora-behavior-tree`
-and integration-test crates' artifact dependencies (`target = "wasm32-wasip1"`),
-so `cargo test` builds the guests itself and the tests find them via forwarded
-`CARGO_CDYLIB_FILE_*` env vars (no explicit per-target build step needed).
+The Rust wasm guests (`behavior-tree-nodes`, `test-rust-wasm`, `animation`)
+are ordinary `cdylib`+`rlib` crates built for the host by default — no
+`forced-target` is used. Their wasm32-wasip2 build, a component, is forced on
+demand by the consuming crates' artifact dependencies
+(`target = "wasm32-wasip2"`), so `cargo test` builds the guests itself and the
+tests find them via forwarded `CARGO_CDYLIB_FILE_*` env vars (no explicit
+per-target build step needed).
 
 See [`design_decisions.md`](design_decisions.md#build-orchestration) for the
 rationale.
@@ -294,11 +295,15 @@ rationale.
 wasmtime, no libloading) and adds an `Engine` class exposing
 `loadModule(headerJson, bytes)` and `call(callJson)` to JS.
 
-The browser executor lives inside `arora` itself
-(`crates/arora/src/executor/browser/`). It uses `js_sys::WebAssembly` for
-instantiation and ships minimum-viable WASI stubs (proc_exit, fd_write to
-console, random_get via crypto.getRandomValues, …) so wasm32-wasip1 guest
-modules can be loaded without re-compiling them for `unknown-unknown`.
+The browser executors live in the engine
+(`crates/arora-engine/src/executor/browser/`) and use `js_sys::WebAssembly`
+for instantiation. `BrowserComponentExecutor` runs a component as it is
+published: it instantiates the component's guest core module and gives it,
+in the canonical ABI's form, the `host` interface and the WASI 0.2 imports
+the native component executor links (standard output and error to the
+console, randomness from `crypto.getRandomValues`, …). `BrowserExecutor`
+ships WASI preview 1 stubs for `wasm32-wasip1` core modules. Neither needs a
+guest re-compiled for `unknown-unknown`.
 
 Demo + headless-Firefox test under `crates/arora-web/www/` and
 `crates/arora-web/tests/`.

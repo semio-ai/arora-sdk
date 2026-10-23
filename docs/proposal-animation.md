@@ -14,7 +14,7 @@ In short:
 - **Two crates.** `arora-animation` is the library: the clip format,
   exact evaluation with velocities, players, and the engine that steps them.
   It depends on no Arora runtime. `arora-animation-module` declares it as
-  the Arora module `@arora/animation`: a `wasm32-wasip1` guest that every
+  the Arora module `@arora/animation`: a `wasm32-wasip2` component that every
   device, emulated or real, loads from its module directory (header, guest
   and records), and host-linkable for a native host.
 - **They move from vizij-rs with their history**, as the node graph does
@@ -413,9 +413,9 @@ workflow's list carries both.
 
 **The guest needs a release channel.** arora-sdk's release workflow
 publishes crates only. A device that loads the module from a directory needs
-the module directory — header, `wasm32-wasip1` guest and records — from
+the module directory — header, `wasm32-wasip2` component and records — from
 somewhere: a GitHub release asset of arora-sdk is the simplest, built with
-`cargo build -p arora-animation-module --target wasm32-wasip1 --release` and
+`cargo build -p arora-animation-module --target wasm32-wasip2 --release` and
 the `module_dir` example. Studio builds the same directory from the crate
 it depends on, so it needs no package.
 
