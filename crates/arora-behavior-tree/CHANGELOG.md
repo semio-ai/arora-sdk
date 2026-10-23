@@ -6,6 +6,14 @@ All notable changes to `arora-behavior-tree`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `LoweringOptions::detached_tree_nodes` opts into registered full detached
+  nodes with the usual demand-driven evaluation and caching.
+  `BehaviorTree::detached_tick_id` exposes each registered tick;
+  `BehaviorTree::detached_status` reports its last evaluation's status,
+  or `None` before a call or after a failed evaluation.
+
 ### Changed
 
 - Native control nodes tick their children directly, while every node remains

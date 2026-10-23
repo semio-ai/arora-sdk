@@ -63,6 +63,19 @@ ticked through its `TickId`. Module calls read argument cells resolved at
 lowering and lend value snapshots through `CallBridge::arora_call_borrowed`;
 bridges using its default implementation receive the same owned `Call`.
 
+Detached module calls normally use a lightweight representation. To measure
+full tree nodes under the same demand-driven policy, use
+`lower_behavior_tree_with_options` with
+`LoweringOptions { detached_tree_nodes: true, trace: false }`. Each detached
+call then owns a registered `TickFunction` and retains its last status, read
+through `BehaviorTree::detached_status` (`None` before the first call or after
+an evaluation fails, including a failed dependency). Cached evaluations keep
+the last call's status without running or tracing again. A registered
+`BehaviorTree::detached_tick_id` reads through the same evaluator in the current
+tick, pulling dependencies and reusing that tick's result or failure. Argument comparison, output caching and sink
+publication keep their usual behavior. `LoweredTree::unregister` releases
+these registrations along with the attached ones.
+
 Module nodes that have children are required to expose them as their first parameter,
 that should be named `children`,
 identified with the UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`,
