@@ -7,7 +7,7 @@
 //! [`NodeFunctions`] host that owns all the domain meaning. Values are always the shared runtime
 //! type [`arora_shape::Value`].
 
-use arora_shape::Value;
+use arora_types::value::Value;
 use hashbrown::HashMap;
 use uuid::Uuid;
 

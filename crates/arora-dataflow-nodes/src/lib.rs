@@ -15,6 +15,7 @@ pub mod task;
 pub mod topo;
 pub mod tree_runtime;
 pub mod types;
+pub mod vocab;
 
 #[cfg(test)]
 mod fixtures;

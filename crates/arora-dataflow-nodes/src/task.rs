@@ -14,7 +14,7 @@ use arora_behavior::{
     STATUS_ENUMERATION_ID, STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID,
     STATUS_SUCCESS_VARIANT_ID,
 };
-use arora_shape::value::{Enumeration, Value};
+use arora_types::value::{Enumeration, Value};
 use uuid::Uuid;
 
 fn status(variant_id: Uuid) -> Value {

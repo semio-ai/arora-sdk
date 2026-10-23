@@ -1,7 +1,7 @@
 //! URDF inverse kinematics helpers gated behind the `urdf_ik` feature.
 
-use arora_shape::value as vocab;
-use arora_shape::Value;
+use crate::vocab;
+use arora_types::value::Value;
 
 use super::numeric;
 use hashbrown::HashMap;
@@ -672,7 +672,7 @@ fn decode_solve(value: &Value) -> Option<(IkRequest, Vec<f32>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arora_shape::value::{Structure, StructureField};
+    use arora_types::value::{Structure, StructureField};
 
     #[test]
     fn a_joint_value_reads_as_one_number() {

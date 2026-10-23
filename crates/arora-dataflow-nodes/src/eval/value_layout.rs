@@ -8,9 +8,9 @@
 //! itself, so the numeric nodes work on any structure the same way, with no
 //! list of value types.
 
-use arora_shape::value as vocab;
-use arora_shape::value::{Structure, StructureField};
+use crate::vocab;
 use arora_shape::{Shape, Value};
+use arora_types::value::{Structure, StructureField};
 use hashbrown::HashMap;
 use std::cell::RefCell;
 use std::sync::Arc;

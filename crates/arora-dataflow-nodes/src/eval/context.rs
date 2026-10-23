@@ -1,7 +1,7 @@
 //! What a node's evaluation reads and writes besides its ports: the clock,
 //! the node's state, and the runs it requests.
 
-use arora_shape::Value;
+use arora_types::value::Value;
 use uuid::Uuid;
 
 #[cfg(feature = "urdf_ik")]

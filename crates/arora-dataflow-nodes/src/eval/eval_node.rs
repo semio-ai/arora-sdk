@@ -7,8 +7,8 @@ use crate::eval::plan::PortLayout;
 use crate::eval::variadic::collect_operand_ports;
 use crate::params::{Params, RoundMode};
 use crate::types::NodeType;
-use arora_shape::value as vocab;
-use arora_shape::Value;
+use crate::vocab;
+use arora_types::value::Value;
 use hashbrown::HashMap;
 use uuid::Uuid;
 
