@@ -29,6 +29,8 @@ pub enum UnloadModuleError {
 }
 impl std::error::Error for UnloadModuleError {}
 
+use crate::limits::GuestLimits;
+
 pub trait Executor {
     fn set_engine(&mut self, engine: EngineRef);
 
@@ -63,6 +65,32 @@ pub trait Executor {
                 self.name()
             ))),
         }
+    }
+
+    /// Load `module_definition` under `limits`, the memory and time its
+    /// guest may spend ([`crate::limits`]). The engine loads every module
+    /// through this; the default loads it as
+    /// [`load_module`](Self::load_module) does, unbounded. The wasmtime
+    /// executors override it to bound the instance.
+    fn load_module_limited(
+        &mut self,
+        module_definition: ModuleDefinition,
+        limits: GuestLimits,
+    ) -> Result<Box<dyn Module>, LoadModuleError> {
+        let _ = limits;
+        self.load_module(module_definition)
+    }
+
+    /// [`load_compiled_module`](Self::load_compiled_module) under `limits`,
+    /// as [`load_module_limited`](Self::load_module_limited) is
+    /// [`load_module`](Self::load_module) under them.
+    fn load_compiled_module_limited(
+        &mut self,
+        module: &CompiledModule,
+        limits: GuestLimits,
+    ) -> Result<Box<dyn Module>, LoadModuleError> {
+        let _ = limits;
+        self.load_compiled_module(module)
     }
 
     fn unload_module(&mut self, module_id: Uuid) -> Result<(), UnloadModuleError>;

@@ -4,6 +4,35 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - 2026-10-23
+
+### Added
+
+- A call to a guest module on wasmtime ends by a deadline, and its instance's
+  linear memory is capped (`arora_engine::limits`).
+  - **Time.** The deadline is the end of the step a device is running
+    (`Engine::set_step_budget`), else `DEFAULT_CALL_BUDGET`, one second, and
+    a module's `GuestLimits::call_budget` tightens it. A call still running
+    at its deadline is interrupted within one millisecond and fails with
+    `DispatchError::Trap`, naming the module, the function and the budget;
+    the module refuses its calls until it is reloaded.
+  - **Memory.** An instance holds at most `GuestLimits::memory` bytes,
+    `DEFAULT_MEMORY` (256 MiB) by default: a `memory.grow` past it returns -1
+    to the guest.
+  - Set for every module with `EngineBuilder::with_guest_limits`, for one
+    with `Engine::set_guest_limits`.
+  - `Executor::load_module_limited` and `load_compiled_module_limited`, which
+    the engine loads modules with; an executor that bounds nothing keeps the
+    provided ones. `Module::set_call_deadline`, which the engine calls before
+    each call; a module that bounds nothing keeps the provided one.
+  - The browser executors bound neither: nothing interrupts the JS thread.
+
+### Changed
+
+- A guest call that took longer than one second outside a step, or longer
+  than its step's period during one, ran to its end; it is now interrupted.
+  An engine whose guests need longer sets their `call_budget`.
+
 ## [6.0.0] - 2026-10-23
 
 ### Changed

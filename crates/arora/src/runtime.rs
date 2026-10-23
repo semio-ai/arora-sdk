@@ -75,6 +75,11 @@ impl Arora {
     /// than firing a burst of catch-up ticks. The `dt` handed to `step` is the
     /// **actual** measured time since the previous step, not `period`.
     ///
+    /// The guest calls a step makes share `period`: natively, a guest call
+    /// still running when the period ends is interrupted, its call fails, and
+    /// its module refuses calls until it is reloaded
+    /// ([`arora_engine::limits`]). The device keeps stepping.
+    ///
     /// To **stop** a run, drop its future (e.g. lose a `select!` against a
     /// stop signal): each `step` runs inside a single poll, so cancellation
     /// only ever lands between steps — the device stays consistent, and
@@ -110,7 +115,12 @@ impl Arora {
             let now = Instant::now();
             let dt = now.duration_since(last_step);
             last_step = now;
-            self.step(dt)?;
+            // The step's guest calls share its period: one still running when
+            // the period ends is interrupted (see `arora_engine::limits`).
+            self.engine.set_step_budget(Some(period));
+            let stepped = self.step(dt);
+            self.engine.set_step_budget(None);
+            stepped?;
         }
     }
 }
@@ -1288,6 +1298,107 @@ mod tests {
         let stepped = ticks.load(std::sync::atomic::Ordering::SeqCst);
         assert!(stepped > 0, "the device ran until the drop");
         arora.step(Duration::from_millis(1)).expect("still usable");
+    }
+
+    /// A behavior calling `function` of `module` each tick, keeping what each
+    /// call answered.
+    struct CallEachTick {
+        module: uuid::Uuid,
+        function: uuid::Uuid,
+        answers: Rc<std::cell::RefCell<Vec<Result<(), String>>>>,
+    }
+
+    impl BehaviorInterpreter for CallEachTick {
+        fn tick(
+            &mut self,
+            ctx: &mut BehaviorContext,
+        ) -> Result<BehaviorStatus, arora_behavior::BehaviorError> {
+            let answer = ctx
+                .call_bridge
+                .arora_call_borrowed(Some(self.module), self.function, &[])
+                .map(drop)
+                .map_err(|error| error.to_string());
+            self.answers.borrow_mut().push(answer);
+            Ok(BehaviorStatus::Running)
+        }
+    }
+
+    /// A guest call that would loop forever is interrupted when its step's
+    /// period ends, and the device keeps stepping: the module refuses the
+    /// calls of the steps after it.
+    #[tokio::test]
+    async fn a_guest_call_overrunning_its_step_is_interrupted_and_the_device_keeps_stepping() {
+        let (module, spin) = (
+            uuid::Uuid::from_u128(0xd2_0001),
+            uuid::Uuid::from_u128(0xd2_0002),
+        );
+        let header: arora_types::module::low::Header = serde_yaml::from_str(&format!(
+            r#"
+id: {module}
+name: spinning
+author: ""
+description: ~
+license: ""
+version: {{ major: 1, minor: 0, patch: 0 }}
+executor: {{ name: wasm, min_version: ~, max_version: ~ }}
+imports: []
+executable_mime: ""
+exports:
+  - type: function
+    id: {spin}
+    name: spin
+    parameters: []
+    ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}
+"#
+        ))
+        .unwrap();
+        let guest = format!(
+            r#"(module
+                (memory (export "memory") 1)
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 1024)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{f}") (param i32) (result i32)
+                    (loop $forever (br $forever))
+                    i32.const 0))"#,
+            f = spin.to_string().replace('-', "_"),
+        );
+        let answers = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut arora = build_with(
+            Box::new(FakeBridge::new()),
+            Box::new(CallEachTick {
+                module,
+                function: spin,
+                answers: answers.clone(),
+            }),
+        );
+        arora
+            .load_module(
+                &arora_engine::compiled::CompiledModule::new(header, guest.as_bytes()).unwrap(),
+            )
+            .unwrap();
+        let _ = tokio::time::timeout(
+            Duration::from_millis(300),
+            arora.run(Duration::from_millis(20)),
+        )
+        .await;
+        let answers = answers.borrow();
+        assert!(answers.len() >= 3, "the device kept stepping: {answers:?}");
+        let overran = answers[0].as_ref().unwrap_err();
+        // The budget is what was left of the step's 20 ms.
+        let budget: f64 = overran
+            .split("of 'spinning' overran its budget of ")
+            .nth(1)
+            .and_then(|rest| rest.split(" ms").next())
+            .and_then(|ms| ms.parse().ok())
+            .unwrap_or_else(|| panic!("{overran}"));
+        assert!(budget <= 20.0, "{overran}");
+        for refused in &answers[1..] {
+            let refused = refused.as_ref().unwrap_err();
+            assert!(
+                refused.contains("overran its budget in an earlier call"),
+                "{refused}"
+            );
+        }
     }
 
     /// `run` paces the step at the requested period: over a fixed wall-clock

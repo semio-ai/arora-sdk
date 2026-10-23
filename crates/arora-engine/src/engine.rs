@@ -8,6 +8,7 @@ use arora_types::{
 use uuid::Uuid;
 
 use crate::arguments::Signatures;
+use crate::limits::GuestLimits;
 use crate::{
     call::{serialize_to_arg, CallBridge, CallError, Callable, CallableId, CallableRegistry},
     compiled::CompiledModule,
@@ -20,6 +21,7 @@ use derive_more::{Display, From};
 
 pub struct EngineBuilder {
     executors: HashMap<&'static str, Box<dyn Executor>>,
+    guest_limits: GuestLimits,
 }
 
 impl Default for EngineBuilder {
@@ -32,7 +34,16 @@ impl EngineBuilder {
     pub fn new() -> Self {
         Self {
             executors: HashMap::new(),
+            guest_limits: GuestLimits::default(),
         }
+    }
+
+    /// The limits of every guest module the engine loads whose own limits
+    /// are not set ([`Engine::set_guest_limits`]); [`GuestLimits::default`]
+    /// unless given.
+    pub fn with_guest_limits(mut self, limits: GuestLimits) -> Self {
+        self.guest_limits = limits;
+        self
     }
 
     pub fn add_executor<E: Executor + 'static>(mut self, executor: E) -> Self {
@@ -41,7 +52,7 @@ impl EngineBuilder {
     }
 
     pub fn build(self) -> Pin<Box<Engine>> {
-        Engine::new(self.executors)
+        Engine::new(self.executors, self.guest_limits)
     }
 }
 
@@ -120,6 +131,13 @@ pub struct Engine {
     executors: HashMap<&'static str, Box<dyn Executor>>,
     modules: HashMap<Uuid, Loaded>,
     callables: CallableRegistry,
+    /// The limits of a guest module whose own are not set.
+    guest_limits: GuestLimits,
+    /// Each module's own limits, set with [`Engine::set_guest_limits`].
+    module_limits: HashMap<Uuid, GuestLimits>,
+    /// When the step under way ends, which no guest call outlasts.
+    #[cfg(not(target_arch = "wasm32"))]
+    step_deadline: Option<std::time::Instant>,
 }
 
 /// A module the engine dispatches to, and the executor that loaded it —
@@ -134,11 +152,18 @@ struct Loaded {
 
 impl Engine {
     /// Create a new [`Engine`] with the given [`Executor`]s.
-    fn new(executors: HashMap<&'static str, Box<dyn Executor>>) -> Pin<Box<Engine>> {
+    fn new(
+        executors: HashMap<&'static str, Box<dyn Executor>>,
+        guest_limits: GuestLimits,
+    ) -> Pin<Box<Engine>> {
         let mut ret = Box::pin(Engine {
             executors,
             modules: HashMap::new(),
             callables: CallableRegistry::new(),
+            guest_limits,
+            module_limits: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            step_deadline: None,
         });
 
         {
@@ -165,14 +190,14 @@ impl Engine {
 
         // We haven't loaded the module yet.
 
+        let signatures = Signatures::of(&module_definition.header);
+        let limits = self.guest_limits(&module_id);
         // Find the executor for the module.
         let executor = self
             .executors
             .get_mut(executor_name)
             .ok_or(LoadModuleError::ExecutorNotFound)?;
-
-        let signatures = Signatures::of(&module_definition.header);
-        let module = executor.load_module(module_definition)?;
+        let module = executor.load_module_limited(module_definition, limits)?;
         self.modules.insert(
             module_id,
             Loaded {
@@ -195,11 +220,12 @@ impl Engine {
         if self.modules.contains_key(&module_id) {
             return Ok(());
         }
+        let limits = self.guest_limits(&module_id);
         let executor = self
             .executors
             .get_mut(module.header().executor.name.as_str())
             .ok_or(LoadModuleError::ExecutorNotFound)?;
-        let instance = executor.load_compiled_module(module)?;
+        let instance = executor.load_compiled_module_limited(module, limits)?;
         self.modules.insert(
             module_id,
             Loaded {
@@ -236,11 +262,12 @@ impl Engine {
         if let Some(executor) = self.refusing_unload(loaded) {
             return Err(ReloadModuleError::Unsupported { executor });
         }
+        let limits = self.guest_limits(&module_id);
         let executor = self
             .executors
             .get_mut(module.header().executor.name.as_str())
             .ok_or(LoadModuleError::ExecutorNotFound)?;
-        let instance = executor.load_compiled_module(module)?;
+        let instance = executor.load_compiled_module_limited(module, limits)?;
         self.modules.insert(
             module_id,
             Loaded {
@@ -289,6 +316,55 @@ impl Engine {
         (!can_unload).then_some(executor)
     }
 
+    /// Set the limits of the guest module `module`, loaded or not: its memory
+    /// cap applies to the instances it loads from then on, its call budget
+    /// to its next call.
+    pub fn set_guest_limits(&mut self, module: Uuid, limits: GuestLimits) {
+        self.module_limits.insert(module, limits);
+    }
+
+    /// The limits of the guest module `module`: its own if set, else the
+    /// engine's ([`EngineBuilder::with_guest_limits`]).
+    pub fn guest_limits(&self, module: &Uuid) -> GuestLimits {
+        self.module_limits
+            .get(module)
+            .copied()
+            .unwrap_or(self.guest_limits)
+    }
+
+    /// Bound every guest call from now on to end within `budget`, the time
+    /// left in the step a device is running; `None` when the step ends. A
+    /// device's run loop sets it to its step period before each step, so the
+    /// guest calls of one step cannot together outlast it. In the browser,
+    /// where nothing interrupts a guest, it does nothing.
+    pub fn set_step_budget(&mut self, budget: Option<std::time::Duration>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.step_deadline = budget.map(|budget| std::time::Instant::now() + budget);
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = budget;
+    }
+
+    /// When a call to `module` starting now must end, and the budget that
+    /// gives it: the earliest of the step's end, the module's own budget and,
+    /// outside a step, [`DEFAULT_CALL_BUDGET`](crate::limits::DEFAULT_CALL_BUDGET).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn call_deadline(&self, module: &Uuid) -> (std::time::Instant, std::time::Duration) {
+        let now = std::time::Instant::now();
+        let own = self
+            .guest_limits(module)
+            .call_budget
+            .map(|budget| now + budget);
+        let deadline = match (self.step_deadline, own) {
+            (Some(step), Some(own)) => step.min(own),
+            (Some(step), None) => step,
+            (None, Some(own)) => own,
+            (None, None) => now + crate::limits::DEFAULT_CALL_BUDGET,
+        };
+        (deadline, deadline.saturating_duration_since(now))
+    }
+
     /// Register an already-instantiated [`Module`] under `id`, making its
     /// functions reachable through [`CallBridge::arora_call`] exactly like a
     /// loaded module's. Where [`load_module`](Self::load_module) instantiates a
@@ -323,10 +399,14 @@ impl Engine {
         function_id: &Uuid,
         arg: &[u8],
     ) -> Result<Box<[u8]>, DispatchError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let (deadline, budget) = self.call_deadline(module_id);
         let module = self
             .modules
             .get_mut(module_id)
             .ok_or(DispatchError::ModuleNotFound { id: *module_id })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        module.module.set_call_deadline(deadline, budget);
         if let Some(signatures) = &module.signatures {
             signatures
                 .check(function_id, arg)

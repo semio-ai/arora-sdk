@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [14.1.0] - 2026-10-23
+
+### Changed
+
+- `Arora::run` bounds the guest calls of each step by its period, through
+  arora-engine 6.1's `Engine::set_step_budget`: a guest call still running
+  when the period ends is interrupted, its call fails, and its module refuses
+  its calls until it is reloaded. The device keeps stepping. A guest's linear
+  memory is capped at 256 MiB.
+
 ## [14.0.0] - 2026-10-23
 
 ### Changed

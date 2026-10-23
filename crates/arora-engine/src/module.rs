@@ -66,6 +66,15 @@ pub(crate) fn error_buffer(message: &str) -> Box<[u8]> {
 
 pub trait Module {
     fn dispatch(&mut self, function_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError>;
+
+    /// The deadline the next call must end by, and the budget that gives it
+    /// ([`crate::limits`]): the engine sets it before each dispatch. A module
+    /// that can interrupt its guest stops a call still running at
+    /// `deadline`; the default, for one that cannot, ignores it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_call_deadline(&mut self, deadline: std::time::Instant, budget: std::time::Duration) {
+        let _ = (deadline, budget);
+    }
 }
 
 /// One function of a [`HostModule`]: the decoded [`Call`] in, the

@@ -32,6 +32,8 @@ const WASI_FN: &str = "0455052e-bb89-41ec-a963-2bbe82ea583b";
 const TRAP_FN: &str = "42681638-6fe3-4004-92fb-bb048dc3bbab";
 const ERROR_BUFFER_FN: &str = "2041d791-4440-4dc9-b54d-1004e314cf99";
 const CALL_FN: &str = "473a50b2-f275-4767-989c-69aa2c2def5b";
+const SPIN_FN: &str = "5d0c4a3e-7b21-4f6e-9a8d-2c41b6e0f3a1";
+const GROW_FN: &str = "9e7b1c52-0d3a-4b8f-8e61-f4a2c9d7b053";
 
 /// What the guest's `wasi` function observes on a host that runs it without
 /// arguments or an environment. The browser executor's test
@@ -66,6 +68,8 @@ fn header() -> Header {
         (TRAP_FN, "trap"),
         (ERROR_BUFFER_FN, "error-buffer"),
         (CALL_FN, "call"),
+        (SPIN_FN, "spin"),
+        (GROW_FN, "grow"),
     ]
     .iter()
     .map(|(id, name)| {
@@ -397,4 +401,72 @@ fn a_declared_component_refuses_an_argument_that_is_not_an_arora_buffer() {
         })
         .expect("a call after the refusals");
     assert_eq!(result.ret, Value::F32(1.0));
+}
+
+/// A call to a component that loops forever is interrupted within its budget
+/// and one epoch; the component then refuses calls until it is reloaded.
+#[test]
+fn a_component_call_that_overruns_its_budget_is_interrupted() {
+    use arora_engine::limits::{GuestLimits, EPOCH};
+    use std::time::{Duration, Instant};
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    let compiled = arora_engine::compiled::CompiledModule::new(header(), &guest_bytes()).unwrap();
+    engine.load_compiled_module(&compiled).unwrap();
+    let (module, spin, echo): (Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        SPIN_FN.parse().unwrap(),
+        ECHO_FN.parse().unwrap(),
+    );
+    let budget = Duration::from_millis(50);
+    engine.set_guest_limits(
+        module,
+        GuestLimits {
+            call_budget: Some(budget),
+            ..GuestLimits::default()
+        },
+    );
+
+    let started = Instant::now();
+    let overran = engine.dispatch(&module, &spin, &[]).unwrap_err();
+    let took = started.elapsed();
+    // Slack for a loaded machine: the deadline itself is the budget plus at
+    // most one epoch.
+    assert!(
+        took >= budget && took < budget + EPOCH + Duration::from_millis(200),
+        "{took:?}"
+    );
+    assert!(
+        format!("{overran}").contains("of 'test-rust-component' overran its budget of 50 ms"),
+        "{overran}"
+    );
+    let refused = engine.dispatch(&module, &echo, &[]).unwrap_err();
+    assert!(
+        format!("{refused}").contains("trapped in an earlier call"),
+        "{refused}"
+    );
+
+    engine.reload_module(&compiled).unwrap();
+    assert!(engine.dispatch(&module, &echo, &[]).is_ok());
+}
+
+/// A component whose allocator grows its memory past the module's cap sees
+/// the allocation fail; under the cap, it succeeds.
+#[test]
+fn a_component_growing_its_memory_past_its_cap_sees_the_allocation_fail() {
+    use arora_engine::limits::GuestLimits;
+    let (module, grow): (Uuid, Uuid) = (MODULE_ID.parse().unwrap(), GROW_FN.parse().unwrap());
+    for (memory, reserved) in [(32 << 20, 0), (128 << 20, 1)] {
+        let mut engine = EngineBuilder::new()
+            .with_guest_limits(GuestLimits {
+                memory,
+                ..GuestLimits::default()
+            })
+            .add_executor(ComponentExecutor::new().unwrap())
+            .build();
+        load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+        let result = engine.dispatch(&module, &grow, &[]).unwrap();
+        assert_eq!(&*result, &[reserved], "a cap of {memory} bytes");
+    }
 }

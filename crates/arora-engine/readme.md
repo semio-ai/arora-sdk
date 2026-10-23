@@ -112,6 +112,29 @@ Left to the guest: an argument that is not an Arora Buffer or not a structure,
 a parameter the call leaves out, and the fields of a record-typed argument,
 which is checked by its record's id, the one thing a header names of it.
 
+### Time and memory a guest may spend
+
+On wasmtime, a call to a guest module ends by a deadline, and its instance's
+linear memory is capped ([`limits`](src/limits.rs)):
+
+- **Time.** During a device's step, set with `Engine::set_step_budget`, the
+  deadline is the step's end, so one step's guest calls cannot together
+  outlast it. Outside a step it is `DEFAULT_CALL_BUDGET`, one second. A
+  module's own `GuestLimits::call_budget`, set with `Engine::set_guest_limits`
+  or for every module with `EngineBuilder::with_guest_limits`, tightens it, or
+  sets it outside a step. A call still running at its deadline is interrupted
+  within one millisecond: it fails with `DispatchError::Trap`, naming the
+  module, the function and the budget. The module then refuses its calls
+  until it is reloaded, since the interrupted call can have left its state
+  half updated.
+- **Memory.** An instance holds at most `GuestLimits::memory` bytes, 256 MiB
+  by default. A `memory.grow` past it returns -1 to the guest, whose
+  allocator then reports the allocation failed.
+
+In the browser a guest runs on the JS thread, which nothing interrupts: the
+browser executors bound neither a call's time nor, beyond the maximum its
+module declares, its memory.
+
 ### Call Mechanism
 
 When a call is performed, its description is serialized into a raw buffer,
