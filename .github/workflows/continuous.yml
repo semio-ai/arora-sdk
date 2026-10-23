@@ -30,6 +30,7 @@ jobs:
       test-arora: ${{ steps.affected.outputs.test-arora }}
       test-arora-engine: ${{ steps.affected.outputs.test-arora-engine }}
       test-arora-web: ${{ steps.affected.outputs.test-arora-web }}
+      test-arora-index: ${{ steps.affected.outputs.test-arora-index }}
       build-arora-web: ${{ steps.affected.outputs.build-arora-web }}
       test-polly: ${{ steps.affected.outputs.test-polly }}
       test-arora-bridge-ros2: ${{ steps.affected.outputs.test-arora-bridge-ros2 }}
@@ -86,7 +87,7 @@ jobs:
       # tests locate them through the forwarded CARGO_CDYLIB_FILE_* env vars
       # (see tests/build.rs). No separate guest build step is needed.
       - name: Test (native + wasm modules via wasmtime)
-        run: cargo test --release ${{ needs.select.outputs.test-args }}
+        run: cargo test --release ${{ needs.select.outputs.test-args }} ${{ needs.select.outputs.test-arora-index && '--features arora-index/build' || '' }}
 
       # Every file cargo tracked as an input of what was just built (rustc
       # dep-info, build-script rerun-if-changed) must select the package that
@@ -189,6 +190,14 @@ jobs:
       - name: Clippy
         if: needs.select.outputs.any == 'true'
         run: cargo clippy ${{ needs.select.outputs.test-args }} --all-targets -- -D warnings
+
+      - name: Install the index wasm32 target
+        if: needs.select.outputs.test-arora-index
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Check feature-free index types for wasm32
+        if: needs.select.outputs.test-arora-index
+        run: cargo check -p arora-index --no-default-features --target wasm32-unknown-unknown
 
       # An unselected package has no changed file, so its formatting is
       # unchanged (a rustfmt.toml or toolchain change selects everything).

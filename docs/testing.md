@@ -72,6 +72,8 @@ tests:
   | the ROS 2 bridge to a native subscriber (`#[ignore]`d, Docker) | `crates/arora-bridge-ros2/tests/zenoh_native.rs` |
   | the NAOqi device against a fake NAOqi | `crates/arora-hal-naoqi/tests/device.rs` |
   | guests through `arora-cli` | `tests/tests/integration.rs` |
+  | asset resolution and fetch through a local directory source | `crates/arora-index/tests/resolver.rs` |
+  | exact public models built through a local directory source, then an offline rebuild | `crates/arora-index/tests/build.rs` |
 
   A variant of a behaviour that a unit test can reach — another input, another
   error — belongs in a unit test, not in another end-to-end case.

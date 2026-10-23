@@ -47,10 +47,11 @@ In short:
 - **Studio's device document references one asset**:
   `publishedAssetReference { assetType: model | face, scopedName, versionRange }`
   (semio_studio `packages/core/src/access/documents.ts`).
-- **A device resolves its model from Studio** at start, into a
-  `ResolvedRef { version, releaseId, artifactKey, contentHash }`, and never
-  serves a private model over the bridge: the router has no transport-level
-  authentication ([models and devices](studio-v2-models-and-devices.md), 2.2).
+- **A resolver for Studio models exists; devices do not use it yet.** The
+  `arora-index` crate resolves a model into a
+  `ResolvedRef { version, releaseId, artifactKey, contentHash }`. A device will
+  resolve its models at start through it, and never serves a private model over
+  the bridge ([models and devices](studio-v2-models-and-devices.md), 2.2).
 - **The data store describes its keys**: `DataStore::meta`, `all_meta`,
   `set_meta` and `set_prefix_meta` hold each key's `KeyMeta` — its type, range,
   unit, rest value, and whether a remote may write it.
