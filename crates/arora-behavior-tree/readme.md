@@ -57,7 +57,13 @@ Thus the tick functions can be registered to the engine in exchange of a `Callab
 This identifier is wrapped in a structure called `TickId`,
 also defined in [`arora-behavior-tree-types`](../arora-behavior-tree-types/readme.md).
 
-Nodes that have children are required to expose them as their first parameter,
+Native control nodes keep each child's tick function and call it directly.
+Every attached node remains registered as an engine callable; the root is
+ticked through its `TickId`. Module calls read argument cells resolved at
+lowering and lend value snapshots through `CallBridge::arora_call_borrowed`;
+bridges using its default implementation receive the same owned `Call`.
+
+Module nodes that have children are required to expose them as their first parameter,
 that should be named `children`,
 identified with the UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`,
 and accept a `Vec<TickId>`.
