@@ -81,7 +81,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # `cargo test --release` builds the wasm32-wasip1 guests automatically
+      # `cargo test --release` builds the wasm32-wasip2 guests automatically
       # via the integration-test crate's artifact dependencies (bindeps); the
       # tests locate them through the forwarded CARGO_CDYLIB_FILE_* env vars
       # (see tests/build.rs). No separate guest build step is needed.
@@ -234,11 +234,13 @@ jobs:
 
       # geckodriver + firefox are preinstalled on ubuntu-latest.
       # --no-default-features drops the wasmtime/native hosts so the engine
-      # builds for wasm32; the test loads the test-rust-wasm guest through
-      # BrowserExecutor and dispatches it (see crates/arora-engine/tests/browser.rs).
-      - name: Browser executor test (headless Firefox)
+      # builds for wasm32; the tests load the test-rust-wasm guest through
+      # BrowserExecutor and the test-rust-component guest through
+      # BrowserComponentExecutor, and dispatch them (see
+      # crates/arora-engine/tests/browser.rs and browser_component.rs).
+      - name: Browser executor tests (headless Firefox)
         if: needs.select.outputs.test-arora-engine
-        run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser
+        run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser --test browser_component
 
       # The run loop's cadence rides a JS timer on wasm32 and Tokio's natively,
       # with the same guarantees either way; the test job covers the latter,

@@ -12,6 +12,10 @@
 //! Guest modules built for `wasm32-wasip1` also import a subset of
 //! `wasi_snapshot_preview1`; we provide minimal stubs sufficient to
 //! get past instantiation and Rust's startup.
+//!
+//! Components (`executor.name: wasm-component`) load through
+//! [`BrowserComponentExecutor`], which shares a [`BrowserExecutor`]'s
+//! [`SharedLoader`]: [`SharedLoader::prepare`] stages either kind.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -27,14 +31,20 @@ use arora_buffers::serde_uuid::serialize as serialize_value;
 use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
+
+mod component;
+
 use crate::call::{CallBridge, CallableId};
 use crate::compiled::{Code, CompiledModule};
 use crate::engine::EngineRef;
 use crate::load::module_definition_from_parts;
-use crate::module::{DispatchError, Module};
+use crate::module::{guest_error, DispatchError, Module};
+pub use component::BrowserComponentExecutor;
+pub(crate) use component::{compile as compile_component, BrowserComponent};
 
-/// State shared between a [`BrowserExecutor`] and asynchronous module
-/// loaders (e.g. arora-web's `prepareModule`).
+/// State shared between a [`BrowserExecutor`], the
+/// [`BrowserComponentExecutor`]s built on it, and asynchronous module loaders
+/// (e.g. arora-web's `prepareModule`).
 ///
 /// Chrome disallows both synchronous compilation and synchronous
 /// instantiation above 8 MB on the main thread, so large modules must be
@@ -44,7 +54,13 @@ use crate::module::{DispatchError, Module};
 /// instead of compiling synchronously.
 pub struct SharedLoader {
     engine: Cell<Option<EngineRef>>,
-    prepared: RefCell<HashMap<Uuid, PreparedInstance>>,
+    prepared: RefCell<HashMap<Uuid, Prepared>>,
+}
+
+/// A guest instantiated ahead of its load, of either kind.
+enum Prepared {
+    Core(PreparedInstance),
+    Component(component::PreparedComponent),
 }
 
 pub type SharedLoaderRc = Rc<SharedLoader>;
@@ -61,12 +77,23 @@ struct PreparedInstance {
 
 impl SharedLoader {
     /// Asynchronously compile and instantiate `executable` for the module
-    /// `id`, staging the instance for the next `load_module(id)`.
+    /// `id`, staging the instance for the next `load_module(id)`. A core
+    /// module loads through the [`BrowserExecutor`], a component through the
+    /// [`BrowserComponentExecutor`]; which one `executable` is, its preamble
+    /// says.
     pub async fn prepare(self: Rc<Self>, id: Uuid, executable: Vec<u8>) -> Result<(), JsValue> {
         let engine_ptr = self
             .engine
             .get()
             .ok_or_else(|| JsValue::from_str("BrowserExecutor: set_engine not called"))?;
+
+        if crate::component_layout::is_component(&executable) {
+            let prepared = component::prepare(engine_ptr, &executable).await?;
+            self.prepared
+                .borrow_mut()
+                .insert(id, Prepared::Component(prepared));
+            return Ok(());
+        }
 
         let (imports, parts) = build_imports(engine_ptr)
             .map_err(|e| JsValue::from_str(&format!("building imports failed: {e}")))?;
@@ -77,7 +104,7 @@ impl SharedLoader {
 
         self.prepared
             .borrow_mut()
-            .insert(id, parts.with_instance(instance));
+            .insert(id, Prepared::Core(parts.with_instance(instance)));
         Ok(())
     }
 }
@@ -119,6 +146,24 @@ impl BrowserExecutor {
     /// Shared handle for staging asynchronously-instantiated modules.
     pub fn shared(&self) -> SharedLoaderRc {
         self.shared.clone()
+    }
+
+    /// An executor for components, loading the modules this executor's
+    /// loader stages.
+    pub fn component_executor(&self) -> BrowserComponentExecutor {
+        BrowserComponentExecutor::new(self.shared())
+    }
+
+    /// The core module staged for `id` by the loader, if there is one.
+    fn staged(&self, id: Uuid) -> Result<Option<PreparedInstance>, LoadModuleError> {
+        match self.shared.prepared.borrow_mut().remove(&id) {
+            None => Ok(None),
+            Some(Prepared::Core(prepared)) => Ok(Some(prepared)),
+            Some(Prepared::Component(_)) => Err(LoadModuleError::Internal(format!(
+                "module {id} was prepared as a component, but its header names the wasm \
+                 executor"
+            ))),
+        }
     }
 }
 
@@ -171,12 +216,7 @@ impl Executor for BrowserExecutor {
         // one; otherwise compile + instantiate synchronously from bytes
         // (subject to Chrome's 8 MB main-thread limit — large modules must
         // go through `SharedLoader::prepare`).
-        let prepared = self
-            .shared
-            .prepared
-            .borrow_mut()
-            .remove(&module_definition.header.id);
-        let prepared = match prepared {
+        let prepared = match self.staged(module_definition.header.id)? {
             Some(p) => p,
             None => self.instantiate(&compile(&module_definition.executable)?)?,
         };
@@ -191,8 +231,7 @@ impl Executor for BrowserExecutor {
             Code::Browser(compiled) => {
                 // An instance staged for this id by `SharedLoader::prepare` is
                 // the one to load, as `load_module` does.
-                let staged = self.shared.prepared.borrow_mut().remove(&module.header.id);
-                let prepared = match staged {
+                let prepared = match self.staged(module.header.id)? {
                     Some(p) => p,
                     None => self.instantiate(compiled)?,
                 };
@@ -201,6 +240,9 @@ impl Executor for BrowserExecutor {
             Code::Executable(executable) => self.load_module(module_definition_from_parts(
                 module.header.clone(),
                 executable.as_ref().into(),
+            )),
+            Code::BrowserComponent(_) => Err(LoadModuleError::Internal(
+                "BrowserExecutor: the module was compiled for the wasm-component executor".into(),
             )),
         }
     }
@@ -348,6 +390,10 @@ impl Module for BrowserModule {
                 message: format!("free(result) failed: {e:?}"),
             })?;
 
+        // A guest's error buffer is its error, as for the wasmtime executor.
+        if let Some(message) = guest_error(&result_buf) {
+            return Err(DispatchError::Guest { message });
+        }
         Ok(result_buf.into_boxed_slice())
     }
 }

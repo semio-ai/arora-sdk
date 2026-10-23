@@ -9,7 +9,7 @@
 /// Designed for WASIp2 today; under WASIp3 the same functions become
 /// `async` (and buffers can graduate to `stream<u8>`) without changing
 /// their shape.
-package arora:module@0.1.0;
+package arora:module@0.2.0;
 
 interface types {
     /// A 128-bit identifier — a UUID split into big-endian halves.
@@ -35,6 +35,11 @@ world module {
     use types.{id};
 
     import host;
+
+    /// The functions this artifact serves, by id. The engine checks the
+    /// functions a module's header declares against them when it loads the
+    /// module.
+    export functions: func() -> list<id>;
 
     /// Single dispatch entry point: routes `method` to the matching
     /// exported function. `arg` and the result are Arora Buffers.

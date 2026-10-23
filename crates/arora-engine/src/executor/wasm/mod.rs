@@ -14,7 +14,6 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::WasiCtxBuilder;
 
 use arora_buffers::serde_uuid::serialize;
-use arora_buffers::{BUFFER_SIZE_SIZE, TYPE_ERROR};
 use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
@@ -24,7 +23,7 @@ use crate::load::module_definition_from_parts;
 use crate::{
     engine::EngineRef,
     executor::wasm::guest::AroraBuffer,
-    module::{DispatchError, Module},
+    module::{guest_error, DispatchError, Module},
 };
 
 mod guest;
@@ -158,6 +157,9 @@ impl Executor for WebAssemblyExecutor {
             Code::Executable(executable) => self.load_module(module_definition_from_parts(
                 module.header.clone(),
                 executable.as_ref().into(),
+            )),
+            _ => Err(LoadModuleError::Internal(
+                "WebAssemblyExecutor: the module was compiled for another executor".into(),
             )),
         }
     }
@@ -424,20 +426,7 @@ impl Module for WebAssemblyModule {
                 ),
             })?;
 
-        // Check for a guest-side error (TYPE_ERROR at payload start).
-        if result_buffer.get(BUFFER_SIZE_SIZE) == Some(&TYPE_ERROR) {
-            let msg_start = BUFFER_SIZE_SIZE + 1;
-            let message = if result_buffer.len() >= msg_start + 4 {
-                let len =
-                    u32::from_le_bytes(result_buffer[msg_start..msg_start + 4].try_into().unwrap())
-                        as usize;
-                let str_start = msg_start + 4;
-                std::str::from_utf8(&result_buffer[str_start..str_start + len])
-                    .unwrap_or("<invalid utf-8>")
-                    .to_string()
-            } else {
-                "guest returned error (no message)".to_string()
-            };
+        if let Some(message) = guest_error(&result_buffer) {
             return Err(DispatchError::Guest { message });
         }
 
