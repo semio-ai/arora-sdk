@@ -1,12 +1,14 @@
-# arora-node-graph
+# arora-dataflow-nodes
 
 Node graphs for Arora: a Vizij node graph (`GraphSpec`, its JSON form) runs
 as the detached nodes of an `arora-behavior-tree`
 ([proposal](../../docs/proposal-behavior-languages.md)). The crate holds:
 
-- **the node vocabulary as module functions** (`functions`): one function of
-  the module `@arora/node-graph` per node kind, and `NodeGraphModule`, which
-  answers their calls in-process through a bridge over the device's. A
+- **the node vocabulary as module functions** (`functions`): one function
+  per node kind, in one of three modules: `@arora/dataflow` for the general
+  kinds, `@arora/geometry` for `vec3cross`, and `@arora/kinematics` for
+  `inversekinematics` and the URDF nodes. `DataflowNodes` answers their calls
+  in-process through a bridge over the device's. A
   function runs its node kind's per-node code (`eval`) over values, its
   parameters (`params::Params`), the clock and its state. What a call does
   that belongs to Vizij's graph format (an `input` node fitting its value to
@@ -21,8 +23,8 @@ as the detached nodes of an `arora-behavior-tree`
 ## On the behavior tree
 
 ```rust
-use arora_node_graph::import::import_json;
-use arora_node_graph::tree_runtime::TreeRuntime;
+use arora_dataflow_nodes::import::import_json;
+use arora_dataflow_nodes::tree_runtime::TreeRuntime;
 use arora_shape::{TypedPath, Value};
 
 // A graph's JSON as Vizij writes it: a spec, or a document holding one.
@@ -81,8 +83,8 @@ How it evaluates:
 The stress example times loading and stepping, and counts each step's calls:
 
 ```bash
-cargo run --release -p arora-node-graph --example stress -- chain 10000
-cargo run --release -p arora-node-graph --example stress -- file graph.json
+cargo run --release -p arora-dataflow-nodes --example stress -- chain 10000
+cargo run --release -p arora-dataflow-nodes --example stress -- file graph.json
 ```
 
 ---
@@ -98,7 +100,7 @@ and `Output` nodes write a `WriteBatch` the host applies.
 ## Installation
 
 ```bash
-cargo add arora-node-graph
+cargo add arora-dataflow-nodes
 ```
 
 Features:
@@ -189,19 +191,19 @@ Disable defaults with `--no-default-features` if you want a minimal build.
 Run the crate tests (unit + integration):
 
 ```bash
-cargo test -p arora-node-graph
+cargo test -p arora-dataflow-nodes
 ```
 
 Test the robotics nodes explicitly:
 
 ```bash
-cargo test -p arora-node-graph --features urdf_ik
+cargo test -p arora-dataflow-nodes --features urdf_ik
 ```
 
 The benchmark loads and steps chains, a mixed "kitchen" graph and a fixture on the tree:
 
 ```bash
-cargo bench -p arora-node-graph
+cargo bench -p arora-dataflow-nodes
 ```
 
 The fixture tests run every graph in `fixtures/` evaluating every node and what its outputs read, and again with its parameters edited in place.

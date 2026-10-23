@@ -108,7 +108,7 @@ Graph specs are normalised so node shorthands stay ergonomic while the runtime a
   }
 }
 
-// normalised representation consumed by arora-node-graph
+// normalised representation consumed by arora-dataflow-nodes
 {
   "id": "scale",
   "type": "multiply",
@@ -162,6 +162,6 @@ Modules include unit tests for the constructor/accessor round-trips, coercion, a
 ## Related Packages
 
 - [`vizij-api-wasm`](https://github.com/vizij-ai/vizij-rs/blob/main/crates/api/vizij-api-wasm/README.md) – wasm helpers that mirror the same normalisation logic for JavaScript.
-- The node graph (`arora-node-graph`) and Vizij's interop crates depend on these contracts.
+- The node graph (`arora-dataflow-nodes`) and Vizij's interop crates depend on these contracts.
 
 Questions or improvements? Open an issue—shared contracts are the backbone of Vizij interoperability. 🔗

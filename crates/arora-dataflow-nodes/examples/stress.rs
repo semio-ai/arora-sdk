@@ -3,8 +3,8 @@
 //! additions `depth` deep and for a graph read from a JSON file.
 //!
 //! ```text
-//! cargo run --release -p arora-node-graph --example stress -- chain 10000
-//! cargo run --release -p arora-node-graph --example stress -- file graph.json
+//! cargo run --release -p arora-dataflow-nodes --example stress -- chain 10000
+//! cargo run --release -p arora-dataflow-nodes --example stress -- file graph.json
 //! ```
 //!
 //! A step of `moving` stages a new value on every input; one of `settled`
@@ -15,9 +15,9 @@
 //! ([`TreeRuntime::set_params`]) and by loading the edited spec.
 use std::time::{Duration, Instant};
 
-use arora_node_graph::import::tree_node_id;
-use arora_node_graph::tree_runtime::{Evaluation, TreeRuntime};
-use arora_node_graph::types::{
+use arora_dataflow_nodes::import::tree_node_id;
+use arora_dataflow_nodes::tree_runtime::{Evaluation, TreeRuntime};
+use arora_dataflow_nodes::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, NodeParams, NodeSpec, NodeType,
 };
 use arora_shape::value::float;
@@ -96,7 +96,7 @@ fn chain(depth: usize) -> GraphSpec {
 
 fn file(path: &str) -> GraphSpec {
     let text = std::fs::read_to_string(path).expect("the graph file reads");
-    let (spec, _) = arora_node_graph::import::import_json(&text, &Default::default())
+    let (spec, _) = arora_dataflow_nodes::import::import_json(&text, &Default::default())
         .expect("the graph imports");
     spec
 }

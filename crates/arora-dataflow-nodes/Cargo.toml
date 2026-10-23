@@ -1,9 +1,9 @@
 [package]
-name = "arora-node-graph"
+name = "arora-dataflow-nodes"
 version = "1.0.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Node graphs for Arora: the node vocabulary as module functions, the importer from a Vizij graph to a behavior tree's detached nodes, and a runtime evaluating a graph on the tree."
+description = "Arora's dataflow nodes: the node vocabulary as the functions of @arora/dataflow, @arora/geometry and @arora/kinematics, the importer from a Vizij graph to a behavior tree's detached nodes, and a runtime evaluating a graph on the tree."
 repository = "https://github.com/semio-ai/arora-sdk"
 readme = "README.md"
 keywords = ["arora", "node", "graph", "dataflow", "robotics"]

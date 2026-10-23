@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `arora-node-graph`. The format follows
+All notable changes to `arora-dataflow-nodes`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/). Versions up to 3.1.1 were
 published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
@@ -10,13 +10,16 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
 
 ### Added
 
-- The node vocabulary as the functions of the module `@arora/node-graph`
-  (`functions`): one per node kind, named by its graph-JSON name. Input
+- The node vocabulary as the functions of three modules (`functions`):
+  `@arora/dataflow` for the general node kinds, `@arora/geometry` for
+  `vec3cross` and `@arora/kinematics` for `inversekinematics` and the URDF
+  nodes. Each node kind is one function, named by its graph-JSON name. Input
   ports, node parameters (`param.<field>`), the clock (`t`, `dt`) and a
   stateful node's state (`state`, a mutable parameter holding a value) are
   its parameters; a node with ports beyond `out` returns a structure of
-  them. `NodeGraphModule` answers the calls in-process, through a bridge
-  over the device's, and runs each with its node kind's per-node code. It keeps, for each node it is called for, the parameters, port
+  them. `DataflowNodes` answers the calls in-process, through a bridge
+  over the device's, and runs each with its node kind's per-node code. It
+  keeps, for each node it is called for, the parameters, port
   layouts and buffers of its last call, so a call whose parameters did not
   change prepares nothing, and it answers borrowed calls
   (`CallBridge::arora_call_borrowed`) without copying its arguments.
@@ -45,8 +48,9 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
 
 ### Changed
 
-- The crate is `arora-node-graph`, in arora-sdk, continuing `vizij-graph-core`
-  3.1.1 with its history. Its library is `arora_node_graph`, and it depends on
+- The crate is `arora-dataflow-nodes`, in arora-sdk, continuing
+  `vizij-graph-core` 3.1.1 with its history. Its library is
+  `arora_dataflow_nodes`, and it depends on
   `arora-shape` where it depended on `vizij-api-core`. Its graph format and
   its evaluation do not change, except as below.
 - The numeric nodes flatten any value whose leaves are numbers, by its own

@@ -1,5 +1,5 @@
-use arora_node_graph::tree_runtime::{Evaluation, TreeRuntime};
-use arora_node_graph::types::{
+use arora_dataflow_nodes::tree_runtime::{Evaluation, TreeRuntime};
+use arora_dataflow_nodes::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, InputDefault, NodeParams, NodeSpec,
     NodeType,
 };
