@@ -27,11 +27,14 @@
 //!
 //! **Direction.** The speed is signed: a negative speed plays backwards. A
 //! turn at a bound reverses the heading without changing the speed; a new
-//! speed of the other sign, `play` and `seek` start the rules afresh — no
-//! turn taken, the window not yet entered, not ended. `set_reversed` gives a
-//! player the heading another has after a turn, so a player started late
-//! plays alongside it — to within a nanosecond at a speed that rounds, as
-//! each player's travel is rounded from its own start.
+//! speed of the other sign, `play`, `play_at` and `seek` start the rules
+//! afresh — no turn taken, the window not yet entered, not ended.
+//! `set_reversed` gives a player the heading another has after a turn, so a
+//! player started late plays alongside it — to within a nanosecond at a
+//! speed that rounds, as each player's travel is rounded from its own start.
+//! A held player (paused or stopped) keeps that heading for its next start,
+//! and through a `seek` before it, as it keeps a new speed; reversed, the
+//! heading counts as the turn taken, so a bounce ends at the next bound.
 
 use crate::time::Nanos;
 
@@ -118,6 +121,9 @@ pub struct Player {
     entered: bool,
     /// Stopped at a bound by the loop mode.
     ended: bool,
+    /// The heading `set_reversed` gave the player while it was held, kept
+    /// for its next start.
+    kept: bool,
     clock: Clock,
     /// The device time the player was last moved to.
     now: Option<Nanos>,
@@ -143,6 +149,7 @@ impl Player {
             turned: false,
             entered: false,
             ended: false,
+            kept: false,
             clock: Clock::Idle,
             now: None,
         }
@@ -209,11 +216,12 @@ impl Player {
         self.state == State::Playing && !self.ended && !self.waiting()
     }
 
-    /// Starts playing from where the player is, at device time `at`.
+    /// Starts playing from where the player is, at device time `at`. The
+    /// rules start afresh, heading as `set_reversed` gave a held player.
     pub fn play(&mut self, at: Nanos, length: Nanos) {
         self.advance(at, length);
         self.state = State::Playing;
-        self.afresh();
+        self.start_afresh();
         self.clock = Clock::From {
             from: at,
             travelled: 0,
@@ -223,11 +231,12 @@ impl Player {
     /// Starts playing at device time `start`: until then the player holds,
     /// and from then on it stands where it would had it started at that
     /// instant, however its steps fall around it. `at` is when the command
-    /// is given.
+    /// is given. The rules start afresh, heading as `set_reversed` gave a
+    /// held player.
     pub fn play_at(&mut self, at: Nanos, start: Nanos, length: Nanos) {
         self.advance(at, length);
         self.state = State::Playing;
-        self.afresh();
+        self.start_afresh();
         self.clock = Clock::Waiting { at: start };
     }
 
@@ -248,16 +257,24 @@ impl Player {
     }
 
     /// Moves the playhead to `position` at device time `at`; a playing
-    /// player plays on from there.
+    /// player plays on from there. The rules start afresh; a held player
+    /// keeps the heading `set_reversed` gave it, for its next start.
     pub fn seek(&mut self, at: Nanos, position: Nanos, length: Nanos) {
         self.advance(at, length);
         self.position = position;
-        self.afresh();
+        if self.kept && self.state != State::Playing {
+            self.entered = false;
+            self.ended = false;
+            self.turned = self.reversed;
+        } else {
+            self.afresh();
+        }
         self.restart_clock(at);
     }
 
     /// Sets the speed from device time `at`. A speed of the other sign is a
-    /// new direction: the rules start afresh.
+    /// new direction: the rules start afresh, with no heading kept. A held
+    /// player keeps its new speed for its next start.
     pub fn set_speed(&mut self, at: Nanos, speed: f64, length: Nanos) {
         self.advance(at, length);
         if (speed < 0.0) != (self.speed < 0.0) {
@@ -283,11 +300,19 @@ impl Player {
     /// Heads the player against its speed's sign, as after a turn at a
     /// bound, or with it: the heading of another player that turned, for one
     /// that is to play alongside it. Reversed, it counts as having turned, so
-    /// a bounce stops at the next bound.
+    /// a bounce stops at the next bound. A held player, paused or stopped,
+    /// keeps the heading for its next start (`play`, `play_at`) and through a
+    /// `seek` before it, as it keeps a new speed: a device that takes each
+    /// command late, given the heading before the start, catches up the way
+    /// it is to head. A `stop` or a speed of the other sign leaves no
+    /// heading kept.
     pub fn set_reversed(&mut self, at: Nanos, reversed: bool, length: Nanos) {
         self.advance(at, length);
         self.reversed = reversed;
         self.turned = self.turned || reversed;
+        if self.state != State::Playing {
+            self.kept = true;
+        }
     }
 
     /// The window as it bounds a player of `length`, its ends in order.
@@ -328,12 +353,26 @@ impl Player {
     }
 
     /// The rules start afresh: no turn taken, the window not entered, not
-    /// ended, heading with the speed.
+    /// ended, heading with the speed, no heading kept.
     fn afresh(&mut self) {
         self.reversed = false;
         self.turned = false;
         self.entered = false;
         self.ended = false;
+        self.kept = false;
+    }
+
+    /// The rules start afresh at a start, heading as `set_reversed` gave the
+    /// player while it was held: a reversed heading counts as a turn taken.
+    fn start_afresh(&mut self) {
+        if self.kept {
+            self.entered = false;
+            self.ended = false;
+            self.turned = self.reversed;
+            self.kept = false;
+        } else {
+            self.afresh();
+        }
     }
 
     fn restart_clock(&mut self, at: Nanos) {

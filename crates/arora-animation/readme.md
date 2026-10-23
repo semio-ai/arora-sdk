@@ -42,8 +42,11 @@ reads:
 A side with none eases as `"cubic"`. A keypoint may also carry `pairing`
 (`"paired"`, `"free"`), which an editor reads and playback does not.
 
-The document form is JSON: the core of a stored Semio Studio animation of
-format 3, whose editor fields (its id, groups, colours) are ignored here.
+The document form is JSON. A clip's `lengthNs` is its natural end: a player
+given no window and no length plays it to there; absent, the clip ends at its
+last keypoint. A stored Semio Studio animation of format 3 is the document
+without `lengthNs`, whose editor fields (its id, groups, colours, viewport
+extent) are ignored here; Studio sets the length when it delivers a clip.
 `Clip::from_json` reads it and `Clip::to_json` writes it; clip format 1.x
 (normalized stamps and handles) reads through `clip1::ClipV1::to_clip`.
 

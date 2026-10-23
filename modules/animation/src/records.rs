@@ -213,9 +213,9 @@ pub struct BakedTrack {
 }
 
 /// A clip of format 2.0, as `arora_animation::Clip` holds it: tracks of
-/// keypoints at signed nanoseconds of clip-local time, and how long the clip
-/// plays when nothing else bounds it (`length_ns`; absent, to its last
-/// keypoint).
+/// keypoints at signed nanoseconds of clip-local time, and the clip's natural
+/// end (`length_ns`), where a player given no window and no length plays it
+/// to; absent, to its last keypoint.
 #[derive(Debug, Clone, PartialEq, AroraType)]
 #[arora(id = "76697a69-6a00-0000-0000-000000000200", version = "2.0.0")]
 pub struct Clip {

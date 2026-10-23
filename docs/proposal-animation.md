@@ -249,7 +249,12 @@ reverses the heading without changing the speed. A speed of the other sign,
 a `play` or a `seek` starts the rules afresh: no turn taken, the window not
 yet entered, not ended. `set_reversed` gives a player the heading another
 has after a turn, so one started late (an instance delivered mid-bounce)
-plays alongside the others, to within a nanosecond at a speed that rounds.
+plays alongside the others, to within a nanosecond at a speed that rounds. A
+held player (paused or stopped) keeps that heading for its next start and
+through a `seek` before it, as it keeps a new speed; reversed, it counts as
+the turn taken, so a bounce ends at the next bound. A client sends the
+heading before the start: a device taking each command late then catches up
+on a past `play_at` instant the way it is to head.
 A speed is at most 2^20 either way, which keeps every travel exact.
 
 **Commands** take effect at the device time of the last step, so a client
@@ -356,7 +361,7 @@ let outputs = engine.step(now_ns, dt_ns);          // one value per output posit
 | Level | Field | Meaning |
 |---|---|---|
 | clip | `name` | |
-| clip | `length` | How long it plays when nothing else bounds it, from 0, in nanoseconds; absent, to its last keypoint. |
+| clip | `length` | Its natural end, from 0, in nanoseconds: a player given no window and no length (a behavior-tree node playing the clip on its own) plays it to there; absent, to its last keypoint. The host that delivers the clip sets it; an authored document carries none. |
 | track | `id`, `name` | |
 | track | `target` | What it animates: the key a player's output for it carries. |
 | keypoint | `id` | |
@@ -373,16 +378,19 @@ must get back unchanged: the transitions as chosen, not the control points
 resolved from them, so moving a keypoint re-resolves its neighbours'
 inferred tangents. The rest of an animation document is Studio's and
 travels beside the clip: the document's id, its track groups, a track's
-colour and group name, the viewport's extent.
+colour and group name, the viewport's extent. A clip's length is not stored:
+Studio computes it when it delivers a clip or prepares one to play on its
+own, as the latest of the content's end, the viewport's extent and 1 s.
 
 ### 5.2 Its two forms
 
-- **The document form** is JSON, the core of a stored Studio animation of
-  format 3: `{ name, lengthNs, tracks: [{ id, name, animatableId, points: [{
-  id, timeNs, value, transitions: { in, out, pairing } }] }] }`, a handle
-  `{ dtNs, dv }` and a named transition its name (`"cubic"`,
-  `"explicit-handles"`, `"inferred-auto-clamped"`: Studio's spellings).
-  Fields it does not name are ignored, so a stored animation is a clip.
+- **The document form** is JSON: `{ name, lengthNs, tracks: [{ id, name,
+  animatableId, points: [{ id, timeNs, value, transitions: { in, out,
+  pairing } }] }] }`, a handle `{ dtNs, dv }` and a named transition its name
+  (`"cubic"`, `"explicit-handles"`, `"inferred-auto-clamped"`: Studio's
+  spellings). Fields it does not name are ignored. A stored Studio animation
+  of format 3 is this document without `lengthNs`, so it reads as a clip that
+  ends at its last keypoint; Studio adds the length when it delivers one.
 - **The record form** is what a module call carries: `Clip`, `ClipTrack`,
   `ClipKeypoint` and `ClipTransition`, records `…0200` to `…0203` of the
   module's id space, at version 2.0.0, taken by `load_clip` and
@@ -404,7 +412,7 @@ and a cubic Bézier is unchanged by that affine map.
 | `arora-animation-module` | 1.0.0 (module `@arora/animation` 3.0.0) | New crate; the module's interface continues `@vizij/animation` 2.0.0. Same ids. Adds `load_clip`, `reload_clip`, `set_rate`, `step_with_velocities`, `set_length`, `set_reversed`, the 2.0 records and `StepSamples`; `PlayerState` 1.3.0 adds `reversed` and `waiting`, `InstanceState` 1.2.0 adds `rate`; every other record vizij publishes is at the next minor, with the same fields, in the `arora` scope (`AnimationClip`, `AnimTrack` and `Keypoint` 1.2.0; `TransitionHandle`, `TrackOutput`, `StepValues`, `OutputKeys`, `BakedAnimation` and `BakedTrack` 1.1.0), so both modules' records load into one registry; `set_loop` takes `bounce`. The `module-dir` feature writes the module directory a device loads (header, guest `animation.wasm`, and the records in the `arora` scope, the module's at `arora.animation`). Behaviour changes (§3): the clock, `f64` numbers, the last keypoint at its instant, keypoints before 0, a window that no longer moves the playhead, commands taking effect at once. |
 | `vizij-animation-core`, `vizij-animation-module` | — | No further release once vizij-rs depends on the arora crates. |
 | `@vizij/animation-module` (npm) | — | Deprecated, or a wrapper over the new guest. |
-| Semio Studio's stored animation | format 3 | Clip 2.0 plus the editor's fields. Studio reads 1, 2 and 3, writes 3, and writes 3 only once every client refuses a format newer than it reads. Published releases keep format 2. |
+| Semio Studio's stored animation | format 3 | Clip 2.0 without `lengthNs`, plus the editor's fields (the viewport's extent in nanoseconds among them). Times and handle deltas are signed integer nanoseconds within a safe integer. Studio reads 1, 2 and 3 and writes 2 until clients that read 3 are in production; a one-line change then writes 3. Published releases keep format 2. |
 
 The first versions of the two crates are published by hand, then each
 crate's trusted publisher is registered, and the release workflow publishes

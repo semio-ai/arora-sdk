@@ -190,3 +190,137 @@ fn pausing_holds_and_playing_resumes_from_the_same_place() {
     p.stop(9_250 * MS, LENGTH);
     assert_eq!(p.position(), 0, "stop returns to the window's start");
 }
+
+/// A player at `from_ms` in `mode`, held (paused) at device time 0.
+fn held(mode: LoopMode, from_ms: i64) -> Player {
+    let mut p = Player::new();
+    p.set_mode(mode);
+    p.seek(0, from_ms * MS, LENGTH);
+    p.pause(0, LENGTH);
+    p
+}
+
+#[test]
+fn a_held_player_keeps_the_heading_it_is_given_for_its_start() {
+    // Started by `play_at`: it heads back from its first step.
+    let mut p = held(LoopMode::Bounce, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.play_at(0, 0, LENGTH);
+    assert!(p.reversed());
+    assert_eq!(at(&mut p, 500), 2_500);
+    // Started by `play`.
+    let mut p = held(LoopMode::Bounce, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.play(0, LENGTH);
+    assert_eq!(at(&mut p, 500), 2_500);
+    // Through a `seek` before the start.
+    let mut p = held(LoopMode::Bounce, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.seek(0, 2_000 * MS, LENGTH);
+    assert!(p.reversed(), "a seek keeps a held player's heading");
+    p.play(0, LENGTH);
+    assert_eq!(at(&mut p, 500), 1_500);
+    // The heading counts as a turn taken: a bounce ends at the next bound.
+    assert_eq!(at(&mut p, 2_000), 0);
+    assert!(p.ended());
+}
+
+#[test]
+fn a_kept_heading_serves_one_start_and_survives_the_commands_before_it() {
+    // Kept for one start: the next is afresh.
+    let mut p = held(LoopMode::PingPong, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.play(0, LENGTH);
+    assert!(p.reversed());
+    p.pause(0, LENGTH);
+    p.play(0, LENGTH);
+    assert!(!p.reversed(), "a second start heads with the speed");
+    // Kept on a stopped player, and through a speed of the same sign.
+    let mut p = held(LoopMode::PingPong, 3_000);
+    p.stop(0, LENGTH);
+    p.seek(0, 3_000 * MS, LENGTH);
+    p.set_reversed(0, true, LENGTH);
+    p.set_speed(0, 2.0, LENGTH);
+    p.play_at(0, 0, LENGTH);
+    assert_eq!(at(&mut p, 500), 2_000);
+}
+
+#[test]
+fn a_player_not_reversed_starts_forward() {
+    let mut p = held(LoopMode::Bounce, 3_000);
+    p.play_at(0, 0, LENGTH);
+    assert!(!p.reversed());
+    assert_eq!(at(&mut p, 500), 3_500);
+    // A heading given back to the speed's sign is kept too, with no turn
+    // taken: the bounce turns at the end and has not ended.
+    let mut p = held(LoopMode::Bounce, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.set_reversed(0, false, LENGTH);
+    p.play(0, LENGTH);
+    assert_eq!(at(&mut p, 500), 3_500);
+    assert_eq!(at(&mut p, 2_500), 4_500);
+    assert!(p.reversed() && !p.ended());
+}
+
+#[test]
+fn a_start_after_a_turn_or_a_reset_heads_with_the_speed() {
+    // A turn taken while playing is not kept past a pause: a start is afresh.
+    let mut p = player(LoopMode::PingPong, 4_000, 1.0);
+    assert_eq!(at(&mut p, 1_500), 4_500);
+    assert!(p.reversed());
+    p.pause(1_500 * MS, LENGTH);
+    p.play(1_500 * MS, LENGTH);
+    assert!(!p.reversed());
+    // Nor a heading given while playing.
+    let mut p = player(LoopMode::PingPong, 1_000, 1.0);
+    p.set_reversed(0, true, LENGTH);
+    p.pause(0, LENGTH);
+    p.play(0, LENGTH);
+    assert!(!p.reversed());
+    // A stop, or a speed of the other sign, leaves no heading kept.
+    let mut p = held(LoopMode::PingPong, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.stop(0, LENGTH);
+    p.play(0, LENGTH);
+    assert!(!p.reversed());
+    let mut p = held(LoopMode::PingPong, 3_000);
+    p.set_reversed(0, true, LENGTH);
+    p.set_speed(0, -1.0, LENGTH);
+    p.play(0, LENGTH);
+    assert!(!p.reversed());
+    assert_eq!(at(&mut p, 500), 2_500, "backwards by its speed alone");
+}
+
+/// The commands a client sends a held player to start it alongside one that
+/// turned: a speed, the heading, then `play_at` the instant the others start
+/// at. A device that takes each a round trip after the last — a real one —
+/// stands exactly where one that took them in the same step does, from the
+/// first step after its start onwards, turns included.
+#[test]
+fn a_heading_given_before_a_late_start_catches_up_the_way_it_heads() {
+    const TRIP: Nanos = 37 * MS + 123;
+    let start: Nanos = 100 * MS;
+    let mut sibling = held(LoopMode::PingPong, 1_000);
+    sibling.set_speed(start, 1.5, LENGTH);
+    sibling.set_reversed(start, true, LENGTH);
+    sibling.play_at(start, start, LENGTH);
+    let mut late = held(LoopMode::PingPong, 1_000);
+    late.set_speed(start + TRIP, 1.5, LENGTH);
+    late.set_reversed(start + 2 * TRIP, true, LENGTH);
+    late.play_at(start + 3 * TRIP, start, LENGTH);
+    let mut now = start + 3 * TRIP;
+    late.advance(now, LENGTH);
+    assert!(
+        late.reversed() && late.position() < 1_000 * MS,
+        "it caught up heading back"
+    );
+    while now < start + 2_000 * MS {
+        sibling.advance(now, LENGTH);
+        late.advance(now, LENGTH);
+        assert_eq!(late.position(), sibling.position(), "at {now} ns");
+        assert_eq!(late.reversed(), sibling.reversed(), "at {now} ns");
+        now += 16_666_667;
+    }
+    // It turned at the start bound and heads forward again.
+    assert!(!late.reversed() && late.position() > 1_000 * MS);
+}
