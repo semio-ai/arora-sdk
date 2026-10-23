@@ -639,8 +639,8 @@ svg.react-flow__connectionline {
 
 </style>
 <style>
-/* Layout: a lab bench. Tabs across the top, one per design; each tab is an
-   instrument panel (inputs and meters on the left, the circuit on the right). */
+/* Layout: a lab bench. Across the top, the overview or two designs to set side by
+   side; the example and its inputs on the left, then each design's circuit over its meters. */
 :root {
   --bg: #f2f3ef;
   --panel: #ffffff;
@@ -957,6 +957,41 @@ table.cmp .form { display: block; font: 400 11px var(--mono); color: var(--muted
 .design-menu input { margin: 0; width: 16px; height: 16px; accent-color: var(--ink); }
 .design-menu i { display: inline-block; flex: none; width: 18px; height: 4px; border-radius: 2px; background: var(--swatch); }
 .design-menu .menu-note { margin: 6px 4px 2px; font-size: 11.5px; color: var(--muted); }
+/* The picker: the overview spans two rows; one row picks the left design, the other the right. */
+nav.tabs.picker { display: grid; grid-template-columns: minmax(150px, auto) minmax(0, 1fr); gap: 0 8px; overflow: visible; }
+nav.tabs.picker > .overview { grid-row: 1 / span 2; justify-content: center; }
+nav.tabs.picker .pick-row { display: flex; align-items: stretch; gap: 4px; overflow-x: auto; min-width: 0; }
+nav.tabs.picker .pick-row + .pick-row { border-top: 1px dashed var(--line); }
+.pick-label { flex: none; align-self: center; width: 4.5em; font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+nav.tabs.picker button[aria-pressed="true"] { background: var(--panel); border-bottom-color: var(--tab-color); }
+nav.tabs.picker[data-mode="compare"] .pick-row button[aria-pressed="true"] { background: transparent; }
+/* Two designs side by side: one example column, then a column per design whose rows line up. */
+.wrap.wide { max-width: 1880px; }
+.pair { display: grid; grid-template-columns: 280px minmax(0, 1fr) minmax(0, 1fr); gap: 12px 16px; align-items: start; }
+.pair > * { min-width: 0; }
+.pair > .pair-example { grid-column: 1; grid-row: 1 / span 5; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+.pair > .pair-left { grid-column: 2; }
+.pair > .pair-right { grid-column: 3; }
+.pair > .proposal { grid-row: 1; grid-template-columns: minmax(0, 1fr); align-self: stretch; }
+.pair > .pair-bar { grid-column: 2 / span 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pair > .views { grid-row: 3; }
+.pair > .outputs { grid-row: 4; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: start; }
+.pair > .pair-notes { grid-row: 5; }
+.pair > .pair-notes .note { margin: 0 0 8px; }
+.pair .proposal ul.pr-links { align-items: flex-start; text-align: left; max-width: none; margin-top: 8px; }
+.pair .proposal details.rules { margin-top: 6px; }
+.pair .proposal details.rules summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.pair .flow-canvas { height: 56vh; }
+@media (max-width: 1100px) {
+  .pair { grid-template-columns: minmax(0, 1fr); }
+  .pair > * { grid-column: 1 !important; grid-row: auto !important; position: static !important; max-height: none !important; }
+  .pair > .pair-example { order: 0; }
+  .pair > .pair-bar { order: 1; }
+  .pair > .pair-left { order: 2; }
+  .pair > .pair-right { order: 3; }
+  nav.tabs.picker { grid-template-columns: minmax(0, 1fr); }
+  nav.tabs.picker > .overview { grid-row: auto; }
+}
 </style>
 </head>
 <body>
@@ -965,7 +1000,7 @@ table.cmp .form { display: block; font: 400 11px var(--mono); color: var(--muted
   <header class="top">
     <div>
       <h1>The NGBT spectrum <svg class="flag" viewBox="0 0 60 40" role="img" aria-label="Intersex-inclusive progress pride flag"><rect y="0.000" width="60" height="6.717" fill="#E40303"/><rect y="6.667" width="60" height="6.717" fill="#FF8C00"/><rect y="13.333" width="60" height="6.717" fill="#FFED00"/><rect y="20.000" width="60" height="6.717" fill="#008026"/><rect y="26.667" width="60" height="6.717" fill="#004CFF"/><rect y="33.333" width="60" height="6.717" fill="#732982"/><polygon points="0,0 12,0 32,20 12,40 0,40" fill="#000000"/><polygon points="0,0 8.5,0 28.5,20 8.5,40 0,40" fill="#784F17"/><polygon points="0,0 5,0 25,20 5,40 0,40" fill="#5BCEFA"/><polygon points="0,0 1.5,0 21.5,20 1.5,40 0,40" fill="#F5A9B8"/><polygon points="0,0 -2,0 18,20 -2,40 0,40" fill="#FFFFFF"/><polygon points="0,0 -5.5,0 14.5,20 -5.5,40 0,40" fill="#FFD800"/><circle cx="5" cy="20" r="3.4" fill="none" stroke="#7902AA" stroke-width="1.3"/></svg></h1>
-      <p class="lede">Nine designs for running node graphs and behavior trees on one device, simulated side by side; #396, detached nodes, is the one chosen. Four are shown: #407 (#396 as main runs it), #409 (#407 with every node a full tree node), #404 and #405. The Designs menu at the top right shows the others. Each tab ticks the same example with that design's rules; the meters count what it does. The overview’s benchmarks run the same workloads in three harnesses (this page’s model, Rust natively, and Rust compiled to wasm in this browser), among them two realistic ones: a robot face, and a robot in conversation.</p>
+      <p class="lede">Nine designs for running node graphs and behavior trees on one device, simulated side by side; #396, detached nodes, is the one chosen. Four are shown: #407 (#396 as main runs it), #409 (#407 with every node a full tree node), #404 and #405. The Designs menu at the top right shows the others. Pick a Left and a Right design to tick the same example under both, side by side; the meters count what each does. The overview’s benchmarks run the same workloads in three harnesses (this page’s model, Rust natively, and Rust compiled to wasm in this browser), among them two realistic ones: a robot face, and a robot in conversation.</p>
     </div>
     <div class="transport" role="group" aria-label="Clock">
       <button id="play" class="primary" type="button">Pause</button>
@@ -3187,7 +3222,6 @@ function setShown(ids) {
   SHOWN.clear(); ids.forEach((id) => SHOWN.add(id));
   try { localStorage.setItem(SHOWN_KEY, JSON.stringify([...SHOWN])); } catch (_) {}
   // Tabs, tables and charts all follow the selection: render them again.
-  if (STATE.tab !== "compare" && !SHOWN.has(STATE.tab)) { STATE.tab = "compare"; try { history.replaceState(null, "", "#compare"); } catch (e) {} }
   syncDesignMenu(); renderAll();
 }
 const shownDesigns = () => DESIGNS.filter((d) => SHOWN.has(d.id));
@@ -3502,13 +3536,23 @@ function calibrationTable() {
 
 // App state
 // ---------------------------------------------------------------------------
-const STATE = { tab: "compare", example: "readers", view: "graph", treeMode: "diagram", incLeaves: "beside", macroLifetime: "block", macroGrouping: "value", macroRun: "placed", macroShow: "authored", macroView: "graph", folds: {}, playing: true, rate: 30, structure: { root: "parallel" }, inputs: {}, pending: {} };
+const STATE = { tab: "compare", left: "compute", right: "macro", example: "readers", view: "graph", treeMode: "diagram", incLeaves: "beside", macroLifetime: "block", macroGrouping: "value", macroRun: "placed", macroShow: "authored", macroView: "graph", folds: {}, playing: true, rate: 30, structure: { root: "parallel" }, inputs: {}, pending: {} };
 const HIST = 240, SPARK = 120;
 let RUN = null;
 try { const saved = JSON.parse(localStorage.getItem("five-ways") || "{}"); if (saved.example) STATE.example = saved.example; if (saved.view) STATE.view = saved.view; if (saved.treeMode) STATE.treeMode = saved.treeMode; if (["beside", "place"].includes(saved.incLeaves)) STATE.incLeaves = saved.incLeaves; if (saved.settings >= 2 && ["graph", "block"].includes(saved.macroLifetime)) STATE.macroLifetime = saved.macroLifetime; if (["value", "group"].includes(saved.macroGrouping)) STATE.macroGrouping = saved.macroGrouping; if (["placed", "pulled"].includes(saved.macroRun)) STATE.macroRun = saved.macroRun; if (["authored", "executed"].includes(saved.macroShow)) STATE.macroShow = saved.macroShow; if (["graph", "tree"].includes(saved.macroView)) STATE.macroView = saved.macroView; } catch (e) {}
-const hashTab = (location.hash || "").replace("#", "");
-if (["compare", ...DESIGNS.map((d) => d.id)].includes(hashTab)) STATE.tab = hashTab;
-function persist() { try { localStorage.setItem("five-ways", JSON.stringify({ settings: 2, example: STATE.example, view: STATE.view, treeMode: STATE.treeMode, incLeaves: STATE.incLeaves, macroLifetime: STATE.macroLifetime, macroGrouping: STATE.macroGrouping, macroRun: STATE.macroRun, macroShow: STATE.macroShow, macroView: STATE.macroView })); } catch (e) {} }
+try { const saved = JSON.parse(localStorage.getItem("five-ways") || "{}"); if (DESIGNS.some((d) => d.id === saved.left)) STATE.left = saved.left; if (DESIGNS.some((d) => d.id === saved.right)) STATE.right = saved.right; } catch (e) {}
+// #compare is the overview, #pair=<left>,<right> two designs side by side; a bare design id goes on the left.
+function readHash() {
+  const t = (location.hash || "").replace("#", "");
+  const known = (id) => DESIGNS.some((d) => d.id === id);
+  if (t === "compare") { STATE.tab = "compare"; return true; }
+  if (t.startsWith("pair=")) { const [l, r] = t.slice(5).split(","); if (known(l)) STATE.left = l; if (known(r)) STATE.right = r; STATE.tab = "pair"; return true; }
+  if (known(t)) { STATE.left = t; STATE.tab = "pair"; return true; }
+  return false;
+}
+readHash();
+function writeHash() { try { history.replaceState(null, "", STATE.tab === "pair" ? `#pair=${STATE.left},${STATE.right}` : "#compare"); } catch (e) {} }
+function persist() { try { localStorage.setItem("five-ways", JSON.stringify({ settings: 2, example: STATE.example, view: STATE.view, treeMode: STATE.treeMode, incLeaves: STATE.incLeaves, macroLifetime: STATE.macroLifetime, macroGrouping: STATE.macroGrouping, macroRun: STATE.macroRun, macroShow: STATE.macroShow, macroView: STATE.macroView, left: STATE.left, right: STATE.right })); } catch (e) {} }
 
 function exampleById(id) { return EXAMPLES.find((e) => e.id === id); }
 function startRun() {
@@ -3551,13 +3595,20 @@ const S = (tag, attrs = {}) => { const el = document.createElementNS("http://www
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const avg = (arr, f) => arr.length ? arr.reduce((s, x) => s + f(x), 0) / arr.length : 0;
 
+// The overview, merged over two rows, then a row choosing the left design and a row choosing the right.
 function renderTabs() {
   const nav = document.getElementById("tabs"); nav.textContent = "";
-  const tabs = [{ id: "compare", tab: "overview", sub: "the designs shown, same tick", color: "--p-compare" }, ...DESIGNS.filter((d) => SHOWN.has(d.id) || d.id === STATE.tab)];
-  for (const t of tabs) {
-    const b = h("button", { role: "tab", "aria-selected": STATE.tab === t.id ? "true" : "false", style: `--tab-color: var(${t.color})`, type: "button", onclick: () => { STATE.tab = t.id; try { history.replaceState(null, "", "#" + t.id); } catch (e) {} renderAll(); } },
-      h("span", { class: "t" }, t.tab), h("span", { class: "s" }, t.sub));
-    nav.append(b);
+  nav.className = "tabs picker"; nav.dataset.mode = STATE.tab;
+  nav.setAttribute("role", "group"); nav.setAttribute("aria-label", "The overview, or two designs side by side");
+  nav.append(h("button", { class: "overview", type: "button", "aria-pressed": STATE.tab === "compare" ? "true" : "false", style: "--tab-color: var(--p-compare)", onclick: () => { STATE.tab = "compare"; writeHash(); renderAll(); } },
+    h("span", { class: "t" }, "overview"), h("span", { class: "s" }, "the designs shown, same tick")));
+  for (const [side, label] of [["left", "Left"], ["right", "Right"]]) {
+    const row = h("div", { class: "pick-row", role: "group", "aria-label": label + " design" }, h("span", { class: "pick-label" }, label));
+    for (const d of DESIGNS.filter((d) => SHOWN.has(d.id) || d.id === STATE[side])) {
+      row.append(h("button", { type: "button", "aria-pressed": STATE[side] === d.id ? "true" : "false", style: `--tab-color: var(${d.color})`, onclick: () => { STATE[side] = d.id; STATE.tab = "pair"; persist(); writeHash(); renderAll(); } },
+        h("span", { class: "t" }, d.tab), h("span", { class: "s" }, d.sub)));
+    }
+    nav.append(row);
   }
 }
 
@@ -4742,11 +4793,11 @@ window.__checkForeignWrite = function () {
 };
 
 // ---- proposal tab ------------------------------------------------------------
-function proposalTab(d) {
+// One design's parts, which the pair lays out in its columns.
+function designPanel(d) {
   const R = RUN.engines.find((x) => x.d.id === d.id);
-  document.documentElement.style.setProperty("--accent", `var(${d.color})`);
   const head = h("section", { class: "proposal", "aria-label": d.name },
-    h("div", {}, h("h2", {}, d.name), h("p", {}, d.lede), h("ul", {}, d.rules.map((r) => h("li", {}, r)))),
+    h("div", {}, h("h2", {}, d.name), h("p", {}, d.lede), h("details", { class: "rules" }, h("summary", {}, `Rules · ${d.rules.length}`), h("ul", {}, d.rules.map((r) => h("li", {}, r))))),
     h("ul", { class: "pr-links", "aria-label": "Pull requests and proposal" },
       d.prs.map((pr) => h("li", {}, h("a", { href: prUrl(pr.ref), target: "_blank", rel: "noopener" }, pr.ref + " ↗"), " ", h("span", { class: "role" }, pr.role), pr.title ? h("span", { class: "pr-title" }, pr.title) : "")),
       d.doc ? h("li", {}, h("a", { href: d.doc, target: "_blank", rel: "noopener" }, d.doc.split("/").at(-1) + " ↗"), " ", h("span", { class: "role" }, "document")) : ""));
@@ -4780,14 +4831,33 @@ function proposalTab(d) {
   const view = views[STATE.view]();
   const readings = readingsLine(R);
   const plot = plotCard([R], true), meters = metersCard(R);
-  const controls = controlsCard(R);
-  const side = h("div", { class: "side" }, exampleList(), controls, plot, meters);
-  const main = h("div", { class: "views" }, h("div", { class: "viewbar" }, h("div", { class: "viewbar-left" }, seg, treeSeg, leafSeg, macroRun, macroShow, macroLife, macroGrouping, macroSeg, foldBar, STATE.view === "graph" ? h("button", { type: "button", onclick: () => view._resetLayout() }, "Reset layout") : ""), STATE.view === "stored" ? "" : legend(d.id, STATE.view)), view, readings,
+  const main = h("div", { class: "views" }, h("div", { class: "viewbar" }, h("div", { class: "viewbar-left" }, leafSeg, macroRun, macroShow, macroLife, macroGrouping, macroSeg, foldBar, STATE.view === "graph" ? h("button", { type: "button", onclick: () => view._resetLayout() }, "Reset layout") : ""), STATE.view === "stored" ? "" : legend(d.id, STATE.view)), view, readings,
     d.id === "macro" ? h("p", { class: "note" }, "Placed when loaded: the loader puts each macro where its readers meet, and the tree runs it there. Pulled at first read: each macro runs when it is first read in a tick.") : "",
     d.id === "macro" ? h("p", { class: "note" }, "As authored is the file a person edits. As executed is the tree the device runs.") : "",
     d.id === "macro" ? h("p", { class: "note" }, STATE.macroRun === "placed" ? "Grouping chooses the macro bodies the loader places. Macros that depend on one another share a WITH in data order." : "Grouping decides when a macro’s values are fixed in a tick, and how much a read brings up to date. One group fixes them all at its first read; per value fixes each at its own.") : "",
     h("p", { class: "note" }, STATE.view === "stored" ? "What the design stores and runs for this example, generated from the same definition every tab uses." : STATE.view === "graph" ? viewNote(d.id) : treeNote(d.id)));
-  return { el: h("div", { class: "views" }, head, h("div", { class: "bench" }, side, main)), draws: [view._draw, readings._draw, plot._draw, meters._draw, controls._draw] };
+  return { R, head, main, out: h("div", { class: "outputs" }, plot, meters), seg, treeSeg, draws: [view._draw, readings._draw, plot._draw, meters._draw] };
+}
+// Two designs side by side: one example column for both, then each design's view
+// over its outputs and meters. The grid's rows keep the two columns level.
+function pairTab() {
+  document.documentElement.style.setProperty("--accent", "var(--p-compare)");
+  const left = designPanel(DESIGNS.find((x) => x.id === STATE.left)), right = designPanel(DESIGNS.find((x) => x.id === STATE.right));
+  const controls = controlsCard(left.R);
+  const place = (el, panel, side) => { el.style.setProperty("--accent", `var(${panel.R.d.color})`); el.classList.add("pair-" + side); return el; };
+  // A design's notes go below its outputs, so the outputs stay next to the view.
+  const notes = (panel) => h("div", { class: "pair-notes" }, ...panel.main.querySelectorAll(":scope > p.note"));
+  const shared = h("div", { class: "pair-bar" }, h("span", { class: "pick-label" }, "Both"), left.seg, left.treeSeg);
+  return {
+    el: h("div", { class: "pair" },
+      h("div", { class: "side pair-example" }, exampleList(), controls),
+      place(left.head, left, "left"), place(right.head, right, "right"),
+      shared,
+      place(left.main, left, "left"), place(right.main, right, "right"),
+      place(left.out, left, "left"), place(right.out, right, "right"),
+      place(notes(left), left, "left"), place(notes(right), right, "right")),
+    draws: [...left.draws, ...right.draws, controls._draw],
+  };
 }
 function treeNote(id) {
   const pills = "Status pills show this tick's Success, Running or Failure; a dash means the node was not ticked.";
@@ -5698,8 +5768,8 @@ function renderAll() {
   BENCH_VIEWS = []; SHOWN_VIEWS = []; WASM_VIEWS = [];
   renderTabs();
   const main = document.getElementById("main"); main.textContent = "";
-  const d = DESIGNS.find((x) => x.id === STATE.tab);
-  const built = d ? proposalTab(d) : compareTab();
+  document.querySelector(".wrap").classList.toggle("wide", STATE.tab === "pair");
+  const built = STATE.tab === "pair" ? pairTab() : compareTab();
   main.append(built.el); DRAWS = built.draws; drawAll();
 }
 function drawAll() { for (const f of DRAWS) f && f(); }
@@ -5710,7 +5780,7 @@ document.getElementById("reset").addEventListener("click", () => { startRun(); r
 document.getElementById("rate").addEventListener("change", (e) => { STATE.rate = +e.target.value; });
 calibrate();
 document.getElementById("cost").addEventListener("change", (e) => { CALL_COST = +e.target.value; updateCallMeasurement(); BENCH_VIEWS.forEach((view) => view(null)); });
-window.addEventListener("hashchange", () => { const t = location.hash.replace("#", ""); if (["compare", ...DESIGNS.map((x) => x.id)].includes(t)) { STATE.tab = t; renderAll(); } });
+window.addEventListener("hashchange", () => { if (readHash()) renderAll(); });
 
 document.body.append(designMenu());
 startRun();

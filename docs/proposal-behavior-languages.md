@@ -47,8 +47,9 @@ In short:
 
 [The NGBT spectrum](ngbt-spectrum.html) simulates this design, the five
 alternatives of §8.2 and the designs of the open pull requests #404, #405,
-#407 and #409 side by side, on the same examples, with live call counts and
-timings. It is one HTML file: download it and open it in a browser. A
+#407 and #409 on the same examples, with live call counts and timings, and
+sets any two of them side by side. It is one HTML file: download it and open
+it in a browser. A
 copy is also published at
 <https://claude.ai/artifact/2KR7xbKViTy1F91gn3fj5y>, for members of the
 Semio organization.
