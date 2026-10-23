@@ -107,13 +107,22 @@ impl StructureLayout {
     }
 }
 
-/// The forms of structure met so far, by structure id. A structure id has
-/// few forms; the count bounds what an unusual stream of values can add.
+/// The forms of structure met so far, by structure id, which later values of
+/// a form read their numbers through. A structure id is a declared type, so a
+/// thread meets few of them, each in few forms; the two bounds cap what an
+/// unusual stream of values can add. A form met past them still flattens,
+/// building its layout for that value alone.
 const FORMS_PER_ID: usize = 16;
+const FORMS: usize = 1024;
+
+#[derive(Default)]
+struct Forms {
+    by_id: HashMap<Uuid, Vec<Arc<StructureLayout>>>,
+    count: usize,
+}
 
 thread_local! {
-    static STRUCTURES: RefCell<HashMap<Uuid, Vec<Arc<StructureLayout>>>> =
-        RefCell::new(HashMap::new());
+    static STRUCTURES: RefCell<Forms> = RefCell::new(Forms::default());
 }
 
 /// The type of a structure's float field.
@@ -365,7 +374,7 @@ fn flatten_into(value: &Value, data: &mut Vec<f32>, in_structure: bool) -> Optio
         Value::Structure(s) if !s.fields.is_empty() => {
             let start = data.len();
             let known = STRUCTURES.with(|forms| {
-                forms.borrow().get(&s.id).and_then(|forms| {
+                forms.borrow().by_id.get(&s.id).and_then(|forms| {
                     forms
                         .iter()
                         .find(|form| {
@@ -390,9 +399,12 @@ fn flatten_into(value: &Value, data: &mut Vec<f32>, in_structure: bool) -> Optio
             });
             STRUCTURES.with(|forms| {
                 let mut forms = forms.borrow_mut();
-                let forms = forms.entry(s.id).or_default();
-                if forms.len() < FORMS_PER_ID {
-                    forms.push(form.clone());
+                if forms.count < FORMS {
+                    let of_id = forms.by_id.entry(s.id).or_default();
+                    if of_id.len() < FORMS_PER_ID {
+                        of_id.push(form.clone());
+                        forms.count += 1;
+                    }
                 }
             });
             Some(ValueLayout::Structure(form))
@@ -477,6 +489,25 @@ mod tests {
         let a = structure(0xA0, vec![(1, Value::F32(1.0)), (2, Value::F32(2.0))]);
         let b = structure(0xA0, vec![(1, Value::F32(3.0)), (2, Value::F32(4.0))]);
         assert!(Arc::ptr_eq(&layout_of(&a), &layout_of(&b)));
+    }
+
+    #[test]
+    fn structures_met_past_the_bound_still_flatten_without_growing_the_cache() {
+        // Its own thread, so its count starts from none.
+        std::thread::spawn(|| {
+            for id in 0..(FORMS as u128 + 8) {
+                let value = structure(0x1_0000 + id, vec![(1, Value::F32(id as f32))]);
+                let flat = flatten_numeric(&value).expect("numeric");
+                assert_eq!(flat.layout.reconstruct(&flat.data), value);
+            }
+            STRUCTURES.with(|forms| {
+                let forms = forms.borrow();
+                assert_eq!(forms.count, FORMS);
+                assert_eq!(forms.by_id.len(), FORMS);
+            });
+        })
+        .join()
+        .expect("the thread should finish");
     }
 
     #[test]
