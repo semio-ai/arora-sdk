@@ -142,6 +142,11 @@ pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
     TreeNode::control_node(PARALLEL_FUNCTION_ID, children)
 }
 
+/// Build a control that ticks prerequisites before its last child, the body.
+pub fn with(children: Vec<TreeNode>) -> TreeNode {
+    TreeNode::control_node(WITH_FUNCTION_ID, children)
+}
+
 // Other functions from other modules
 //================================================================
 #[allow(unused)]
@@ -357,6 +362,11 @@ pub const PARALLEL_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0xa9, 0x34, 0x02, 0x89, 0x1f, 0x30, 0x41, 0x1f, 0x9f, 0xaa, 0x0f, 0x07, 0xd5, 0x46, 0x13, 0xe8,
 ]);
 
+/// Ticks its prerequisites in order, ignoring their statuses, then returns
+/// the last child's status. Errors propagate. Requires at least two children.
+/// A settled prerequisite subtree can be cached independently of the body.
+pub const WITH_FUNCTION_ID: Uuid = uuid::uuid!("57544800-0000-4000-8000-000000000001");
+
 // Direct action nodes from test-rust-wasm (non-Status returns via _ret out-parameter)
 //==============================================================
 #[allow(unused)]
@@ -421,3 +431,13 @@ pub const ADD_B_PARAM_ID: Uuid = Uuid::from_bytes([
 pub const ADD_RES_PARAM_ID: Uuid = Uuid::from_bytes([
     0x13, 0xd7, 0xa1, 0xc2, 0x2d, 0x37, 0x4d, 0x0e, 0xb3, 0x17, 0x29, 0x24, 0x67, 0x1d, 0x22, 0x10,
 ]);
+
+/// `Copy(value, out)`: copy a value's presence and contents into the bound
+/// output cell, returning Success. It performs no module call. Incremental
+/// execution caches it until either the source or destination changes, so a
+/// cached computation can republish a key overwritten by another writer.
+pub const COPY_FUNCTION_ID: Uuid = uuid::uuid!("a1434d2d-a838-4dc9-bd49-126f6c6aa800");
+/// [`COPY_FUNCTION_ID`]'s source value.
+pub const COPY_VALUE_PARAM_ID: Uuid = uuid::uuid!("a1434d2d-a838-4dc9-bd49-126f6c6aa801");
+/// [`COPY_FUNCTION_ID`]'s destination variable.
+pub const COPY_OUT_PARAM_ID: Uuid = uuid::uuid!("a1434d2d-a838-4dc9-bd49-126f6c6aa802");

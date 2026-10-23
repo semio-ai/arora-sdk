@@ -136,14 +136,7 @@ impl Incremental {
 }
 
 pub(crate) fn cacheable(node: &Node) -> bool {
-    fn nested(expression: &Expression) -> bool {
-        match expression {
-            Expression::Call(_) => true,
-            Expression::Select { source, .. } => nested(source),
-            _ => false,
-        }
-    }
-    if node.arguments.values().any(nested) {
+    if has_call(node) {
         return false;
     }
     if is_native(node.function) {
@@ -161,4 +154,16 @@ pub(crate) fn cacheable(node: &Node) -> bool {
                 Some(Expression::Value(arora_types::value::Value::Boolean(true)))
             )
     }
+}
+
+/// Calls at any argument depth carry state and prevent attached caching.
+pub(crate) fn has_call(node: &Node) -> bool {
+    fn nested(expression: &Expression) -> bool {
+        match expression {
+            Expression::Call(_) => true,
+            Expression::Select { source, .. } => nested(source),
+            _ => false,
+        }
+    }
+    node.arguments.values().any(nested)
 }

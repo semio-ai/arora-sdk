@@ -34,8 +34,8 @@
 //! The forms. A lone graph's published call binds its `_ret` to its key, or is
 //! a sink. A branch's graph is published by its branch, so only the taken
 //! branch publishes, each form the way its code can: incremental leaves sit in
-//! their branch and bind `_ret` to the key; today's executor and detached
-//! nodes call `publish`, a module
+//! their branch and bind `_ret` to the key; placement's file publishes with the
+//! native `Copy`; today's executor and detached nodes call `publish`, a module
 //! function returning its argument with `_ret` bound to the key, since the
 //! tree has no native node that writes a number to a key.
 //!
@@ -50,6 +50,9 @@
 //! - `attached-incremental`: the attached leaves, `_on_change`, on the
 //!   incremental executor, each graph's leaves in its own branch:
 //!   `PARALLEL[ leaf × n, RUN ]`.
+//! - `placed`: the detached form placed with `place_detached(…,
+//!   PlacementScope::Readers)`, on the incremental executor. Sinks place before
+//!   the root, and a branch's groups before the branch's body, which reads them.
 //!
 //! The bench compares the values the forms publish. In `branches-switching`, it
 //! leaves today's executor out: its damping keeps running in a branch the tree
@@ -67,13 +70,16 @@ use std::time::Instant;
 
 use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_behavior_tree::nodes::{
-    EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
-    PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID,
+    COPY_FUNCTION_ID, COPY_OUT_PARAM_ID, COPY_VALUE_PARAM_ID, EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID,
+    EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID,
+    SEQ_FUNCTION_ID,
 };
 use arora_behavior_tree::schema::{
     Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
 };
-use arora_behavior_tree::{load_behavior_tree_nodes_with, lower_behavior_tree};
+use arora_behavior_tree::{
+    load_behavior_tree_nodes_with, lower_behavior_tree, place_detached, PlacementScope,
+};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::data::{DataStore, Key};
@@ -553,22 +559,25 @@ enum Form {
     AttachedNaive,
     Detached,
     AttachedIncremental,
+    Placed,
 }
 impl Form {
-    const ALL: [Form; 3] = [
+    const ALL: [Form; 4] = [
         Form::AttachedNaive,
         Form::Detached,
         Form::AttachedIncremental,
+        Form::Placed,
     ];
     fn name(self) -> &'static str {
         match self {
             Form::AttachedNaive => "attached-naive",
             Form::Detached => "detached",
             Form::AttachedIncremental => "attached-incremental",
+            Form::Placed => "placed",
         }
     }
     fn detached(self) -> bool {
-        self == Form::Detached
+        matches!(self, Form::Detached | Form::Placed)
     }
 }
 
@@ -721,11 +730,16 @@ fn incremental_leaves(form: Form) -> bool {
     form == Form::AttachedIncremental
 }
 
-/// The leaf with which a branch publishes call `c`'s value to `key`: a call
-/// of `publish`.
-fn publish(tree: &mut Builder, _form: Form, c: usize, value: Expression, key: Expression) -> Uuid {
-    let arguments = [(VALUE, value), (_RET_PARAM_ID, key)];
-    tree.push(publish_id(c), HashMap::from(arguments), None)
+/// The leaf with which a branch publishes call `c`'s value to `key`:
+/// placement's file uses the native `Copy`, the other forms call `publish`.
+fn publish(tree: &mut Builder, form: Form, c: usize, value: Expression, key: Expression) -> Uuid {
+    if form == Form::Placed {
+        let arguments = [(COPY_VALUE_PARAM_ID, value), (COPY_OUT_PARAM_ID, key)];
+        tree.push(COPY_FUNCTION_ID, HashMap::from(arguments), None)
+    } else {
+        let arguments = [(VALUE, value), (_RET_PARAM_ID, key)];
+        tree.push(publish_id(c), HashMap::from(arguments), None)
+    }
 }
 
 /// Control and check nodes, numbered from 1, beside the calls.
@@ -807,11 +821,21 @@ fn measure(
             .collect(),
         ..Bridge::default()
     };
-    let (nodes, names) = build(graph, form);
+    let (mut nodes, names) = build(graph, form);
     let resolver = |name: &str| Some(store.slot(&Key::from(name)));
+    if form == Form::Placed {
+        nodes = place_detached(
+            nodes,
+            PlacementScope::Readers,
+            &bridge.index(),
+            &resolver,
+            &names,
+        )
+        .unwrap();
+    }
     let tree = load_behavior_tree_nodes_with(nodes, &resolver, &names).unwrap();
     let tree = lower_behavior_tree(tree, &bridge.index(), &mut bridge, false).unwrap();
-    tree.set_incremental(form == Form::AttachedIncremental);
+    tree.set_incremental(matches!(form, Form::AttachedIncremental | Form::Placed));
     // Write a key only when its value changes, as a host would.
     let mut step = 0;
     let mut tick = |bridge: &mut Bridge, step: &mut usize| {

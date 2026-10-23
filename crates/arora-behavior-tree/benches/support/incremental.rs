@@ -34,6 +34,9 @@ pub enum Op {
     Running(u64),
     #[allow(dead_code)] // Exercised by the tests sharing this host.
     WriteThenTick,
+    /// Returns `x` and writes `y` to its state: two outputs with distinct values.
+    #[allow(dead_code)] // Exercised by the tests sharing this host.
+    Split,
 }
 
 pub fn signature(id: Uuid) -> (Uuid, ModuleFunction) {
@@ -223,6 +226,13 @@ impl Bridge {
                     value: Box::new(Value::F64(next)),
                 });
                 Value::F64(next)
+            }
+            Op::Split => {
+                mutated.push(StructureField {
+                    id: STATE,
+                    value: Box::new(Value::F64(y)),
+                });
+                Value::F64(x)
             }
             Op::Mul => Value::F64(x * y),
             Op::Clamp => Value::F64(x.max(0.0).min(y.abs() + 1.0)),

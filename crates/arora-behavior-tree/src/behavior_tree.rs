@@ -15,6 +15,10 @@ mod incremental;
 #[cfg(test)]
 mod incremental_tests;
 pub mod nodes;
+pub mod placement;
+#[cfg(test)]
+mod placement_tests;
+pub use placement::{place_detached, PlacementScope};
 mod scatter;
 pub mod schema;
 pub mod schema_groot;
@@ -49,12 +53,13 @@ use std::{
 use uuid::Uuid;
 
 use crate::nodes::{
-    EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
-    PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
-    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
-    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SEQ_FUNCTION_ID,
-    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
-    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
+    COPY_FUNCTION_ID, COPY_OUT_PARAM_ID, COPY_VALUE_PARAM_ID, EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID,
+    EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID,
+    RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID, RUN_STATUS_FUNCTION_ID,
+    RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID,
+    SCATTER_VALUES_PARAM_ID, SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+    SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS,
+    UNPACK_VALUES_PARAM_ID, WITH_FUNCTION_ID,
 };
 
 // Runtime.
@@ -663,6 +668,8 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | SEQ_STAR_FUNCTION_ID
             | FALLBACK_FUNCTION_ID
             | PARALLEL_FUNCTION_ID
+            | WITH_FUNCTION_ID
+            | COPY_FUNCTION_ID
             | RUN_CALL_FUNCTION_ID
             | RUN_STATUS_FUNCTION_ID
             | EQUAL_FUNCTION_ID
@@ -672,7 +679,7 @@ pub(crate) fn is_native(function: Uuid) -> bool {
 }
 
 /// Tick the native nodes (see [`is_native`]) — the control nodes, the status
-/// leaves, the task-run nodes, the data nodes `Equal`, `Unpack` and `Scatter`
+/// leaves, the task-run nodes, the data nodes `Equal`, `Copy`, `Unpack` and `Scatter`
 /// and the core string nodes ([`core_nodes`]) — without consulting the
 /// function index or the wasm engine. Children run their tick functions directly,
 /// with the same error conversion as their registered callables. Returns
@@ -713,6 +720,28 @@ fn tick_builtin(
         Ok::<_, BehaviorTreeError>(value)
     };
     let status = match node.function {
+        COPY_FUNCTION_ID => {
+            let source = NodeParameterId {
+                node: node.id,
+                parameter: COPY_VALUE_PARAM_ID,
+            };
+            let value = match node.arguments.get(&COPY_VALUE_PARAM_ID) {
+                Some(Expression::Call(_) | Expression::Select { .. }) => {
+                    Some(argument(caller, COPY_VALUE_PARAM_ID)?)
+                        .filter(|value| *value != Value::Unit)
+                }
+                _ => get_node_parameter_variable(&source, scope.node_parameters_variables)?.get(),
+            };
+            get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: COPY_OUT_PARAM_ID,
+                },
+                scope.node_parameters_variables,
+            )?
+            .set_opt(value);
+            Status::Success
+        }
         EQUAL_FUNCTION_ID => {
             if argument(caller, EQUAL_A_PARAM_ID)? == argument(caller, EQUAL_B_PARAM_ID)? {
                 Status::Success
@@ -791,6 +820,18 @@ fn tick_builtin(
                 }
                 status
             }
+        }
+        WITH_FUNCTION_ID => {
+            if child_tick_ids.len() < 2 {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("WITH node {} requires at least two children", node.id),
+                });
+            }
+            let (body, prerequisites) = child_tick_ids.split_last().unwrap();
+            for child in prerequisites {
+                child.tick(caller)?;
+            }
+            body.tick(caller)?
         }
         PARALLEL_FUNCTION_ID => {
             // Ticks every child every time, then aggregates: Success only if
@@ -1699,12 +1740,13 @@ fn get_variable<'a>(
 /// Check a data node's arguments, and bind where an `Unpack` or a `Scatter`
 /// node writes: `None` for any other node.
 ///
-/// `Equal` needs both its arguments, `Unpack` its values and `Scatter` its
-/// values and keys, linked. Each of `Unpack`'s other arguments is an output
-/// port bound to a variable, whose cell the generic lowering already set up;
-/// two ports may not bind one variable, by id or by name. `Scatter`'s
-/// `within`, if linked, is a literal key prefix, the tree's whole namespace
-/// when empty (see [`scatter::Scatter::bind`]).
+/// `Copy` needs its value and destination; `Equal` needs both its arguments,
+/// `Unpack` its values and `Scatter` its values and keys, linked. Each of
+/// `Unpack`'s other arguments is an output port bound to a variable, whose
+/// cell the generic lowering already set up; two ports may not bind one
+/// variable, by id or by name. `Scatter`'s `within`, if linked, is a literal
+/// key prefix, the tree's whole namespace when empty (see
+/// [`scatter::Scatter::bind`]).
 pub(crate) fn bind_data_node(
     node: &Node,
     names: &HashMap<Uuid, String>,
@@ -1716,6 +1758,7 @@ pub(crate) fn bind_data_node(
         })
     };
     let required: &[Uuid] = match node.function {
+        COPY_FUNCTION_ID => &[COPY_VALUE_PARAM_ID, COPY_OUT_PARAM_ID],
         EQUAL_FUNCTION_ID => &[EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID],
         UNPACK_FUNCTION_ID => &[UNPACK_VALUES_PARAM_ID],
         SCATTER_FUNCTION_ID => &[SCATTER_VALUES_PARAM_ID, SCATTER_KEYS_PARAM_ID],
@@ -1723,6 +1766,14 @@ pub(crate) fn bind_data_node(
     };
     if let Some(missing) = required.iter().find(|id| !node.arguments.contains_key(id)) {
         return refuse(format!("argument {missing} is not linked"));
+    }
+    if node.function == COPY_FUNCTION_ID
+        && !matches!(
+            node.arguments[&COPY_OUT_PARAM_ID],
+            Expression::VariableId(_) | Expression::Variable(_)
+        )
+    {
+        return refuse("Copy's out must bind a variable".into());
     }
     if node.function == SCATTER_FUNCTION_ID {
         return Ok(Some(Outputs::Keys(Rc::new(scatter::Scatter::bind(node)?))));

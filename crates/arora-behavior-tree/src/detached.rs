@@ -83,10 +83,11 @@ use uuid::Uuid;
 use crate::display::{stated_id, Names};
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
-    REGEX_MATCH_FIRST_MATCH_PARAM_ID, REGEX_MATCH_FUNCTION_ID, RUN_STATUS_FUNCTION_ID,
-    RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-    SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID, SET_STR_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID,
-    UNPACK_OUT_PARAM_IDS, UNSET_STR_FUNCTION_ID, UNSET_STR_VARIABLE_PARAM_ID,
+    COPY_FUNCTION_ID, COPY_OUT_PARAM_ID, REGEX_MATCH_FIRST_MATCH_PARAM_ID, REGEX_MATCH_FUNCTION_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
+    SET_STR_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNSET_STR_FUNCTION_ID,
+    UNSET_STR_VARIABLE_PARAM_ID,
 };
 use crate::schema::{Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 use crate::variable::VariableCell;
@@ -139,9 +140,17 @@ struct Lowered {
     signatures: FunctionIndex,
     /// By node: the detached nodes it reads, by position.
     reads: Vec<Vec<usize>>,
+    /// All detached nodes in data order, including unused nodes.
+    order: Vec<usize>,
     /// By node: its arguments in signature order, `_ret` aside, each with
     /// where its value comes from, resolved once.
     arguments: Vec<Vec<Argument>>,
+    /// The inputs, of detached and attached nodes alike, that read a cell
+    /// another detached node's output writes, such as an input that output is
+    /// bound to: each reads that cell, even when its argument names a store
+    /// key. A detached node's fed input has that cell as its argument's
+    /// source.
+    fed: crate::id_hash::IdSet<NodeParameterId>,
     /// By node: the module its function belongs to, when the function index
     /// has the function.
     modules: Vec<Option<Uuid>>,
@@ -730,6 +739,8 @@ impl Detached {
             .nodes
             .iter()
             .enumerate()
+            .map(|(at, node)| (Some(at), &**node))
+            .chain(attached.iter().map(|node| (None, &**node)))
             .flat_map(|(at, node)| {
                 node.arguments
                     .keys()
@@ -740,7 +751,7 @@ impl Detached {
                 let np = NodeParameterId { node, parameter };
                 let cell = node_parameters_variables.get(&np)?;
                 match writers.get(&cell_id(cell)) {
-                    Some((Some(writer), _)) if *writer != at => Some(np),
+                    Some((Some(writer), _)) if Some(*writer) != at => Some(np),
                     _ => None,
                 }
             })
@@ -802,6 +813,7 @@ impl Detached {
         *self.lowered.borrow_mut() = Lowered {
             signatures,
             reads,
+            order,
             cells_only: arguments
                 .iter()
                 .map(|arguments: &Vec<Argument>| {
@@ -811,6 +823,7 @@ impl Detached {
                 })
                 .collect(),
             arguments,
+            fed,
             modules,
             rewrites,
             outputs,
@@ -820,6 +833,29 @@ impl Detached {
             plan,
         };
         Ok(())
+    }
+
+    /// The same dependency graph used for pulls, with all nodes in data order.
+    pub(crate) fn placement(&self) -> PlacementAnalysis {
+        let lowered = self.lowered.borrow();
+        PlacementAnalysis {
+            reads: lowered.reads.clone(),
+            pulls: lowered.pulls.clone(),
+            sinks: lowered.sinks.clone(),
+            order: lowered.order.clone(),
+            unused: lowered.plan.unused.iter().copied().collect(),
+            fed: lowered.fed.clone(),
+            publications: lowered
+                .outputs
+                .iter()
+                .map(|outputs| {
+                    outputs
+                        .iter()
+                        .filter_map(|output| Some((output.port, output.publish.clone()?)))
+                        .collect()
+                })
+                .collect(),
+        }
     }
 
     /// Start a tick: every detached node is out of date until it is read.
@@ -1198,6 +1234,7 @@ fn claim_attached(
 /// The parameters a node of the tree's own vocabulary writes.
 pub(crate) fn native_writes(function: Uuid) -> &'static [Uuid] {
     match function {
+        COPY_FUNCTION_ID => &[COPY_OUT_PARAM_ID],
         UNPACK_FUNCTION_ID => &UNPACK_OUT_PARAM_IDS,
         SEQ_STAR_FUNCTION_ID => &[SEQ_STAR_CURRENT_INDEX_PARAM_ID],
         RUN_STATUS_FUNCTION_ID => &[RUN_STATUS_OUT_PARAM_ID, RUN_STATUS_LATCH_PARAM_ID],
@@ -1364,4 +1401,18 @@ fn sorted(reads: &[Vec<usize>], nodes: &[Rc<Node>]) -> Result<Vec<usize>, Behavi
         }
     }
     Ok(sorted)
+}
+
+/// Read-only projection of detached lowering for load-time placement.
+pub(crate) struct PlacementAnalysis {
+    pub(crate) reads: Vec<Vec<usize>>,
+    pub(crate) pulls: crate::id_hash::IdMap<Uuid, Rc<[usize]>>,
+    pub(crate) sinks: Vec<usize>,
+    pub(crate) order: Vec<usize>,
+    pub(crate) unused: HashSet<Uuid>,
+    /// The inputs that read a cell another detached node's output writes.
+    pub(crate) fed: crate::id_hash::IdSet<NodeParameterId>,
+    /// By node: each port that publishes a store key, and the key, in the
+    /// order detached publication writes them.
+    pub(crate) publications: Vec<Vec<(Uuid, VariableCell)>>,
 }
