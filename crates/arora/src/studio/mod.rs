@@ -1,10 +1,12 @@
 //! The Semio Studio connection: what [`crate::run_with_hal`] wires around the
 //! runtime loop when the `studio-bridge` feature selects Studio as the bridge
-//! — Firebase auth, token rotation, the Zenoh connection, device registration.
+//! — the device's enrollment with Studio, its sign-in and token rotation, the
+//! Zenoh connection.
 //!
 //! This is what makes `arora` Studio-capable (not just its binary):
 //! the full run — read Firebase config + Zenoh endpoints from the environment,
-//! load/save an encrypted refresh token from a local file, build the real
+//! keep the device's encrypted Studio credential in its device directory,
+//! enroll the device when it is not enrolled, build the real
 //! `ZenohDeviceClient` (the studio-bridge Zenoh connector), and drive it via
 //! [`crate::run_with_frontend`] over the caller's [`DataStore`]
 //! (`arora_types::data::DataStore` — the entrypoints default it to a fresh
@@ -22,13 +24,13 @@
 //!
 //! | the run asks | the default bridge |
 //! |---|---|
-//! | `--studio`, or `ARORA_STUDIO=1` | Studio; a device holding no saved credential registers as a new Studio device |
+//! | `--studio`, or `ARORA_STUDIO=1` | Studio; a device not enrolled with Studio [enrolls](#enrollment) first |
 //! | nothing, or `--no-studio` | the open local bridge, whatever the device holds |
 //!
 //! `--no-studio` wins over `--studio` and `ARORA_STUDIO`: a run told both
 //! declines, and a run passing it overrides the variable.
 //!
-//! The saved credential is the refresh token of the device's Studio account,
+//! The saved credential is the refresh token of the device's Studio session,
 //! in its device directory's `studio/` subdirectory ([`crate::device_dir`]).
 //! It does not connect a run that does not ask: a saved credential is not
 //! proof of an opt-in, as a headless run of arora 13.4 or earlier signed the
@@ -38,7 +40,56 @@
 //! lookup finds.
 //!
 //! The `connect` functions below are themselves the ask: an embedder calling
-//! one connects, a device holding no credential registering.
+//! one connects, a device that is not enrolled enrolling first.
+//!
+//! # Enrollment
+//!
+//! Studio creates a device, under the owner a person chooses, when the device
+//! enrolls; the device signs in with the credential its enrollment saved from
+//! then on. A run that connects enrolls the device when the client finds no
+//! enrolled device in its credentials: none, one that does not read, one
+//! Studio refuses (a revoked or deleted device), or one that is no device's,
+//! such as the anonymous account an earlier arora signed the device up as.
+//! It enrolls:
+//!
+//! - with the enrollment token `STUDIO_ENROLLMENT_TOKEN` holds, when it holds
+//!   one: a person created it in Studio (`semio_enroll_…`), and Studio creates
+//!   the device under its owner. The token is a secret, read from the
+//!   environment at run time only: no option takes it, since a command line
+//!   is visible to the host's other users, and the run never logs it.
+//! - otherwise by code: the run shows a code, which a person enters in Studio,
+//!   choosing the device's owner. Each code is logged, and shown to the
+//!   operator under the terminal UI ([`Operator::show_enrollment_code`]), with
+//!   the Studio page approving it when the client knows Studio's web address
+//!   (`STUDIO_URL`, else the one baked into `arora-studio-bridge-client`). A
+//!   code that expires undecided is replaced by another; the run waits for a
+//!   person's decision for as long as it runs.
+//!
+//! Then the run connects. A person refusing the code, or Studio refusing the
+//! token, fails the run: it asked for Studio, and Studio refused the device.
+//! Only a device the client finds not enrolled enrolls: Studio failing
+//! otherwise fails the run, the credential kept, and so does a credential of
+//! another Firebase project than the run's, which says the two disagree on
+//! which Studio the device belongs to.
+//!
+//! Studio shows the person approving the device its description: its name,
+//! `DEVICE_NAME` — under the terminal UI the operator is asked for one when
+//! it is unset, and it is generated when left blank — and its model (below).
+//! The device's record is Studio's from then on: its name and owner change
+//! there, never from the device.
+//!
+//! # The device's model
+//!
+//! The device reports its model to its Studio record each time it connects,
+//! and describes it when it enrolls: its family, and its hardware and software
+//! versions, each from its variable — `MODEL_FAMILY`, `HARDWARE_VERSION`,
+//! `SOFTWARE_VERSION` — else from the description of the device's HAL
+//! ([`crate::AroraBuilder::run`] passes it). A report writes the fields it
+//! gives, the record keeping the others. A device that enrolls with neither
+//! giving its family is asked for one under the terminal UI: the family it
+//! enrolls with stays its record's, as no later report gives another.
+//!
+//! # Configuration
 //!
 //! The public Firebase config and the production bridge endpoint are baked into
 //! `arora-studio-bridge-client`, so this is zero-config for production. These env
@@ -51,85 +102,59 @@
 //!     `tcp/localhost:7447`) to target a local/preprod bridge without a rebuild.
 //!     Over a TLS endpoint (`tls/…`), the bridge knows the device by a
 //!     certificate Studio issues it, kept beside the refresh token.
+//!   - `STUDIO_URL` — Studio's web address (`https://…`), overriding the one
+//!     baked into `arora-studio-bridge-client`, whose approval page a run
+//!     enrolling by code shows beside the code.
+//!   - `STUDIO_ENROLLMENT_TOKEN` — the enrollment token a device that is not
+//!     enrolled enrolls with, instead of a code.
 //!   - `DEVICE_LOCAL_ID` — the device's local id, which names its directory
 //!     `<data_local_dir>/semio/arora/devices/<local id>` ([`crate::device_dir`]);
 //!     `default` when unset. Two devices on one host set different ids. The
 //!     Studio connection keeps its credentials (the refresh token of the
-//!     device's Studio account and the key encrypting it, and its bridge key
+//!     device's Studio session and the key encrypting it, and its bridge key
 //!     and certificate) in the directory's `studio/` subdirectory.
 //!   - `DEVICE_DIR` — the device directory itself, replacing the per-user
 //!     path. An embedder passes it to [`connect_with_device_dir`] instead.
 //!   - `IDENTITY_FILE` — deprecated: the identity it names migrates to
 //!     `<IDENTITY_FILE>_dir`, which the run uses as its device directory.
-//!   - `DEVICE_OWNERS` (comma-separated), `DEVICE_NAME`, `MODEL_FAMILY`,
-//!     `DEVICE_DESCRIPTION`, `HARDWARE_VERSION`, `SOFTWARE_VERSION` — the device
-//!     info registered with Studio. A set env var wins over every other source
-//!     of its field; a blank one counts as unset. See
-//!     [Registration](#registration).
+//!   - `DEVICE_NAME` — the name a device enrolls with; `MODEL_FAMILY`,
+//!     `HARDWARE_VERSION`, `SOFTWARE_VERSION` — its model. A set variable wins
+//!     over every other source of its field; a blank one counts as unset.
 //!   - `RUST_LOG` — log filter (`env_logger`).
 //!
-//! # Registration
-//!
-//! What the device registers with Studio as is resolved field by field, the
-//! first source that gives a field winning:
-//!
-//! | field | sources, in order |
-//! |---|---|
-//! | owners | `DEVICE_OWNERS`, the saved registration, the operator |
-//! | name | `DEVICE_NAME`, the saved registration, the operator (generated when left blank) |
-//! | model family | `MODEL_FAMILY`, the HAL's description, the saved registration, the operator |
-//! | hardware / software version | `HARDWARE_VERSION` / `SOFTWARE_VERSION`, the HAL's description |
-//! | description | `DEVICE_DESCRIPTION` |
-//!
-//! The operator is asked only under the terminal UI of a run that connects,
-//! and only for a field no other source gives; a saved registration answers
-//! the model family too (with none when the operator typed none), so a device
-//! registered once is asked nothing again. Leaving the owner empty declines
-//! Studio: the run serves the open local bridge instead, and nothing is saved.
-//!
-//! The **saved registration** is `device.json` in the device directory's
-//! `studio/` subdirectory: the owners and the name a run
-//! that asked the operator anything resolved, and the model family the operator
-//! typed, if any. It is written by such a run, before it connects, and read by
-//! every later one, interactive or headless — so a device set up once under the
-//! terminal UI can run headless. Delete it to be asked again.
-//!
-//! Headless, nobody is asked: the device registers with the info the
-//! environment and the saved registration give, completed by the HAL's
-//! description, and registers nothing — leaving an existing registration
-//! untouched — when neither the environment nor a saved registration gives any.
-//! [`crate::AroraBuilder::run`] passes the description of the device's HAL.
+//! [`DataStore`]: arora_types::data::DataStore
 
 mod credentials;
-mod registration;
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-use arora_bridge::{Bridge, DeviceInfo};
+use anyhow::{Context, Result};
+use arora_bridge::Bridge;
 use arora_hal::HalDescription;
+use arora_studio_bridge_client::credentials::DeviceCredentials;
+use arora_studio_bridge_client::error::Error as ClientError;
 use arora_studio_bridge_client::firestore_support::options::{
     FirebaseEmulatorOptions, FirebaseOptions,
 };
+use arora_studio_bridge_client::session::{
+    DeviceDescription, Error as SessionError, PendingSignIn,
+};
+use arora_studio_bridge_client::studio::{self as enrollment, EnrollWith, ENROLLMENT_TOKEN_VAR};
 use arora_studio_bridge_client::zenoh::ZenohDeviceClient;
+use arora_studio_bridge_client::{PartialDeviceModel, PartialDeviceModelVersion};
 use log::{info, warn};
 
 use crate::device_dir;
-use crate::operator::Operator;
+use crate::operator::{EnrollmentCode, Operator};
 
-use arora_studio_bridge_client::credentials::DeviceCredentials;
-
-use registration::Registration;
-
-/// The prompt shown to the operator for the Studio owner UID(s). Empty is
-/// allowed and meaningful: no owner means "do not connect to Studio".
-const OWNER_LABEL: &str =
-    "Semio Studio owner UID(s), comma-separated — leave empty to skip (disables Studio support)";
-/// The prompt for the device name. Empty falls back to a generated
-/// `arora-device-<random>` name, so the device is never nameless.
+/// The prompt for the name of a device that enrolls. Empty falls back to a
+/// generated `arora-device-<random>` name, so the device is never nameless.
 const NAME_LABEL: &str = "Device name — leave empty for a generated name";
-/// The prompt for the model family. Empty is fine (the device registers with no
-/// model family).
+
+/// The prompt for the model family of a device that enrolls when neither
+/// `MODEL_FAMILY` nor the HAL gives one. Empty is fine: the device enrolls
+/// with no model family.
 const MODEL_FAMILY_LABEL: &str = "Model family — optional, leave empty to skip";
 
 /// What a run asks of Semio Studio: the [module docs](self#whether-a-run-connects)
@@ -138,8 +163,7 @@ const MODEL_FAMILY_LABEL: &str = "Model family — optional, leave empty to skip
 /// hands it to the run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Choice {
-    /// `--studio`: Studio, a device holding no credential registering as a
-    /// new Studio device.
+    /// `--studio`: Studio, a device that is not enrolled enrolling first.
     Studio,
     /// Nothing, or `--no-studio`: the open local bridge, whatever the device
     /// holds.
@@ -156,9 +180,9 @@ const STUDIO_VAR: &str = "ARORA_STUDIO";
 /// `ARORA_STUDIO` beside them.
 #[derive(Clone, Debug, Default, clap::Args)]
 pub struct StudioArgs {
-    /// Connect to Semio Studio, registering this device with it when it holds
-    /// no saved Studio credential; ARORA_STUDIO=1 asks the same. Without
-    /// either, the run serves the open local bridge.
+    /// Connect to Semio Studio, enrolling this device with it when it is not
+    /// enrolled; ARORA_STUDIO=1 asks the same. Without either, the run serves
+    /// the open local bridge.
     #[arg(long)]
     studio: bool,
     /// Serve the open local bridge, even when --studio or ARORA_STUDIO asks
@@ -201,15 +225,15 @@ impl StudioArgs {
 }
 
 /// What a device holds of a Studio credential: the refresh token of its
-/// Studio account, which a connection signs it in with.
+/// Studio session, which a connection signs it in with.
 #[derive(Debug)]
 enum Credential {
     /// One that reads.
     Saved,
-    /// None: a connection would sign the device up as a new Studio device.
+    /// None: a connection would enroll the device.
     Absent,
     /// One that does not read (its key missing or another, the file damaged):
-    /// a connection would sign the device up anew, as another Studio device.
+    /// a connection would enroll the device anew, as another Studio device.
     Unreadable(String),
 }
 
@@ -242,12 +266,12 @@ impl Decision {
     fn log(&self) {
         match self {
             Decision::Asked => info!(
-                "Studio: connecting, as --studio asks; a device with no saved credential \
-                 registers with Semio Studio."
+                "Studio: connecting, as --studio asks; a device not enrolled with Semio Studio \
+                 enrolls first."
             ),
             Decision::Unregistered(dir) => info!(
                 "Studio: no saved credential in {}; serving the local bridge. Pass --studio to \
-                 register this device with Semio Studio.",
+                 enroll this device with Semio Studio.",
                 dir.display()
             ),
             Decision::Saved(dir) => info!(
@@ -257,7 +281,7 @@ impl Decision {
             ),
             Decision::Unreadable(dir, error) => warn!(
                 "Studio: the saved credential in {} does not read ({error}); serving the local \
-                 bridge. Pass --studio to register this device with Semio Studio anew.",
+                 bridge. Pass --studio to enroll this device with Semio Studio anew.",
                 dir.display()
             ),
             Decision::Unknown(error) => warn!(
@@ -309,8 +333,8 @@ fn resolved(credentials: Result<DeviceCredentials>) -> Credential {
 }
 
 /// What `credentials` hold of a Studio credential. A token that reads is what
-/// the client signs in with; it signs up only with none, and with one that
-/// does not read (`arora-studio-bridge-client` 10).
+/// the client signs in with; a device holding none, or one that does not
+/// read, enrolls.
 fn held(credentials: &DeviceCredentials) -> Credential {
     match credentials.refresh_token() {
         Ok(Some(_)) => Credential::Saved,
@@ -320,18 +344,15 @@ fn held(credentials: &DeviceCredentials) -> Credential {
 }
 
 /// Resolve the default bridge of a `studio-bridge` run asking `choice`: the
-/// Semio Studio connection, or the open local bridge — when the run does not
-/// connect ([module docs](self#whether-a-run-connects)), or when the operator
-/// declines Studio.
+/// Semio Studio connection, or the open local bridge when the run does not
+/// connect ([module docs](self#whether-a-run-connects)).
 ///
-/// A run that connects resolves the device info as the
-/// [module docs](self#registration) say: under the terminal UI, the operator
-/// is asked for what neither the environment, the HAL's `description`, nor
-/// the saved registration gives, and leaving the owner empty disables Studio
-/// — the returned bridge is then the open local bridge instead. Headless,
-/// nobody is asked. The whole Studio side (Firebase auth, token rotation,
-/// Zenoh connection, device registration) is identical for every device —
-/// only the hardware behind it differs.
+/// A device that is not enrolled enrolls as the [module docs](self#enrollment)
+/// say: under the terminal UI, the operator names it when `DEVICE_NAME` does
+/// not, and is shown each code; headless, nobody is asked, and the log shows
+/// the codes. The whole Studio side (enrollment, sign-in, token rotation, the
+/// Zenoh connection) is identical for every device — only the hardware behind
+/// it, which `description` describes, differs.
 pub(crate) async fn default_bridge(
     frontend: &crate::operator::Frontend,
     description: &HalDescription,
@@ -349,8 +370,8 @@ pub(crate) async fn default_bridge(
 /// `local` otherwise. Only the one picked runs.
 async fn bridge_for(
     decision: Decision,
-    studio: impl std::future::Future<Output = Result<Box<dyn Bridge>>>,
-    local: impl std::future::Future<Output = Result<Box<dyn Bridge>>>,
+    studio: impl Future<Output = Result<Box<dyn Bridge>>>,
+    local: impl Future<Output = Result<Box<dyn Bridge>>>,
 ) -> Result<Box<dyn Bridge>> {
     decision.log();
     if decision.connects() {
@@ -360,107 +381,47 @@ async fn bridge_for(
     }
 }
 
-/// The Studio connection of a run that connects, through the operator under
-/// the terminal UI: the open local bridge when the operator declines.
+/// The Studio connection of a run that connects, through the operator only
+/// under the terminal UI: headless, nobody answers.
 async fn connect_studio(
     frontend: &crate::operator::Frontend,
     description: &HalDescription,
 ) -> Result<Box<dyn Bridge>> {
-    // Interactive front end (the terminal UI): ask the operator for the device
-    // info nothing else gives. An empty owner means "disable Studio", in which
-    // case we do not connect at all and fall through to the open local bridge
-    // (see below).
-    //
-    // Headless / unattended: there is nobody to prompt — the bridge registers
-    // the device info the environment and the saved registration give
-    // (skipping registration when neither gives any).
-    let client = if frontend.interactive {
-        connect_with_operator_and_description(&*frontend.operator, description).await?
-    } else {
-        Some(connect_with_description(description).await?)
-    };
-
-    match client {
-        Some(client) => Ok(client),
-        None => {
-            // Skip-Studio fallback: the operator left the owner empty, so there
-            // is no Studio to connect to. Rather than run with no remote at all,
-            // fall through to the same open local bridge the non-Studio build
-            // serves — local editors still reach the device, just without Semio
-            // Studio.
-            info!("studio-bridge: skipped by operator (no owner) — running without Studio");
-            crate::run::local_ws_bridge().await
-        }
-    }
+    let operator = frontend.interactive.then_some(&*frontend.operator);
+    connect_device(credentials::from_env()?, description, operator).await
 }
 
-/// Build the Studio bridge for an interactive run, resolving the device info
-/// through `operator` as the [module docs](self#registration) say, with no HAL
-/// description: each field is taken from its env var when set, else from the
-/// saved registration, otherwise the operator is prompted (on the terminal
-/// UI's prompt line). Returns `Ok(None)` when the operator declines Studio by
-/// leaving the owner empty (and neither `DEVICE_OWNERS` nor a saved
-/// registration gives one) — the caller then runs without a Studio bridge.
+/// Build the Studio bridge of the device the environment configures,
+/// enrolling it first when it is not enrolled, through `operator`: it is
+/// asked the device's name when `DEVICE_NAME` does not give one, and shown
+/// each code a person approves the device with, as the
+/// [module docs](self#enrollment) say. Fails when the enrollment is refused.
 ///
 /// This is the operator-driven counterpart to [`connect`] (which never asks,
 /// for embedders that have no operator). The bridge itself is built the same
-/// way; only how the device info is gathered differs.
-pub async fn connect_with_operator(operator: &dyn Operator) -> Result<Option<Box<dyn Bridge>>> {
+/// way; only how a device that enrolls is named, and how its code is shown,
+/// differ.
+pub async fn connect_with_operator(operator: &dyn Operator) -> Result<Box<dyn Bridge>> {
     connect_with_operator_and_description(operator, &HalDescription::default()).await
 }
 
-/// [`connect_with_operator`], completing the device info with what the
-/// device's HAL says of itself: its model family, unless `MODEL_FAMILY` is set,
-/// is the HAL's (and the operator is not asked for one), and so are its
-/// hardware and software versions, unless `HARDWARE_VERSION` /
-/// `SOFTWARE_VERSION` are set. Pass `hal.describe().await`.
-///
-/// When the operator was asked anything, the owners and name resolved — and
-/// the model family the operator typed, if any — are saved in the device
-/// directory before connecting, and the next run asks nothing.
+/// [`connect_with_operator`], with the device's model completed by what its
+/// HAL says of itself, as the [module docs](self#the-devices-model) say. Pass
+/// `hal.describe().await`.
 pub async fn connect_with_operator_and_description(
     operator: &dyn Operator,
     description: &HalDescription,
-) -> Result<Option<Box<dyn Bridge>>> {
-    let saved_at = registration::path_in(&device_dir::from_env()?);
-    let saved = registration::load(&saved_at);
-    let Some(resolved) =
-        resolve_with_operator(operator, &env_nonempty, saved.as_ref(), description).await
-    else {
-        return Ok(None);
-    };
-    if resolved.from_saved {
-        log_saved_use(&resolved.info, &saved_at);
-    }
-    // The credentials first: under the deprecated `IDENTITY_FILE`, resolving
-    // them migrates the identity into a device directory that must not exist
-    // before, so nothing is written there until they are.
-    let credentials = credentials::from_env()?;
-    if let Some(answered) = &resolved.answered {
-        match registration::save(&saved_at, answered) {
-            Ok(()) => info!(
-                "studio: saved the registration in {}; the next run asks nothing (delete it to \
-                 answer again)",
-                saved_at.display()
-            ),
-            Err(e) => warn!(
-                "studio: could not save the registration in {}: {e}; the next run asks again",
-                saved_at.display()
-            ),
-        }
-    }
-    Ok(Some(
-        build_studio_bridge(credentials, Some(resolved.info)).await?,
-    ))
+) -> Result<Box<dyn Bridge>> {
+    connect_device(credentials::from_env()?, description, Some(operator)).await
 }
 
-/// Build the Semio Studio bridge — a ready-to-inject [`Bridge`] endpoint — from
-/// the environment, register the device from any configured device info, and
-/// return it.
+/// Build the Semio Studio bridge — a ready-to-inject [`Bridge`] endpoint — of
+/// the device the environment configures, enrolling it first when it is not
+/// enrolled, and return it.
 ///
 /// This is the injectable counterpart to [`crate::run_with_hal`]: where `run_with_hal`
 /// builds the bridge *and* owns the run loop, `connect` returns just the
-/// finished, registered bridge so an embedder can attach it to a device with
+/// finished, connected bridge so an embedder can attach it to a device with
 /// [`AroraBuilder::with_bridge`](crate::AroraBuilder::with_bridge) — the
 /// producer side of "let a Studio see this runtime's live data". A host that
 /// already runs its own Arora (e.g. the Vizij standalone) opts into a Studio
@@ -471,24 +432,21 @@ pub async fn connect_with_operator_and_description(
 /// let device = arora::Arora::builder().with_bridge(studio_bridge).build()?;
 /// ```
 ///
-/// The whole Studio side (Firebase auth, token rotation, the Zenoh connection,
-/// device registration) is identical for every device; only the runtime it is
-/// attached to differs. Nobody is asked anything: the device info is the
-/// environment's, completed by the registration an interactive run saved in
-/// the device directory, if any — see the [module docs](self#registration).
+/// The whole Studio side (enrollment, sign-in, token rotation, the Zenoh
+/// connection) is identical for every device; only the runtime it is attached
+/// to differs. Nobody is asked anything: a device that enrolls is named by
+/// `DEVICE_NAME`, or generated, and the log shows the codes it enrolls by —
+/// see the [module docs](self#enrollment). Fails when the enrollment is
+/// refused.
 pub async fn connect() -> Result<Box<dyn Bridge>> {
     connect_with_description(&HalDescription::default()).await
 }
 
-/// [`connect`], completing the device info with what the device's HAL says of
-/// itself (`hal.describe().await`): its model family, unless `MODEL_FAMILY`
-/// is set, and its hardware and software versions, unless `HARDWARE_VERSION`
-/// / `SOFTWARE_VERSION` are. The description completes a registration, it
-/// does not make one: with neither the environment nor a saved registration
-/// giving any device info, nothing is registered, as with [`connect`].
+/// [`connect`], with the device's model completed by what its HAL says of
+/// itself (`hal.describe().await`), as the
+/// [module docs](self#the-devices-model) say.
 pub async fn connect_with_description(description: &HalDescription) -> Result<Box<dyn Bridge>> {
-    let info = unattended_info(&device_dir::from_env()?, description);
-    build_studio_bridge(credentials::from_env()?, info).await
+    connect_device(credentials::from_env()?, description, None).await
 }
 
 /// [`connect`], with `device_dir` as the device directory rather than the one
@@ -496,287 +454,325 @@ pub async fn connect_with_description(description: &HalDescription) -> Result<Bo
 /// subdirectory. An app whose platform gives it a data directory (Android, a
 /// Tauri app) passes that; [`crate::device_dir::of`] gives the per-user one
 /// of a local id. The directories are created if missing, and the
-/// credentials on first connection.
-///
-/// The device info is the environment's, completed by the registration saved
-/// in `device_dir` — which only an interactive run of the same device
-/// directory writes; an app that never runs one registers exactly what the
-/// environment gives, as before.
+/// credentials when the device enrolls.
 pub async fn connect_with_device_dir(device_dir: &Path) -> Result<Box<dyn Bridge>> {
-    build_studio_bridge(
+    connect_device(
         credentials::in_device_dir(device_dir)?,
-        unattended_info(device_dir, &HalDescription::default()),
+        &HalDescription::default(),
+        None,
     )
     .await
 }
 
-/// Build the Studio bridge itself — Firebase auth, token load/rotate, device
-/// registration, the Zenoh connection — as the device whose Studio credentials
-/// `credentials` holds. With `info`, the device is registered with it before
-/// the client connects, which a bridge that certifies devices requires of a
-/// new one; without, an existing registration is left untouched. [`connect`],
-/// [`connect_with_device_dir`] and [`connect_with_operator`] each pass the
-/// [`DeviceInfo`] they resolved.
-async fn build_studio_bridge(
+/// Build the Studio bridge of the device whose Studio credentials
+/// `credentials` holds, reporting its model as `description` completes it,
+/// and enrolling it first through `operator`, if any, when it is not
+/// enrolled.
+async fn connect_device(
     credentials: DeviceCredentials,
-    info: Option<DeviceInfo>,
+    description: &HalDescription,
+    operator: Option<&dyn Operator>,
 ) -> Result<Box<dyn Bridge>> {
-    // Read the Firebase options and Zenoh endpoints from the environment.
-    let firebase_options = FirebaseOptions::from_env();
-    let firebase_emulator_options = FirebaseEmulatorOptions::from_env();
-    // The bridge endpoint is baked into `arora-studio-bridge-client`;
-    // `STUDIO_BRIDGE_ENDPOINT` overrides it at runtime to target a local/preprod
-    // bridge (e.g. `tcp/localhost:7447`) without a rebuild.
-    let endpoint_override = std::env::var("STUDIO_BRIDGE_ENDPOINT")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-
     // Install the rustls ring crypto provider (the Zenoh/Firebase TLS stacks
     // need a default provider).
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
-
-    // The client signs in with the refresh token `credentials` holds and saves
-    // each rotation there; over a TLS endpoint it also keeps there the key and
-    // certificate the bridge knows the device by, obtained from Studio and
-    // renewed while it runs.
-    let client = match endpoint_override {
-        Some(endpoint) => {
-            info!("Connecting to Semio Studio via Zenoh (endpoint: {endpoint})");
-            ZenohDeviceClient::new_endpoint_with_credentials(
-                &firebase_options,
-                Some(&firebase_emulator_options),
-                &credentials,
-                info,
-                endpoint,
-            )
-            .await
-        }
-        None => {
-            info!("Connecting to Semio Studio via the baked-in bridge endpoint");
-            ZenohDeviceClient::new_with_credentials(
-                &firebase_options,
-                Some(&firebase_emulator_options),
-                &credentials,
-                info,
-            )
-            .await
-        }
-    }
-    // `arora_studio_bridge_client::error::Error` has no `Display` impl,
-    // so format it with `{e:?}`.
-    .map_err(|e| anyhow::anyhow!("failed to connect to Semio Studio via Zenoh: {e:?}"))?;
-    let client: Box<dyn Bridge> = Box::new(client);
-    Ok(client)
+    let studio = &Studio::from_env();
+    let credentials = &credentials;
+    let model = &Model::of(&env_nonempty, description);
+    let client = enrolled(
+        credentials.path(),
+        || studio.connect(credentials, model.reported()),
+        |why| async move {
+            info!("Studio: this device is not enrolled with Semio Studio ({why}); enrolling it");
+            let device = enrolling_device(&env_nonempty, model, operator).await;
+            studio.enroll(credentials, &device, operator).await
+        },
+    )
+    .await?;
+    Ok(Box::new(client))
 }
 
-/// The device info a run resolved, and how.
-#[derive(Debug, PartialEq)]
-struct Resolved {
-    /// What the device registers with.
-    info: DeviceInfo,
-    /// Whether the saved registration gave any field.
-    from_saved: bool,
-    /// What to save, when the operator was asked anything.
-    answered: Option<Registration>,
+/// The client of the enrolled device whose Studio credentials are in
+/// `credentials`: `connect`'s when the device is enrolled; otherwise
+/// `connect`'s once `enroll`, told why the device is not enrolled, has
+/// enrolled it.
+///
+/// Only a device the client finds not enrolled enrolls. Studio failing
+/// otherwise says nothing of the device's enrollment, and a credential of
+/// another Firebase project than the run's means the two disagree on which
+/// Studio the device belongs to: enrolling would replace a credential that
+/// may be good.
+async fn enrolled<C, Connected, Enrolled>(
+    credentials: &Path,
+    mut connect: impl FnMut() -> Connected,
+    enroll: impl FnOnce(String) -> Enrolled,
+) -> Result<C>
+where
+    Connected: Future<Output = Result<C, ClientError>>,
+    Enrolled: Future<Output = Result<()>>,
+{
+    let failed = |error| connection_error(error, credentials);
+    match connect().await {
+        Err(ClientError::NotEnrolled(why)) => {
+            enroll(why).await?;
+            connect().await.map_err(failed)
+        }
+        connected => connected.map_err(failed),
+    }
 }
 
-/// The device info of an interactive run, `env` reading the environment: for
-/// each field, the first source that gives it wins, as the
-/// [module docs](self#registration) list them; the operator is asked only for
-/// what none gives. `None` when the owner resolves empty: Studio is declined.
-async fn resolve_with_operator(
-    operator: &dyn Operator,
-    env: &dyn Fn(&str) -> Option<String>,
-    saved: Option<&Registration>,
-    description: &HalDescription,
-) -> Option<Resolved> {
-    let mut asked = false;
-    let mut from_saved = false;
-
-    // Owner first. An empty result disables Studio, so short-circuit before
-    // asking anything else.
-    let owners = match (env("DEVICE_OWNERS"), saved) {
-        (Some(owners), _) => parse_owners(&owners),
-        (None, Some(saved)) => {
-            from_saved = true;
-            saved.owners.clone()
-        }
-        (None, None) => {
-            asked = true;
-            operator
-                .ask_text(OWNER_LABEL, false)
-                .await
-                .map(|owners| parse_owners(&owners))
-                .unwrap_or_default()
-        }
+/// `error`, connecting the device whose Studio credentials are in
+/// `credentials`, with what to do when the credential is another Firebase
+/// project's.
+fn connection_error(error: ClientError, credentials: &Path) -> anyhow::Error {
+    let context = match &error {
+        ClientError::Studio(SessionError::WrongProject { .. }) => format!(
+            "the device's Studio credential in {} is another Firebase project's than the one \
+             this run reaches, so the device does not enroll again over it: point the run at \
+             that project (the FIREBASE_* variables), or delete that directory to enroll the \
+             device with this one",
+            credentials.display()
+        ),
+        _ => "failed to connect to Semio Studio".to_string(),
     };
-    if owners.is_empty() {
-        return None;
+    anyhow::Error::new(error).context(context)
+}
+
+/// The Studio a run reaches, as the environment configures it.
+struct Studio {
+    firebase: FirebaseOptions,
+    emulators: FirebaseEmulatorOptions,
+    /// `STUDIO_BRIDGE_ENDPOINT`: the bridge endpoint, overriding the one baked
+    /// into `arora-studio-bridge-client` to target a local or preproduction
+    /// bridge (e.g. `tcp/localhost:7447`) without a rebuild.
+    endpoint: Option<String>,
+}
+
+impl Studio {
+    fn from_env() -> Self {
+        Studio {
+            firebase: FirebaseOptions::from_env(),
+            emulators: FirebaseEmulatorOptions::from_env(),
+            endpoint: env_nonempty("STUDIO_BRIDGE_ENDPOINT"),
+        }
     }
 
-    // The name always ends up non-empty: generated when left blank.
-    let name = match (env("DEVICE_NAME"), saved) {
-        (Some(name), _) => name,
-        (None, Some(saved)) => {
-            from_saved = true;
-            saved.name.clone()
-        }
-        (None, None) => {
-            asked = true;
-            ask_nonblank(operator, NAME_LABEL)
+    /// Connect the device `credentials` holds enrolled, reporting `model`.
+    /// The client signs it in with the refresh token there and saves each
+    /// rotation there; over a TLS endpoint it also keeps there the key and
+    /// certificate the bridge knows the device by, obtained from Studio and
+    /// renewed while it runs.
+    async fn connect(
+        &self,
+        credentials: &DeviceCredentials,
+        model: Option<PartialDeviceModel>,
+    ) -> Result<ZenohDeviceClient, ClientError> {
+        match &self.endpoint {
+            Some(endpoint) => {
+                info!("Connecting to Semio Studio via Zenoh (endpoint: {endpoint})");
+                ZenohDeviceClient::new_endpoint(
+                    &self.firebase,
+                    Some(&self.emulators),
+                    credentials,
+                    model,
+                    endpoint.clone(),
+                )
                 .await
-                .unwrap_or_else(generated_device_name)
-        }
-    };
-
-    // The model family: the HAL knows it better than a saved answer. A saved
-    // registration answers it even when it holds none: the operator typed none.
-    let mut typed_model_family = None;
-    let model_family = match (env("MODEL_FAMILY"), hal_field(&description.model_family)) {
-        (Some(model_family), _) => Some(model_family),
-        (None, Some(model_family)) => {
-            info!("studio: model family {model_family}, as the HAL describes the device");
-            Some(model_family)
-        }
-        (None, None) => match saved {
-            Some(saved) => {
-                from_saved |= saved.model_family.is_some();
-                saved.model_family.clone()
             }
             None => {
-                asked = true;
-                typed_model_family = ask_nonblank(operator, MODEL_FAMILY_LABEL).await;
-                typed_model_family.clone()
+                info!("Connecting to Semio Studio via the baked-in bridge endpoint");
+                ZenohDeviceClient::new(&self.firebase, Some(&self.emulators), credentials, model)
+                    .await
             }
-        },
-    };
-
-    // The operator is asked only for what no saved registration gave, so a
-    // run that asked anything had none: what it saves is all it resolved.
-    let answered = asked.then(|| Registration {
-        owners: owners.clone(),
-        name: name.clone(),
-        model_family: typed_model_family,
-    });
-    Some(Resolved {
-        info: DeviceInfo {
-            name: Some(name),
-            description: env("DEVICE_DESCRIPTION"),
-            model_family,
-            hardware_version: env("HARDWARE_VERSION")
-                .or_else(|| hal_field(&description.hardware_version)),
-            // Software version: env or the HAL — not something an operator types.
-            software_version: env("SOFTWARE_VERSION")
-                .or_else(|| hal_field(&description.software_version)),
-            owners,
-        },
-        from_saved,
-        answered,
-    })
-}
-
-/// The device info of a run nobody answers for, `env` reading the
-/// environment: the environment's, completed by the saved registration and
-/// the HAL's `description`. `None` when neither the environment nor a saved
-/// registration gives any — the description alone registers nothing, so an
-/// existing registration is left untouched.
-fn resolve_unattended(
-    env: &dyn Fn(&str) -> Option<String>,
-    saved: Option<&Registration>,
-    description: &HalDescription,
-) -> Option<Resolved> {
-    let from_env = DeviceInfo {
-        name: env("DEVICE_NAME"),
-        description: env("DEVICE_DESCRIPTION"),
-        model_family: env("MODEL_FAMILY"),
-        hardware_version: env("HARDWARE_VERSION"),
-        software_version: env("SOFTWARE_VERSION"),
-        owners: env("DEVICE_OWNERS")
-            .map(|owners| parse_owners(&owners))
-            .unwrap_or_default(),
-    };
-    if from_env == DeviceInfo::default() && saved.is_none() {
-        return None;
-    }
-    let mut from_saved = false;
-    let owners = match (from_env.owners.is_empty(), saved) {
-        (true, Some(saved)) => {
-            from_saved = true;
-            saved.owners.clone()
         }
-        _ => from_env.owners,
-    };
-    let name = or_saved(
-        from_env.name,
-        saved.map(|saved| saved.name.clone()),
-        &mut from_saved,
-    );
-    let model_family = or_saved(
-        from_env
-            .model_family
-            .or_else(|| hal_field(&description.model_family)),
-        saved.and_then(|saved| saved.model_family.clone()),
-        &mut from_saved,
-    );
-    Some(Resolved {
-        info: DeviceInfo {
-            name,
-            description: from_env.description,
-            model_family,
-            hardware_version: from_env
-                .hardware_version
-                .or_else(|| hal_field(&description.hardware_version)),
-            software_version: from_env
-                .software_version
-                .or_else(|| hal_field(&description.software_version)),
-            owners,
-        },
-        from_saved,
-        answered: None,
-    })
-}
-
-/// `value`, else `saved`, noting in `from_saved` when `saved` gave it.
-fn or_saved(value: Option<String>, saved: Option<String>, from_saved: &mut bool) -> Option<String> {
-    value.or_else(|| {
-        *from_saved |= saved.is_some();
-        saved
-    })
-}
-
-/// The device info a run nobody answers for registers, for the device whose
-/// directory is `device_dir`: see [`resolve_unattended`].
-fn unattended_info(device_dir: &Path, description: &HalDescription) -> Option<DeviceInfo> {
-    let saved_at = registration::path_in(device_dir);
-    let saved = registration::load(&saved_at);
-    let resolved = resolve_unattended(&env_nonempty, saved.as_ref(), description)?;
-    if resolved.from_saved {
-        log_saved_use(&resolved.info, &saved_at);
     }
-    Some(resolved.info)
+
+    /// Enroll `device` with Studio, saving its credential in `credentials`:
+    /// with the enrollment token `STUDIO_ENROLLMENT_TOKEN` holds, else by
+    /// code, each code shown in the log and to `operator`.
+    async fn enroll(
+        &self,
+        credentials: &DeviceCredentials,
+        device: &DeviceDescription,
+        operator: Option<&dyn Operator>,
+    ) -> Result<()> {
+        let enrolled = match EnrollWith::token_from_env() {
+            Some(token) => {
+                info!(
+                    "Studio: enrolling this device as {} with the enrollment token in \
+                     {ENROLLMENT_TOKEN_VAR}",
+                    device.name
+                );
+                enrollment::enroll(
+                    &self.firebase,
+                    Some(&self.emulators),
+                    credentials,
+                    device,
+                    token,
+                )
+                .await
+            }
+            None => {
+                let codes = Codes { operator };
+                let origin = enrollment::origin();
+                let show = |pending: &PendingSignIn| {
+                    codes.show(&enrollment_code(pending, origin.as_deref()));
+                };
+                enrollment::enroll(
+                    &self.firebase,
+                    Some(&self.emulators),
+                    credentials,
+                    device,
+                    EnrollWith::Code(Box::new(show)),
+                )
+                .await
+            }
+        };
+        let device_id = enrolled.context("failed to enroll the device with Semio Studio")?;
+        info!("Studio: enrolled as device {device_id}");
+        Ok(())
+    }
 }
 
-/// Says the device registers with values saved at `saved_at`, and how to be
-/// asked again.
-fn log_saved_use(info: &DeviceInfo, saved_at: &Path) {
-    info!(
-        "studio: registering as {} for owner(s) {} (saved in {}; delete it to answer again)",
-        info.name.as_deref().unwrap_or("(no name)"),
-        info.owners.join(", "),
-        saved_at.display()
-    );
+/// The code `pending` asks a person to approve, with its approval page on the
+/// Studio served at `origin`, when it is known.
+fn enrollment_code(pending: &PendingSignIn, origin: Option<&str>) -> EnrollmentCode {
+    EnrollmentCode {
+        code: pending.user_code().to_string(),
+        approval_url: origin.map(|origin| pending.approval_url(origin)),
+    }
 }
 
-/// The owner UIDs a comma-separated list names: trimmed, blanks dropped.
-fn parse_owners(owners: &str) -> Vec<String> {
-    owners
-        .split(',')
-        .map(|owner| owner.trim().to_string())
-        .filter(|owner| !owner.is_empty())
-        .collect()
+/// Shows the codes of an enrollment by code: each in the log, and to the
+/// operator, if any, whose code is cleared once the enrollment ends — or once
+/// it is dropped, which would otherwise leave the operator showing a code
+/// nobody waits on.
+struct Codes<'a> {
+    operator: Option<&'a dyn Operator>,
+}
+
+impl Codes<'_> {
+    fn show(&self, code: &EnrollmentCode) {
+        info!("{}", code_line(code));
+        if let Some(operator) = self.operator {
+            operator.show_enrollment_code(Some(code));
+        }
+    }
+}
+
+impl Drop for Codes<'_> {
+    fn drop(&mut self) {
+        if let Some(operator) = self.operator {
+            operator.show_enrollment_code(None);
+        }
+    }
+}
+
+/// The log line showing `code`.
+fn code_line(code: &EnrollmentCode) -> String {
+    match &code.approval_url {
+        Some(url) => format!(
+            "Studio: to enroll this device, enter the code {} in Semio Studio, or open {url}",
+            code.code
+        ),
+        None => format!(
+            "Studio: to enroll this device, enter the code {} in Semio Studio",
+            code.code
+        ),
+    }
+}
+
+/// The device's model: each field from its variable, else from the HAL's
+/// description.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Model {
+    family: Option<String>,
+    hardware: Option<String>,
+    software: Option<String>,
+}
+
+impl Model {
+    /// The model `env` and the HAL's `description` give, the variable
+    /// winning each field.
+    fn of(env: &dyn Fn(&str) -> Option<String>, description: &HalDescription) -> Self {
+        Model {
+            family: env("MODEL_FAMILY").or_else(|| hal_field(&description.model_family)),
+            hardware: env("HARDWARE_VERSION").or_else(|| hal_field(&description.hardware_version)),
+            software: env("SOFTWARE_VERSION").or_else(|| hal_field(&description.software_version)),
+        }
+    }
+
+    /// What the device reports to its Studio record: the fields it gives,
+    /// the record keeping the others; `None` when it gives none.
+    fn reported(&self) -> Option<PartialDeviceModel> {
+        if *self == Model::default() {
+            return None;
+        }
+        let version = (self.hardware.is_some() || self.software.is_some()).then(|| {
+            PartialDeviceModelVersion {
+                hardware: self.hardware.clone(),
+                software: self.software.clone(),
+            }
+        });
+        Some(PartialDeviceModel {
+            family: self.family.clone(),
+            version,
+        })
+    }
+
+    /// The description of the device named `name` that enrolls, which the
+    /// person approving it sees.
+    fn described(&self, name: String) -> DeviceDescription {
+        let mut device =
+            DeviceDescription::new(name).with_version(concat!("arora ", env!("CARGO_PKG_VERSION")));
+        if let Some(family) = &self.family {
+            device = device.with_family(family);
+        }
+        if let Some(hardware) = &self.hardware {
+            device = device.with_hardware(hardware);
+        }
+        if let Some(software) = &self.software {
+            device = device.with_software(software);
+        }
+        device
+    }
+}
+
+/// What a device that enrolls describes itself as to the person approving
+/// it: its name — `DEVICE_NAME` in `env`, else what `operator`, if any,
+/// answers, else a generated one — and `model`, whose family, when nothing
+/// gives one, `operator` is asked for.
+async fn enrolling_device(
+    env: &dyn Fn(&str) -> Option<String>,
+    model: &Model,
+    operator: Option<&dyn Operator>,
+) -> DeviceDescription {
+    let name = match env("DEVICE_NAME") {
+        Some(name) => name,
+        None => ask(operator, NAME_LABEL)
+            .await
+            .unwrap_or_else(generated_device_name),
+    };
+    let family = match &model.family {
+        Some(family) => Some(family.clone()),
+        None => ask(operator, MODEL_FAMILY_LABEL).await,
+    };
+    Model {
+        family,
+        ..model.clone()
+    }
+    .described(name)
+}
+
+/// What `operator`, if any, answers `label`, not required: `None` when it
+/// skips it, answers blank, or there is no operator.
+async fn ask(operator: Option<&dyn Operator>, label: &str) -> Option<String> {
+    match operator {
+        Some(operator) => ask_nonblank(operator, label).await,
+        None => None,
+    }
 }
 
 /// Ask the operator for one free-text field, not required. A blank answer
@@ -806,8 +802,8 @@ fn env_nonempty(key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// A generated device name, `arora-device-<random>`, for when the operator does
-/// not provide one — so a registered device is never nameless.
+/// A generated device name, `arora-device-<random>`, for a device that
+/// enrolls with no name given — so a device is never nameless.
 fn generated_device_name() -> String {
     format!("arora-device-{}", random_device_suffix())
 }
@@ -831,6 +827,7 @@ fn random_device_suffix() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -842,11 +839,12 @@ mod tests {
     use crate::operator::{AccessRequestSummary, AccessRuling};
 
     /// An operator answering each prompt from a script, keyed by its label,
-    /// and recording the labels it was asked.
+    /// and recording the labels it was asked and the codes it was shown.
     #[derive(Default)]
     struct Scripted {
         answers: HashMap<&'static str, &'static str>,
         asked: Mutex<Vec<String>>,
+        shown: Mutex<Vec<Option<EnrollmentCode>>>,
     }
 
     impl Scripted {
@@ -859,6 +857,10 @@ mod tests {
 
         fn asked(&self) -> Vec<String> {
             self.asked.lock().unwrap().clone()
+        }
+
+        fn shown(&self) -> Vec<Option<EnrollmentCode>> {
+            self.shown.lock().unwrap().clone()
         }
     }
 
@@ -874,6 +876,10 @@ mod tests {
                 decision: AccessDecision::Rejected,
                 remember: false,
             }
+        }
+
+        fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) {
+            self.shown.lock().unwrap().push(code.cloned());
         }
     }
 
@@ -894,170 +900,270 @@ mod tests {
         }
     }
 
-    fn saved(model_family: Option<&str>) -> Registration {
-        Registration {
-            owners: vec!["saved-uid".to_string()],
-            name: "saved-name".to_string(),
-            model_family: model_family.map(str::to_string),
+    fn code(code: &str, approval_url: Option<&str>) -> EnrollmentCode {
+        EnrollmentCode {
+            code: code.to_string(),
+            approval_url: approval_url.map(str::to_string),
         }
     }
 
-    fn strings(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| value.to_string()).collect()
+    /// Where the enrollment tests' device keeps its Studio credentials.
+    fn credentials_dir() -> PathBuf {
+        PathBuf::from("/devices/bench/studio")
     }
 
-    #[tokio::test]
-    async fn a_device_registered_once_is_asked_nothing_again() {
-        let device =
-            std::env::temp_dir().join(format!("arora-studio-asked-once-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&device);
-        let saved_at = registration::path_in(&device);
-        let no_hal = HalDescription::default();
+    /// What [`enrolled`] gives when the client's connections answer
+    /// `connections`, in turn, and its enrollment answers `enrollment`; with
+    /// the reasons the enrollment was given, and how many connections were
+    /// made.
+    fn enrolled_with(
+        connections: Vec<Result<&'static str, ClientError>>,
+        enrollment: Result<()>,
+    ) -> (Result<&'static str>, Vec<String>, usize) {
+        let connections = RefCell::new(connections.into_iter());
+        let made = RefCell::new(0);
+        let reasons = RefCell::new(Vec::new());
+        let client = futures::executor::block_on(enrolled(
+            &credentials_dir(),
+            || {
+                *made.borrow_mut() += 1;
+                let connection = connections.borrow_mut().next();
+                async move { connection.expect("no connection is made past those scripted") }
+            },
+            |why| {
+                reasons.borrow_mut().push(why);
+                async move { enrollment }
+            },
+        ));
+        (client, reasons.into_inner(), made.into_inner())
+    }
 
-        // First run: nothing saved, nothing set — the operator answers all.
-        let operator = Scripted::answering(&[
-            (OWNER_LABEL, " uid-1, uid-2 "),
-            (NAME_LABEL, "pepper-lab"),
-            (MODEL_FAMILY_LABEL, "pepper"),
-        ]);
-        let first = resolve_with_operator(&operator, &env(&[]), None, &no_hal)
-            .await
-            .expect("an owner was given");
-        assert_eq!(
-            operator.asked(),
-            [OWNER_LABEL, NAME_LABEL, MODEL_FAMILY_LABEL]
+    #[test]
+    fn an_enrolled_device_connects_without_enrolling() {
+        let (client, reasons, made) = enrolled_with(vec![Ok("client")], Ok(()));
+        assert_eq!(client.unwrap(), "client");
+        assert!(reasons.is_empty(), "enrolled for {reasons:?}");
+        assert_eq!(made, 1);
+    }
+
+    #[test]
+    fn a_device_not_enrolled_enrolls_then_connects() {
+        let (client, reasons, made) = enrolled_with(
+            vec![
+                Err(ClientError::NotEnrolled(
+                    "it holds no credential".to_string(),
+                )),
+                Ok("client"),
+            ],
+            Ok(()),
         );
-        assert!(!first.from_saved);
-        let answered = first.answered.expect("the answers are to be saved");
-        registration::save(&saved_at, &answered).unwrap();
-
-        // Second run: the saved registration answers every question.
-        let operator = Scripted::default();
-        let saved = registration::load(&saved_at);
-        let second = resolve_with_operator(&operator, &env(&[]), saved.as_ref(), &no_hal)
-            .await
-            .expect("the saved owner registers the device");
-        assert!(operator.asked().is_empty(), "asked {:?}", operator.asked());
-        assert_eq!(second.info, first.info);
-        assert!(second.from_saved);
-        assert_eq!(second.answered, None, "nothing new to save");
-        std::fs::remove_dir_all(&device).unwrap();
+        assert_eq!(client.unwrap(), "client");
+        assert_eq!(reasons, ["it holds no credential"]);
+        assert_eq!(made, 2);
     }
 
-    #[tokio::test]
-    async fn a_blank_model_family_answer_is_remembered_as_none() {
-        let operator = Scripted::answering(&[(OWNER_LABEL, "uid"), (NAME_LABEL, "")]);
-        let first = resolve_with_operator(&operator, &env(&[]), None, &HalDescription::default())
-            .await
-            .unwrap();
-        let answered = first.answered.unwrap();
+    #[test]
+    fn a_refused_enrollment_fails_and_does_not_connect_again() {
+        let (client, _, made) = enrolled_with(
+            vec![Err(ClientError::NotEnrolled("anonymous".to_string()))],
+            Err(anyhow::Error::new(ClientError::EnrollmentDenied)),
+        );
+        let error = format!("{:#}", client.unwrap_err());
+        assert!(error.contains("refused"), "{error}");
+        assert_eq!(made, 1);
+    }
+
+    #[test]
+    fn a_device_its_enrollment_leaves_unenrolled_fails() {
+        let (client, reasons, made) = enrolled_with(
+            vec![
+                Err(ClientError::NotEnrolled(
+                    "it holds no credential".to_string(),
+                )),
+                Err(ClientError::NotEnrolled("Studio refuses it".to_string())),
+            ],
+            Ok(()),
+        );
+        let error = format!("{:#}", client.unwrap_err());
+        assert!(error.contains("Studio refuses it"), "{error}");
+        assert_eq!(reasons.len(), 1, "a device enrolls once per run");
+        assert_eq!(made, 2);
+    }
+
+    #[test]
+    fn studio_failing_otherwise_fails_without_enrolling() {
+        // Firebase down or a bridge out of reach says nothing of the device's
+        // enrollment: enrolling again would replace a credential that is good.
+        let (client, reasons, _) = enrolled_with(
+            vec![Err(ClientError::Zenoh("no route".to_string()))],
+            Ok(()),
+        );
+        let error = format!("{:#}", client.unwrap_err());
+        assert!(error.contains("no route"), "{error}");
+        assert!(reasons.is_empty(), "enrolled for {reasons:?}");
+    }
+
+    #[test]
+    fn a_credential_of_another_project_fails_without_enrolling() {
+        let wrong_project = SessionError::WrongProject {
+            project: "studio".to_string(),
+            audience: "studio-staging".to_string(),
+        };
+        let (client, reasons, made) =
+            enrolled_with(vec![Err(ClientError::Studio(wrong_project))], Ok(()));
+        let error = client.unwrap_err();
         assert!(
-            answered.name.starts_with("arora-device-"),
-            "a blank name is generated, and the generated one saved: {}",
-            answered.name
+            matches!(
+                error.downcast_ref::<ClientError>(),
+                Some(ClientError::Studio(SessionError::WrongProject { .. }))
+            ),
+            "{error:?}"
         );
-        assert_eq!(answered.model_family, None);
+        let said = format!("{error:#}");
+        assert!(said.contains("another Firebase project's"), "{said}");
+        assert!(
+            said.contains(&credentials_dir().display().to_string()),
+            "{said}"
+        );
+        assert!(said.contains("studio-staging"), "{said}");
+        assert!(reasons.is_empty(), "enrolled for {reasons:?}");
+        assert_eq!(made, 1);
+    }
 
+    #[test]
+    fn each_code_is_shown_then_cleared_once_the_enrollment_ends() {
         let operator = Scripted::default();
-        let second = resolve_with_operator(
-            &operator,
-            &env(&[]),
-            Some(&answered),
-            &HalDescription::default(),
-        )
-        .await
-        .unwrap();
-        assert!(operator.asked().is_empty(), "asked {:?}", operator.asked());
-        assert_eq!(second.info.name, Some(answered.name));
-        assert_eq!(second.info.model_family, None);
-    }
-
-    #[tokio::test]
-    async fn an_empty_owner_declines_studio_and_saves_nothing() {
-        let operator = Scripted::answering(&[(OWNER_LABEL, " , ")]);
-        let resolved =
-            resolve_with_operator(&operator, &env(&[]), None, &HalDescription::default()).await;
-        assert_eq!(resolved, None);
-        assert_eq!(operator.asked(), [OWNER_LABEL], "nothing else is asked");
-    }
-
-    #[tokio::test]
-    async fn the_environment_wins_over_the_saved_registration() {
-        let operator = Scripted::default();
-        let resolved = resolve_with_operator(
-            &operator,
-            &env(&[
-                ("DEVICE_OWNERS", "env-uid"),
-                ("DEVICE_NAME", "env-name"),
-                ("MODEL_FAMILY", "env-model"),
-            ]),
-            Some(&saved(Some("saved-model"))),
-            &description(Some("hal-model"), None),
-        )
-        .await
-        .unwrap();
-        assert!(operator.asked().is_empty());
-        assert_eq!(resolved.info.owners, strings(&["env-uid"]));
-        assert_eq!(resolved.info.name.as_deref(), Some("env-name"));
-        assert_eq!(resolved.info.model_family.as_deref(), Some("env-model"));
-        assert!(!resolved.from_saved);
-        assert_eq!(resolved.answered, None);
-    }
-
-    #[tokio::test]
-    async fn the_hal_gives_the_model_family_and_versions_unless_the_environment_does() {
-        // Nothing saved: the HAL's model family spares the operator the
-        // question, and is not saved — the HAL gives it again next run.
-        let operator = Scripted::answering(&[(OWNER_LABEL, "uid"), (NAME_LABEL, "nao")]);
-        let resolved = resolve_with_operator(
-            &operator,
-            &env(&[("SOFTWARE_VERSION", "env-sw")]),
-            None,
-            &description(Some("nao"), Some("hal-v")),
-        )
-        .await
-        .unwrap();
-        assert_eq!(operator.asked(), [OWNER_LABEL, NAME_LABEL]);
-        assert_eq!(resolved.info.model_family.as_deref(), Some("nao"));
-        assert_eq!(resolved.info.hardware_version.as_deref(), Some("hal-v"));
-        assert_eq!(resolved.info.software_version.as_deref(), Some("env-sw"));
-        assert_eq!(resolved.answered.unwrap().model_family, None);
-
-        // Saved: the HAL's model family wins over the saved one.
-        let operator = Scripted::default();
-        let resolved = resolve_with_operator(
-            &operator,
-            &env(&[]),
-            Some(&saved(Some("saved-model"))),
-            &description(Some("pepper"), None),
-        )
-        .await
-        .unwrap();
-        assert!(operator.asked().is_empty());
-        assert_eq!(resolved.info.model_family.as_deref(), Some("pepper"));
-        assert_eq!(resolved.info.owners, strings(&["saved-uid"]));
-    }
-
-    #[tokio::test]
-    async fn the_operator_is_asked_only_for_what_nothing_gives() {
-        let operator = Scripted::answering(&[(NAME_LABEL, "typed-name")]);
-        let resolved = resolve_with_operator(
-            &operator,
-            &env(&[("DEVICE_OWNERS", "env-uid"), ("MODEL_FAMILY", "env-model")]),
-            None,
-            &HalDescription::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(operator.asked(), [NAME_LABEL]);
+        let codes = Codes {
+            operator: Some(&operator),
+        };
+        codes.show(&code("BCDF-GHJK", None));
+        codes.show(&code("LMNP-QRST", Some("https://studio.example/approve")));
+        assert_eq!(operator.shown().len(), 2);
+        drop(codes);
         assert_eq!(
-            resolved.answered,
-            Some(Registration {
-                owners: strings(&["env-uid"]),
-                name: "typed-name".to_string(),
-                model_family: None,
-            }),
-            "the resolved owners and name are saved, an env model family is not"
+            operator.shown(),
+            [
+                Some(code("BCDF-GHJK", None)),
+                Some(code("LMNP-QRST", Some("https://studio.example/approve"))),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn a_code_line_names_the_approval_page_when_studio_s_address_is_known() {
+        assert_eq!(
+            code_line(&code("BCDF-GHJK", None)),
+            "Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio"
+        );
+        assert_eq!(
+            code_line(&code(
+                "BCDF-GHJK",
+                Some("https://studio.example/approve?code=BCDF-GHJK")
+            )),
+            "Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio, or open \
+             https://studio.example/approve?code=BCDF-GHJK"
+        );
+    }
+
+    #[tokio::test]
+    async fn what_describes_the_device_is_not_asked() {
+        let operator = Scripted::answering(&[(NAME_LABEL, "typed"), (MODEL_FAMILY_LABEL, "typed")]);
+        let device = enrolling_device(
+            &env(&[("DEVICE_NAME", "pepper-lab")]),
+            &Model::of(&env(&[]), &description(Some("nao"), None)),
+            Some(&operator),
+        )
+        .await;
+        assert_eq!(device.name, "pepper-lab");
+        assert_eq!(device.family.as_deref(), Some("nao"));
+        assert!(operator.asked().is_empty(), "asked {:?}", operator.asked());
+    }
+
+    #[tokio::test]
+    async fn the_operator_names_a_device_and_its_family_nothing_else_gives() {
+        let operator = Scripted::answering(&[
+            (NAME_LABEL, " pepper-lab "),
+            (MODEL_FAMILY_LABEL, " pepper "),
+        ]);
+        let device = enrolling_device(&env(&[]), &Model::default(), Some(&operator)).await;
+        assert_eq!(device.name, "pepper-lab");
+        assert_eq!(device.family.as_deref(), Some("pepper"));
+        assert_eq!(operator.asked(), [NAME_LABEL, MODEL_FAMILY_LABEL]);
+
+        // Left blank, or with nobody to ask, the name is generated, and the
+        // device enrolls with no family.
+        let operator = Scripted::answering(&[(NAME_LABEL, " ")]);
+        let blank = enrolling_device(&env(&[]), &Model::default(), Some(&operator)).await;
+        assert!(blank.name.starts_with("arora-device-"), "{}", blank.name);
+        assert_eq!(blank.family, None);
+        let headless = enrolling_device(&env(&[]), &Model::default(), None).await;
+        assert!(
+            headless.name.starts_with("arora-device-"),
+            "{}",
+            headless.name
+        );
+        assert_eq!(headless.family, None);
+    }
+
+    #[test]
+    fn each_model_field_is_its_variable_s_else_the_hal_s() {
+        let model = Model::of(
+            &env(&[
+                ("MODEL_FAMILY", "env-family"),
+                ("SOFTWARE_VERSION", "env-sw"),
+            ]),
+            &description(Some("nao"), Some("hal-v")),
+        );
+        assert_eq!(
+            model,
+            Model {
+                family: Some("env-family".to_string()),
+                hardware: Some("hal-v".to_string()),
+                software: Some("env-sw".to_string()),
+            }
+        );
+        assert_eq!(
+            model.reported(),
+            Some(PartialDeviceModel {
+                family: Some("env-family".to_string()),
+                version: Some(PartialDeviceModelVersion {
+                    hardware: Some("hal-v".to_string()),
+                    software: Some("env-sw".to_string()),
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn a_report_carries_only_the_fields_given() {
+        let model = Model::of(&env(&[]), &description(Some(" "), None));
+        assert_eq!(model, Model::default());
+        assert_eq!(model.reported(), None);
+        let versions_only = Model::of(&env(&[("HARDWARE_VERSION", "6")]), &description(None, None));
+        assert_eq!(
+            versions_only.reported(),
+            Some(PartialDeviceModel {
+                family: None,
+                version: Some(PartialDeviceModelVersion {
+                    hardware: Some("6".to_string()),
+                    software: None,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn a_device_enrolls_described_by_its_name_and_model() {
+        let device = Model::of(&env(&[]), &description(Some("nao"), Some("6")))
+            .described("pepper-lab".to_string());
+        assert_eq!(device.name, "pepper-lab");
+        assert_eq!(device.family.as_deref(), Some("nao"));
+        assert_eq!(device.hardware.as_deref(), Some("6"));
+        assert_eq!(device.software.as_deref(), Some("6"));
+        assert_eq!(
+            device.version.as_deref(),
+            Some(concat!("arora ", env!("CARGO_PKG_VERSION")))
         );
     }
 
@@ -1234,77 +1340,6 @@ mod tests {
         assert_eq!(
             bridge_for_(Decision::Unreadable(studio_dir(), "damaged".to_string())),
             "local"
-        );
-    }
-
-    #[test]
-    fn unattended_nothing_set_nothing_saved_registers_nothing() {
-        assert_eq!(
-            resolve_unattended(&env(&[]), None, &description(Some("nao"), Some("v"))),
-            None,
-            "the HAL's description alone registers nothing"
-        );
-    }
-
-    #[test]
-    fn unattended_a_saved_registration_registers_the_device() {
-        let resolved = resolve_unattended(
-            &env(&[]),
-            Some(&saved(Some("saved-model"))),
-            &description(None, Some("hal-v")),
-        )
-        .unwrap();
-        assert!(resolved.from_saved);
-        assert_eq!(
-            resolved.info,
-            DeviceInfo {
-                name: Some("saved-name".to_string()),
-                description: None,
-                model_family: Some("saved-model".to_string()),
-                hardware_version: Some("hal-v".to_string()),
-                software_version: Some("hal-v".to_string()),
-                owners: strings(&["saved-uid"]),
-            }
-        );
-    }
-
-    #[test]
-    fn unattended_the_environment_then_the_hal_then_the_saved_registration() {
-        let resolved = resolve_unattended(
-            &env(&[("DEVICE_NAME", "env-name"), ("HARDWARE_VERSION", "env-hw")]),
-            Some(&saved(Some("saved-model"))),
-            &description(Some("hal-model"), Some("hal-v")),
-        )
-        .unwrap();
-        assert_eq!(
-            resolved.info,
-            DeviceInfo {
-                name: Some("env-name".to_string()),
-                description: None,
-                model_family: Some("hal-model".to_string()),
-                hardware_version: Some("env-hw".to_string()),
-                software_version: Some("hal-v".to_string()),
-                owners: strings(&["saved-uid"]),
-            }
-        );
-    }
-
-    #[test]
-    fn unattended_without_a_saved_registration_is_the_environment_s() {
-        let resolved = resolve_unattended(
-            &env(&[("DEVICE_OWNERS", "a, b"), ("DEVICE_NAME", "n")]),
-            None,
-            &HalDescription::default(),
-        )
-        .unwrap();
-        assert!(!resolved.from_saved);
-        assert_eq!(
-            resolved.info,
-            DeviceInfo {
-                name: Some("n".to_string()),
-                owners: strings(&["a", "b"]),
-                ..DeviceInfo::default()
-            }
         );
     }
 }

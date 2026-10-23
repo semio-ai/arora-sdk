@@ -199,7 +199,6 @@ dependencies = [
  "log",
  "ratatui",
  "rustls",
- "serde",
  "serde_json",
  "sysinfo",
  "tokio",
@@ -418,16 +417,14 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "10.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "655847e03688015f32d2a3dc0b14ea94499680c33aa0e143730928a518a0f3a0"
+version = "11.0.0"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#656c56afdac955acbf13a219b1aa334e82c0001f"
 dependencies = [
  "arora-bridge",
  "arora-types",
  "async-stream",
  "async-trait",
  "chrono",
- "crypto_secretbox",
  "firestore",
  "futures",
  "futures-util",
@@ -437,9 +434,9 @@ dependencies = [
  "rcgen 0.13.2",
  "reqwest",
  "rustls",
+ "semio-studio-session",
  "serde",
  "serde_json",
- "strfmt",
  "studio-bridge-msgs",
  "sync_wrapper",
  "tokio",
@@ -4029,7 +4026,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4892,6 +4889,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "semio-studio-session"
+version = "1.0.0"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#656c56afdac955acbf13a219b1aa334e82c0001f"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "crypto_secretbox",
+ "log",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "webpki-roots",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5295,12 +5309,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
 
 [[package]]
-name = "strfmt"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046d549b88a663d317cd04d39696fca5f77db4db44e1db65bfb9dee7f9e680bd"
-
-[[package]]
 name = "string-interner"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5350,8 +5358,7 @@ dependencies = [
 [[package]]
 name = "studio-bridge-msgs"
 version = "7.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fc586adeaecd20cd3c5691ab29d1421f101df68f8cdca9ce74b832a84b9f7cd"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#656c56afdac955acbf13a219b1aa334e82c0001f"
 dependencies = [
  "arora-types",
  "chrono",

@@ -23,6 +23,12 @@ All notable changes to `arora-hal-restful`. The format follows
   To migrate a runner that connects with its saved credential, build it with
   `--features runner,studio` and pass `--studio` on every run that should
   connect, or set `ARORA_STUDIO=1` in its environment.
+- A runner built with `studio` enrolls a device that is not enrolled with
+  Semio Studio before it connects (arora 16). A person enters the code
+  the run shows (in the terminal UI's prompt line, and in the log) in Studio,
+  choosing the device's owner; or the run redeems the enrollment token
+  `STUDIO_ENROLLMENT_TOKEN` holds. `DEVICE_OWNERS` and the owner prompt are
+  gone, and a device an earlier `arora-restful` registered enrolls again.
 
 ## [4.4.0] - 2026-10-19
 

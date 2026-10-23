@@ -9,10 +9,9 @@
 //! `configs/nao.json`). An optional second JSON file overrides the selected config.
 //!
 //! The device serves the open local bridge. Built with the `studio` feature, it connects to
-//! Semio Studio instead when the run passes `--studio` (`ARORA_STUDIO=1`), which registers a
-//! device holding no saved Studio credential; `--no-studio` keeps it on the local bridge. Its
-//! identity, registration and credential are arora's (`arora::studio`), configured from the
-//! environment.
+//! Semio Studio instead when the run passes `--studio` (`ARORA_STUDIO=1`), which enrolls a
+//! device that is not enrolled with Studio; `--no-studio` keeps it on the local bridge. Its
+//! enrollment and credential are arora's (`arora::studio`), configured from the environment.
 //!
 //! The device runs a behavior tree: by default `trees/ready.groot.xml`, which says "Arora is
 //! ready" with a hand gesture at start; `--tree` runs another one, `--no-tree` none. The

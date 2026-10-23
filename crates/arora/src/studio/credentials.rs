@@ -1,8 +1,6 @@
 //! The Studio connection's credentials: the `studio/` subdirectory of the
 //! device directory ([`crate::device_dir`]), which arora names and
-//! [`DeviceCredentials`] writes the credentials inside. Beside them, arora
-//! keeps only the device's saved registration, `device.json`
-//! ([`super::registration`]).
+//! [`DeviceCredentials`] alone writes inside.
 //!
 //! Two older layouts come in here, both in [`DeviceCredentials`]' format:
 //!

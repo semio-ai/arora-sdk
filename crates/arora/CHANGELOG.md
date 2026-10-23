@@ -6,8 +6,55 @@ All notable changes to `arora`. The format follows
 
 ## [16.0.0] - 2026-10-23
 
+### Added
+
+- `operator::EnrollmentCode` and `Operator::show_enrollment_code`: an operator
+  shows the code that enrolls the device with Semio Studio, until the next
+  call replaces or clears it. The default shows nothing, as the run's log says
+  each code. The terminal UI shows the code in its prompt line, with Studio's
+  page approving it when the Studio client knows Studio's web address
+  (`STUDIO_URL`, else the one baked into it).
+
 ### Changed
 
+- **A device enrolls with Semio Studio** (`arora-studio-bridge-client` 11).
+  Studio creates the device, under the owner a person chooses, when it
+  enrolls, and the device signs in with the credential its enrollment saved
+  from then on; it never signs up as an anonymous account. A run that
+  connects enrolls the device when its credentials hold no enrolled device:
+  none, one that does not read, one Studio refuses (a revoked or deleted
+  device), or one that is no device's, such as the anonymous account 13.x and
+  earlier signed a device up as. It enrolls with the enrollment token
+  `STUDIO_ENROLLMENT_TOKEN` holds, read from the environment only and never
+  logged, else by a code a person enters in Studio. The code is logged, and
+  shown to the operator under the terminal UI; one that expires undecided is
+  replaced by another. Then the run connects.
+  - A person refusing the code, or Studio refusing the token, fails the run.
+  - Only a device the client finds not enrolled enrolls. Studio failing
+    otherwise fails the run and keeps the credential; so does a credential of
+    another Firebase project than the run's, the error naming its directory
+    and saying to point the run at that project or delete the directory.
+  - The device enrolls with its name — `DEVICE_NAME`; else, under the
+    terminal UI, what the operator types; else generated — and its model,
+    the operator typing the model family under the terminal UI when nothing
+    gives one. Its name and owner are Studio's from then on: a run no longer
+    writes them.
+  - Each run reports the device's model: `MODEL_FAMILY`, `HARDWARE_VERSION`
+    and `SOFTWARE_VERSION`, else what the HAL describes, writing only the
+    fields given.
+  - `studio::connect_with_operator` and
+    `connect_with_operator_and_description` return the bridge
+    (`Result<Box<dyn Bridge>>`): there is no owner left to decline Studio
+    with.
+  - Every `studio::connect` function enrolls a device that is not enrolled:
+    `connect`, `connect_with_description` and `connect_with_device_dir` log
+    the codes, and ask nobody.
+
+  To migrate a device registered by arora 13 or earlier: run it once with
+  `--studio`, and enter the code it shows in Studio, choosing its owner; or
+  create an enrollment token in Studio and set it in
+  `STUDIO_ENROLLMENT_TOKEN` for that run. An embedder matching
+  `connect_with_operator`'s `Ok(None)` drops that arm.
 - A `studio-bridge` run connects to Semio Studio only when it asks for it:
   `--studio`, `ARORA_STUDIO=1`, or `AroraBuilder::with_studio(Choice::Studio)`.
   A device holding a saved Studio credential serves the open local bridge
@@ -24,8 +71,7 @@ All notable changes to `arora`. The format follows
   - `studio::Choice::Local` is the default: what a run that asks nothing
     gives, and what `--no-studio` gives. `--no-studio` still wins over
     `--studio` and `ARORA_STUDIO`.
-  - The `studio::connect` functions are unchanged: an embedder calling one
-    asks for Studio.
+  - An embedder calling a `studio::connect` function asks for Studio.
 
   To migrate a device that connects with its saved credential, pass
   `--studio` to its runner, or set `ARORA_STUDIO=1` in its environment. An
@@ -43,6 +89,12 @@ All notable changes to `arora`. The format follows
   build links, so a runner built without Studio beside one built with it
   would otherwise take `--studio` and ignore it. `RunnerArgs` carries
   `--module` alone.
+- `DEVICE_OWNERS` and the owner prompt: the person approving the device
+  chooses its owner in Studio. `DEVICE_DESCRIPTION` goes too: Studio's
+  record holds the description.
+- The saved registration, `studio/device.json`: a device enrolls once, so
+  nothing is resolved again on later runs. A run neither reads nor writes it;
+  delete it.
 
 ## [15.0.0] - 2026-10-23
 

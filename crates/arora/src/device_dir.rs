@@ -8,7 +8,7 @@
 //! └── devices/
 //!     └── <local id>/      the device directory; DEVICE_DIR replaces this whole path
 //!         ├── modules/     the module directories the device loads at start
-//!         └── studio/      the Studio connection's credentials and saved registration
+//!         └── studio/      the Studio connection's credentials
 //! ```
 //!
 //! `<data_local_dir>` is per user: `~/Library/Application Support` on macOS,
@@ -16,7 +16,7 @@
 //! the devices of one user on one host apart; `DEVICE_LOCAL_ID` sets it, and a
 //! device that sets none is [`DEFAULT_LOCAL_ID`]. It is local only: the name a
 //! device shows (`DEVICE_NAME`) can change without making it another device,
-//! and the id Studio knows it by is assigned when it first signs in.
+//! and the id Studio knows it by is assigned when it enrolls.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

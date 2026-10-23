@@ -120,13 +120,12 @@ directory**, each use in a subdirectory of its own:
         │                          on, in arora-registry's layout (module/, structure/, …)
         └── studio/                the Studio connection's credentials, kept by
             ├── key                arora-studio-bridge-client's DeviceCredentials
-            ├── refresh_token
-            └── device.json        the saved registration: owners, name, model family
+            └── refresh_token
 ```
 
 The local id tells apart the devices one user runs on one host. It is local
-only: the name a device shows (`DEVICE_NAME`) can change without making it
-another device, and the id Studio knows it by is assigned at its first sign-in.
+only: the name a device shows can change without making it another device, and
+the id Studio knows it by is assigned when it enrolls.
 Anything else a device keeps goes in a subdirectory of its own beside these.
 
 A module directory is the layout a module is published in: the
@@ -159,7 +158,7 @@ on a terminal or not:
 
 | the run passes | the device |
 |---|---|
-| `--studio`, or sets `ARORA_STUDIO=1` | connects to Studio; a device holding no saved credential signs up as a new Studio device and registers |
+| `--studio`, or sets `ARORA_STUDIO=1` | connects to Studio; a device that is not enrolled with Studio [enrolls](#enrolling-a-device-with-studio) first |
 | nothing, or `--no-studio` | serves the open local bridge, whatever it holds |
 
 `--no-studio` wins over `--studio` and `ARORA_STUDIO`, which is how a run
@@ -167,28 +166,25 @@ overrides the variable, and `--studio` wins over `ARORA_STUDIO`, which is a
 boolean (`1`, `true`, `yes`, `on`, or their opposites); blank counts as
 unset, and any other value fails the start.
 
-The credential is the refresh token of the device's Studio account, in its
-device directory's `studio/`. A device holds one once any connection has
-signed it in, and a run passing `--studio` connects with it; deleting
-`studio/` makes it a device with none. A saved credential does not connect a
-run on its own, because it is not proof of an opt-in: a headless run of arora
-13.4 or earlier signed the device up unasked, and an embedder's
-`studio::connect` — Vizij's `--studio` — keeps its credential in the same
-per-user `default` device unless `DEVICE_LOCAL_ID` names another. A
-credential that does not read (its key missing, the file damaged, an
-`IDENTITY_FILE` naming nothing) counts as none: `--studio` signs the device
-up anew. The run says what it decided in one line, a run that does not ask
-naming what the device holds:
+The credential is the refresh token of the device's Studio session, in its
+device directory's `studio/`. A device holds one once it has enrolled, and a
+run passing `--studio` connects with it; deleting `studio/` makes it a device
+with none. A saved credential does not connect a run on its own, because it is
+not proof of an opt-in: a headless run of arora 13.4 or earlier signed the
+device up unasked, and an embedder's `studio::connect` — Vizij's `--studio` —
+keeps its credential in the same per-user `default` device unless
+`DEVICE_LOCAL_ID` names another. The run says what it decided in one line, a
+run that does not ask naming what the device holds:
 
 ```text
-Studio: connecting, as --studio asks; a device with no saved credential registers with Semio Studio.
-Studio: no saved credential in <path>; serving the local bridge. Pass --studio to register this device with Semio Studio.
+Studio: connecting, as --studio asks; a device not enrolled with Semio Studio enrolls first.
+Studio: no saved credential in <path>; serving the local bridge. Pass --studio to enroll this device with Semio Studio.
 Studio: serving the local bridge, as the run does not ask for Studio. Pass --studio to connect with the saved credential in <path>.
 ```
 
 The robot runners take the same options. An embedder asks for Studio by
-calling `studio::connect` (or one of its variants), which connects whatever
-the device holds.
+calling `studio::connect` (or one of its variants), which connects the device,
+enrolling it first when it is not enrolled.
 
 The chain down to the bridge's code, in a `studio-bridge` build:
 
@@ -201,47 +197,74 @@ The chain down to the bridge's code, in a `studio-bridge` build:
    passes its own to `studio::connect_with_device_dir`.
 2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
    and hands it to `DeviceCredentials::in_dir`. The credentials there are the
-   client's; arora writes only `device.json` beside them (below).
+   client's; arora writes nothing there.
 3. A run that does not ask for Studio reads the refresh token there
    (`DeviceCredentials::refresh_token`) only to say in its log whether the
    device holds one, and serves the open local bridge whatever it finds.
 4. `studio::connect` passes the `DeviceCredentials` to
-   `ZenohDeviceClient::new_with_credentials`, or to
-   `new_endpoint_with_credentials` when `STUDIO_BRIDGE_ENDPOINT` names the
-   bridge's endpoint. The client's Firebase authenticator signs the device in
-   with the refresh token the credentials hold and saves each rotated one there.
+   `ZenohDeviceClient::new`, or to `new_endpoint` when `STUDIO_BRIDGE_ENDPOINT`
+   names the bridge's endpoint. The client signs the device in with the
+   refresh token the credentials hold and saves each rotated one there. When
+   they hold no enrolled device's (`Error::NotEnrolled`), arora enrolls the
+   device with `studio::enroll`, which saves the new credential there, and
+   connects again.
 
-### What the device registers with Studio as
+### Enrolling a device with Studio
 
-A run that connects to Studio registers the device with it: its owners (the
-Studio user UIDs it belongs to), its name, its model family, and its hardware and
-software versions. Each field comes from the first source that gives it:
+Studio creates a device, under the owner a person chooses, when the device
+enrolls; the device signs in with the credential its enrollment saved from
+then on. A run passing `--studio` enrolls the device when its credentials hold
+no enrolled device: none, one that does not read (its key missing, the file
+damaged, an `IDENTITY_FILE` naming nothing), one Studio refuses (a revoked or
+deleted device), or one that is no device's, such as the anonymous account
+arora 13 and earlier signed a device up as. It enrolls:
+
+- **with an enrollment token**, when `STUDIO_ENROLLMENT_TOKEN` holds one: a
+  person creates it in Studio (`semio_enroll_…`), and Studio creates the device
+  under the token's owner. This is how a device with neither screen nor
+  operator enrolls. The token is a secret: arora reads it from the
+  environment at run time only — no option takes it, since a command line is
+  visible to the host's other users — and never logs it.
+- **by code** otherwise: the run shows a code, which a person enters in
+  Studio, choosing the device's owner. The terminal UI shows it in its prompt
+  line; the log says it too, headless included:
+
+  ```text
+  Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio, or open https://<studio>/approve?code=BCDF-GHJK
+  ```
+
+  The approval page is shown when the Studio client knows Studio's web
+  address: `STUDIO_URL`, else the one baked into it. A code that expires
+  undecided is replaced by another, shown in turn; the run waits for a
+  person's decision for as long as it runs.
+
+Then the run connects, and later runs with `--studio` connect without
+enrolling. A person refusing the code, or Studio refusing the token, fails the
+run, as Studio refused the device it asked for. Only a device whose
+credentials hold no enrolled device enrolls: Studio failing otherwise fails the
+run and keeps the credential, and so does a credential of another Firebase
+project than the run's — the run names its directory, and either the run is
+pointed at that project (the `FIREBASE_*` variables) or the directory is
+deleted to enroll the device with the run's.
+
+The person approving the device sees its description: its name, and its model
+family and hardware and software versions. The name is `DEVICE_NAME`; under
+the terminal UI the operator is asked for one when it is unset, and it is
+generated (`arora-device-<random>`) when left blank or headless. The model is
+the device's (below); under the terminal UI the operator is asked for the
+model family when nothing gives one. After enrollment, the device's name and
+owner are Studio's: they change there, never from the device.
+
+The device reports its model to Studio each time it connects. Each field comes
+from its variable, else from the HAL (`Hal::describe`):
 
 | field | sources, in order |
 |---|---|
-| owners | `DEVICE_OWNERS` (comma-separated), `device.json`, the operator |
-| name | `DEVICE_NAME`, `device.json`, the operator (generated when left blank) |
-| model family | `MODEL_FAMILY`, the HAL (`Hal::describe`), `device.json`, the operator |
+| model family | `MODEL_FAMILY`, the HAL |
 | hardware / software version | `HARDWARE_VERSION` / `SOFTWARE_VERSION`, the HAL |
-| description | `DEVICE_DESCRIPTION` |
 
-Under the terminal UI the operator is asked only for what nothing else gives,
-and a run that asked anything saves the owners and name it resolved — and the
-model family the operator typed, if any — in `studio/device.json`. The next
-run asks nothing; it logs
-`studio: registering as <name> for owner(s) <uids> (saved in <path>; delete it to answer again)`.
-Delete the file to be asked again. Leaving the owner empty runs without Studio,
-on the open local bridge, and saves nothing. A headless run asks nothing: it
-registers what the environment and `device.json` give, completed by the HAL,
-so a device set up once under the terminal UI can then run headless.
-
-```json
-{
-  "owners": ["<owner uid>"],
-  "name": "pepper-lab",
-  "model_family": "pepper"
-}
-```
+A report writes the fields it gives, the record keeping the others: a family
+the operator typed at enrollment stays, as no report gives another.
 
 Credentials from arora 11.0 and earlier, in `.semio/arora` under the
 executable's directory, the home directory or the current directory, move into

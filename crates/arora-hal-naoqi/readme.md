@@ -76,9 +76,9 @@ The device starts, the robot says "Arora is ready" with its hands, and:
 More logs: set `RUST_LOG=debug` before the command. Without a terminal (`nohup`, a
 service), the runner is headless and asks nothing.
 
-A run that connects to Studio ([Semio Studio](#semio-studio)) first asks, on the terminal
-UI, what neither the Studio variables nor an earlier answer give: your Studio owner UID, a
-device name, a model family (`nao`). Leave the owner empty to run without Studio after all.
+A run that connects to Studio ([Semio Studio](#semio-studio)) enrolls a device that is not
+enrolled: on the terminal UI it asks for a device name, unless `DEVICE_NAME` gives one, then
+shows the code a person approves the device with in Studio.
 
 Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; in a build
 with the `studio` feature, `--studio` connects to Semio Studio and `--no-studio` serves the
@@ -153,10 +153,11 @@ ssh -t nao@<robot_name>.local   # -t: the terminal UI needs a terminal
 ./arora-naoqi tcp://localhost:9559
 ```
 
-The device then behaves as [from your computer](#3-use-it). To register it with Semio
-Studio, build it with `--features runner,studio`, run it once with `--studio` and answer the
-prompts. To leave it running after you log out, run it headless with `nohup`, still with
-`--studio`: a registered device connects to Studio with its saved credential.
+The device then behaves as [from your computer](#3-use-it). To enroll it with Semio
+Studio, build it with `--features runner,studio`, run it once with `--studio` and approve the
+code it shows in Studio. To leave it running after you log out, run it headless with
+`nohup`, still with `--studio`: an enrolled device connects to Studio with its saved
+credential.
 
 On the robot, the device directory follows the same rule as anywhere: `DEVICE_DIR` when it
 is set, else `semio/arora/devices/<DEVICE_LOCAL_ID>/` in the user data directory
@@ -198,32 +199,42 @@ it up unasked. A run that does not ask says so when the device holds one:
 `--no-studio` serves the local bridge even when `ARORA_STUDIO=1` asks for Studio. Delete the
 device's `studio/` directory (below) to make it a device with none.
 
-There is no pairing code yet: a device declares its owners itself, by their Studio user ids
-(UIDs).
+A device enrolls with Studio the first time it connects: a person approves it in Studio and
+chooses its owner, a person or an organization, and Studio creates the device.
 
-1. **Find your Studio UID.** Studio does not display it yet. Sign in to Studio in a
-   browser, open the developer tools, then Application (Storage in Firefox) → IndexedDB →
-   `firebaseLocalStorageDb` → `firebaseLocalStorage`: the entry's `value.uid` is your UID.
-2. **Start the device with `--studio`** and answer the prompts: the owner UID (several,
-   comma-separated, for a shared robot), a device name (`arora-device-<id>` when left empty),
-   the model family `nao`. Or set `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`: a variable
-   that is set skips its question. Headless, nobody is asked, and the device registers what
-   the variables give.
+1. **Start the device with `--studio`.** It shows a code: in the terminal UI's prompt line,
+   and in the log, headless included.
 
    ```sh
    cargo run --release -p arora-hal-naoqi --features runner,studio --bin arora-naoqi -- --studio tcp://<robot_name>.local:9559
    ```
-3. The logs say `Registered device <id> with Studio`, then that the Zenoh session is open.
-   The robot is now in your device list in Studio, where you bind it to a robot model and
+
+   Under the terminal UI the runner first asks for a device name (`arora-device-<id>` when
+   left empty); `DEVICE_NAME` skips the question, and headless nobody is asked. The model
+   family (`nao` or `pepper`) and versions are those the robot reports, unless
+   `MODEL_FAMILY`, `HARDWARE_VERSION` or `SOFTWARE_VERSION` set them.
+2. **Enter the code in Studio**, signed in, and choose the device's owner. When it knows
+   Studio's web address (`STUDIO_URL`, else the one its Studio client was published with),
+   the runner also shows the page that approves the code. A code that expires undecided is
+   replaced by another.
+3. The logs say `Studio: enrolled as device <id>`, then that the Zenoh session is open. The
+   robot is now in its owner's device list in Studio, where you bind it to a robot model and
    drive it.
 
-The device's identity (its Studio credentials) is kept on the machine that runs
+A robot with nobody at a terminal enrolls with an enrollment token instead: create one in
+Studio, and start the runner with it in `STUDIO_ENROLLMENT_TOKEN` (an environment variable,
+never an option: the token is a secret). Studio creates the device under the token's owner.
+A refused code or token fails the run.
+
+The device's identity (its Studio credential) is kept on the machine that runs
 `arora-naoqi`, under `semio/arora/devices/default/studio/` in its user data directory:
 `~/.local/share` on Linux and on the robot, `~/Library/Application Support` on macOS. The
-next runs with `--studio` connect with it without asking again; a device run from
-your computer, then deployed on the robot, registers twice. To register the robot afresh,
+next runs with `--studio` connect with it without enrolling again; a device run from
+your computer, then deployed on the robot, enrolls twice. To enroll the robot afresh,
 delete that directory and run with `--studio`, or give the run another identity with
-`DEVICE_LOCAL_ID=<name>` (or a whole other directory with `DEVICE_DIR`).
+`DEVICE_LOCAL_ID=<name>` (or a whole other directory with `DEVICE_DIR`). A credential an
+earlier `arora-naoqi` saved, before devices enrolled, is no enrolled device's: the next run
+with `--studio` enrolls the device.
 
 ## Keys
 
