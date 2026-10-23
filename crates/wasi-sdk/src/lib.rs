@@ -143,17 +143,25 @@ fn download_and_extract(cache: &Path, install: &Path) -> Result<()> {
         .iter()
         .find(|e| e.path().is_dir())
         .ok_or_else(|| anyhow!("no top-level dir in extracted tarball"))?;
-    // If a concurrent build script already installed it, skip the rename.
-    if !install.join("bin").join(clang_exe_name()).exists() {
-        if install.exists() {
-            fs::remove_dir_all(install).ok();
-        }
-        fs::rename(top.path(), install).with_context(|| {
-            format!("renaming {} to {}", top.path().display(), install.display())
-        })?;
-    }
+    install_extracted(&top.path(), install)?;
     fs::remove_dir_all(&tmp_extract).ok();
     Ok(())
+}
+
+/// Move the SDK extracted at `extracted` to `install`. Build scripts download
+/// it concurrently, so another may install it there between this one's check
+/// and its rename: the rename then fails on the directory the other filled,
+/// and that install is kept. A directory there without the SDK in it is
+/// replaced; one with the SDK is never removed, as another build may be using
+/// it.
+fn install_extracted(extracted: &Path, install: &Path) -> Result<()> {
+    let installed = || install.join("bin").join(clang_exe_name()).exists();
+    if fs::rename(extracted, install).is_ok() || installed() {
+        return Ok(());
+    }
+    fs::remove_dir_all(install).ok();
+    fs::rename(extracted, install)
+        .with_context(|| format!("renaming {} to {}", extracted.display(), install.display()))
 }
 
 fn host_os_arch() -> Result<(&'static str, String)> {
@@ -174,4 +182,63 @@ fn host_os_arch() -> Result<(&'static str, String)> {
         bail!("unsupported host arch for WASI SDK download")
     };
     Ok((os, arch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An empty directory for one test, under the system's temporary one.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("wasi-sdk-{}-{name}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// An SDK, as far as the locator looks: `bin/clang` holding `marker`.
+    fn sdk(at: &Path, marker: &str) {
+        fs::create_dir_all(at.join("bin")).unwrap();
+        fs::write(at.join("bin").join(clang_exe_name()), marker).unwrap();
+    }
+
+    fn marker(install: &Path) -> String {
+        fs::read_to_string(install.join("bin").join(clang_exe_name())).unwrap()
+    }
+
+    #[test]
+    fn an_extracted_sdk_is_moved_to_its_install() {
+        let dir = scratch("moved");
+        let (extracted, install) = (dir.join("extracted"), dir.join("install"));
+        sdk(&extracted, "extracted");
+
+        install_extracted(&extracted, &install).unwrap();
+        assert_eq!(marker(&install), "extracted");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_sdk_another_build_installed_first_is_kept() {
+        let dir = scratch("kept");
+        let (extracted, install) = (dir.join("extracted"), dir.join("install"));
+        sdk(&extracted, "extracted");
+        sdk(&install, "installed");
+
+        install_extracted(&extracted, &install).unwrap();
+        assert_eq!(marker(&install), "installed");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_directory_without_the_sdk_is_replaced() {
+        let dir = scratch("replaced");
+        let (extracted, install) = (dir.join("extracted"), dir.join("install"));
+        sdk(&extracted, "extracted");
+        fs::create_dir_all(install.join("share")).unwrap();
+        fs::write(install.join("share").join("partial"), "").unwrap();
+
+        install_extracted(&extracted, &install).unwrap();
+        assert_eq!(marker(&install), "extracted");
+        fs::remove_dir_all(&dir).ok();
+    }
 }
