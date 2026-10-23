@@ -61,6 +61,12 @@ past-instant-waited=true";
 const MODULE_ID: &str = "0cd3f0c6-95d4-4ab1-90fa-7fbcca25c2c6";
 
 fn header() -> Header {
+    header_as(MODULE_ID, "test-rust-component")
+}
+
+/// The test guest's header under the module id `id` and the name `name`, as
+/// a second module served by the same artifact.
+fn header_as(id: &str, name: &str) -> Header {
     let exports: String = [
         (ECHO_FN, "echo"),
         (CALL_INDIRECT_FN, "call-indirect"),
@@ -82,8 +88,8 @@ fn header() -> Header {
     .collect();
     let yaml = format!(
         r#"
-id: {MODULE_ID}
-name: test-rust-component
+id: {id}
+name: {name}
 author: ""
 description: ~
 license: ""
@@ -469,4 +475,155 @@ fn a_component_growing_its_memory_past_its_cap_sees_the_allocation_fail() {
         let result = engine.dispatch(&module, &grow, &[]).unwrap();
         assert_eq!(&*result, &[reserved], "a cap of {memory} bytes");
     }
+}
+
+/// A component calling another through `host.dispatch` gives its callee no
+/// more than its own deadline: the callee is interrupted at the caller's
+/// budget and refuses calls until it is reloaded.
+#[test]
+fn a_component_s_callee_ends_by_its_caller_s_deadline() {
+    use arora_engine::limits::{GuestLimits, EPOCH};
+    use std::time::{Duration, Instant};
+    const CALLEE_ID: &str = "7e0b9c4d-2a61-4f38-b5d7-0c9e8a1f6b24";
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    load_module_from_parts(&mut engine, header_as(CALLEE_ID, "callee"), guest_bytes()).unwrap();
+    let (caller, callee, spin): (Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        CALLEE_ID.parse().unwrap(),
+        SPIN_FN.parse().unwrap(),
+    );
+    // Only the caller has a budget: the callee's call ends by it.
+    let budget = Duration::from_millis(30);
+    engine.set_guest_limits(
+        caller,
+        GuestLimits {
+            call_budget: Some(budget),
+            ..GuestLimits::default()
+        },
+    );
+    let mut arg = callee.as_bytes().to_vec();
+    arg.extend_from_slice(spin.as_bytes());
+    let started = Instant::now();
+    let failed = engine
+        .dispatch(&caller, &CALL_FN.parse().unwrap(), &arg)
+        .unwrap_err();
+    let took = started.elapsed();
+    assert!(
+        took >= budget && took < budget + 2 * EPOCH + Duration::from_millis(200),
+        "{took:?}"
+    );
+    // The caller, past its deadline once the callee returns, is interrupted
+    // too: its call fails with its own overrun.
+    assert!(
+        format!("{failed}").contains("overran its budget"),
+        "{failed}"
+    );
+    let refused = engine.dispatch(&callee, &spin, &[]).unwrap_err();
+    assert!(
+        format!("{refused}").contains("trapped in an earlier call"),
+        "{refused}"
+    );
+}
+
+/// A component calling back into itself through `host.dispatch` keeps its
+/// call's deadline and budget: the re-entered call is interrupted at the
+/// budget of the call under way.
+#[test]
+fn a_component_called_back_keeps_its_call_s_deadline() {
+    use arora_engine::limits::{GuestLimits, EPOCH};
+    use std::time::{Duration, Instant};
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    let (module, spin): (Uuid, Uuid) = (MODULE_ID.parse().unwrap(), SPIN_FN.parse().unwrap());
+    let budget = Duration::from_millis(50);
+    engine.set_guest_limits(
+        module,
+        GuestLimits {
+            call_budget: Some(budget),
+            ..GuestLimits::default()
+        },
+    );
+    let mut arg = module.as_bytes().to_vec();
+    arg.extend_from_slice(spin.as_bytes());
+    let started = Instant::now();
+    let failed = engine
+        .dispatch(&module, &CALL_FN.parse().unwrap(), &arg)
+        .unwrap_err();
+    let took = started.elapsed();
+    assert!(
+        took >= budget && took < budget + 2 * EPOCH + Duration::from_millis(200),
+        "{took:?}"
+    );
+    assert!(
+        format!("{failed}").contains("overran its budget of 50 ms"),
+        "{failed}"
+    );
+}
+
+/// During a step, a module's own budget and the time left in the step bound
+/// a component's call together: whichever ends first.
+#[test]
+fn a_component_call_ends_by_the_earlier_of_the_step_and_its_module_s_budget() {
+    use arora_engine::limits::{GuestLimits, EPOCH};
+    use std::time::{Duration, Instant};
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    let compiled = arora_engine::compiled::CompiledModule::new(header(), &guest_bytes()).unwrap();
+    engine.load_compiled_module(&compiled).unwrap();
+    let (module, spin): (Uuid, Uuid) = (MODULE_ID.parse().unwrap(), SPIN_FN.parse().unwrap());
+    let (short, long) = (Duration::from_millis(30), Duration::from_millis(400));
+    for (step, own) in [(long, short), (short, long)] {
+        engine.reload_module(&compiled).unwrap();
+        engine.set_guest_limits(
+            module,
+            GuestLimits {
+                call_budget: Some(own),
+                ..GuestLimits::default()
+            },
+        );
+        engine.set_step_budget(Some(step));
+        let started = Instant::now();
+        let overran = engine.dispatch(&module, &spin, &[]).unwrap_err();
+        let took = started.elapsed();
+        engine.set_step_budget(None);
+        assert!(
+            took >= short && took < short + 2 * EPOCH + Duration::from_millis(200),
+            "step {step:?}, own {own:?}: {took:?}"
+        );
+        assert!(format!("{overran}").contains("overran"), "{overran}");
+    }
+}
+
+/// The epoch counter follows the wall clock: a long budget is not stretched
+/// by the ticker's sleeps overrunning.
+#[test]
+fn a_long_component_budget_is_kept_to_the_wall_clock() {
+    use arora_engine::limits::GuestLimits;
+    use std::time::{Duration, Instant};
+    let budget = Duration::from_millis(800);
+    let mut engine = EngineBuilder::new()
+        .with_guest_limits(GuestLimits {
+            call_budget: Some(budget),
+            ..GuestLimits::default()
+        })
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    let started = Instant::now();
+    engine
+        .dispatch(&MODULE_ID.parse().unwrap(), &SPIN_FN.parse().unwrap(), &[])
+        .unwrap_err();
+    let took = started.elapsed();
+    // Counting sleeps instead overruns by several percent: 50 ms and more
+    // here.
+    assert!(
+        took >= budget && took < budget + Duration::from_millis(40),
+        "{took:?}"
+    );
 }

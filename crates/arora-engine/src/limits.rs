@@ -73,42 +73,75 @@ impl Default for GuestLimits {
     }
 }
 
-/// The deadline a guest's store runs to, as wasmtime counts it: the epochs
-/// from now until `deadline`, rounded up, and one more. The counter's next
-/// tick can come at once, so `n` ticks span more than `n - 1` epochs: one
-/// more keeps a call from ending before `deadline`, and lets a call made with
-/// no time left run for an epoch rather than fail unentered.
+/// The counter a wasmtime engine's deadlines are checked against, as its
+/// ticker advances it: one epoch per [`EPOCH`] since `start`, `ticked` of
+/// them made so far.
 #[cfg(feature = "wasmtime-host")]
-pub(crate) fn epochs_until(deadline: std::time::Instant) -> u64 {
-    let left = deadline.saturating_duration_since(std::time::Instant::now());
-    left.as_nanos().div_ceil(EPOCH.as_nanos()) as u64 + 1
+pub(crate) struct Clock {
+    start: std::time::Instant,
+    ticked: std::sync::atomic::AtomicU64,
+}
+
+#[cfg(feature = "wasmtime-host")]
+impl Clock {
+    /// The deadline a guest's store runs to, as wasmtime counts it: the
+    /// epochs still to tick until the one due after `deadline`, and at least
+    /// one, so a call made with no time left runs for an epoch rather than
+    /// fail unentered.
+    ///
+    /// It counts from the wall clock the ticker follows, not from the ticks
+    /// made: a ticker running late makes up its missed ticks at once, and a
+    /// deadline counted from its count would be reached early by as many.
+    /// The epoch after the one `deadline` falls in is due once `deadline` has
+    /// passed, so a call never ends before it.
+    pub(crate) fn epochs_until(&self, deadline: std::time::Instant) -> u64 {
+        let due = deadline
+            .saturating_duration_since(self.start)
+            .as_nanos()
+            .div_ceil(EPOCH.as_nanos()) as u64
+            + 1;
+        due.saturating_sub(self.ticked.load(std::sync::atomic::Ordering::Acquire))
+            .max(1)
+    }
 }
 
 /// Advance `engine`'s epoch every [`EPOCH`], from a thread of its own, for the
-/// life of the process. Called once per wasmtime engine, when it is created.
+/// life of the process; its deadlines are counted with the returned
+/// [`Clock`]. Called once per wasmtime engine, when it is created.
 #[cfg(feature = "wasmtime-host")]
-pub(crate) fn tick(engine: &wasmtime::Engine) {
+pub(crate) fn tick(engine: &wasmtime::Engine) -> std::sync::Arc<Clock> {
+    use std::sync::atomic::Ordering;
+    let clock = std::sync::Arc::new(Clock {
+        start: std::time::Instant::now(),
+        ticked: std::sync::atomic::AtomicU64::new(0),
+    });
     let engine = engine.weak();
+    let ticker = clock.clone();
     std::thread::Builder::new()
         .name("arora-epoch".into())
         .spawn(move || {
             // The counter follows the wall clock, not the count of sleeps:
-            // every sleep overruns, and a deadline counted in epochs would
+            // every sleep overruns, and a deadline counted in sleeps would
             // drift later by as much.
-            let start = std::time::Instant::now();
-            let mut ticked: u128 = 0;
             while let Some(engine) = engine.upgrade() {
-                let due = start.elapsed().as_nanos() / EPOCH.as_nanos();
+                let due = (ticker.start.elapsed().as_nanos() / EPOCH.as_nanos()) as u64;
+                let mut ticked = ticker.ticked.load(Ordering::Relaxed);
                 while ticked < due {
+                    // The engine's epoch first: `ticked` never counts a tick
+                    // the engine has not seen, so a deadline counted from it
+                    // is late, if anything, never early.
                     engine.increment_epoch();
                     ticked += 1;
+                    ticker.ticked.store(ticked, Ordering::Release);
                 }
                 drop(engine);
-                let next = start + Duration::from_nanos(((ticked + 1) * EPOCH.as_nanos()) as u64);
+                let next =
+                    ticker.start + Duration::from_nanos((ticked + 1) * EPOCH.as_nanos() as u64);
                 std::thread::sleep(next.saturating_duration_since(std::time::Instant::now()));
             }
         })
         .expect("spawn the epoch thread");
+    clock
 }
 
 /// The message of a call interrupted at its deadline.
@@ -127,11 +160,22 @@ mod tests {
 
     #[cfg(feature = "wasmtime-host")]
     #[test]
-    fn a_deadline_is_counted_in_whole_epochs_and_one_more() {
-        let now = std::time::Instant::now();
-        assert_eq!(epochs_until(now), 1);
-        assert_eq!(epochs_until(now - Duration::from_secs(1)), 1);
-        let ten = epochs_until(now + Duration::from_millis(10));
-        assert!((10..=11).contains(&ten), "{ten}");
+    fn a_deadline_is_counted_from_the_wall_clock_to_the_epoch_after_it() {
+        use std::sync::atomic::AtomicU64;
+        use std::time::Instant;
+        let now = Instant::now();
+        let clock = Clock {
+            start: now,
+            ticked: AtomicU64::new(0),
+        };
+        assert_eq!(clock.epochs_until(now), 1);
+        assert_eq!(clock.epochs_until(now - Duration::from_secs(1)), 1);
+        assert_eq!(clock.epochs_until(now + Duration::from_millis(10)), 11);
+        // A ticker 50 epochs late: the deadline counts the ticks it makes up.
+        let late = Clock {
+            start: now - Duration::from_millis(100),
+            ticked: AtomicU64::new(50),
+        };
+        assert_eq!(late.epochs_until(now + Duration::from_millis(10)), 61);
     }
 }
