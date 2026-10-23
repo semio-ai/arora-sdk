@@ -814,3 +814,51 @@ fn a_call_with_no_time_left_in_the_step_is_not_made() {
     );
     assert!(engine.dispatch(&b, &echo, &[]).is_ok());
 }
+
+/// An executor of its own under the component executor's name, which loads a
+/// module from its bytes and serves `echo`.
+struct LoadsBytes;
+
+struct Echoes;
+
+impl arora_engine::module::Module for Echoes {
+    fn dispatch(
+        &mut self,
+        _: &Uuid,
+        arg: &[u8],
+    ) -> Result<Box<[u8]>, arora_engine::module::DispatchError> {
+        Ok(arg.into())
+    }
+}
+
+impl arora_engine::executor::Executor for LoadsBytes {
+    fn set_engine(&mut self, _: arora_engine::engine::EngineRef) {}
+
+    fn name(&self) -> &'static str {
+        "wasm-component"
+    }
+
+    fn load_module(
+        &mut self,
+        _: arora_types::module::low::ModuleDefinition,
+    ) -> Result<Box<dyn arora_engine::module::Module>, arora_engine::executor::LoadModuleError>
+    {
+        Ok(Box::new(Echoes))
+    }
+
+    fn unload_module(&mut self, _: Uuid) -> Result<(), arora_engine::executor::UnloadModuleError> {
+        Ok(())
+    }
+}
+
+/// An executor that loads modules from their bytes, registered under a name
+/// whose modules the engine could compile, still loads them from their bytes.
+#[test]
+fn an_executor_loading_bytes_under_the_component_executor_s_name_loads_them() {
+    let mut engine = EngineBuilder::new().add_executor(LoadsBytes).build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    let echoed = engine
+        .dispatch(&MODULE_ID.parse().unwrap(), &ECHO_FN.parse().unwrap(), b"")
+        .unwrap();
+    assert!(echoed.is_empty());
+}

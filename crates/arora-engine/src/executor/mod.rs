@@ -67,9 +67,20 @@ pub trait Executor {
         }
     }
 
+    /// Whether this executor loads a module compiled ahead by
+    /// [`CompiledModule::new`] as it loads its bytes. The engine then compiles
+    /// a module loaded from its bytes first, and loads it compiled, so that
+    /// compiling it takes none of its load's time ([`crate::limits`]). The
+    /// default, `false`, keeps an executor's modules loaded from their bytes
+    /// through [`load_module_limited`](Self::load_module_limited); the
+    /// wasmtime executors answer `true`.
+    fn loads_compiled_modules(&self) -> bool {
+        false
+    }
+
     /// Load `module_definition` under `limits`, the memory and time its
     /// guest may spend ([`crate::limits`]). The engine loads every module
-    /// through this; the default loads it as
+    /// that is not compiled ahead through this; the default loads it as
     /// [`load_module`](Self::load_module) does, unbounded. The wasmtime
     /// executors override it to bound the instance.
     fn load_module_limited(

@@ -288,6 +288,10 @@ impl Executor for ComponentExecutor {
         "wasm-component"
     }
 
+    fn loads_compiled_modules(&self) -> bool {
+        true
+    }
+
     fn load_module(
         &mut self,
         module_definition: ModuleDefinition,
