@@ -186,60 +186,62 @@ bench measures placed groups and publication, not anchoring at readers.
 
 | N = 1000 | settled | one input changes | every input changes |
 |---|--:|--:|--:|
-| attached-naive | 121 µs · 1000 calls | 121 µs · 1000 calls | 135 µs · 1000 calls |
-| attached-incremental | 6.6 µs · 0 | 9.8 µs · 10 | 151 µs · 828 |
-| attached-incremental-with | 1.9 µs · 0 | 10.0 µs · 10 | 159 µs · 828 |
-| detached | 27.4 µs · 0 | 29.9 µs · 10 | 131 µs · 828 |
-| placed | 2.5 µs · 0 | 6.5 µs · 10 | 174 µs · 828 |
+| attached-naive | 122 µs · 1000 calls | 126 µs · 1000 calls | 138 µs · 1000 calls |
+| attached-incremental | 6.6 µs · 0 | 10.0 µs · 10 | 159 µs · 828 |
+| attached-incremental-with | 1.9 µs · 0 | 10.1 µs · 10 | 159 µs · 828 |
+| detached | 27.0 µs · 0 | 28.0 µs · 10 | 130 µs · 828 |
+| placed | 2.5 µs · 0 | 6.2 µs · 10 | 160 µs · 828 |
 
-At N = 10 and 100, settled: placed 0.18 and 0.34 µs, detached 0.33 and 2.2 µs.
+At N = 10 and 100, settled: placed 0.19 and 0.34 µs, detached 0.31 and 2.1 µs.
 
 `cargo bench -p arora-behavior-tree --bench scale` adds a graph a tenth of
 whose calls read a clock, and eight graphs as the branches of a `FALLBACK`
 with every input changing, generated as the design comparison's JavaScript
-model generates them. A published call is a sink, so its group places
-before the root, whichever branch reads it. At N = 1000:
+model generates them. A lone graph's published calls are sinks, whose groups
+place before the root. A branch publishes its graph's values itself: the
+placed file with `Copy`, which reads the node in the branch, so `Readers`
+anchors the group there; detached nodes with `publish`, a module function
+returning its argument, since main has no native node that writes a number
+to a key. At N = 1000:
 
 | N = 1000 | detached | placed | attached-incremental |
 |---|--:|--:|--:|
-| a tenth of the calls read a clock | 90 µs · 293 calls | 139 µs · 293 calls | 96 µs · 293 calls |
-| eight branches, the first taken | 204 µs · 1000 calls | 437 µs · 1000 calls | 46 µs · 125 calls |
-| eight branches, the taken one moving | 203 µs · 1000 calls | 423 µs · 1000 calls | 46 µs · 125 calls |
+| a tenth of the calls read a clock | 88 µs · 293 calls | 103 µs · 293 calls | 94 µs · 293 calls |
+| eight branches, the first taken | 39 µs · 188 calls | 53 µs · 125 calls | 44 µs · 125 calls |
+| eight branches, the taken one moving | 40 µs · 189 calls | 56 µs · 125 calls | 47 µs · 125 calls |
 
-- **Placed and detached make the same module calls** in every scenario and
-  size here.
-- **Settled, a placed group costs under a tenth of detached nodes.** Its
+- **Placed and detached make the same graph calls** in every scenario and
+  size here; in branches, detached nodes also make their branch's `publish`
+  calls, which `Copy` makes natively.
+- **Settled, a placed group costs a tenth of detached nodes.** Its
   `PARALLEL` has no `RUN`, so a settled tick answers the `WITH` and its body
   from their caches, where every detached sink is brought up to date and
   published. Written as `WITH[ PARALLEL[ leaf × N ], RUN ]`, attached leaves
   cost the same: the saving comes from the shape, which any attached node
   graph can take.
 - **When one input changes, a placed group costs under a quarter** of
-  detached nodes: 6.5 against 30 µs.
-- **When every input changes, detached nodes are about 1.3× cheaper.** A
-  placed node is an incremental attached leaf, which records the versions of
-  its argument cells before its call and compares them after it, and each
-  sink adds a `Copy`. A detached node compares its argument values in place.
-- **On the generated graphs, whose calls take two to five arguments, a
-  placed node costs more per call than a detached one**, from the same
-  bookkeeping: 139 against 90 µs under the clock, for the same calls.
-- **A branch's sinks place before the root**, so placed nodes, like detached
-  ones, compute every branch: 437 against 204 µs. Leaves held by their
-  branch, as the incremental proposal places a node graph, compute only the
-  taken one: 46 µs. A sink's readers are outside the tree, so `Readers` has
-  no reader to anchor it at; §5 records this.
+  detached nodes: 6.2 against 28 µs.
+- **When most calls run, detached nodes are cheaper**: 130 against 160 µs
+  when every input changes, 88 against 103 under the clock, 39 against 53 in
+  branches. A placed node is an incremental attached leaf, which records and
+  compares the versions of its argument cells and whose writes mark their
+  readers; the tick starts by observing every store-backed cell the tree
+  reads; and each published value adds a `Copy`, a native visit that reads
+  the node's port and writes its key. A detached node compares its argument
+  values in place.
+- **A branch the tree does not take is not computed**, placed or detached.
+
 ## 5. Open details
 
 - **Lifetime.** With a halt, a `WITH` that its parent stops ticking could drop
   its groups' state, so a branch's smoothing restarts when the branch starts
   again. Arora has no halt (§1); this placement needs none.
 - **Sinks read by one branch.** A sink is brought up to date at every tick,
-  whichever branch the tree takes, so its group places before the root, and
-  a graph that publishes only what one branch uses still runs in every
-  branch. A branch that publishes from inside itself, with a `Copy` reading
-  the node, gives `Readers` an anchor there and runs the group only when the
-  branch is taken. Whether a file states that, or placement infers it from
-  which branch reads a sink's key, is open.
+  whichever branch the tree takes, so its group places before the root. A
+  branch that publishes from inside itself, with a `Copy` reading the node,
+  gives `Readers` an anchor there and runs the group only when the branch is
+  taken, as the bench's branch scenarios do. Whether placement could infer
+  that from which branch reads a sink's key is open.
 - **Finer groups.** A group per value read, instead of per connected
   component, places each value closer to its readers and runs less of the
   graph when one branch is taken. At the limit, it is #396's evaluation.
