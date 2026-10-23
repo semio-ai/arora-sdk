@@ -9,6 +9,10 @@ license = "Apache-2.0"
 path = "src/behavior_tree.rs"
 
 [[bench]]
+name = "attached"
+harness = false
+
+[[bench]]
 name = "edit"
 harness = false
 
@@ -38,3 +42,11 @@ anyhow = "1"
 # Only for tests: exercise a `{var}` cell resolved to a real store Slot. The
 # library itself stays storage-agnostic (it depends only on the `Slot` trait).
 arora-simple-data-store = { path = "../arora-simple-data-store" }
+
+[[bench]]
+name = "incremental"
+harness = false
+
+[[bench]]
+name = "scale"
+harness = false

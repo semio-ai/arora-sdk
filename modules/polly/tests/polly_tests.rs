@@ -17,10 +17,8 @@ use rand::rng;
 use arora_types::record::{module::frozen::ExportKind, Resolver};
 use std::str::FromStr;
 use std::{
-    cell::RefCell,
     collections::HashMap,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 use tokio::fs::{read_to_string, File};
 use tokio::io::AsyncReadExt;
@@ -93,12 +91,11 @@ async fn polly_sequence_of_speech() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn fake_listen_polly_dialogue() -> Result<()> {
-    let name = Rc::new(RefCell::new(Some(Value::String(String::new()))));
-    let name_expr = Expression::Variable(VariableCell::Local(name.to_owned()));
-    let feeling = Rc::new(RefCell::new(Some(Value::String(String::new()))));
-    let feeling_expr = Expression::Variable(VariableCell::Local(feeling.to_owned()));
-    let input = Rc::new(RefCell::new(Some(Value::String(String::new()))));
-    let input_expr = Expression::Variable(VariableCell::Local(input.to_owned()));
+    let name_expr = Expression::Variable(VariableCell::local_with(Value::String(String::new())));
+    let feeling_expr =
+        Expression::Variable(VariableCell::local_with(Value::String(String::new())));
+    let input = VariableCell::local_with(Value::String(String::new()));
+    let input_expr = Expression::Variable(input.clone());
 
     let behavior = fallback(vec![
         seq(vec![
@@ -138,10 +135,10 @@ async fn fake_listen_polly_dialogue() -> Result<()> {
     let mut tick_count = 0;
     while status == Status::Running {
         if tick_count == 5 {
-            *input.borrow_mut() = Some(Value::String("Ross".to_string()));
+            input.set(Value::String("Ross".to_string()));
         }
         if tick_count == 10 {
-            *input.borrow_mut() = Some(Value::String("great".to_string()));
+            input.set(Value::String("great".to_string()));
         }
         status = runtime.tick().unwrap();
         tick_count += 1;

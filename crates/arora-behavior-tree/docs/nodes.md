@@ -80,16 +80,16 @@ Three data nodes are ticked natively too, and read their arguments through any l
 flowchart TB
   tick["node tick"] --> builtin{"function id is<br/>a built-in?"}
   builtin -- yes --> native["tick_builtin (native)<br/>seq / seq_star / fallback / parallel<br/>succeed / fail / run<br/>set_str / unset_str / is_str_set<br/>wait_str_set / regex_match"]
-  native --> children["tick children through their<br/>registered tick functions"]
-  builtin -- no --> resolve["resolve function in function_index"]
-  resolve --> buildcall["build Call { module_id, id, args }<br/>children passed as TickId[]"]
-  buildcall --> engine["ctx.call_bridge.arora_call(call)"]
+  native --> children["tick each child's tick function directly"]
+  builtin -- no --> resolve["function and argument cells<br/>resolved when the tree is lowered"]
+  resolve --> buildcall["lend { module_id, id, args }<br/>children passed as TickId[]"]
+  buildcall --> engine["call_bridge.arora_call_borrowed(…)<br/>(default: an owned Call to arora_call)"]
   engine --> writeback["write back mutated out-params<br/>+ _ret; interpret return as Status"]
   native --> status(["Status: Success / Failure / Running"])
   writeback --> status
 ```
 
-Native dispatch is [`tick_builtin`](../src/behavior_tree.rs#L241-L423): `SEQ` short-circuits on the first non-`Success` child; `FALLBACK` on the first non-`Failure`; `PARALLEL` ticks every child and succeeds only if all did; `SEQ_STAR` resumes from a persisted `current_index`; the string nodes go to [`tick_core_node`](../src/core_nodes.rs#L132). Any non-built-in function is resolved in the `function_index` and dispatched through the engine ([`behavior_tree.rs:271-436`](../src/behavior_tree.rs#L271-L436)). At setup, **every node is registered on the engine as a callable** and wrapped in a `TickId`, so children can be invoked through the call bridge ([`setup_tick_function`, `behavior_tree.rs:104-152`](../src/behavior_tree.rs#L104-L152)).
+Native dispatch is [`tick_builtin`](../src/behavior_tree.rs): `SEQ` short-circuits on the first non-`Success` child; `FALLBACK` on the first non-`Failure`; `PARALLEL` ticks every child and succeeds only if all did; `SEQ_STAR` resumes from a persisted `current_index`; the string nodes go to [`tick_core_node`](../src/core_nodes.rs). A native parent calls each child's tick function directly; the root is ticked through the engine. Any non-built-in function is resolved in the `function_index` when the tree is lowered, with each argument's cell, and called through `CallBridge::arora_call_borrowed`, which lends the argument values; a bridge that does not implement it receives the same call as an owned `Call` through `arora_call`. At setup, **every node is registered on the engine as a callable** and wrapped in a `TickId` ([`setup_tick_function`](../src/behavior_tree.rs)): a module composite receives its children as `TickId`s and ticks them through the engine.
 
 ## How nodes interact with the data store
 
