@@ -6,12 +6,12 @@ use crate::eval::plan::{PlanCache, PortLayout};
 use crate::eval::variadic::collect_operand_ports;
 use crate::types::{NodeParams, NodeSpec, NodeType, RoundMode};
 use arora_shape::value as vocab;
-use arora_shape::{coercion, Shape, TypedPath, Value, WriteOp};
+use arora_shape::{Shape, TypedPath, Value, WriteOp};
 use hashbrown::HashMap;
 use uuid::Uuid;
 
 use super::noise;
-use super::numeric::{as_bool, as_float, binary_numeric, unary_numeric};
+use super::numeric::{as_bool, as_float, as_vector, binary_numeric, unary_numeric};
 use super::shape_helpers::{
     coerce_numeric_to_shape, is_numeric_like, null_of_shape_numeric, project_by_selector,
     value_matches_shape,
@@ -1723,7 +1723,7 @@ fn vec_port_to_vec(inputs: &InputSlots, key: &str) -> Vec<f32> {
     }
     inputs
         .get(key)
-        .map(|port| coercion::to_vector(&port.value))
+        .map(|port| as_vector(&port.value))
         .unwrap_or_default()
 }
 
@@ -1742,19 +1742,15 @@ fn eval_default_blend(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<
     }
 
     if !target_ports.is_empty() && !weights.is_empty() && weights.len() != target_ports.len() {
+        // A NaN-filled value of the first numeric operand's form.
+        let nan_like = |port: &PortValue| {
+            flatten_numeric(&port.value).map(|flat| flat.layout.fill_with(f32::NAN))
+        };
         let fallback_value = target_ports
             .first()
-            .filter(|port| is_numeric_like(&port.shape.id))
-            .map(|port| null_of_shape_numeric(&port.shape.id))
-            .or_else(|| {
-                if is_numeric_like(&baseline_port.shape.id) {
-                    Some(null_of_shape_numeric(&baseline_port.shape.id))
-                } else if is_numeric_like(&offset_port.shape.id) {
-                    Some(null_of_shape_numeric(&offset_port.shape.id))
-                } else {
-                    None
-                }
-            })
+            .and_then(|port| nan_like(port))
+            .or_else(|| nan_like(&baseline_port))
+            .or_else(|| nan_like(&offset_port))
             .unwrap_or(vocab::float(f32::NAN));
 
         return single_output(outputs, fallback_value);
