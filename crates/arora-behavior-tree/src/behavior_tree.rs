@@ -861,11 +861,12 @@ fn tick_builtin(
                     return Ok(Some(latched));
                 }
             }
-            let child = child_tick_ids
-                .first()
-                .ok_or(BehaviorTreeError::InconsistentTreeError {
-                    message: format!("run-status decorator {} needs one child", node.id),
-                })?;
+            let child =
+                child_tick_ids
+                    .first()
+                    .ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
+                        message: format!("run-status decorator {} needs one child", node.id),
+                    })?;
             let ticked = child.tick(caller);
             let out = get_node_parameter_variable(
                 &NodeParameterId {
@@ -1779,7 +1780,7 @@ fn get_node_parameter_variable<'a>(
 ) -> Result<&'a VariableCell, BehaviorTreeError> {
     node_parameters_variables
         .get(node_parameter)
-        .ok_or(BehaviorTreeError::InconsistentTreeError {
+        .ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
             message: format!("node parameter {} was not found", node_parameter),
         })
 }
@@ -1810,7 +1811,7 @@ pub(crate) fn setup_node_parameter_variable(
         }
         Expression::NodeArgument(other_node_parameter) => node_parameters_variables
             .get(other_node_parameter)
-            .ok_or(BehaviorTreeError::InconsistentTreeError {
+            .ok_or_else(|| BehaviorTreeError::InconsistentTreeError {
                 message: format!(
                     "node argument {} used by node argument {} was not found",
                     other_node_parameter,
