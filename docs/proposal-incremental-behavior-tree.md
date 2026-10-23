@@ -267,69 +267,75 @@ per tick. Every form makes one engine dispatch per tick, for the root.
 
 | N | Scenario | Form | µs/tick | Calls |
 |--:|---|---|--:|--:|
-| 10 | settled | attached-naive | 1.77 | 10 |
-| | | attached-plain-incremental | 2.45 | 10 |
+| 10 | settled | attached-naive | 1.86 | 10 |
+| | | attached-plain-incremental | 2.53 | 10 |
 | | | attached-incremental | 0.25 | 0 |
-| | | detached | 0.34 | 0 |
-| 100 | settled | attached-naive | 12.5 | 100 |
-| | | attached-plain-incremental | 16.5 | 100 |
-| | | attached-incremental | 0.75 | 0 |
-| | | detached | 2.08 | 0 |
-| 1000 | settled | attached-naive | 129 | 1000 |
-| | | attached-plain-incremental | 162 | 1000 |
-| | | attached-incremental | 6.6 | 0 |
-| | | detached | 30 | 0 |
-| | | attached-guarded | 134 | 0 |
-| 1000 | one-input | attached-naive | 133 | 1000 |
-| | | attached-plain-incremental | 163 | 1000 |
+| | | detached | 0.32 | 0 |
+| 100 | settled | attached-naive | 11.8 | 100 |
+| | | attached-plain-incremental | 15.7 | 100 |
+| | | attached-incremental | 0.74 | 0 |
+| | | detached | 2.22 | 0 |
+| 1000 | settled | attached-naive | 121 | 1000 |
+| | | attached-plain-incremental | 158 | 1000 |
+| | | attached-incremental | 6.8 | 0 |
+| | | detached | 27 | 0 |
+| | | attached-guarded | 127 | 0 |
+| 1000 | one-input | attached-naive | 125 | 1000 |
+| | | attached-plain-incremental | 161 | 1000 |
 | | | attached-incremental | 10.0 | 10 |
-| | | detached | 28.9 | 10 |
-| 1000 | all-inputs | attached-naive | 142 | 1000 |
-| | | attached-plain-incremental | 190 | 1000 |
-| | | attached-incremental | 157 | 828 |
-| | | detached | 127 | 828 |
+| | | detached | 28.4 | 10 |
+| 1000 | all-inputs | attached-naive | 136 | 1000 |
+| | | attached-plain-incremental | 182 | 1000 |
+| | | attached-incremental | 154 | 828 |
+| | | detached | 128 | 828 |
 
 `cargo bench -p arora-behavior-tree --bench scale` measures N = 10, 30, 100,
 300 and 1000 in six scenarios: the chains above when settled, one input
 changes or every input changes; a generated graph a tenth of whose calls
 read a clock; and eight generated graphs as the branches of a `FALLBACK`,
 with every input changing and the taken branch fixed or moving every 50
-ticks. A published call binds its `_ret` to its key in every form, so in
-the branch scenarios detached sinks compute every branch, while incremental
-leaves are held by their branch. At N = 1000, µs per tick and calls:
+ticks. A branch publishes its graph's values itself: incremental leaves sit
+in their branch and bind `_ret` to their keys; today's executor and detached
+nodes call `publish`, a module function returning its argument, since the
+tree has no native node that writes a number to a key, and those calls count
+among the calls. At N = 1000, µs per tick and calls:
 
 | Scenario | attached-naive | detached | attached-incremental |
 |---|--:|--:|--:|
-| clock | 165 · 1000 | 91 · 293 | 98 · 293 |
-| branches | 199 · 1000 | 201 · 1000 | 46 · 125 |
-| branches, switching | 221 · 1000 | 204 · 1000 | 48 · 125 |
+| clock | 156 · 1000 | 88 · 293 | 94 · 293 |
+| branches | 154 · 1063 | 42 · 188 | 47 · 125 |
+| branches, switching | 156 · 1064 | 43 · 189 | 49 · 125 |
 
 What the numbers show:
 
-- **The incremental and detached forms make the same calls** in every chain
-  scenario, and in the clock scenario.
-- **Settled, an incremental tree costs under a quarter of detached nodes**:
-  6.6 against 30 µs at N = 1000. The incremental `PARALLEL` checks every
-  child's cache and the executor compares every store-backed cell at the
-  start of the tick, about 7 ns per node, both linear in the tree with a
-  known replacement (§5). Every detached sink is brought up to date and
-  published each tick.
+- **An attached call costs what a detached call costs.** When every input
+  changes, today's executor takes 0.136 µs per call and detached nodes
+  0.155 µs.
+- **The incremental and detached forms make the same graph calls** in every
+  scenario. In branches, detached nodes also make their branch's `publish`
+  calls.
+- **Settled, an incremental tree costs a quarter of detached nodes**: 6.8
+  against 27 µs at N = 1000. The incremental `PARALLEL` checks every child's
+  cache and the executor compares every store-backed cell at the start of
+  the tick, about 7 ns per node, both linear in the tree with a known
+  replacement (§5). Every detached sink is brought up to date and published
+  each tick.
 - **When one input changes, an incremental tree costs a third** of detached
-  nodes: 10 against 29 µs.
-- **When every input changes, detached nodes are about 1.2× cheaper**: 127
-  against 157 µs. An incremental leaf records the versions of its argument
-  cells before its call and compares them after it, and its writes advance
-  versions; a detached node compares its argument values in place.
-- **Under a clock, the two cost about the same**: 98 against 91 µs.
-- **A branch the tree does not take costs nothing** when its graph's leaves
-  are in it: 46 µs, where sinks and today's executor compute all eight
-  branches, about 200 µs.
+  nodes: 10 against 28 µs.
+- **When most calls run, detached nodes are cheaper**: 128 against 154 µs
+  when every input changes, 88 against 94 under the clock, 42 against 47 in
+  branches. An incremental leaf records the versions of its argument cells
+  before its call and compares them after it, its writes advance versions
+  and mark their readers, and the tick starts by observing every
+  store-backed cell the tree reads, a taken branch's or not; a detached node
+  compares its argument values in place. Without `_on_change`, the same tree
+  shows this bookkeeping alone: 0.04 to 0.05 µs per call over today's
+  executor.
+- **A branch the tree does not take costs neither form a call**; today's
+  executor, which ticks every leaf, computes all eight branches.
 - **A guard per node costs as much as calling every leaf**: four native
   nodes ticked per graph node. The executor makes the same check, about 20
   times cheaper, without adding nodes.
-- **Without `_on_change`, a tree costs 25 to 35% more** than on today's
-  executor, with the same calls: the versioned writes and the dirty
-  bookkeeping, with nothing to skip.
 - **The bridge is native.** These timings do not include wasm calls or
   hardware I/O, which add the same cost per call to every form. Compare the
   counts as well as the times.
