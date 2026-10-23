@@ -9,7 +9,7 @@ use arora_registry::{ModuleFrozen, TypeDefinitionFrozen};
 use arora_types::record::module::frozen::{ExportKind, Parameter};
 use arora_vfs::{Directory, Entry, File};
 use ast::{
-    Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
+    ArrayKind, Block, Declaration, Expression, Extern, FunctionImplementation, FunctionPrototype,
     IncludeStyle, Namespace, NewLine, PreprocessorDirective, Statement, TranslationUnit, TypeRef,
     Variable,
 };
@@ -705,6 +705,9 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
         .into(),
     );
     declarations.push(
+        PreprocessorDirective::Include("arora/module.hpp".to_string(), IncludeStyle::System).into(),
+    );
+    declarations.push(
         PreprocessorDirective::Include(
             "arora/buffer/deserialize.hpp".to_string(),
             IncludeStyle::System,
@@ -723,6 +726,9 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
 
     declarations.push(declare::uuid_variable(id::module_uuid(&module.name), module_id).into());
 
+    // Each function's id constant and entry point, for the table of the
+    // functions the module serves.
+    let mut served = Vec::new();
     for (export_id, export) in &context.module.as_ref().unwrap().exports {
         match &export.kind {
             ExportKind::Function(f) => {
@@ -926,6 +932,7 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
                 }
 
                 let function_name = format!("arora_function_{}", identifier_uuid(export_id));
+                served.push((id::function_uuid(&export.name), function_name.clone()));
 
                 declarations.push(
                     Extern {
@@ -957,6 +964,35 @@ fn generate_self_source<'a>(context: &Context<'a>) -> anyhow::Result<Translation
             }
         }
     }
+
+    // The functions the module serves (arora/module.hpp), ended by a null id:
+    // a component's `functions` and `dispatch` exports serve them.
+    let entries: Vec<String> = served
+        .iter()
+        .map(|(id, function)| format!("{{ {id}, {function} }}"))
+        .chain(["{ nullptr, nullptr }".to_string()])
+        .collect();
+    declarations.push(
+        Extern {
+            name: "C".to_string(),
+            block: Block {
+                statements: vec![Variable {
+                    name: "arora_module_exports".to_string(),
+                    ty: TypeRef {
+                        ty: "arora_module_export".to_string(),
+                        constant: true,
+                        ..Default::default()
+                    },
+                    value: Some(format!("{{ {} }}", entries.join(", ")).to_expression()),
+                    array: ArrayKind::Dynamic,
+                    ..Default::default()
+                }
+                .into()],
+                ..Default::default()
+            },
+        }
+        .into(),
+    );
 
     Ok(TranslationUnit { declarations })
 }

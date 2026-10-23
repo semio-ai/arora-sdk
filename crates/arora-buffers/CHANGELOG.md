@@ -4,6 +4,13 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - 2026-10-23
+
+### Added
+
+- `arora_buffer_writer_finalized_free`: frees a buffer
+  `arora_buffer_writer_finalize` returned, by the length its header holds.
+
 ## [3.0.0] - 2026-09-25
 
 ### Added

@@ -4,11 +4,11 @@ project(test-cpp CXX)
 # Required cache vars (normally passed by the wrapping build.rs):
 #   ARORA_MODULE_CLI            host bin that codegens C++ from module.yaml
 #   records dir for arora-behavior-tree-types-yaml
-#   ARORA_BUFFERS_LIB           wasm32-wasip1 static lib (.a) of arora-buffers
-#   ARORA_UTIL_LIB              wasm32-wasip1 static lib (.a) of arora-util
+#   ARORA_BUFFERS_LIB           wasm32-wasip2 static lib (.a) of arora-buffers
+#   ARORA_UTIL_LIB              wasm32-wasip2 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp (built inline below)
 #   ARORA_MODULE_DIR            the module directory to write (see below)
-# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip1 toolchain file.
+# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip2 toolchain file.
 foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB
             ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR ARORA_MODULE_DIR)
   if(NOT DEFINED ${VAR})
@@ -58,22 +58,22 @@ add_custom_target(generate-test-cpp-wrapper ALL
     ${GENERATED_DIR}/header.json
 )
 
-# The wasm module is linked as a WASI reactor: no `main`, no `_start`, and an
-# `_initialize` the engine calls once, when it loads the module, to run the
-# C++ static constructors. Its state then lives across calls, as a Rust
-# guest's does.
+# The guest is a component of the `arora:module` world, as a Rust guest is:
+# arora-cpp-component serves the module's functions through the world's
+# `functions` and `dispatch` exports. It links as a WASI reactor: no `main`,
+# no `_start`, and an `_initialize` the component calls once, when it is
+# instantiated, to run the C++ static constructors. Its state then lives
+# across calls.
 add_executable(test-cpp
   src/main.cpp
   ${GENERATED_DIR}/source/test-cpp.cpp
 )
 add_dependencies(test-cpp generate-test-cpp-wrapper)
 target_include_directories(test-cpp PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}/include)
-target_link_libraries(test-cpp PRIVATE arora-buffers arora-util arora-cpp)
+target_link_libraries(test-cpp PRIVATE arora-buffers arora-util arora-cpp arora-cpp-component)
 target_compile_options(test-cpp PRIVATE -fPIC -O3 -flto -fno-exceptions)
 target_link_options(test-cpp PRIVATE
   -mexec-model=reactor
-  -Wl,--export=arora_buffer_alloc
-  -Wl,--export=arora_buffer_free
   -Wl,--allow-multiple-definition
 )
 

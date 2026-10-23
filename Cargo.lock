@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "13.6.0"
+version = "13.7.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "arora-animation-module"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "arora-animation",
  "arora-engine",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "arora-types",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
@@ -423,6 +423,7 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "tempfile",
+ "test-rust-component",
  "test-rust-wasm",
  "uuid",
  "wasm-bindgen",
@@ -522,6 +523,8 @@ dependencies = [
  "anyhow",
  "arora",
  "arora-animation-module",
+ "arora-behavior",
+ "arora-behavior-tree-types",
  "arora-buffers",
  "arora-cli",
  "arora-engine",
@@ -529,6 +532,7 @@ dependencies = [
  "arora-types",
  "example-cpp",
  "futures",
+ "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "test-behavior-tree-nodes",
  "test-cpp",
@@ -541,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "arora-behavior",
  "arora-buffers",
@@ -550,6 +554,7 @@ dependencies = [
  "arora-types",
  "serde_yaml 0.9.34+deprecated",
  "trybuild",
+ "wit-bindgen 0.58.0",
 ]
 
 [[package]]
@@ -614,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-macros"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "arora-types",
  "proc-macro2",
@@ -626,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-rust"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -826,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "10.3.0"
+version = "10.4.0"
 dependencies = [
  "arora",
  "arora-behavior",
@@ -7543,6 +7548,7 @@ dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
  "arora-buffers",
+ "arora-module",
  "arora-module-core",
  "arora-module-rust",
  "arora-registry",
@@ -7586,6 +7592,8 @@ dependencies = [
 name = "test-rust-component"
 version = "0.1.0"
 dependencies = [
+ "arora-buffers",
+ "wasip2",
  "wit-bindgen 0.58.0",
 ]
 
@@ -9466,6 +9474,9 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+dependencies = [
+ "bitflags 2.13.1",
+]
 
 [[package]]
 name = "wit-bindgen"

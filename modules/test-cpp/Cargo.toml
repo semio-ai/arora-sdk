@@ -24,9 +24,9 @@ cmake = "0.1"
 # the cli. The build script stages both binaries into one directory.
 arora-module-cli = { path = "../../crates/arora-module-authoring/cli", artifact = "bin" }
 arora-module-cpp = { path = "../../crates/arora-module-authoring/cpp", artifact = "bin" }
-# wasm32-wasip1 static libraries the C++ links against.
-arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip1" }
-arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip1" }
+# wasm32-wasip2 static libraries the C++ links against.
+arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip2" }
+arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip2" }
 # The build.rs reads the records/ directory populated by this crate's
 # build script — declared here purely to force build-order so a cold
 # `cargo build --workspace` works without prior builds.

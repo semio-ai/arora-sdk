@@ -35,6 +35,13 @@ fn main() -> Result<()> {
     // cargo rebuilds on an edit (and CI selection, checked against cargo's
     // records, sees it).
     println!("cargo:rerun-if-changed={}", arora_cpp_source.display());
+    // The world the guest is a component of, which libs/cpp links it against.
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root
+            .join("crates/arora-engine/wit/arora-module.wit")
+            .display()
+    );
     let arora_include_dir = workspace_root.join("target").join("include");
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let test_cpp_records = workspace_root
@@ -52,11 +59,11 @@ fn main() -> Result<()> {
         .join("modules")
         .join("test-cpp-2");
 
-    // The target hint is test-cpp's (see its build.rs): wasm32-wasip1, which
+    // The target hint is test-cpp's (see its build.rs): wasm32-wasip2, which
     // the toolchain file compiles for, as the Rust guests build for it.
     let dst = cmake::Config::new(&manifest_dir)
-        .target("wasm32-wasip1")
-        .host("wasm32-wasip1")
+        .target("wasm32-wasip2")
+        .host("wasm32-wasip2")
         .no_default_flags(true)
         .define("CMAKE_TOOLCHAIN_FILE", &toolchain_file)
         .define("ARORA_MODULE_CLI", &arora_module_cli)
