@@ -34,8 +34,8 @@
 //! **Memory.** Each linear memory of a guest's instance may hold up to
 //! [`GuestLimits::memory`] bytes, [`DEFAULT_MEMORY`] by default: a
 //! `memory.grow` past it fails inside the guest, which sees the grow return
-//! -1, and the host grows nothing. A core module has one memory; a component
-//! can hold several, each under the cap.
+//! -1, and the host grows nothing. A component can hold several memories,
+//! each under the cap.
 //!
 //! **In the browser** a guest runs on the JS thread, which nothing
 //! interrupts: the browser executors bound neither a call's time nor, beyond

@@ -5,8 +5,6 @@ pub mod component;
 #[cfg(feature = "native-host")]
 pub mod native;
 mod wasi_limits;
-#[cfg(feature = "wasmtime-host")]
-pub mod wasm;
 
 use crate::compiled::{Code, CompiledModule};
 use crate::load::module_definition_from_parts;
@@ -45,10 +43,8 @@ pub trait Executor {
     ///
     /// The default serves an executor that loads its executable as it is: it
     /// hands the module's bytes to [`load_module`](Self::load_module), and
-    /// refuses a module compiled for the WebAssembly executor. The WebAssembly
-    /// executors override it to instantiate the compiled code; another executor
-    /// registered under `"wasm"` receives compiled modules too, and overrides
-    /// it to accept them.
+    /// refuses a module compiled for the component executor. The component
+    /// executors override it to instantiate the compiled code.
     fn load_compiled_module(
         &mut self,
         module: &CompiledModule,
@@ -60,7 +56,7 @@ pub trait Executor {
             )),
             #[allow(unreachable_patterns)]
             _ => Err(LoadModuleError::Internal(format!(
-                "the {} executor cannot instantiate a module compiled for the WebAssembly \
+                "the {} executor cannot instantiate a module compiled for the component \
                  executor",
                 self.name()
             ))),
@@ -73,7 +69,7 @@ pub trait Executor {
     /// compiling it takes none of its load's time ([`crate::limits`]). The
     /// default, `false`, keeps an executor's modules loaded from their bytes
     /// through [`load_module_limited`](Self::load_module_limited); the
-    /// wasmtime executors answer `true`.
+    /// wasmtime component executor answers `true`.
     fn loads_compiled_modules(&self) -> bool {
         false
     }

@@ -4,6 +4,14 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [12.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** on arora 15 and arora-engine 7. `Engine` and
+  `BehaviorTreeRunner` load components only: a `wasm32-wasip1` core module
+  fails to load, and `prepareModule` refuses one.
+
 ## [11.0.0] - 2026-10-23
 
 ### Changed

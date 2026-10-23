@@ -7,13 +7,12 @@ Welcome to the core of the project!
 The Arora engine runs WASM modules — advertised with
 [a custom module description format (or schema)](https://github.com/semio-ai/arora-sdk) —
 through pluggable [`Executor`](src/executor/mod.rs) implementations, chosen
-by the `executor.name` of a module's header. Each kind runs natively, on
-[`wasmtime`](https://docs.wasmtime.dev/) (the default `wasmtime-host`
-feature), and in the browser, on its native `WebAssembly` runtime, when
-`arora` itself is compiled to `wasm32-unknown-unknown` (the JS-facing
-wrapper is [`arora-web`](https://github.com/semio-ai/arora-sdk)):
-
-- **`wasm-component`**, what Arora guests are built as: a component of the
+by the `executor.name` of a module's header. A WebAssembly guest runs
+natively, on [`wasmtime`](https://docs.wasmtime.dev/) (the default
+`wasmtime-host` feature), and in the browser, on its native `WebAssembly`
+runtime, when `arora` itself is compiled to `wasm32-unknown-unknown` (the
+JS-facing wrapper is [`arora-web`](https://github.com/semio-ai/arora-sdk)).
+It is a **`wasm-component`**: a component of the
   `arora:module` world ([`wit/arora-module.wit`](wit/arora-module.wit)), as
   Rust and C++ build one for `wasm32-wasip2`. It exports `functions` and
   `dispatch`, and may import the world's `host` interface and the WASI 0.2
@@ -22,20 +21,18 @@ wrapper is [`arora-web`](https://github.com/semio-ai/arora-sdk)):
   ([`component_layout`](src/component_layout.rs)).
   Hosted by [`component::ComponentExecutor`](src/executor/component/mod.rs)
   and [`browser::BrowserComponentExecutor`](src/executor/browser/component.rs),
-  which a `BrowserExecutor`'s `component_executor()` gives. A component that
-  traps runs no more calls until it is reloaded.
-- **`wasm`**, a core module speaking the core-module ABI
-  (`arora_buffer_alloc`/`free` and `arora_function_<uuid>` exports,
-  `arora_dispatch` / `arora_dispatch_indirect` imports), as guests built for
-  `wasm32-wasip1` are. Hosted by
-  [`wasm::WebAssemblyExecutor`](src/executor/wasm/mod.rs) and
-  [`browser::BrowserExecutor`](src/executor/browser/mod.rs).
+  built on a [`SharedLoader`](src/executor/browser/mod.rs), which stages a
+  component compiled asynchronously. A component that traps runs no more calls
+  until it is reloaded.
+
+A core module, as a guest built for `wasm32-wasip1` is, has no executor: its
+header names `wasm`, which no engine registers, and a device's module
+directory naming it is refused with the rebuild it needs.
 
 A guest that exports `_initialize` — a WASI reactor, which a C or C++ guest
 is when linked with `-mexec-model=reactor` — has it run once, when it loads,
-before any other export: a component's initializer calls it, and the `wasm`
-executors call it for a core module. It runs the guest's static
-constructors.
+before any other export: its component's initializer calls it. It runs the
+guest's static constructors.
 
 ### Compiling a module once
 
@@ -44,10 +41,10 @@ the engine that loads it. A module that several engines load — one per
 device, say — compiles once as a [`CompiledModule`](src/compiled.rs), which
 each engine loads with `Engine::load_compiled_module`: it instantiates the
 compiled code, with an instance (memory, globals) of its own, and compiles
-nothing. Natively, every executor of a kind in the process runs on one
-wasmtime engine, the one a compiled module belongs to; in the browser, a
-`WebAssembly.Module` — for a component, of the guest's core module —
-instantiates anywhere.
+nothing. Natively, every component executor in the process runs on one
+wasmtime engine, the one a compiled module belongs to; in the browser, the
+`WebAssembly.Module` of the component's guest core module instantiates
+anywhere.
 
 ## Native Executor
 
@@ -134,8 +131,8 @@ linear memory is capped ([`limits`](src/limits.rs)):
   time left before its deadline is not made, and its module, never entered,
   serves its later calls.
 - **Memory.** Each linear memory of a guest's instance holds at most
-  `GuestLimits::memory` bytes, 256 MiB by default. A core module has one; a
-  component can hold several, each under the cap. A `memory.grow` past it
+  `GuestLimits::memory` bytes, 256 MiB by default; a component can hold
+  several, each under the cap. A `memory.grow` past it
   returns -1 to the guest, whose allocator then reports the allocation
   failed.
 

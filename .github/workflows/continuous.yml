@@ -234,13 +234,12 @@ jobs:
 
       # geckodriver + firefox are preinstalled on ubuntu-latest.
       # --no-default-features drops the wasmtime/native hosts so the engine
-      # builds for wasm32; the tests load the test-rust-wasm guest through
-      # BrowserExecutor and the test-rust-component guest through
-      # BrowserComponentExecutor, and dispatch them (see
-      # crates/arora-engine/tests/browser.rs and browser_component.rs).
+      # builds for wasm32; the tests load the test-rust-component guest
+      # through BrowserComponentExecutor and dispatch it (see
+      # crates/arora-engine/tests/browser_component.rs).
       - name: Browser executor tests (headless Firefox)
         if: needs.select.outputs.test-arora-engine
-        run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser --test browser_component
+        run: wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser_component
 
       # The run loop's cadence rides a JS timer on wasm32 and Tokio's natively,
       # with the same guarantees either way; the test job covers the latter,

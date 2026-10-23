@@ -234,17 +234,22 @@ fn read_files(dir: &Path) -> Result<ModuleFiles> {
     })
 }
 
-/// The extension of the artifact `executor` runs: `wasm` for the WebAssembly
+/// The extension of the artifact `executor` runs: `wasm` for the component
 /// executor, the platform's dynamic-library extension for the native one.
 /// These are the executors the runtime's engine carries; any other has no
 /// artifact here to look for.
 fn artifact_extension(executor: &str) -> Result<&'static str> {
     match executor {
-        "wasm-component" | "wasm" => Ok("wasm"),
+        "wasm-component" => Ok("wasm"),
         "native" => Ok(std::env::consts::DLL_EXTENSION),
+        "wasm" => bail!(
+            "the header names executor 'wasm', a wasm32-wasip1 core module, which no \
+             device runs: rebuild the guest for wasm32-wasip2, whose header names \
+             wasm-component"
+        ),
         other => bail!(
             "the header names executor '{other}', which this device does not run \
-             (wasm-component, wasm, native)"
+             (wasm-component, native)"
         ),
     }
 }

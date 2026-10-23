@@ -2,7 +2,7 @@
 //!
 //! Where [`arora_engine`] is the bare, unopinionated runtime, this crate wires
 //! a ready-to-use [`Arora`]: the whole device in one object — the engine (with
-//! the WebAssembly and native executors), the shared data store, the HAL and
+//! the component and native executors), the shared data store, the HAL and
 //! bridge I/O seams, one behavior interpreter, and the step loop that drives
 //! them. The core behavior-tree nodes — the control nodes and the string nodes
 //! (`SetString`, `UnsetString`, `IsStringSet`, `WaitStringSet`, `RegexMatch`)
@@ -87,9 +87,7 @@ use arora_engine::engine::{
     EngineBuilder, LoadModuleError, PinnedEngine, ReloadModuleError, UnloadModuleError,
 };
 #[cfg(feature = "native")]
-use arora_engine::executor::{
-    component::ComponentExecutor, native::NativeExecutor, wasm::WebAssemblyExecutor,
-};
+use arora_engine::executor::{component::ComponentExecutor, native::NativeExecutor};
 /// Re-exported so an embedder can set what a guest module may spend
 /// ([`AroraBuilder::with_guest_limits`], [`Arora::set_guest_limits`]).
 pub use arora_engine::limits::GuestLimits;
@@ -876,7 +874,7 @@ impl AroraBuilder {
     /// `header` is the module's low-level [`Header`] — its id, its exported
     /// functions (each with a UUID), and the **executor** that runs it.
     /// `executable` is the module's bytes in whatever format that executor
-    /// expects: a `.wasm` for the WebAssembly executor, or a native dynamic
+    /// expects: a `.wasm` component for the component executor, or a native dynamic
     /// library for the native executor. The engine selects the executor by the
     /// name the header announces, so this one seam loads either format. The
     /// module is loaded at [`build`](Self::build); once loaded, its exported
@@ -1746,8 +1744,8 @@ fn freeze_exports<'a>(
 }
 
 /// Build the engine with the right executor hosts for the target: components
-/// and core modules on the browser's `WebAssembly` runtime on wasm, or on
-/// wasmtime, with the native (dynamic library) host, otherwise.
+/// on the browser's `WebAssembly` runtime on wasm, or on wasmtime, with the
+/// native (dynamic library) host, otherwise.
 #[cfg(feature = "native")]
 fn build_engine(limits: GuestLimits) -> Result<PinnedEngine> {
     Ok(EngineBuilder::new()
@@ -1756,23 +1754,16 @@ fn build_engine(limits: GuestLimits) -> Result<PinnedEngine> {
             ComponentExecutor::new()
                 .map_err(|e| anyhow::anyhow!("failed to create the component executor: {e}"))?,
         )
-        .add_executor(
-            WebAssemblyExecutor::new()
-                .map_err(|e| anyhow::anyhow!("failed to create wasm executor: {e}"))?,
-        )
         .add_executor(NativeExecutor::new())
         .build())
 }
 
 #[cfg(all(not(feature = "native"), target_arch = "wasm32"))]
 fn build_engine(limits: GuestLimits) -> Result<PinnedEngine> {
-    use arora_engine::executor::browser::BrowserExecutor;
-    let executor = BrowserExecutor::new();
-    let components = executor.component_executor();
+    use arora_engine::executor::browser::{BrowserComponentExecutor, SharedLoader};
     Ok(EngineBuilder::new()
         .with_guest_limits(limits)
-        .add_executor(executor)
-        .add_executor(components)
+        .add_executor(BrowserComponentExecutor::new(SharedLoader::new()))
         .build())
 }
 
@@ -2895,6 +2886,9 @@ mod host_module_tests {
 
 #[cfg(all(test, feature = "native"))]
 mod stepping_tests;
+
+#[cfg(all(test, feature = "native"))]
+mod test_components;
 
 #[cfg(all(test, feature = "native"))]
 mod module_reload_tests;

@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "14.1.0"
+version = "15.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "6.1.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "11.0.0"
+version = "12.0.0"
 dependencies = [
  "arora",
  "arora-behavior",

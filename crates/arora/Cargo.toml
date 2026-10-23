@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "14.1.0"
+version = "15.0.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree core nodes and the Semio backend."
 license = "Apache-2.0"
@@ -64,7 +64,7 @@ studio-bridge = [
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
-arora-engine = { path = "../arora-engine", version = "6.1", default-features = false }
+arora-engine = { path = "../arora-engine", version = "7", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.1" }
 arora-behavior = { path = "../arora-behavior", version = "9.4" }
 # 3.8: `PrimitiveKind::from_id`, to check a module record against its header.

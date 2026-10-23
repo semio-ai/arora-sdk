@@ -130,11 +130,12 @@ pub async fn generate_sources(
     );
 
     // Also declare arora engine functions.
-    // A core module (wasm32-wasip1) imports them from the engine; a component
-    // (wasm32-wasip2) reaches the engine through the `arora:module` world's
-    // `host` interface, which arora-module bridges them to. On other targets
-    // (host iteration / `cargo test`) we emit panicking stubs so the crate
-    // still links and trivial tests can run natively.
+    // A component (wasm32-wasip2), the form an engine loads a guest in,
+    // reaches the engine through the `arora:module` world's `host` interface,
+    // which arora-module bridges them to. Built for another wasm32 target, the
+    // crate imports them from `env`, which no Arora executor provides. On
+    // other targets (host iteration / `cargo test`) we emit panicking stubs so
+    // the crate still links and trivial tests can run natively.
     let engine_functions_declarations = quote! {
       #[cfg(all(target_arch = "wasm32", not(all(target_os = "wasi", target_env = "p2"))))]
       #[link(wasm_import_module = "env")]

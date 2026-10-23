@@ -1,6 +1,6 @@
 //! Loading, reloading and unloading guest modules on a running device.
 //!
-//! The guests are small WebAssembly modules written in the text format, each
+//! The guests are small components written in the text format, each
 //! answering every function it exports with a fixed value: two versions of one
 //! module id that answer differently tell which version a call reached.
 
@@ -19,7 +19,7 @@ const PING: Uuid = Uuid::from_u128(0x5f423ba9_d5f9_46d7_a9b5_fb7d28f99ea6);
 /// declaration, at `minor`.
 fn header(functions: &[Uuid], minor: u32) -> Header {
     let mut header = test_rust_wasm::test_rust_wasm::header(low::Executor {
-        name: "wasm".to_string(),
+        name: "wasm-component".to_string(),
         min_version: None,
         max_version: None,
     });
@@ -31,48 +31,23 @@ fn header(functions: &[Uuid], minor: u32) -> Header {
 }
 
 /// A guest answering each function of `answers` with its value, whatever the
-/// argument: a bump allocator that every free resets, and each function's
-/// result buffer laid out ahead in a data segment.
+/// argument.
 fn guest(answers: &[(Uuid, Value)]) -> Vec<u8> {
-    let mut data = String::new();
-    let mut functions = String::new();
-    let mut offset = 16usize;
-    for (id, value) in answers {
-        let result = arora_buffers::serde_uuid::serialize(&Value::Structure(Structure {
-            id: *id,
-            fields: vec![StructureField {
+    use crate::test_components::{component, Answer};
+    let functions: Vec<(Uuid, Answer)> = answers
+        .iter()
+        .map(|(id, value)| {
+            let result = arora_buffers::serde_uuid::serialize(&Value::Structure(Structure {
                 id: *id,
-                value: Box::new(value.clone()),
-            }],
-        }));
-        let bytes: String = result.iter().map(|b| format!("\\{b:02x}")).collect();
-        data += &format!("(data (i32.const {offset}) \"{bytes}\")\n");
-        functions += &format!(
-            "(func (export \"arora_function_{}\") (param i32) (result i32) i32.const {offset})\n",
-            id.to_string().replace('-', "_")
-        );
-        offset += result.len().next_multiple_of(8);
-    }
-    format!(
-        r#"(module
-             (memory (export "memory") 1)
-             (global $next (mut i32) (i32.const 4096))
-             (func (export "arora_buffer_alloc") (param $size i32) (result i32)
-               (local $at i32)
-               global.get $next
-               local.set $at
-               global.get $next
-               local.get $size
-               i32.add
-               global.set $next
-               local.get $at)
-             (func (export "arora_buffer_free") (param i32)
-               i32.const 4096
-               global.set $next)
-             {data}
-             {functions})"#
-    )
-    .into_bytes()
+                fields: vec![StructureField {
+                    id: *id,
+                    value: Box::new(value.clone()),
+                }],
+            }));
+            (*id, Answer::Bytes(result.to_vec()))
+        })
+        .collect();
+    component(&functions)
 }
 
 fn compiled(functions: &[(Uuid, Value)], minor: u32) -> CompiledModule {

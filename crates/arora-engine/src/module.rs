@@ -54,16 +54,6 @@ pub(crate) fn guest_error(buffer: &[u8]) -> Option<String> {
     Some(message.unwrap_or_else(|| "guest returned error (no message)".to_string()))
 }
 
-/// The error buffer carrying `message`, the form a guest returns an error in
-/// (`BufferWriter::add_error`): what a guest calling another through a core
-/// module's `arora_dispatch` imports gets for a call that fails, as a guest
-/// gets its own error back.
-pub(crate) fn error_buffer(message: &str) -> Box<[u8]> {
-    let mut writer = arora_buffers::BufferWriter::new();
-    writer.add_error(message);
-    writer.finalize()
-}
-
 pub trait Module {
     fn dispatch(&mut self, function_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError>;
 
