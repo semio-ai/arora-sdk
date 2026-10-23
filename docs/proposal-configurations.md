@@ -25,9 +25,9 @@ In short:
 - **The store is the only source of records.** A device resolves through its
   own `arora-registry`, filled through a **registry source**, and does not
   serve records. arora-sdk knows only the source trait, so a backend could be
-  distributed; for now the only backend is Studio's, whose source lives in
-  studio-bridge's client, which already owns the connection to Studio, the
-  credentials and the device's cache directory.
+  distributed; for now the only backend is Studio's, whose source is
+  Semio's `semio-studio-assets` crate, signed in through `semio-studio-auth`.
+  The device's cache stays in the device directory the bridge client uses.
 - **Every record lives in a scope**, the top folder named by the `@handle`
   of the account that publishes it, as a scoped name says. A module and its
   own types live in the module's scope; a type modules of different scopes
@@ -119,8 +119,8 @@ reloaded on a running device is still indexed from its header (4.3).
 |---|---|---|---|
 | What a published thing is | Records (`arora-types`); Studio v2 assets and `arora-index`'s `AssetType` / `ResolvedRef` | Records | A record is already versioned, frozen and referenced by id and version; a module record is what a declaration and the authoring pipeline produce. Release metadata — content hashes, deprecation, the scoped name — attaches to a record version instead of forming a second vocabulary. |
 | Holding records in a process | `arora-registry`'s `LocalRegistry`; the `feat/type-registry` `Registry`; `arora-index`'s `resolved.json` | `arora-registry` | One registry for authoring (tag, freeze) and for devices (exact lookup). A record carries its name, so the `records.json` index is not needed. `ty::low::TypeRegistry` stays on the header vocabulary's axis ([design note](design_decisions.md#two-type-vocabularies-two-axes)). |
-| Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through the `RegistrySource` trait in `arora-registry`, one implementation per backend (3.3) | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. `arora-index`'s selection, verification and sealing work over any source; the Studio source lives in studio-bridge. |
-| Connecting to Studio, credentials | `arora-index`'s `FIREBASE_*` configuration and `TokenSource`; studio-bridge's client | studio-bridge's client | Arora works without Studio. The bridge client already holds the Studio connection and the device's credentials. |
+| Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through the `RegistrySource` trait in `arora-registry`, one implementation per backend (3.3) | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. `arora-index`'s selection, verification and sealing work over any source; the Studio source is Semio's `semio-studio-assets`. |
+| Connecting to Studio, credentials | `arora-index`'s `FIREBASE_*` configuration and `TokenSource`; studio-bridge's client | Semio's `semio-studio-auth`, which the bridge client and the Studio source both use | Arora works without Studio. Sign-in is one Semio crate; the bridge client keeps the device's credentials in its directory. |
 | The device's cache directory | `arora-index`'s `<device dir>/assets/`; the Studio Bridge client's directory; `<device dir>/modules/` | One cache, in the device directory, shared with the bridge client | Two cache roots for one device drift. Operator-installed `modules/` stays a separate, unverified input. |
 | Publishing | semio-cli (semio-db); Studio's web publishing | The store's backend | Records are published where they are read, and the backend decides at publication who owns a scope (2.2). semio-cli publishes to semio-db, which is deprecated. |
 | Release selection | `arora-registry`'s `resolve_tag`; `arora-index`; Studio's `resolveDependency` | `arora-index`'s resolver, with the source supplying releases and metadata | One rule for a range: the newest non-deprecated version that satisfies it and has the requested artifact, as Studio's `resolveDependency`. |
@@ -401,9 +401,9 @@ pub struct Release {
   directory (records in the `records/` layout, artifacts by content hash), in
   the directory the bridge client already uses, not a second cache root.
 - **Implementations:** a local directory (`DirSource`, no network); a static
-  host over HTTPS; Studio's backend, in studio-bridge, over its connection and
-  credentials — what studio-bridge's `StudioSource` implements today; Studio's
-  page, backed by its own store client.
+  host over HTTPS; Studio's backend, `StudioSource` in Semio's
+  `semio-studio-assets`, signed in through `semio-studio-auth`; Studio's page,
+  backed by its own store client.
 - **Where it lives.** The trait and its types (`RegistrySource`, `Release`,
   `PackageRef`, `Kind`, `SourceError`) are in `arora-registry`, which already
   builds for `wasm32` in `arora-web`, so Studio's page uses the same types.
@@ -636,7 +636,8 @@ with native modules changes them, by restarting.
   chunks (`apply-configuration`, `describe-configuration`): a
   `studio-bridge-msgs` major, then majors of `arora-studio-bridge-client` and
   `studio-bridge-studio-client`, then `arora` re-pins the device client. The
-  Studio registry source ships with studio-bridge. A release in two repos.
+  Studio registry source ships as `semio-studio-assets`. A release across
+  three repos.
 - **The router** grants the new chunks to the claimant, compiled with the
   other grants.
 - **Negotiation.** A device that answers the new operations announces
@@ -704,9 +705,10 @@ records and artifacts through its own source, as itself.
 ## 5. How this composes with `arora-index`
 
 `arora-index` ([#360](https://github.com/semio-ai/arora-sdk/pull/360)) is
-the client over `RegistrySource` (3.3), and the Studio source
-([studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109)) is
-one implementation of it. Converging on the one trait changes them as
+the client over `RegistrySource` (3.3), and the Studio source is one
+implementation of it: Semio's `semio-studio-assets`, from
+[studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109)'s
+`StudioSource` and publish path. Converging on the one trait changes them as
 follows:
 
 | Today | Converged |
@@ -806,9 +808,10 @@ be translated at every boundary.
 ### arora-sdk knows a registry source, not Studio
 
 Arora works without Studio. The source trait lets a device fill its registry
-from local directories or any backend of the store alike; Studio's backend,
-the only one for now, keeps its connection, credentials and cache in
-studio-bridge's client, which owns them already.
+from local directories or any backend of the store alike. Studio's backend,
+the only one for now, is reached through Semio's crates: `semio-studio-assets`
+for the source and `semio-studio-auth` for sign-in, which the bridge client
+uses too. arora links them only in its opt-in Studio feature.
 
 ### One registry source for every kind
 
