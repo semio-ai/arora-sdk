@@ -62,6 +62,23 @@ const CALL_FN: Id = Id {
     lo: 0x989c_69aa_2c2d_ef5b,
 };
 
+/// `spin` function id: loops forever, so a call to it only ends when the
+/// host interrupts it.
+/// 5d0c4a3e-7b21-4f6e-9a8d-2c41b6e0f3a1
+const SPIN_FN: Id = Id {
+    hi: 0x5d0c_4a3e_7b21_4f6e,
+    lo: 0x9a8d_2c41_b6e0_f3a1,
+};
+
+/// `grow` function id: tries to reserve 64 MiB, growing its memory as it
+/// must, and returns `[1]` if it could, `[0]` if the allocator could not grow
+/// the memory.
+/// 9e7b1c52-0d3a-4b8f-8e61-f4a2c9d7b053
+const GROW_FN: Id = Id {
+    hi: 0x9e7b_1c52_0d3a_4b8f,
+    lo: 0x8e61_f4a2_c9d7_b053,
+};
+
 struct Component;
 
 impl Guest for Component {
@@ -73,6 +90,8 @@ impl Guest for Component {
             TRAP_FN,
             ERROR_BUFFER_FN,
             CALL_FN,
+            SPIN_FN,
+            GROW_FN,
         ]
     }
 
@@ -89,6 +108,15 @@ impl Guest for Component {
         }
         if method == TRAP_FN {
             panic!("trap requested");
+        }
+        if method == SPIN_FN {
+            loop {
+                std::hint::black_box(());
+            }
+        }
+        if method == GROW_FN {
+            let mut reserved = Vec::<u8>::new();
+            return Ok(vec![reserved.try_reserve_exact(64 << 20).is_ok() as u8]);
         }
         if method == ERROR_BUFFER_FN {
             let mut writer = arora_buffers::BufferWriter::new();

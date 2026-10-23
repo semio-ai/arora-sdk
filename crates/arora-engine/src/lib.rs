@@ -5,5 +5,6 @@ pub mod call;
 pub mod compiled;
 pub mod component_layout;
 pub mod engine;
+pub mod limits;
 pub mod load;
 pub mod module;

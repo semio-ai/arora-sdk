@@ -28,15 +28,16 @@ use anyhow::Result;
 use derive_more::{Display, Error, From};
 use uuid::Uuid;
 use wasmtime::component::{bindgen, Component, HasData, Linker};
-use wasmtime::{Config, Engine as WasmEngine, Store};
+use wasmtime::{Config, Engine as WasmEngine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use arora_types::module::low::{ExportSymbol, ModuleDefinition};
+use arora_types::module::low::{Header, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::call::{CallBridge, CallableId};
 use crate::compiled::{Code, CompiledModule};
 use crate::engine::EngineRef;
+use crate::limits::{self, GuestLimits};
 use crate::load::module_definition_from_parts;
 use crate::module::{guest_error, DispatchError, Module as AroraModule};
 
@@ -63,11 +64,16 @@ unsafe impl Send for EnginePtr {}
 struct HostState {
     wasi: WasiCtx,
     table: ResourceTable,
+    /// What the instance may grow its memory to ([`GuestLimits::memory`]).
+    limits: StoreLimits,
 
     /// The engine this module belongs to. Guest calls to `host.dispatch`
     /// re-enter the engine while it is already mutably borrowed further up
     /// the stack, hence the raw pointer (see [`EngineRef`]).
     engine: EnginePtr,
+    /// When the call under way must end ([`limits::bound`]): the load's
+    /// deadline until the first call sets its own.
+    deadline: std::time::Instant,
 }
 
 impl WasiView for HostState {
@@ -128,6 +134,9 @@ fn config() -> Config {
     config.debug_info(cfg!(debug_assertions));
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
     config.concurrency_support(false);
+    // A call's deadline (`crate::limits`) is checked against the engine's
+    // epoch, which `limits::tick` advances.
+    config.epoch_interruption(true);
     config
 }
 
@@ -143,7 +152,11 @@ fn config() -> Config {
 fn engine() -> Result<&'static WasmEngine, LoadModuleError> {
     static ENGINE: OnceLock<Result<WasmEngine, String>> = OnceLock::new();
     ENGINE
-        .get_or_init(|| WasmEngine::new(&config()).map_err(|e| format!("{e:#}")))
+        .get_or_init(|| {
+            let engine = WasmEngine::new(&config()).map_err(|e| format!("{e:#}"))?;
+            limits::tick(&engine);
+            Ok(engine)
+        })
         .as_ref()
         .map_err(|e| {
             LoadModuleError::Internal(format!("failed to create the component engine: {e}"))
@@ -218,17 +231,24 @@ impl ComponentExecutor {
     /// executor's Arora engine, serving the functions `exports` declares.
     fn instantiate(
         &self,
-        exports: &[ExportSymbol],
+        header: &Header,
         component: &Component,
+        limits: GuestLimits,
     ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
+        let exports = &header.exports;
         let state = HostState {
             wasi: WasiCtxBuilder::new().inherit_stdio().build(),
             table: ResourceTable::new(),
+            limits: StoreLimitsBuilder::new().memory_size(limits.memory).build(),
             engine: EnginePtr(self.arora_engine.ok_or_else(|| {
                 LoadModuleError::Internal("ComponentExecutor: set_engine not called".into())
             })?),
+            // Instantiating runs the component's initializer and `functions`.
+            deadline: std::time::Instant::now() + limits::DEFAULT_CALL_BUDGET,
         };
         let mut store = Store::new(component.engine(), state);
+        store.limiter(|state| &mut state.limits);
+        limits::bound(&mut store, |state: &HostState| state.deadline);
 
         let bindings = Module::instantiate(&mut store, component, &self.linker)
             .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
@@ -249,10 +269,12 @@ impl ComponentExecutor {
         }
 
         Ok(Box::new(ComponentModule {
+            name: header.name.clone(),
             bindings,
             store,
             function_ids,
             trapped: None,
+            budget: limits::DEFAULT_CALL_BUDGET,
         }))
     }
 }
@@ -266,24 +288,44 @@ impl Executor for ComponentExecutor {
         "wasm-component"
     }
 
+    fn loads_compiled_modules(&self) -> bool {
+        true
+    }
+
     fn load_module(
         &mut self,
         module_definition: ModuleDefinition,
     ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
-        let component = compile(&module_definition.executable)?;
-        self.instantiate(&module_definition.header.exports, &component)
+        self.load_module_limited(module_definition, GuestLimits::default())
     }
 
     fn load_compiled_module(
         &mut self,
         module: &CompiledModule,
     ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
+        self.load_compiled_module_limited(module, GuestLimits::default())
+    }
+
+    fn load_module_limited(
+        &mut self,
+        module_definition: ModuleDefinition,
+        limits: GuestLimits,
+    ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
+        let component = compile(&module_definition.executable)?;
+        self.instantiate(&module_definition.header, &component, limits)
+    }
+
+    fn load_compiled_module_limited(
+        &mut self,
+        module: &CompiledModule,
+        limits: GuestLimits,
+    ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
         match &module.code {
-            Code::Component(component) => self.instantiate(&module.header.exports, component),
-            Code::Executable(executable) => self.load_module(module_definition_from_parts(
-                module.header.clone(),
-                executable.as_ref().into(),
-            )),
+            Code::Component(component) => self.instantiate(&module.header, component, limits),
+            Code::Executable(executable) => self.load_module_limited(
+                module_definition_from_parts(module.header.clone(), executable.as_ref().into()),
+                limits,
+            ),
             _ => Err(LoadModuleError::Internal(
                 "ComponentExecutor: the module was compiled for another executor".into(),
             )),
@@ -298,6 +340,10 @@ impl Executor for ComponentExecutor {
 }
 
 struct ComponentModule {
+    /// The module's name, which an overrun's error names.
+    name: String,
+    /// The budget of the call under way, which an overrun's error names.
+    budget: std::time::Duration,
     bindings: Module,
     store: Store<HostState>,
     /// Functions the module's header declares; dispatch refuses others.
@@ -309,6 +355,11 @@ struct ComponentModule {
 }
 
 impl AroraModule for ComponentModule {
+    fn set_call_deadline(&mut self, deadline: std::time::Instant, budget: std::time::Duration) {
+        self.store.data_mut().deadline = deadline;
+        self.budget = budget;
+    }
+
     fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
         if !self.function_ids.contains(method_id) {
             return Err(DispatchError::FunctionNotFound { id: *method_id });
@@ -324,7 +375,12 @@ impl AroraModule for ComponentModule {
         {
             Ok(result) => result,
             Err(e) => {
-                let message = format!("dispatch trapped: {e:#?}");
+                let message = match e.downcast_ref::<wasmtime::Trap>() {
+                    Some(wasmtime::Trap::Interrupt) => {
+                        limits::overran(&self.name, method_id, self.budget)
+                    }
+                    _ => format!("dispatch trapped: {e:#?}"),
+                };
                 self.trapped = Some(message.clone());
                 return Err(DispatchError::Trap { message });
             }
