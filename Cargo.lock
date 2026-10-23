@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "13.7.0"
+version = "14.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-naoqi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arora",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-restful"
-version = "4.4.0"
+version = "5.0.0"
 dependencies = [
  "anyhow",
  "arora",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal-ros2"
-version = "5.6.0"
+version = "6.0.0"
 dependencies = [
  "anyhow",
  "arora",
@@ -832,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "arora-web"
-version = "10.4.0"
+version = "11.0.0"
 dependencies = [
  "arora",
  "arora-behavior",

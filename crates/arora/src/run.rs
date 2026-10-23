@@ -22,8 +22,10 @@
 //! ([`arora-bridge-ws`](arora_bridge_ws)): the device serves
 //! `ws://127.0.0.1:9000` and any editor or app on the machine connects — no
 //! accounts. A build with the `studio-bridge` feature connects to Semio Studio
-//! instead (Firebase auth + Zenoh) when the device holds a saved Studio
-//! credential or the run asks for it (`--studio`), as `arora::studio` says.
+//! instead (Firebase auth + Zenoh) when the run asks for it
+//! ([`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio), which a
+//! runner's `--studio` gives), as `arora::studio` says; these entry points do
+//! not ask.
 //! The two are mutually exclusive: each of these entry points wires exactly one bridge.
 //! (Assembling an [`Arora`] directly with the builder can wire several.)
 //!
@@ -77,8 +79,7 @@ use crate::Arora;
     about = "The Arora device runner",
     long_about = "The Arora device runner: a headless device over the fake HAL, serving the \
                   open local bridge. A build with Semio Studio (the studio-bridge feature) \
-                  connects to Studio instead when the device holds a saved Studio credential, \
-                  or with --studio.\n\n\
+                  connects to Studio instead with --studio.\n\n\
                   At start it loads every module directory under its device directory's \
                   modules/ — the device directory is DEVICE_DIR; else <IDENTITY_FILE>_dir \
                   while that deprecated variable is set; else the per-user directory of the \
@@ -144,8 +145,8 @@ pub struct RunnerArgs {
     pub module: Vec<std::path::PathBuf>,
 
     /// What the run asks of Semio Studio: `--studio` connects, registering a
-    /// device that holds no saved Studio credential; `--no-studio` serves the
-    /// open local bridge; neither connects only a device holding one. See
+    /// device that holds no saved Studio credential; neither, or
+    /// `--no-studio`, serves the open local bridge. See
     /// [whether a run connects](crate::studio#whether-a-run-connects).
     #[cfg(feature = "studio-bridge")]
     #[command(flatten)]

@@ -4,6 +4,23 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-10-23
+
+### Changed
+
+- `runner` no longer enables `studio`: the `arora-restful` runner it builds serves
+  the open local bridge and takes no Studio option. A runner that connects to
+  Semio Studio is built with `--features runner,studio`.
+- Requires arora 14: a runner built with `studio` connects to Semio Studio only
+  when the run passes `--studio` (or sets `ARORA_STUDIO=1`), a device holding a
+  saved Studio credential included. A run that does not ask serves the open
+  local bridge, and logs that `--studio` connects with the credential the
+  device holds.
+
+  To migrate a runner that connects with its saved credential, build it with
+  `--features runner,studio` and pass `--studio` on every run that should
+  connect, or set `ARORA_STUDIO=1` in its environment.
+
 ## [4.4.0] - 2026-10-19
 
 ### Added

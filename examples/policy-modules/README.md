@@ -66,8 +66,8 @@ Then, for each demo:
 
    The terminal asks for the owner (your Studio user id, shown in Studio's
    **Register Device** dialog) and a device name, once: the device saves the
-   answers and its Studio credential, and every later run connects and
-   registers with them, `--studio` or not (`--no-studio` declines). An empty
+   answers and its Studio credential, and every later run with `--studio`
+   connects and registers with them (`--no-studio` declines). An empty
    owner serves the local bridge instead of Studio. The model family is the GLB's robot
    name, capitalised (`Microduck`), and the hardware version `mujoco`.
    `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY` and `HARDWARE_VERSION`
@@ -102,9 +102,8 @@ and downloads a voice; libpiper is GPLv3, hence opt-in. Without it, or with
 
 ## Without Studio
 
-Built without `--features studio` — or with it, when the device holds no
-saved Studio credential and the run does not pass `--studio`, or passes
-`--no-studio` — the device serves the open local bridge on
+Built without `--features studio` — or with it, when the run does not pass
+`--studio`, or passes `--no-studio` — the device serves the open local bridge on
 `ws://127.0.0.1:9000`, the standard Arora bridge any local client talks
 to: JSON messages, a `values_changed` push per step with every key that
 changed, and writes as

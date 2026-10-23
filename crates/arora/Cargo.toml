@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "13.7.0"
+version = "14.0.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree core nodes and the Semio backend."
 license = "Apache-2.0"
@@ -48,8 +48,7 @@ native = [
 # headless device runner (Firebase auth, token storage, app-data dir, logging)
 # that registers the device with Studio. Opt-in: a plain arora runtime (e.g.
 # Vizij hosting a local bridge) does not talk to the Semio store at all. A
-# build with it still connects only a device holding a saved Studio
-# credential, or a run passing --studio.
+# build with it still connects only a run passing --studio.
 studio-bridge = [
     "native",
     "dep:arora-studio-bridge-client",

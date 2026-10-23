@@ -1,18 +1,20 @@
 //! arora-restful: runs an HTTP-controlled robot as an Arora device.
 //!
 //! Usage: `arora-restful [--module <DIR>]... [--studio | --no-studio] <CONFIG>
-//! [OVERRIDES]` (`--help` lists the options).
+//! [OVERRIDES]` (`--help` lists the options; `--studio` and `--no-studio` in a
+//! build with the `studio` feature).
 //!
 //! There are no built-in robots: the first argument (or the `CONFIG` env var)
 //! is a path to a `RESTfulRobotConfig` JSON file describing the robot's HTTP
 //! API (see `configs/hackerbot.json`). An optional second JSON file overrides
 //! the selected config.
 //!
-//! The device serves the open local bridge, and connects to Semio Studio
-//! instead when it holds a saved Studio credential or the run passes
-//! `--studio` (`ARORA_STUDIO=1`), which registers a device holding none;
-//! `--no-studio` keeps it on the local bridge. Its identity, registration and
-//! credential are arora's (`arora::studio`), configured from the environment.
+//! The device serves the open local bridge. Built with the `studio` feature, it
+//! connects to Semio Studio instead when the run passes `--studio`
+//! (`ARORA_STUDIO=1`), which registers a device holding no saved Studio
+//! credential; `--no-studio` keeps it on the local bridge. Its identity,
+//! registration and credential are arora's (`arora::studio`), configured from
+//! the environment.
 //!
 //! The device carries the modules its device directory holds under `modules/`,
 //! then each `--module` directory, as the `arora` runner does
@@ -120,8 +122,7 @@ mod tests {
     }
 
     /// `--studio` and `--no-studio` parse into the run's Studio choice,
-    /// anywhere on the command line; neither leaves it to the saved
-    /// credential.
+    /// anywhere on the command line; neither serves the open local bridge.
     #[cfg(feature = "studio")]
     #[test]
     fn studio_and_no_studio_give_the_run_s_studio_choice() {
@@ -134,10 +135,7 @@ mod tests {
                 .choice()
                 .expect("ARORA_STUDIO is unset or a boolean")
         };
-        assert_eq!(
-            choice(&["arora-restful", "hackerbot.json"]),
-            Choice::IfSaved
-        );
+        assert_eq!(choice(&["arora-restful", "hackerbot.json"]), Choice::Local);
         assert_eq!(
             choice(&["arora-restful", "--studio", "hackerbot.json"]),
             Choice::Studio
@@ -146,5 +144,15 @@ mod tests {
             choice(&["arora-restful", "hackerbot.json", "--no-studio"]),
             Choice::Local
         );
+    }
+
+    /// Built without the `studio` feature, the runner takes no Studio option:
+    /// `--studio` is refused, not ignored.
+    #[cfg(not(feature = "studio"))]
+    #[test]
+    fn studio_is_refused_without_the_studio_feature() {
+        let error = Cli::try_parse_from(["arora-restful", "--studio", "hackerbot.json"])
+            .expect_err("--studio is refused");
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 }
