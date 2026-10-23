@@ -38,6 +38,12 @@ struct Cli {
     overrides: Option<String>,
     #[command(flatten)]
     runner: RunnerArgs,
+    /// `--studio` and `--no-studio`, under this crate's own `studio` feature:
+    /// arora's `studio-bridge` may be enabled by another runner in the same
+    /// build, and this one must still refuse `--studio` without its own.
+    #[cfg(feature = "studio")]
+    #[command(flatten)]
+    studio: arora::studio::StudioArgs,
 }
 
 fn load_config(selector: &str) -> ROS2RobotConfig {
@@ -77,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
         .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
     #[cfg(feature = "studio")]
-    let builder = builder.with_studio(cli.runner.studio.choice()?);
+    let builder = builder.with_studio(cli.studio.choice()?);
     // One runtime carries everything: the HAL's ROS tasks spawn on it at
     // construction, and arora drives the device on it.
     let hal = Ros2Hal::new(config)
@@ -145,7 +151,6 @@ mod tests {
         let choice = |args: &[&str]| {
             Cli::try_parse_from(args.iter().copied())
                 .expect("the command line parses")
-                .runner
                 .studio
                 .choice()
                 .expect("ARORA_STUDIO is unset or a boolean")

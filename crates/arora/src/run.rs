@@ -112,7 +112,8 @@ pub struct DeviceCli {
     #[arg(long, value_name = "DIR", help = MODULE_HELP)]
     pub module: Vec<std::path::PathBuf>,
 
-    /// `--studio` and `--no-studio`, as [`RunnerArgs::studio`] takes them.
+    /// `--studio` and `--no-studio`, as a runner flattens
+    /// [`StudioArgs`](crate::studio::StudioArgs) for them.
     #[cfg(feature = "studio-bridge")]
     #[command(flatten)]
     pub studio: crate::studio::StudioArgs,
@@ -125,13 +126,18 @@ const MODULE_HELP: &str = "A module directory to load besides the device directo
                            (executor native), and optionally records/. Repeatable.";
 
 /// The options every device runner takes besides its own, as a clap helper to
-/// `#[command(flatten)]` into the runner's command line:
+/// `#[command(flatten)]` into the runner's command line: `--module <DIR>` (or
+/// `--module=<DIR>`), repeatable. Load the directories it names, with the
+/// device directory's, through
+/// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs).
 ///
-/// - `--module <DIR>` (or `--module=<DIR>`), repeatable. Load the directories
-///   it names, with the device directory's, through
-///   [`with_module_dirs`](crate::AroraBuilder::with_module_dirs).
-/// - In a `studio-bridge` build, `--studio` and `--no-studio` (the `studio`
-///   field). Hand their `StudioArgs::choice` to `AroraBuilder::with_studio`.
+/// A runner that connects to Semio Studio also flattens
+/// [`StudioArgs`](crate::studio::StudioArgs), under a feature of its own that
+/// enables arora's `studio-bridge`, and hands its `choice()` to
+/// `AroraBuilder::with_studio`. The Studio options are not in this struct
+/// because a feature of arora is enabled for every runner a build links:
+/// a runner built without Studio, beside one built with it, would then take
+/// `--studio` and ignore it.
 ///
 /// The robot runners of `arora-hal-ros2`, `arora-hal-restful` and
 /// `arora-hal-naoqi` take it; the `arora` binary's [`DeviceCli`] takes the
@@ -143,14 +149,6 @@ pub struct RunnerArgs {
     /// the order given.
     #[arg(long, value_name = "DIR", help = MODULE_HELP)]
     pub module: Vec<std::path::PathBuf>,
-
-    /// What the run asks of Semio Studio: `--studio` connects, registering a
-    /// device that holds no saved Studio credential; neither, or
-    /// `--no-studio`, serves the open local bridge. See
-    /// [whether a run connects](crate::studio#whether-a-run-connects).
-    #[cfg(feature = "studio-bridge")]
-    #[command(flatten)]
-    pub studio: crate::studio::StudioArgs,
 }
 
 #[cfg(feature = "native")]

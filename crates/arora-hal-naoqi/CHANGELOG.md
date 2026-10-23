@@ -11,6 +11,9 @@ All notable changes to `arora-hal-naoqi`. The format follows
 - `runner` no longer enables `studio`: the `arora-naoqi` runner it builds serves
   the open local bridge and takes no Studio option. A runner that connects to
   Semio Studio is built with `--features runner,studio`.
+- The `arora-naoqi` runner takes `--studio` and `--no-studio` only under this
+  crate's `studio` feature, whichever other crate a build enables arora's
+  `studio-bridge` for: without `studio` it refuses `--studio`.
 - Requires arora 16: a runner built with `studio` connects to Semio Studio only
   when the run passes `--studio` (or sets `ARORA_STUDIO=1`), a device holding a
   saved Studio credential included. A run that does not ask serves the open

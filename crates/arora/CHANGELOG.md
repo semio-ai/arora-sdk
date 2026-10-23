@@ -37,6 +37,12 @@ All notable changes to `arora`. The format follows
 - `studio::Choice::IfSaved`, connecting on a saved credential alone. Use
   `Choice::Studio` to connect, or `Choice::Local`, the default, to serve the
   local bridge.
+- `RunnerArgs::studio`. A runner that connects to Semio Studio flattens
+  `studio::StudioArgs` itself, under a feature of its own that enables
+  arora's `studio-bridge`: an arora feature is enabled for every runner a
+  build links, so a runner built without Studio beside one built with it
+  would otherwise take `--studio` and ignore it. `RunnerArgs` carries
+  `--module` alone.
 
 ## [15.0.0] - 2026-10-23
 

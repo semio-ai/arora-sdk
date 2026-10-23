@@ -91,9 +91,9 @@ modules, its device directory's and those its command line names, load with
 `AroraBuilder::with_module_dirs(&device_dir::from_env()?, &dirs)`, records
 included, as the `arora` binary and the robot runners load theirs. A runner
 with a command line of its own flattens `RunnerArgs` into it for `--module`,
-and for `--studio` and `--no-studio` in a `studio-bridge` build, whose
-`studio.choice()` it hands to `AroraBuilder::with_studio`, as the robot runners
-do. The records join the registry `with_registry` gives
+and, under a feature of its own enabling `studio-bridge`, `studio::StudioArgs`
+for `--studio` and `--no-studio`, whose `choice()` it hands to
+`AroraBuilder::with_studio`, as the robot runners do. The records join the registry `with_registry` gives
 when the device is built, whichever of the two calls comes first.
 
 On wasm, build the library with `--no-default-features`: the `native` feature
