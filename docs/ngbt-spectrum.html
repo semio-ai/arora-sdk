@@ -1000,7 +1000,7 @@ nav.tabs.picker[data-mode="compare"] .pick-row button[aria-pressed="true"] { bac
   <header class="top">
     <div>
       <h1>The NGBT spectrum <svg class="flag" viewBox="0 0 60 40" role="img" aria-label="Intersex-inclusive progress pride flag"><rect y="0.000" width="60" height="6.717" fill="#E40303"/><rect y="6.667" width="60" height="6.717" fill="#FF8C00"/><rect y="13.333" width="60" height="6.717" fill="#FFED00"/><rect y="20.000" width="60" height="6.717" fill="#008026"/><rect y="26.667" width="60" height="6.717" fill="#004CFF"/><rect y="33.333" width="60" height="6.717" fill="#732982"/><polygon points="0,0 12,0 32,20 12,40 0,40" fill="#000000"/><polygon points="0,0 8.5,0 28.5,20 8.5,40 0,40" fill="#784F17"/><polygon points="0,0 5,0 25,20 5,40 0,40" fill="#5BCEFA"/><polygon points="0,0 1.5,0 21.5,20 1.5,40 0,40" fill="#F5A9B8"/><polygon points="0,0 -2,0 18,20 -2,40 0,40" fill="#FFFFFF"/><polygon points="0,0 -5.5,0 14.5,20 -5.5,40 0,40" fill="#FFD800"/><circle cx="5" cy="20" r="3.4" fill="none" stroke="#7902AA" stroke-width="1.3"/></svg></h1>
-      <p class="lede">Nine designs for running node graphs and behavior trees on one device, simulated side by side; #396, detached nodes, is the one chosen. Four are shown: #407 (#396 as main runs it), #409 (#407 with every node a full tree node), #404 and #405. The Designs menu at the top right shows the others. Pick a Left and a Right design to tick the same example under both, side by side; the meters count what each does. The overview’s benchmarks run the same workloads in three harnesses (this page’s model, Rust natively, and Rust compiled to wasm in this browser), among them two realistic ones: a robot face, and a robot in conversation.</p>
+      <p class="lede">Nine designs for running node graphs and behavior trees on one device, simulated side by side; #396, detached nodes, is the one chosen. Five are shown: #407 (#396 as main runs it), #409 (#407 with every node a full tree node), #404, #405 and vizij-rs#257 (the tree inside the node graph). The Designs menu at the top right shows the others. Pick a Left and a Right design to tick the same example under both, side by side; the meters count what each does. The overview’s benchmarks run the same workloads in three harnesses (this page’s model, Rust natively, and Rust compiled to wasm in this browser), among them two realistic ones: a robot face, and a robot in conversation.</p>
     </div>
     <div class="transport" role="group" aria-label="Clock">
       <button id="play" class="primary" type="button">Pause</button>
@@ -3213,8 +3213,9 @@ const MACRO_GROUPING_NAMES = { value: "Per value", group: "One group" };
 // page and dims the matching table rows. It is kept per viewer as the list of hidden
 // designs, so a design added later starts shown.
 const SHOWN_KEY = "ngbt-shown-designs";
-// The designs under review: main as #407 runs it, its full-node variant, and #404 and #405.
-const DEFAULT_SHOWN = ["compute", "compute-full", "inc", "macro"];
+// The designs under review: main as #407 runs it, its full-node variant, #404 and #405,
+// and the tree inside the node graph (vizij-rs#257), the one design the other way round.
+const DEFAULT_SHOWN = ["compute", "compute-full", "inc", "macro", "control"];
 const SHOWN = new Set(DEFAULT_SHOWN);
 try { const shown = JSON.parse(localStorage.getItem(SHOWN_KEY) || "null"); if (Array.isArray(shown)) { SHOWN.clear(); shown.filter((id) => DESIGNS.some((d) => d.id === id)).forEach((id) => SHOWN.add(id)); } } catch (_) {}
 let SHOWN_VIEWS = [];
@@ -3244,7 +3245,7 @@ function designMenu() {
       h("button", { type: "button", onclick: () => setShown(DESIGNS.map((d) => d.id)) }, "All"),
       h("button", { type: "button", onclick: () => setShown([]) }, "None")),
     labels,
-    h("p", { class: "menu-note" }, "Default: #407 (#396 as main runs it), #409 (#407 with every node a full tree node), #404 and #405.")));
+    h("p", { class: "menu-note" }, "Default: #407 (#396 as main runs it), #409 (#407 with every node a full tree node), #404, #405 and vizij-rs#257 (the tree inside the node graph).")));
   document.addEventListener("click", (ev) => { if (details.open && !details.contains(ev.target)) details.open = false; });
   DESIGN_MENU = { boxes, labels, summary };
   syncDesignMenu();
