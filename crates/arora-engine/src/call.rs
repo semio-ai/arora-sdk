@@ -69,6 +69,7 @@ impl From<DispatchError> for CallError {
             DispatchError::Trap { message } => CallError::Trap { message },
             DispatchError::Internal { message } => CallError::Internal { message },
             DispatchError::Guest { message } => CallError::Guest { message },
+            DispatchError::Argument { message } => CallError::Generic { message },
         }
     }
 }

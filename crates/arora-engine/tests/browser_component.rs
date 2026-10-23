@@ -33,6 +33,17 @@ const COMPONENT: &[u8] = include_bytes!(env!(
 
 /// Function ids implemented by modules/test-rust-component/src/lib.rs.
 const ECHO_FN: &str = "dd6a4f61-9f88-4376-9d50-1e92e95a73aa";
+
+/// The parameters a function of the header declares: `echo` takes a `u64`
+/// under its own id, so a call to it echoes back as that function's result
+/// (the re-entry tests read it so); the others take none.
+fn parameters(function: &str) -> &'static str {
+    if function == ECHO_FN {
+        "[{ id: dd6a4f61-9f88-4376-9d50-1e92e95a73aa, name: value, type: { kind: scalar, id: 00000000-0000-0000-0000-000000000009 } }]"
+    } else {
+        "[]"
+    }
+}
 const CALL_INDIRECT_FN: &str = "1bd1cf09-e94c-4c14-b653-32bd96157c41";
 const WASI_FN: &str = "0455052e-bb89-41ec-a963-2bbe82ea583b";
 const TRAP_FN: &str = "42681638-6fe3-4004-92fb-bb048dc3bbab";
@@ -70,8 +81,9 @@ fn header_with(executor: &str, functions: &[(&str, &str)]) -> Header {
         .iter()
         .map(|(id, name)| {
             format!(
-                "  - type: function\n    id: {id}\n    name: {name}\n    parameters: []\n    \
-                 ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}\n"
+                "  - type: function\n    id: {id}\n    name: {name}\n    parameters: {}\n    \
+                 ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}\n",
+                parameters(id),
             )
         })
         .collect();

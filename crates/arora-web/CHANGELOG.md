@@ -4,6 +4,15 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** on arora 14 and arora-engine 6; arora-web's Rust interface
+  names arora's types (`LocalCaller`). A call to a guest module whose
+  arguments do not match the parameters its header declares fails, naming
+  the parameter, and reaches no guest.
+
 ## [10.4.0] - 2026-10-23
 
 ### Added

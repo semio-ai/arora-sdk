@@ -83,6 +83,26 @@ or from any module via `arora_dispatch_indirect`.
 > [Behavior Trees](https://github.com/semio-ai/arora-sdk) typically use this mechanism
 > to wrap the various node functions into uniform tick functions.
 
+### Arguments checked against the header
+
+Before a call reaches a guest module, the engine checks its arguments against
+the parameters the module's header declares for the function: an argument
+naming a parameter the function does not declare, or carrying a value not of
+its parameter's type, fails the call with `DispatchError::Argument`
+(`CallError::Generic` through `arora_call`), and the guest never reads it. This
+holds for every guest, whatever built it, and for calls between guests, which
+reach the engine's `dispatch` too. A guest's own decoding stays its own for what
+the engine leaves to it:
+
+- an argument that is not an Arora Buffer, or not a structure;
+- a parameter the call leaves out, which a guest takes as absent;
+- the fields of a record-typed argument, which is checked by its record's id,
+  the one thing a header names of it.
+
+A present optional argument may be passed as an option or as its element, and
+an array as its typed array or as a generic array whose elements are each of
+the element type: every guest reads both forms.
+
 ### Call Mechanism
 
 When a call is performed, its description is serialized into a raw buffer,

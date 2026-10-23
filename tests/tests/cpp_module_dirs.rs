@@ -221,6 +221,75 @@ fn a_cpp_component_refuses_an_argument_that_is_not_an_arora_buffer() {
     );
 }
 
+/// A C++ guest reads an argument as its declared type whatever it carries:
+/// the engine refuses one not of its parameter's type, or naming a parameter
+/// the function does not declare, before the guest reads it, and the module
+/// answers next.
+#[test]
+fn a_cpp_component_is_never_given_an_argument_of_another_type() {
+    use arora_engine::call::CallBridge;
+    let (mut engine, module) = test_cpp_engine();
+    let field = |i: &str, value: Value| StructureField {
+        id: id(i),
+        value: Box::new(value),
+    };
+    let test_2_args = id("b213a552-77ad-465a-a26d-352e8eccfd63");
+    let test_optional = id("a24fd5ab-baf8-4f44-af41-053a54b3fa81");
+    const A: &str = "55dbec70-1c3a-433e-a6e6-27446b7f065e";
+    const B: &str = "abf9ca4e-e03f-431a-a32b-4911f809c399";
+    const OPTIONAL: &str = "b3ec8dd2-2df1-43ae-bf2d-0a567c998243";
+    for (function, args, named) in [
+        (
+            test_2_args,
+            vec![field(A, Value::String("x".into())), field(B, Value::U32(1))],
+            "'a'",
+        ),
+        (
+            test_2_args,
+            vec![field(A, Value::F64(1.0)), field(B, Value::U32(1))],
+            "'a'",
+        ),
+        (
+            test_optional,
+            vec![field(OPTIONAL, Value::String("x".into()))],
+            "'a'",
+        ),
+        (
+            test_optional,
+            vec![field(
+                OPTIONAL,
+                Value::Option(Some(Box::new(Value::String("x".into())))),
+            )],
+            "'a'",
+        ),
+        (
+            test_optional,
+            vec![field(B, Value::U32(1))],
+            "has no parameter",
+        ),
+    ] {
+        let refused = engine
+            .arora_call(Call {
+                module_id: Some(module),
+                id: function,
+                args,
+            })
+            .unwrap_err();
+        assert!(
+            matches!(&refused, arora_engine::call::CallError::Generic { message } if message.contains(named)),
+            "{refused:?}"
+        );
+    }
+    let result = engine
+        .arora_call(Call {
+            module_id: Some(module),
+            id: test_optional,
+            args: vec![field(OPTIONAL, Value::U32(41))],
+        })
+        .expect("a call after the refusals");
+    assert_eq!(result.ret, Value::Option(Some(Box::new(Value::U32(42)))));
+}
+
 /// The Arora Buffer of `value`, cut `by` bytes short, its size prefix counting
 /// what is left: a prefix that holds, and a value that does not.
 fn cut_short(value: &Value, by: usize) -> Vec<u8> {

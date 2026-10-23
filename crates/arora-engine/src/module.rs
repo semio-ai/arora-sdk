@@ -27,6 +27,12 @@ pub enum DispatchError {
     Guest {
         message: String,
     },
+    /// The call's arguments do not match the parameters the guest module's
+    /// header declares for the function: one it does not declare, or a value
+    /// not of its parameter's type. The call reached no guest.
+    Argument {
+        message: String,
+    },
 }
 
 /// The message of a guest's error buffer — what a guest returns for an error

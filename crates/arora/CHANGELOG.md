@@ -4,6 +4,17 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [14.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** on arora-engine 6, whose types arora re-exports
+  (`CompiledModule`, `HostModule`, `ModuleBuilder`). A call to a guest module
+  whose arguments do not match the parameters its header declares — a
+  parameter the function does not declare, or a value not of its parameter's
+  type — fails with `CallError::Generic`, from a remote, the behavior tree or
+  another guest alike, and reaches no guest.
+
 ## [13.7.0] - 2026-10-23
 
 ### Added
