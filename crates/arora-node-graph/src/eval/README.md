@@ -1,57 +1,34 @@
-# Evaluation Module Guide
+# The per-node code
 
-This directory contains the modules that implement the `arora-node-graph` evaluation pipeline. The goal is to keep the public entry points (`Context`, `evaluate_all`) concise while domain-specific logic lives in focused submodules.
+This directory holds what each node kind computes: the code the module's functions ([`functions`](../functions.rs)) run for a call, over the node's inputs, parameters, clock and state.
 
----
-
-## Module Summary
+## Files
 
 | File | Responsibility |
 |------|----------------|
-| `mod.rs` | Re-exports the key types (`Context`, `StagedInput`, `evaluate_all`) and wires submodules together. |
-| `graph_runtime.rs` | Maintains per-node state, staged inputs, output caches, and frame timing (`t`/`dt`). |
-| `value_layout.rs` | Flattens structured `Value` instances into contiguous numeric buffers, supports reconstruction, and handles scalar broadcasting. |
-| `shape_helpers.rs` | Enforces declared output shapes and performs numeric coercions/null-of-shape fills. |
-| `numeric.rs` / `variadic.rs` | Shared math utilities for unary/binary/variadic operations. |
-| `eval_node.rs` | Dispatches every `NodeType` implementation, combining helpers from the other modules. |
-| `urdfik.rs` | Optional robotics helpers gated behind the `urdf_ik` feature (URDF parsing, IK/FK solvers). |
-| `tests.rs` | Behavioural coverage for evaluator paths (selectors, staging, blends, URDF flows). |
-| `blend_tests.rs` | Focused regression tests for blend nodes. |
+| `eval_node.rs` | Dispatches a `Node` (its id, kind and `Params`) to its kind's code, over its input and output slots of `Value`s. |
+| `context.rs` | One call's `Context`: the clock (`t`, `dt`), the node's state (springs, dampers, slews, URDF chains, task runs, spawns) and the runs it requests. |
+| `plan.rs` | A node's input and output port layouts, from its kind's signature in the editor registry ([`schema`](../schema.rs)). |
+| `value_layout.rs` | Flattens a value whose leaves are numbers into a buffer, by its own form, and rebuilds it. |
+| `numeric.rs` / `variadic.rs` | Unary, binary and variadic arithmetic over flattened values, and number readings. |
+| `noise.rs` | The noise nodes' generators. |
+| `shape_helpers.rs` | Applies an edge's selector, and Vizij's declared shapes: inference, matching and numeric coercion. |
+| `vizij.rs` | What a call does for Vizij's graph format: an `input` node fitting its value to its declared shape, the check of declared output shapes, and a keyed batch's writes. |
+| `urdfik.rs` | The URDF IK/FK helpers, behind the `urdf_ik` feature. |
 
----
+## A call
 
-## Evaluation Flow
+1. The module decodes the call's static arguments into the node's `Params`, and lays out its inputs.
+2. It sets the `Context`'s clock and the node's state, then `eval_node_inner` runs the node's code, which writes its outputs.
+3. The module checks the node's declared output shapes, returns its outputs, and writes its state back.
 
-1. **Staging** – Hosts call `Context::advance_epoch` and `Context::set_input` to queue inputs for the upcoming frame.
-2. **Topology** – `evaluate_all` computes a topological ordering, clears cached outputs, and retains node state for nodes still present in the spec.
-3. **Per-node evaluation** – For each node ID, `eval_node.rs`:
-   - Reads inputs via `graph_runtime.rs` staging helpers.
-   - Uses `value_layout.rs` to flatten numeric content when needed.
-   - Leverages `numeric.rs` / `variadic.rs` for math-heavy nodes.
-   - Applies selectors and enforces output shapes through `shape_helpers.rs`.
-   - Records `WriteOp`s for sink nodes (`Output`).
-4. **Result aggregation** – Outputs and write batches are returned to the caller; persistent state remains in `Context`.
+Staging inputs, ordering the nodes and writing the graph's outputs are the tree's: `TreeRuntime` stages inputs in its store, and the behavior tree runs each node when what it outputs is read.
 
----
+## Adding a node kind
 
-## Development Notes
+1. Extend `NodeType` in `types.rs`, and give it its signature in the editor registry (`schema.rs`).
+2. Write its code in `eval_node.rs`, with helpers to keep the dispatch short.
+3. A node that keeps state between calls keeps it in the `Context` (see `Spring`, `Damp`, `Slew`).
+4. Test it on the tree (`tree_tests`).
 
-- Keep node-specific logic inside `eval_node.rs`. Shared helpers should live in `numeric.rs`, `variadic.rs`, or dedicated modules to avoid duplication.
-- When adding new node types:
-  1. Extend `NodeType` in `types.rs`.
-  2. Implement evaluation logic in `eval_node.rs` (create helper functions to keep the main match concise).
-  3. Update tests to cover success and failure paths (shape enforcement, selector errors, etc.).
-- If a node requires persistent state, use the state helpers in `graph_runtime.rs` (see Spring/Damp/Slew implementations).
-- URDF-specific code must stay behind the `urdf_ik` feature flag to keep the core dependency light.
-
----
-
-## Testing
-
-- Run `cargo test -p arora-node-graph` to cover all modules, including the evaluation tests here.
-- The `blend_tests.rs` file complements `tests.rs` with additional coverage for blending operations.
-- When introducing new nodes or selector behaviour, add dedicated tests to keep regressions visible.
-
----
-
-Need to touch this layout? Keep the table above up to date so contributors can navigate the module quickly. 🧭
+URDF code stays behind the `urdf_ik` feature, to keep the default dependencies light.
