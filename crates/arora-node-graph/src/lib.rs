@@ -1,7 +1,9 @@
-//! Core graph evaluation runtime for Vizij.
+//! Node graphs on Arora's behavior tree.
 //!
-//! This crate defines the canonical graph schema, node registry metadata, topology helpers,
-//! and evaluation runtime used by wasm bindings and the Arora behavior interpreter.
+//! This crate defines the graph schema, the node registry metadata and topology helpers, the
+//! node vocabulary as the functions of an Arora module ([`functions`]), the importer from a graph
+//! to a behavior tree ([`import`]), and [`TreeRuntime`](tree_runtime::TreeRuntime), which runs a
+//! graph on the tree.
 
 pub mod eval;
 pub mod functions;
@@ -18,9 +20,7 @@ mod fixtures;
 mod tree_tests;
 
 pub use eval::{
-    eval_node, evaluate_all, evaluate_all_cached, evaluate_all_with_functions,
-    evaluate_writes_with_functions, GraphRuntime, NodeFunction, NodeFunctionRegistry,
-    NodeFunctions, PortValue, StagedInput,
+    GraphRuntime, NodeFunction, NodeFunctionRegistry, NodeFunctions, PortValue, StagedInput,
 };
 pub use schema::registry;
 pub use topo::topo_order;

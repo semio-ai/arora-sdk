@@ -1,15 +1,7 @@
-//! The tree's counterparts of the reference evaluator's structural tests:
-//! its topological order (`topo`), its incremental plan (`eval::plan`) and
-//! its selections (`eval::shape_helpers`). The tree has no plan to extend or
-//! shrink: a changed graph is loaded again, and each node it keeps keeps its
-//! state. What those tests hold of a graph's evaluation, these hold of the
-//! tree's; a test whose reference counterpart is about the plan itself is
-//! named for what it holds of the tree:
-//!
-//! | Reference test | Here |
-//! |---|---|
-//! | `plan::a_crossing_edge_is_refused_and_the_plan_kept` | `a_component_reading_a_kept_node_reads_its_value` |
-//! | `shape_helpers::selection_takes_the_declared_shape_of_the_part` | `an_edge_selects_a_part_of_its_source` |
+//! The structural tests: a graph's topological order (`topo`), how a
+//! changed graph keeps what it shares with the last one, and its selections
+//! (`eval::shape_helpers`). A changed graph is loaded again, and each node it
+//! keeps keeps its state.
 use arora_shape::value as vocab;
 use arora_shape::{TypedPath, Value};
 use hashbrown::HashMap;

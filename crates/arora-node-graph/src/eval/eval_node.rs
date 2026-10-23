@@ -2,7 +2,7 @@
 
 use crate::eval::graph_runtime::{GraphRuntime, StagedInput};
 use crate::eval::node_function::NodeFunctions;
-use crate::eval::plan::{PlanCache, PortLayout};
+use crate::eval::plan::PortLayout;
 use crate::eval::variadic::collect_operand_ports;
 use crate::types::{NodeParams, NodeSpec, NodeType, RoundMode};
 use arora_shape::value as vocab;
@@ -13,8 +13,7 @@ use uuid::Uuid;
 use super::noise;
 use super::numeric::{as_bool, as_float, as_vector, binary_numeric, unary_numeric};
 use super::shape_helpers::{
-    coerce_numeric_to_shape, is_numeric_like, null_of_shape_numeric, project_by_selector,
-    value_matches_shape,
+    coerce_numeric_to_shape, is_numeric_like, null_of_shape_numeric, value_matches_shape,
 };
 #[cfg(feature = "urdf_ik")]
 use super::urdfik::{
@@ -179,22 +178,8 @@ fn single_output(outputs: &mut OutputSlots, value: Value) -> Result<(), String> 
     keyed_output(outputs, "out", value)
 }
 
-/// Evaluate a single node, updating `rt` with new outputs and queued writes.
-///
-/// This is the host-agnostic entry point; nodes that require a [`NodeFunctions`] host
-/// (currently only [`NodeType::ExternalFunction`]) will error when evaluated through this path.
-/// Use [`eval_node_inner`] with `Some(functions)` to enable them.
-pub fn eval_node(
-    rt: &mut GraphRuntime,
-    spec: &NodeSpec,
-    inputs: &InputSlots,
-    outputs: &mut OutputSlots,
-) -> Result<(), String> {
-    eval_node_inner(rt, spec, inputs, outputs, None)
-}
-
 /// Evaluate a single node, optionally threading a [`NodeFunctions`] host through to
-/// `ExternalFunction` nodes.
+/// `ExternalFunction` nodes, which error without one.
 pub fn eval_node_inner(
     rt: &mut GraphRuntime,
     spec: &NodeSpec,
@@ -2625,101 +2610,4 @@ fn enforce_output_shapes_slots(
     }
 
     Ok(())
-}
-
-/// Materialize output map for external consumers/tests.
-pub fn materialize_outputs(layout: &PortLayout, slots: &[PortValue]) -> HashMap<String, PortValue> {
-    let mut map = HashMap::with_capacity(layout.slots.len());
-    for (idx, name) in layout.slots.iter().enumerate() {
-        if let Some(port) = slots.get(idx) {
-            map.insert(name.clone(), port.clone());
-        }
-    }
-    map
-}
-
-/// Gather the most recent outputs for each of the node's input connections, applying selectors.
-pub fn read_inputs(
-    rt: &GraphRuntime,
-    node_idx: usize,
-    plan: &PlanCache,
-) -> Result<(Vec<PortValue>, Vec<bool>), String> {
-    let layout = plan
-        .layouts
-        .get(node_idx)
-        .ok_or_else(|| format!("missing layout for node index {}", node_idx))?;
-    let bindings = plan
-        .input_bindings
-        .get(node_idx)
-        .ok_or_else(|| format!("missing input bindings for node index {}", node_idx))?;
-
-    let mut resolved = vec![PortValue::default(); layout.inputs.slots.len()];
-    let mut present = vec![false; layout.inputs.slots.len()];
-
-    for (slot_idx, binding) in bindings.iter().enumerate() {
-        let fallback = || {
-            binding
-                .default
-                .clone()
-                .unwrap_or_else(|| PortValue::new(vocab::float(0.0)))
-        };
-        let source_port = binding.source.as_ref().and_then(|src| {
-            rt.outputs_vec
-                .get(src.node_idx)
-                .and_then(|vec| vec.get(src.slot))
-        });
-        let has_value = binding.source.is_some() || binding.default.is_some();
-
-        // A selector projects the source's port in place: only the selected
-        // part is cloned, however large the source value.
-        let selected = binding
-            .source
-            .as_ref()
-            .and_then(|src| Some((src, src.selector.as_ref()?)));
-        let port = match (selected, source_port) {
-            (Some((src, selector)), source) => {
-                let fallback_port;
-                let base = match source {
-                    Some(port) => port,
-                    None => {
-                        fallback_port = fallback();
-                        &fallback_port
-                    }
-                };
-                let source_label = plan
-                    .layouts
-                    .get(src.node_idx)
-                    .and_then(|l| l.outputs.slot_name(src.slot))
-                    .unwrap_or("<slot>");
-                let source_port_id = src.output_name.as_str();
-                let input_label = layout.inputs.slot_name(slot_idx).unwrap_or("<slot>");
-                let (value, shape_id) = project_by_selector(
-                    &base.value,
-                    Some(&base.shape.id),
-                    selector,
-                )
-                .map_err(|err| {
-                    format!(
-                        "selector {:?} on edge [node_idx {}] {}:{} -> {} failed: {}",
-                        selector, src.node_idx, source_label, source_port_id, input_label, err
-                    )
-                })?;
-                match shape_id {
-                    Some(id) => PortValue::with_shape(value, Shape::new(id)),
-                    None => PortValue::new(value),
-                }
-            }
-            (None, Some(port)) => port.clone(),
-            (None, None) => fallback(),
-        };
-
-        if let Some(slot) = resolved.get_mut(slot_idx) {
-            *slot = port;
-        }
-        if let Some(slot_present) = present.get_mut(slot_idx) {
-            *slot_present = has_value;
-        }
-    }
-
-    Ok((resolved, present))
 }

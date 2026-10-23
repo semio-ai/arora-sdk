@@ -1,11 +1,14 @@
-//! Every fixture evaluated on both engines, over the same inputs and clock:
-//! the reference evaluator and the tree compute the same value on every port
-//! of every node, and make the same writes, at every tick.
+//! Every fixture evaluated on the tree two ways over the same inputs and
+//! clock, and the two compared at every tick:
+//!
+//! - evaluating what the outputs read makes the writes evaluating every node
+//!   makes;
+//! - a parameter edited in place computes what a tree loading the edited
+//!   spec computes, on every port of every node.
 use arora_shape::{TypedPath, Value};
 
-use crate::tree_runtime::TreeRuntime;
+use crate::tree_runtime::{Evaluation, TreeRuntime};
 use crate::types::GraphSpec;
-use crate::{evaluate_all, GraphRuntime};
 
 /// The fixture `name`'s graph, and its input nodes' paths with the value
 /// each reads when nothing is staged.
@@ -79,8 +82,8 @@ fn close(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// Whether `spec` has a node evaluating a URDF, which fails on both engines
-/// without the `urdf_ik` feature.
+/// Whether `spec` has a node evaluating a URDF, which fails without the
+/// `urdf_ik` feature.
 fn needs_urdf(spec: &GraphSpec) -> bool {
     use crate::types::NodeType;
     spec.nodes.iter().any(|node| {
@@ -91,57 +94,33 @@ fn needs_urdf(spec: &GraphSpec) -> bool {
     })
 }
 
-/// One tick of `reference` evaluating `reference_spec` and `tree` its
-/// counterpart `tree_spec`, over the same inputs and clock, and the two
-/// compared port by port and write by write. Returns whether the tick
-/// evaluates: an IK target out of a chain's reach fails it on both.
-fn tick_both(
-    name: &str,
-    tick: usize,
+/// What one tick of `rt` evaluating `spec` gives, over the fixture's inputs
+/// at `tick`: `None` when the tick fails, as an IK target out of a chain's
+/// reach does.
+fn tick(
+    rt: &mut TreeRuntime,
+    spec: &GraphSpec,
     inputs: &[(String, Option<Value>)],
-    (reference, reference_spec): (&mut GraphRuntime, &GraphSpec),
-    (tree, tree_spec): (&mut TreeRuntime, &GraphSpec),
-) -> bool {
-    reference.dt = 1.0 / 60.0;
-    tree.dt = reference.dt;
-    reference.t += reference.dt;
-    tree.t += tree.dt;
+    tick: usize,
+) -> Option<()> {
+    rt.dt = 1.0 / 60.0;
+    rt.t += rt.dt;
     for (i, (input, default)) in inputs.iter().enumerate() {
         let path = TypedPath::parse(input).expect("a path");
-        reference.set_input(path.clone(), staged(default, i, tick), None);
-        tree.set_input(path, staged(default, i, tick), None);
+        rt.set_input(path, staged(default, i, tick), None);
     }
-    let expected = evaluate_all(reference, reference_spec);
-    let actual = tree.evaluate_spec(tree_spec);
-    match (&expected, &actual) {
-        (Ok(()), Ok(())) => {}
-        (Err(_), Err(_)) => return false,
-        _ => panic!("{name}, tick {tick}: the reference gives {expected:?}, the tree {actual:?}"),
-    }
-    for (node, ports) in &reference.outputs {
-        for (port, value) in ports {
-            let got = tree.outputs.get(node).and_then(|ports| ports.get(port));
-            let got =
-                got.unwrap_or_else(|| panic!("{name}, tick {tick}: the tree has no {node}.{port}"));
-            assert!(
-                close(&value.value, &got.value),
-                "{name}, tick {tick}: {node}.{port} is {:?} on the reference, {:?} on the tree",
-                value.value,
-                got.value
-            );
-            assert_eq!(
-                value.shape, got.shape,
-                "{name}, tick {tick}: {node}.{port}'s shape"
-            );
-        }
-    }
+    rt.evaluate_spec(spec).ok()
+}
+
+/// `expected`'s and `actual`'s writes are the same, path by path.
+fn same_writes(name: &str, tick: usize, expected: &TreeRuntime, actual: &TreeRuntime) {
     let writes = |batch: &arora_shape::WriteBatch| {
         batch
             .iter()
             .map(|op| (op.path.to_string(), op.value.clone()))
             .collect::<Vec<_>>()
     };
-    let (expected, actual) = (writes(&reference.writes), writes(&tree.writes));
+    let (expected, actual) = (writes(&expected.writes), writes(&actual.writes));
     assert_eq!(
         expected.len(),
         actual.len(),
@@ -154,31 +133,54 @@ fn tick_both(
             "{name}, tick {tick}: {path} is {value:?}, then {got:?}"
         );
     }
-    true
+}
+
+/// `expected` and `actual` hold the same value on every port of every node.
+fn same_ports(name: &str, tick: usize, expected: &TreeRuntime, actual: &TreeRuntime) {
+    for (node, ports) in &expected.outputs {
+        for (port, value) in ports {
+            let got = actual.outputs.get(node).and_then(|ports| ports.get(port));
+            let got = got.unwrap_or_else(|| panic!("{name}, tick {tick}: no {node}.{port}"));
+            assert!(
+                close(&value.value, &got.value),
+                "{name}, tick {tick}: {node}.{port} is {:?}, then {:?}",
+                value.value,
+                got.value
+            );
+            assert_eq!(
+                value.shape, got.shape,
+                "{name}, tick {tick}: {node}.{port}'s shape"
+            );
+        }
+    }
 }
 
 #[test]
-fn every_fixture_computes_on_the_tree_what_it_computes_on_the_reference() {
+fn every_fixture_writes_the_same_evaluating_every_node_or_what_its_outputs_read() {
     for (name, _) in crate::fixtures::ALL {
         let (spec, inputs) = fixture(name);
+        if needs_urdf(&spec) && !cfg!(feature = "urdf_ik") {
+            // Its URDF nodes fail every evaluation that runs them.
+            continue;
+        }
         let spec = spec.with_cache();
-        let mut reference = GraphRuntime::default();
-        let mut tree = TreeRuntime::default();
-        let compared = (0..40)
-            .filter(|tick| {
-                tick_both(
-                    name,
-                    *tick,
-                    &inputs,
-                    (&mut reference, &spec),
-                    (&mut tree, &spec),
-                )
-            })
-            .count();
-        assert!(
-            compared > 0 || (needs_urdf(&spec) && !cfg!(feature = "urdf_ik")),
-            "{name}: no tick evaluates"
-        );
+        let mut every = TreeRuntime::new(Evaluation::Every);
+        let mut demanded = TreeRuntime::new(Evaluation::Demanded);
+        let mut compared = 0;
+        for at in 0..40 {
+            let expected = tick(&mut every, &spec, &inputs, at);
+            let actual = tick(&mut demanded, &spec, &inputs, at);
+            assert_eq!(
+                expected.is_some(),
+                actual.is_some(),
+                "{name}, tick {at}: one evaluation fails"
+            );
+            if expected.is_some() {
+                same_writes(name, at, &every, &demanded);
+                compared += 1;
+            }
+        }
+        assert!(compared > 0, "{name}: no tick evaluates");
     }
 }
 
@@ -235,46 +237,51 @@ fn edited(node: &crate::types::NodeSpec, factor: f64) -> crate::types::NodeParam
 }
 
 /// Every fixture with its parameters edited halfway through, in place on
-/// the tree and in the spec the reference evaluates: the two compute the
-/// same, each node keeping its state through the edit, and the tree is not
-/// built again.
+/// one tree and in the spec another tree loads: the two compute the same,
+/// each node keeping its state through the edit, and the tree edited in
+/// place is not built again.
 #[test]
-fn a_parameter_edited_in_place_computes_what_the_reference_computes_from_the_edited_spec() {
+fn a_parameter_edited_in_place_computes_what_a_tree_loading_the_edited_spec_computes() {
     let mut edits = 0;
     for (name, _) in crate::fixtures::ALL {
         let (spec, inputs) = fixture(name);
         let spec = spec.with_cache();
-        let mut reference = GraphRuntime::default();
-        let mut tree = TreeRuntime::default();
-        let (mut reference_spec, mut tree_spec) = (spec.clone(), spec.clone());
-        for tick in 0..40 {
-            if tick == 20 {
-                for (at, node) in spec.nodes.iter().enumerate() {
+        let mut in_place = TreeRuntime::default();
+        let mut reloaded = TreeRuntime::default();
+        let (mut in_place_spec, mut reloaded_spec) = (spec.clone(), spec.clone());
+        for at in 0..40 {
+            if at == 20 {
+                for (index, node) in spec.nodes.iter().enumerate() {
                     let params = edited(node, 1.1);
-                    let in_place = tree.set_params(&node.id, &params).expect("an edit");
+                    let made = in_place.set_params(&node.id, &params).expect("an edit");
                     assert!(
-                        in_place,
+                        made,
                         "{name}: the edit of {}'s parameters is made in place",
                         node.id
                     );
                     edits += 1;
-                    tree_spec.nodes[at].params = params.clone();
-                    reference_spec.nodes[at].params = params;
+                    in_place_spec.nodes[index].params = params.clone();
+                    reloaded_spec.nodes[index].params = params;
                 }
-                // The reference plans the edited spec again, as its host
-                // does for an edit it cannot tell is a value's; its nodes
-                // keep their state.
-                reference_spec = reference_spec.with_cache();
+                // The other tree loads the edited spec, as its host does for
+                // an edit it cannot tell is a value's; its nodes keep their
+                // state.
+                reloaded_spec = reloaded_spec.with_cache();
             }
-            tick_both(
-                name,
-                tick,
-                &inputs,
-                (&mut reference, &reference_spec),
-                (&mut tree, &tree_spec),
+            let expected = tick(&mut reloaded, &reloaded_spec, &inputs, at);
+            let actual = tick(&mut in_place, &in_place_spec, &inputs, at);
+            assert_eq!(
+                expected.is_some(),
+                actual.is_some(),
+                "{name}, tick {at}: one evaluation fails"
             );
+            if expected.is_some() {
+                same_ports(name, at, &reloaded, &in_place);
+                same_writes(name, at, &reloaded, &in_place);
+            }
         }
-        assert_eq!(tree.loads(), 1, "{name}: the tree is built once");
+        assert_eq!(in_place.loads(), 1, "{name}: the tree is built once");
+        assert_eq!(reloaded.loads(), 2, "{name}: the other tree loads the edit");
     }
     assert!(edits > 0);
 }

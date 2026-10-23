@@ -41,9 +41,8 @@ fn constant_node(id: &str, value: Value) -> NodeSpec {
     }
 }
 
-/// A spec evaluated again keeps the tree it was built as: the reference's
-/// plan cache reuses its layouts for an unchanged version, and the tree is
-/// built once for an unchanged spec.
+/// A spec evaluated again keeps the tree it was built as: the tree is built
+/// once for an unchanged spec.
 #[test]
 fn a_spec_evaluated_again_keeps_its_tree() {
     let spec = graph_spec!({
@@ -63,8 +62,7 @@ fn a_spec_evaluated_again_keeps_its_tree() {
     );
 }
 
-/// A spec of another version builds the tree again: the reference rebuilds
-/// its plan when the version changes.
+/// A spec of another version builds the tree again.
 #[test]
 fn a_spec_of_another_version_builds_its_tree_again() {
     let base = graph_spec!({

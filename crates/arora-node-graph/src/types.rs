@@ -176,7 +176,7 @@ pub enum NodeType {
     ///
     /// Where a [`TaskRun`](Self::TaskRun) node *is* one run's call, this node
     /// starts runs: the request is queued on the runtime's
-    /// [`spawns`](crate::eval::GraphRuntime::spawns) and served by the host
+    /// [`spawns`](crate::tree_runtime::TreeRuntime::spawns) and served by the host
     /// once the evaluation is done. The graph keeps no handle — a run it
     /// spawns is the host's to end and clean up.
     Spawn,
@@ -371,11 +371,12 @@ pub struct GraphSpec {
     /// Directed edges connecting source outputs to target inputs.
     #[serde(default)]
     pub edges: Vec<EdgeSpec>,
-    /// Optional caller-managed cache key for plan reuse. When zero, the runtime falls back to
-    /// hashing to detect structural changes.
+    /// Caller-managed version of the spec: a host keying specs by version
+    /// loads one of a new version again.
     #[serde(default, skip_serializing_if = "crate::types::is_zero")]
     pub version: u64,
-    /// Fingerprint of the structural layout (nodes/edges/params) used alongside `version`.
+    /// Not read by the runtime. It stays in the format, so documents that
+    /// carry it still parse.
     #[serde(default, skip_serializing_if = "crate::types::is_zero")]
     pub fingerprint: u64,
 }
@@ -462,12 +463,8 @@ pub struct EdgeSpec {
 }
 
 impl GraphSpec {
-    /// Recompute the structural fingerprint for this spec without mutating the version counter.
-    pub fn recompute_fingerprint(&self) -> u64 {
-        crate::eval::fingerprint_spec(self)
-    }
-
-    /// Seed or bump the spec version and refresh the fingerprint for plan-cache reuse.
+    /// Seed or bump the spec version, so a host keying specs by version
+    /// loads it again.
     ///
     /// - If `version` is zero, it is set to 1.
     /// - Otherwise, the version is saturated by `saturating_add(1)` to avoid wrap.
@@ -477,7 +474,6 @@ impl GraphSpec {
         } else {
             self.version.saturating_add(1)
         };
-        self.fingerprint = self.recompute_fingerprint();
         self
     }
 

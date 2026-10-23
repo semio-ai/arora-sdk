@@ -23,9 +23,7 @@
 //!
 //! Parameter ids derive from the role alone ([`input_param`],
 //! [`param_field`]), so a port is one id whatever function it is a parameter
-//! of. A call is evaluated by the per-node code of the [reference
-//! evaluator](crate::eval), so a node computes what it computes in a
-//! [`GraphSpec`](crate::types::GraphSpec) evaluation.
+//! of. A call is evaluated by its node kind's [per-node code](crate::eval).
 //!
 //! Besides the node kinds the module has [`SELECT`], which applies an edge's
 //! selector, and [`EXTERNAL`], which calls another module's function as an
