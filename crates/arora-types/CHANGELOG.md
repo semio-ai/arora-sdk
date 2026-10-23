@@ -4,6 +4,14 @@ All notable changes to `arora-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.10.0] - 2026-10-23
+
+### Added
+
+- `ty::low::validate_type_ref`: whether a value is of the type a `TypeRef`
+  names, the check `ty::low::validate` makes of a primitive type, for a value
+  checked against a parameter's or a field's type reference.
+
 ## [3.9.0] - 2026-10-22
 
 ### Added

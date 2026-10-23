@@ -39,6 +39,17 @@ pub fn well_formed(buffer: &[u8]) -> Result<(), String> {
 
 /// A read through a buffer, at a byte offset from its start, as the decoder's
 /// reader measures it.
+/// Where the value starting at byte `at` of `buffer` ends: the offset of the
+/// byte after it, walking it as [`well_formed`] does and decoding nothing.
+/// `buffer` is the whole Arora Buffer, its size prefix included, as array
+/// alignment counts from its start. Fails as [`well_formed`] does, on a value
+/// that runs past `buffer`, nests deeper than [`MAX_DEPTH`] or is not one.
+pub fn value_end(buffer: &[u8], at: usize) -> Result<usize, String> {
+    let mut walk = Walk { buffer, at };
+    walk.value(0)?;
+    Ok(walk.at)
+}
+
 struct Walk<'a> {
     buffer: &'a [u8],
     at: usize,
@@ -254,6 +265,33 @@ mod tests {
             assert_eq!(well_formed(&buffer), Ok(()), "{value:?}");
             assert_eq!(deserialize(&buffer), value);
         }
+    }
+
+    /// `value_end` steps over a value to the next: over each field of a
+    /// structure holding a value of every form, to the end of the buffer.
+    #[test]
+    fn value_end_steps_over_a_value_of_every_form() {
+        let fields: Vec<StructureField> = values()
+            .into_iter()
+            .enumerate()
+            .map(|(n, value)| StructureField {
+                id: id(n as u8),
+                value: Box::new(value),
+            })
+            .collect();
+        let count = fields.len();
+        let buffer = serialize(&Value::Structure(Structure {
+            id: id(200),
+            fields,
+        }));
+        // The structure's tag, id and field count, then each field's id and value.
+        let mut at = BUFFER_SIZE_SIZE + 1 + 16 + 4;
+        for n in 0..count {
+            assert_eq!(&buffer[at..at + 16], id(n as u8).as_bytes(), "field {n}");
+            at = value_end(&buffer, at + 16).expect("a value of the structure");
+        }
+        assert_eq!(at, buffer.len());
+        assert_eq!(value_end(&buffer, BUFFER_SIZE_SIZE), Ok(buffer.len()));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "10.4.0"
+version = "11.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 # package` (publish verification) without pulling the browser host into a host
 # link.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-arora-engine = { path = "../arora-engine", version = "5.5", default-features = false }
+arora-engine = { path = "../arora-engine", version = "6", default-features = false }
 arora-types = { path = "../arora-types", version = "3" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime). A downstream device pulls the seam crates
@@ -27,7 +27,7 @@ arora-types = { path = "../arora-types", version = "3" }
 # `list_keys` and `Arora::describe_methods`, which the read-only operations
 # answer from without a step. 13.7: the browser's component executor
 # registered, which a `wasm-component` guest loads through.
-arora = { path = "../arora", version = "13.7", default-features = false }
+arora = { path = "../arora", version = "14", default-features = false }
 # 2.1: the records `withRecords` loads, in arora-registry's layout.
 arora-registry = { path = "../arora-registry", version = "2.1" }
 # 6.1: the shapes a client reads keys and methods in, and a run handle's

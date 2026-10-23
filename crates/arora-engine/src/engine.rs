@@ -7,6 +7,7 @@ use arora_types::{
 };
 use uuid::Uuid;
 
+use crate::arguments::Signatures;
 use crate::{
     call::{serialize_to_arg, CallBridge, CallError, Callable, CallableId, CallableRegistry},
     compiled::CompiledModule,
@@ -126,6 +127,9 @@ pub struct Engine {
 struct Loaded {
     executor: Option<&'static str>,
     module: Box<dyn Module>,
+    /// A guest module's declared functions, against which each call's
+    /// arguments are checked; `None` for a registered host module.
+    signatures: Option<Signatures>,
 }
 
 impl Engine {
@@ -167,12 +171,14 @@ impl Engine {
             .get_mut(executor_name)
             .ok_or(LoadModuleError::ExecutorNotFound)?;
 
+        let signatures = Signatures::of(&module_definition.header);
         let module = executor.load_module(module_definition)?;
         self.modules.insert(
             module_id,
             Loaded {
                 executor: Some(executor.name()),
                 module,
+                signatures: Some(signatures),
             },
         );
 
@@ -199,6 +205,7 @@ impl Engine {
             Loaded {
                 executor: Some(executor.name()),
                 module: instance,
+                signatures: Some(Signatures::of(module.header())),
             },
         );
         Ok(())
@@ -239,6 +246,7 @@ impl Engine {
             Loaded {
                 executor: Some(executor.name()),
                 module: instance,
+                signatures: Some(Signatures::of(module.header())),
             },
         );
         Ok(())
@@ -295,11 +303,20 @@ impl Engine {
             Loaded {
                 executor: None,
                 module,
+                signatures: None,
             },
         );
     }
 
     /// Dispatch a method call to a module. `arg` must be a raw Arora Buffer.
+    ///
+    /// A call to a guest module whose arguments name a parameter the function
+    /// does not declare, or carry a value not of its parameter's type, fails
+    /// with [`DispatchError::Argument`] and reaches no guest. `unit` passes for
+    /// any parameter, as callers pass it for an unset argument, and a record-
+    /// typed argument is checked by its record's id. Left to the guest: an
+    /// `arg` that is not an Arora Buffer or not a structure, a function the
+    /// header does not declare, and a parameter the call leaves out.
     pub fn dispatch(
         &mut self,
         module_id: &Uuid,
@@ -310,7 +327,11 @@ impl Engine {
             .modules
             .get_mut(module_id)
             .ok_or(DispatchError::ModuleNotFound { id: *module_id })?;
-
+        if let Some(signatures) = &module.signatures {
+            signatures
+                .check(function_id, arg)
+                .map_err(|message| DispatchError::Argument { message })?;
+        }
         module.module.dispatch(function_id, arg)
     }
 }

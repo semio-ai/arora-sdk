@@ -4,6 +4,40 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** `DispatchError::Argument`. `Engine::dispatch` checks a call to
+  a guest module against the parameters the module's header declares for the
+  function: an argument naming a parameter the function does not declare, or
+  carrying a value not of its parameter's type, fails the call with
+  `DispatchError::Argument`, `CallError::Generic` through `arora_call`, and
+  reaches no guest. A C++ guest read such a value as absent and answered as if
+  it had not been given; a Rust guest refused it with its own error. Calls
+  between guests reach `dispatch` too, so the check covers them.
+  - The check reads the argument's type tags in place and decodes nothing:
+    it costs the host no memory beyond the argument's buffer.
+  - What passes: `unit` for any parameter, as callers pass it for an unset
+    argument; any value for a dynamic value type (`KEY_VALUE_ID`,
+    `ARRAY_VALUE_ID`); a present optional argument as an option or as its
+    element; an array as its typed array, or as a generic array whose every
+    element is of the element type.
+  - Left to the guest: an argument that is not an Arora Buffer or not a
+    structure, a function the header does not declare, a parameter the call
+    leaves out, and the fields of a record-typed argument, which is checked
+    by its record's id.
+  - A host module registered with `register_module` is not checked: its
+    functions take the decoded `Call`.
+- Requires arora-buffers 3.2 (`value_end`).
+
+### Fixed
+
+- A core module's `arora_dispatch` and `arora_dispatch_indirect` imports, on
+  wasmtime and in the browser, give the calling guest a call that fails as an
+  error buffer, the form a guest's own error takes. The host panicked on it,
+  as on a refused argument.
+
 ## [5.5.0] - 2026-10-23
 
 ### Added

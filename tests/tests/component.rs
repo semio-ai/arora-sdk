@@ -16,6 +16,17 @@ use uuid::Uuid;
 
 /// Function ids implemented by modules/test-rust-component/src/lib.rs.
 const ECHO_FN: &str = "dd6a4f61-9f88-4376-9d50-1e92e95a73aa";
+
+/// The parameters a function of the header declares: `echo` takes a `u64`
+/// under its own id, so a call to it echoes back as that function's result
+/// (the re-entry tests read it so); the others take none.
+fn parameters(function: &str) -> &'static str {
+    if function == ECHO_FN {
+        "[{ id: dd6a4f61-9f88-4376-9d50-1e92e95a73aa, name: value, type: { kind: scalar, id: 00000000-0000-0000-0000-000000000009 } }]"
+    } else {
+        "[]"
+    }
+}
 const CALL_INDIRECT_FN: &str = "1bd1cf09-e94c-4c14-b653-32bd96157c41";
 const WASI_FN: &str = "0455052e-bb89-41ec-a963-2bbe82ea583b";
 const TRAP_FN: &str = "42681638-6fe3-4004-92fb-bb048dc3bbab";
@@ -59,8 +70,9 @@ fn header() -> Header {
     .iter()
     .map(|(id, name)| {
         format!(
-            "  - type: function\n    id: {id}\n    name: {name}\n    parameters: []\n    \
-             ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}\n"
+            "  - type: function\n    id: {id}\n    name: {name}\n    parameters: {}\n    \
+             ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}\n",
+            parameters(id),
         )
     })
     .collect();
@@ -266,6 +278,38 @@ fn component_that_traps_refuses_calls_until_it_is_reloaded() {
         &*engine.dispatch(&module, &echo, b"after").unwrap(),
         b"after"
     );
+}
+
+/// A component loaded compiled ahead, as a device loads one, or reloaded, has
+/// its calls' arguments checked against its header as one loaded from its
+/// bytes does.
+#[test]
+fn a_compiled_or_reloaded_component_s_arguments_are_checked() {
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    let compiled = arora_engine::compiled::CompiledModule::new(header(), &guest_bytes()).unwrap();
+    let echo: Uuid = ECHO_FN.parse().unwrap();
+    let call = || arora_types::call::Call {
+        module_id: Some(MODULE_ID.parse().unwrap()),
+        id: echo,
+        args: vec![arora_types::value::StructureField {
+            id: echo,
+            value: Box::new(Value::String("not a u64".into())),
+        }],
+    };
+    let refused = |engine: &mut std::pin::Pin<Box<arora_engine::engine::Engine>>| {
+        let error = engine.arora_call(call()).unwrap_err();
+        assert!(
+            matches!(&error, arora_engine::call::CallError::Generic { message }
+                if message.contains("of 'echo'")),
+            "{error:?}"
+        );
+    };
+    engine.load_compiled_module(&compiled).unwrap();
+    refused(&mut engine);
+    engine.reload_module(&compiled).unwrap();
+    refused(&mut engine);
 }
 
 /// A guest calls a function of a module — here its own — through

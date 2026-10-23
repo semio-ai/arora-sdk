@@ -46,7 +46,7 @@ arora-types = { path = "../arora-types", version = "3.1" }
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
 # 13.5: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
 # Studio choice.
-arora = { path = "../arora", version = "13.5", optional = true }
+arora = { path = "../arora", version = "14", optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"
@@ -65,7 +65,7 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] 
 
 [dev-dependencies]
 # A device over the HAL, for the tests of what it opens to remote writers.
-arora = { path = "../arora", version = "13" }
+arora = { path = "../arora", version = "14" }
 rand = "0.10"
 # `time` (tests only): the DDS round-trip tests sleep and time out around
 # discovery; the HAL itself needs no timers.

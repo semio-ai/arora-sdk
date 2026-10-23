@@ -34,7 +34,7 @@ arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-types = { path = "../arora-types", version = "3.1" }
 # 13.5: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
 # Studio choice.
-arora = { path = "../arora", version = "13.5", optional = true }
+arora = { path = "../arora", version = "14", optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
@@ -54,6 +54,6 @@ webpki-roots = "1"
 
 [dev-dependencies]
 # A device over the HAL, for the tests of what it opens to remote writers.
-arora = { path = "../arora", version = "13" }
+arora = { path = "../arora", version = "14" }
 # `time` (tests only): the try_send test times out around the queued write.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

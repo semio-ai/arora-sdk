@@ -27,6 +27,12 @@ pub enum DispatchError {
     Guest {
         message: String,
     },
+    /// The call's arguments do not match the parameters the guest module's
+    /// header declares for the function: one it does not declare, or a value
+    /// not of its parameter's type. The call reached no guest.
+    Argument {
+        message: String,
+    },
 }
 
 /// The message of a guest's error buffer — what a guest returns for an error
@@ -46,6 +52,16 @@ pub(crate) fn guest_error(buffer: &[u8]) -> Option<String> {
         String::from_utf8_lossy(message).into_owned()
     });
     Some(message.unwrap_or_else(|| "guest returned error (no message)".to_string()))
+}
+
+/// The error buffer carrying `message`, the form a guest returns an error in
+/// (`BufferWriter::add_error`): what a guest calling another through a core
+/// module's `arora_dispatch` imports gets for a call that fails, as a guest
+/// gets its own error back.
+pub(crate) fn error_buffer(message: &str) -> Box<[u8]> {
+    let mut writer = arora_buffers::BufferWriter::new();
+    writer.add_error(message);
+    writer.finalize()
 }
 
 pub trait Module {

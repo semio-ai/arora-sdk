@@ -348,7 +348,11 @@ fn default_value_for_array_element_type_id(id: Uuid) -> Value {
   }
 }
 
-fn validate_type_ref(value: &Value, type_ref: &TypeRef) -> Result<(), ConversionError> {
+/// Whether `value` is of the type `type_ref` names, as [`validate`] checks a
+/// primitive type: the exact primitive, array, fixed-length array (its
+/// length too), map or option. A record reference is checked by the record's
+/// id alone; its fields, which only the record's definition names, are not.
+pub fn validate_type_ref(value: &Value, type_ref: &TypeRef) -> Result<(), ConversionError> {
   match type_ref {
     TypeRef::Scalar { id } => validate_scalar_type_id(value, *id),
     TypeRef::Array { id } => validate_array_element_type_id(value, *id),

@@ -94,8 +94,8 @@ fn a_sequence_ticks_its_children_through_the_host() {
 }
 
 /// A call the generated code refuses — an argument that is not an Arora
-/// Buffer, short or cut short, a parameter the function does not have — fails
-/// as the guest's error, and the module goes on answering calls.
+/// Buffer, short or cut short — fails as the guest's error, and the module
+/// goes on answering calls.
 #[test]
 fn a_generated_export_s_refusal_is_the_guest_s_error() {
     let mut engine = engine();
@@ -120,16 +120,52 @@ fn a_generated_export_s_refusal_is_the_guest_s_error() {
             "{arg:?}: {refused:?}"
         );
     }
-    let extra = StructureField {
-        id: SEQ_CHILDREN.parse().unwrap(),
-        value: Box::new(Value::U32(1)),
-    };
-    let refused = engine.arora_call(call(SUCCEED, vec![extra])).unwrap_err();
-    assert!(
-        format!("{refused}").contains("expected 0 parameters"),
-        "{refused}"
-    );
+    let result = engine.arora_call(call(SUCCEED, vec![])).unwrap();
+    assert_eq!(result.ret, Value::from(Status::Success));
+}
 
+/// A call carrying a parameter the function does not declare, or a value not
+/// of its parameter's type, is refused by the engine against the header,
+/// naming the parameter, and reaches no guest: the module answers next.
+#[test]
+fn an_argument_the_header_does_not_declare_is_refused_before_the_guest() {
+    let mut engine = engine();
+    let field = |id: &str, value: Value| StructureField {
+        id: id.parse().unwrap(),
+        value: Box::new(value),
+    };
+    const STATUS_IDENTITY: &str = "ef48e6d3-c735-4b5c-8f63-fc54d94dd4ee";
+    const STATUS_VALUE: &str = "e1f174e6-ca9e-4344-84cb-7f3f22115239";
+    for (function, argument, named) in [
+        (
+            SUCCEED,
+            field(SEQ_CHILDREN, Value::U32(1)),
+            "has no parameter",
+        ),
+        (
+            STATUS_IDENTITY,
+            field(STATUS_VALUE, Value::U32(3)),
+            "'value'",
+        ),
+        (
+            SEQ,
+            field(SEQ_CHILDREN, Value::String("x".into())),
+            "'children'",
+        ),
+        (
+            SEQ,
+            field(SEQ_CHILDREN, Value::ArrayU32(vec![1])),
+            "'children'",
+        ),
+    ] {
+        let refused = engine
+            .arora_call(call(function, vec![argument]))
+            .unwrap_err();
+        assert!(
+            matches!(&refused, CallError::Generic { message } if message.contains(named)),
+            "{function}: {refused:?}"
+        );
+    }
     let result = engine.arora_call(call(SUCCEED, vec![])).unwrap();
     assert_eq!(result.ret, Value::from(Status::Success));
 }

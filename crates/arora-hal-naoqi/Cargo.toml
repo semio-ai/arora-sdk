@@ -36,7 +36,7 @@ arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1"
 arora-types = { path = "../arora-types", version = "3" }
 # 13.5: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
 # Studio choice.
-arora = { path = "../arora", version = "13.5", optional = true }
+arora = { path = "../arora", version = "14", optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
@@ -51,6 +51,6 @@ tokio = { version = "1", features = ["rt", "time", "sync"] }
 
 [dev-dependencies]
 # The device test: the default tree on the Arora runtime, without the Studio connection.
-arora = { path = "../arora", version = "13" }
+arora = { path = "../arora", version = "14" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
