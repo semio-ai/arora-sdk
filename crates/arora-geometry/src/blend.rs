@@ -6,8 +6,10 @@
 //!   two numbers give an `F32`;
 //! - quaternions slerp, the shorter way round;
 //! - any other two structures with the same type id and field ids blend
-//!   field by field. A vec3 blends component by component, and a transform
-//!   lerps its translation and scale and slerps its rotation;
+//!   field by field, each field keeping its type: two `F32` or two `F64`
+//!   fields lerp, and any other numbers, such as integers, step. A vec3
+//!   blends component by component, and a transform lerps its translation
+//!   and scale and slerps its rotation;
 //! - `ArrayF32`s blend element by element, a missing element reading as 0,
 //!   and a number blends with every element of an `ArrayF32`;
 //! - records blend the fields both hold, by name, and keep the other fields
@@ -15,9 +17,8 @@
 //! - sequences blend item by item, and keep the extra items of the side `t`
 //!   is nearer.
 //!
-//! Anything else steps ([`step_blend`](crate::blend::step_blend)): booleans,
-//! text, enumerations, and two values of different forms give `a` below 0.5
-//! and `b` from 0.5.
+//! Anything else steps ([`step_blend`]): booleans, text, enumerations, and
+//! two values of different forms give `a` below 0.5 and `b` from 0.5.
 
 use arora_types::value::{Structure, StructureField, Value};
 
@@ -169,10 +170,22 @@ fn blend_structures(a: &Structure, b: &Structure, t: f32) -> Option<Value> {
             .zip(&b.fields)
             .map(|(fa, fb)| StructureField {
                 id: fa.id,
-                value: Box::new(blend_values(&fa.value, &fb.value, t)),
+                value: Box::new(blend_field(&fa.value, &fb.value, t)),
             })
             .collect(),
     }))
+}
+
+/// Two values of a structure's field, blended so the field keeps its type:
+/// two `F32`s or two `F64`s lerp in their type, any other numbers step, and
+/// anything else blends as [`blend_values`] does.
+fn blend_field(a: &Value, b: &Value, t: f32) -> Value {
+    match (a, b) {
+        (Value::F32(x), Value::F32(y)) => Value::F32(lerp_f(*x, *y, t)),
+        (Value::F64(_), Value::F64(_)) => blend_values(a, b, t),
+        _ if number(a).is_some() || number(b).is_some() => step_blend(a, b, t),
+        _ => blend_values(a, b, t),
+    }
 }
 
 fn blend_list_like(a: &[Value], b: &[Value], t: f32) -> Vec<Value> {
@@ -313,6 +326,29 @@ mod tests {
             structure(0.0, 0.0)
         );
         assert_eq!(blend_values(&structure(0.0, 0.0), &other, 0.75), other);
+    }
+
+    #[test]
+    fn a_structure_keeps_its_integer_fields_by_stepping_them() {
+        let structure = |n: i32, x: f32| {
+            Value::Structure(Structure {
+                id: Uuid::from_u128(0xF0),
+                fields: vec![
+                    StructureField {
+                        id: Uuid::from_u128(0xF1),
+                        value: Box::new(Value::I32(n)),
+                    },
+                    StructureField {
+                        id: Uuid::from_u128(0xF2),
+                        value: Box::new(Value::F32(x)),
+                    },
+                ],
+            })
+        };
+        let (a, b) = (structure(4, 0.0), structure(8, 4.0));
+        assert_eq!(blend_values(&a, &b, 0.0), a);
+        assert_eq!(blend_values(&a, &b, 0.25), structure(4, 1.0));
+        assert_eq!(blend_values(&a, &b, 0.75), structure(8, 3.0));
     }
 
     #[test]

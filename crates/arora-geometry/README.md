@@ -25,7 +25,7 @@ Each type is a `Value::Structure` of `F32` fields with a type id and field ids t
 
 - numbers lerp. Two `F64`s blend in `f64` and give an `F64`; any other two numbers give an `F32`;
 - quaternions slerp, the shorter way round;
-- any other two structures with the same type id and field ids blend field by field. A vec3 blends component by component, and a transform lerps its translation and scale and slerps its rotation;
+- any other two structures with the same type id and field ids blend field by field, each field keeping its type: two `F32` or two `F64` fields lerp, and any other numbers, such as integers, step. A vec3 blends component by component, and a transform lerps its translation and scale and slerps its rotation;
 - `ArrayF32`s blend element by element, a missing element reading as 0, and a number blends with every element of an `ArrayF32`;
 - records blend the fields both hold, by name, and keep the other fields of the side `t` is nearer (`a` below 0.5);
 - sequences blend item by item, and keep the extra items of the side `t` is nearer.
