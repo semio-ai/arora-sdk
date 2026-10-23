@@ -534,6 +534,48 @@ fn loaded_with(component: &str, functions: [u64; 2]) -> (Pin<Box<Engine>>, Vec<S
     (engine, ids)
 }
 
+/// A guest with one page of memory and an allocator that grows it, asking for
+/// as many random bytes as the low half of the function id it is called by.
+fn random_reader([a, b]: [u64; 2]) -> String {
+    format!(
+        r#"(core module $guest
+            (import "wasi:random/random@0.2.0" "get-random-bytes"
+                (func $random (param i64 i32)))
+            (memory (export "memory") 1)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32)
+                (i32.mul
+                    (memory.grow (i32.add (i32.shr_u (local.get 3) (i32.const 16)) (i32.const 1)))
+                    (i32.const 65536)))
+            (func (export "functions") (result i32)
+                (i64.store (i32.const 1024) (i64.const 0))
+                (i64.store (i32.const 1032) (i64.const {a}))
+                (i64.store (i32.const 1040) (i64.const 0))
+                (i64.store (i32.const 1048) (i64.const {b}))
+                (i32.store (i32.const 2048) (i32.const 1024))
+                (i32.store (i32.const 2052) (i32.const 2))
+                (i32.const 2048))
+            (func (export "dispatch") (param i64 i64 i32 i32) (result i32)
+                (call $random (local.get 1) (i32.const 3072))
+                (i32.store8 (i32.const 2048) (i32.const 0))
+                (i32.store (i32.const 2052) (i32.const 0))
+                (i32.store (i32.const 2056) (i32.const 0))
+                (i32.const 2048)))"#
+    )
+}
+
+/// Random bytes more than the guest's memory holds are given it, its allocator
+/// growing that memory, as natively; past what wasmtime returns at once, the
+/// call traps, as natively.
+#[wasm_bindgen_test]
+fn random_bytes_the_guest_grows_its_memory_for_are_given_in_browser() {
+    console_error_panic_hook::set_once();
+    let lens = [1 << 20, (64 << 20) + 1];
+    let (mut engine, ids) = loaded_with(&world_component(&random_reader(lens), ""), lens);
+    dispatch(&mut engine, &ids[0], &[]).expect("many times the guest's memory");
+    let error = dispatch(&mut engine, &ids[1], &[]).unwrap_err();
+    assert!(error.contains("more than the 67108864"), "{error}");
+}
+
 /// Writing more zeroes than a stream writes at once traps, as natively, where
 /// wasmtime writes none of them, rather than writing some.
 #[wasm_bindgen_test]

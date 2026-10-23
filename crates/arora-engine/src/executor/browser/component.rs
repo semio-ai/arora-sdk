@@ -52,6 +52,7 @@ use crate::call::{CallBridge, CallableId};
 use crate::compiled::{Code, CompiledModule};
 use crate::component_layout::{guest_module, provided};
 use crate::engine::EngineRef;
+use crate::executor::wasi_limits::{BLOCKING_WRITE_LIMIT, RANDOM_BYTES_LIMIT, WRITE_BUDGET};
 use crate::executor::{Executor, LoadModuleError, UnloadModuleError};
 use crate::load::module_definition_from_parts;
 use crate::module::{guest_error, DispatchError, Module};
@@ -546,12 +547,6 @@ const STDOUT: i32 = 2;
 const STDERR: i32 = 3;
 const READY: i32 = 1;
 
-/// What an output stream's `check-write` permits at once, as natively.
-const WRITE_BUDGET: u64 = 1 << 16;
-
-/// What a `blocking-…-and-flush` writes at once, as natively.
-const BLOCKING_WRITE_LIMIT: u64 = 4096;
-
 /// The most the output stream function `name` writes at once.
 fn write_limit(name: &str) -> u64 {
     if name.starts_with("[method]output-stream.blocking-") {
@@ -880,12 +875,16 @@ impl Imports {
             // Random bytes, from `crypto.getRandomValues`.
             ("wasi:random/random", "get-random-bytes")
             | ("wasi:random/insecure", "get-insecure-random-bytes") => {
+                let name = name.to_string();
                 self.keep(Closure::<dyn Fn(i64, i32)>::new(move |len, ret| {
                     let guest = host.guest();
-                    // No more than the guest's memory holds.
+                    // As many as wasmtime returns at once; the guest's
+                    // allocator grows its memory for them, or fails.
                     let len = len as u64;
-                    if len > u64::from(guest.view().length()) {
-                        trap(format!("{len} random bytes do not fit the guest's memory"));
+                    if len > RANDOM_BYTES_LIMIT {
+                        trap(format!(
+                            "{name}: {len} bytes is more than the {RANDOM_BYTES_LIMIT} it returns at once"
+                        ));
                     }
                     let bytes = random_bytes(len as usize);
                     guest
