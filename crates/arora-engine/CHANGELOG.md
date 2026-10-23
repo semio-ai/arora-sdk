@@ -31,6 +31,13 @@ All notable changes to `arora-engine`. The format follows
     functions take the decoded `Call`.
 - Requires arora-buffers 3.2 (`value_end`).
 
+### Fixed
+
+- A core module's `arora_dispatch` and `arora_dispatch_indirect` imports, on
+  wasmtime and in the browser, give the calling guest a call that fails as an
+  error buffer, the form a guest's own error takes. The host panicked on it,
+  as on a refused argument.
+
 ## [5.5.0] - 2026-10-23
 
 ### Added

@@ -23,7 +23,7 @@ use crate::load::module_definition_from_parts;
 use crate::{
     engine::EngineRef,
     executor::wasm::guest::AroraBuffer,
-    module::{guest_error, DispatchError, Module},
+    module::{error_buffer, guest_error, DispatchError, Module},
 };
 
 mod guest;
@@ -222,9 +222,12 @@ impl WebAssemblyModule {
         let method_id = Uuid::read_wasm_memory(&context, memory, method_id);
         let arg = AroraBuffer::read_wasm_memory(&context, memory, arg);
 
+        // A call that fails reaches the calling guest as an error buffer, as a
+        // guest's own error does: a refused argument or a callee's error is
+        // the caller's to handle, never the host's to panic on.
         let result = engine
             .dispatch(&module_id, &method_id, arg.as_ref())
-            .unwrap();
+            .unwrap_or_else(|error| error_buffer(&error.to_string()));
 
         let result_addr = malloc.call(&mut context, (result.len() as u32,)).unwrap();
 
@@ -238,10 +241,12 @@ impl WebAssemblyModule {
     fn arora_dispatch_indirect(mut caller: Caller<'_, HostState>, callable_id: u64) -> u32 {
         // SAFETY: re-entrant access to the engine; see `HostState::engine`.
         let arora_caller: &mut dyn CallBridge = unsafe { &mut *caller.data().engine.0 };
-        let result_value = arora_caller
-            .arora_call_indirect(&CallableId { id: callable_id })
-            .unwrap();
-        let result_buffer = serialize(&result_value);
+        // As in `arora_dispatch`: a call that fails is an error buffer.
+        let result_buffer = match arora_caller.arora_call_indirect(&CallableId { id: callable_id })
+        {
+            Ok(value) => serialize(&value),
+            Err(error) => error_buffer(&error.to_string()),
+        };
 
         let malloc = caller.data().malloc.as_ref().unwrap().clone();
 
@@ -541,5 +546,169 @@ exports:
                 .expect("dispatches");
             assert_eq!(&*result, &[5, 0, 0, 0, 1]);
         }
+    }
+
+    /// The wat data string of `bytes`.
+    fn wat_bytes(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("\\{byte:02x}")).collect()
+    }
+
+    /// A core module calling another through `arora_dispatch` with an
+    /// argument of another type than the callee's parameter gets the
+    /// engine's refusal back as an error buffer, which it returns as its own
+    /// result: the host does not panic, and the callee is never entered.
+    #[test]
+    fn a_refused_call_between_core_modules_is_the_caller_s_error_buffer() {
+        use arora_types::value::{Structure, StructureField, Value};
+        let (caller, call) = (Uuid::from_u128(0xc0_0001), Uuid::from_u128(0xc0_0002));
+        let (callee, take, count) = (
+            Uuid::from_u128(0xc0_0003),
+            Uuid::from_u128(0xc0_0004),
+            Uuid::from_u128(0xc0_0005),
+        );
+        let header = |id: Uuid, function: Uuid, parameters: &str| -> Header {
+            serde_yaml::from_str(&format!(
+                r#"
+id: {id}
+name: m{id}
+author: ""
+description: ~
+license: ""
+version: {{ major: 1, minor: 0, patch: 0 }}
+executor: {{ name: wasm, min_version: ~, max_version: ~ }}
+imports: []
+executable_mime: ""
+exports:
+  - type: function
+    id: {function}
+    name: f
+    parameters: {parameters}
+    ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}
+"#
+            ))
+            .expect("parse the header")
+        };
+        // `take(count: u32)`, given a string.
+        let wrong = arora_buffers::serde_uuid::serialize(&Value::Structure(Structure {
+            id: take,
+            fields: vec![StructureField {
+                id: count,
+                value: Box::new(Value::String("three".into())),
+            }],
+        }));
+        let caller_guest = format!(
+            r#"(module
+                (import "env" "arora_dispatch" (func $dispatch (param i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 256) "{callee}")
+                (data (i32.const 272) "{take}")
+                (data (i32.const 512) "{wrong}")
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 4096)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{function}") (param i32) (result i32)
+                    (call $dispatch (i32.const 256) (i32.const 272) (i32.const 512))))"#,
+            callee = wat_bytes(callee.as_bytes()),
+            take = wat_bytes(take.as_bytes()),
+            wrong = wat_bytes(&wrong),
+            function = call.to_string().replace('-', "_"),
+        );
+        // Entering the callee traps: a call that reaches it fails otherwise.
+        let callee_guest = format!(
+            r#"(module
+                (memory (export "memory") 1)
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 1024)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{function}") (param i32) (result i32) unreachable))"#,
+            function = take.to_string().replace('-', "_"),
+        );
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        for (header, guest) in [
+            (header(caller, call, "[]"), caller_guest),
+            (
+                header(
+                    callee,
+                    take,
+                    &format!(
+                        "[{{ id: {count}, name: count, type: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000008 }} }}]"
+                    ),
+                ),
+                callee_guest,
+            ),
+        ] {
+            let compiled = CompiledModule::new(header, guest.as_bytes()).expect("compiles");
+            engine.load_compiled_module(&compiled).expect("loads");
+        }
+        let refused = engine
+            .dispatch(&caller, &call, &[])
+            .expect_err("the caller returns the refusal as its error");
+        assert!(
+            matches!(&refused, DispatchError::Guest { message }
+                if message.contains("the argument 'count' of 'f' is not of its declared type")),
+            "{refused:?}"
+        );
+    }
+
+    /// A core module calling a callable through `arora_dispatch_indirect` that
+    /// fails gets the failure back as an error buffer, as through
+    /// `arora_dispatch`.
+    #[test]
+    fn a_failing_indirect_call_is_the_caller_s_error_buffer() {
+        use crate::call::{CallError, Callable};
+        use arora_types::value::Value;
+        struct Refusing;
+        impl Callable for Refusing {
+            fn call(&self, _caller: &mut dyn CallBridge) -> Result<Value, CallError> {
+                Err(CallError::Generic {
+                    message: "the callable refuses".into(),
+                })
+            }
+        }
+        let (module, call) = (Uuid::from_u128(0xc1_0001), Uuid::from_u128(0xc1_0002));
+        let header: Header = serde_yaml::from_str(&format!(
+            r#"
+id: {module}
+name: indirect
+author: ""
+description: ~
+license: ""
+version: {{ major: 1, minor: 0, patch: 0 }}
+executor: {{ name: wasm, min_version: ~, max_version: ~ }}
+imports: []
+executable_mime: ""
+exports:
+  - type: function
+    id: {call}
+    name: f
+    parameters: []
+    ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}
+"#
+        ))
+        .expect("parse the header");
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        let callable = engine.arora_register_callable(std::rc::Rc::new(Refusing));
+        let guest = format!(
+            r#"(module
+                (import "env" "arora_dispatch_indirect" (func $indirect (param i64) (result i32)))
+                (memory (export "memory") 1)
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 4096)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{function}") (param i32) (result i32)
+                    (call $indirect (i64.const {callable}))))"#,
+            function = call.to_string().replace('-', "_"),
+            callable = callable.id,
+        );
+        let compiled = CompiledModule::new(header, guest.as_bytes()).expect("compiles");
+        engine.load_compiled_module(&compiled).expect("loads");
+        let refused = engine
+            .dispatch(&module, &call, &[])
+            .expect_err("the caller returns the failure as its error");
+        assert!(
+            matches!(&refused, DispatchError::Guest { message } if message.contains("the callable refuses")),
+            "{refused:?}"
+        );
     }
 }

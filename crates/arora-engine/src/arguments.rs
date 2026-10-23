@@ -184,6 +184,7 @@ impl Buffer<'_> {
             };
         }
         match self.tag(at) {
+            // Every well-known id is matched above: `id` names a record.
             TYPE_STRUCTURE | TYPE_ENUMERATION if self.id(at + 1) == id => Ok(()),
             TYPE_STRUCTURE | TYPE_ENUMERATION => Err(format!(
                 "expected a value of the record {id}, got one of {}",
@@ -217,9 +218,12 @@ impl Buffer<'_> {
                 }
                 Ok(())
             }
-            TYPE_STRUCTURE | TYPE_ENUMERATION if self.id(at + 6) == id => Ok(()),
+            TYPE_STRUCTURE | TYPE_ENUMERATION if names_a_record(&id) && self.id(at + 6) == id => {
+                Ok(())
+            }
             TYPE_STRUCTURE | TYPE_ENUMERATION => Err(format!(
-                "expected an array of the record {id}, got one of {}",
+                "expected an array of {}, got an array of the record {}",
+                describe(&id),
                 self.id(at + 6)
             )),
             element => match primitive(&id) {
@@ -247,6 +251,21 @@ impl Buffer<'_> {
 
 /// Whether `id` is a dynamic value type, which a guest takes as a `Value`,
 /// whatever it holds.
+/// Whether `id` names a record: an id no well-known type has. A structure or
+/// enumeration carries its record's id, and one carrying a well-known type's
+/// id is not of that type.
+fn names_a_record(id: &Uuid) -> bool {
+    !ty::PRIMITIVE_IDS.contains(id)
+}
+
+/// How an error names the type `id`: its primitive's name, or the record.
+fn describe(id: &Uuid) -> String {
+    match primitive(id) {
+        Some((_, name)) => name.to_string(),
+        None => format!("the record {id}"),
+    }
+}
+
 fn dynamic(id: &Uuid) -> bool {
     *id == *ty::KEY_VALUE_ID || *id == *ty::ARRAY_VALUE_ID
 }
@@ -328,7 +347,7 @@ mod tests {
     use arora_buffers::serde_uuid::serialize;
     use arora_types::module::low::ExportFunction;
     use arora_types::ty::low::validate_type_ref;
-    use arora_types::value::{Enumeration, Structure, StructureField, Value};
+    use arora_types::value::{Enumeration, Structure, StructureField, StructureWithoutId, Value};
 
     // Clear of the well-known type ids (`ty::U16_ID` is 7, …).
     const FUNCTION: Uuid = Uuid::from_u128(0xf1c7_0001);
@@ -548,6 +567,7 @@ mod tests {
                     Value::ArrayF64(v) => Some(v.len()),
                     Value::ArrayString(v) => Some(v.len()),
                     Value::ArrayStructure { elements, .. } => Some(elements.len()),
+                    Value::ArrayEnumeration { elements, .. } => Some(elements.len()),
                     _ => None,
                 });
                 let Some(count) = count else {
@@ -607,6 +627,29 @@ mod tests {
                 id: RECORD,
                 elements: vec![],
             },
+            Value::ArrayStructure {
+                id: *ty::U32_ID,
+                elements: vec![],
+            },
+            Value::ArrayStructure {
+                id: *ty::U32_ID,
+                elements: vec![
+                    StructureWithoutId { fields: vec![] },
+                    StructureWithoutId { fields: vec![] },
+                ],
+            },
+            Value::ArrayEnumeration {
+                id: *ty::STRING_ID,
+                elements: vec![],
+            },
+            Value::Structure(Structure {
+                id: *ty::U32_ID,
+                fields: vec![],
+            }),
+            Value::Structure(Structure {
+                id: *ty::ARRAY_U32_ID,
+                fields: vec![],
+            }),
             Value::ArrayValue(vec![Value::U32(1), Value::U32(2)]),
             Value::ArrayValue(vec![Value::U32(1), Value::F64(2.0)]),
             Value::ArrayValue(vec![record(), record()]),

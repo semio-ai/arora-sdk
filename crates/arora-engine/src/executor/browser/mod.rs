@@ -38,7 +38,7 @@ use crate::call::{CallBridge, CallableId};
 use crate::compiled::{Code, CompiledModule};
 use crate::engine::EngineRef;
 use crate::load::module_definition_from_parts;
-use crate::module::{guest_error, DispatchError, Module};
+use crate::module::{error_buffer, guest_error, DispatchError, Module};
 pub use component::BrowserComponentExecutor;
 pub(crate) use component::{compile as compile_component, BrowserComponent};
 
@@ -421,9 +421,11 @@ fn build_imports(engine_ptr: EngineRef) -> Result<(Object, ImportParts), LoadMod
             let module_id = read_uuid(&late.memory, module_id_ptr);
             let method_id = read_uuid(&late.memory, method_id_ptr);
             let arg = read_arora_buffer(&late.memory, arg_ptr);
+            // A call that fails reaches the calling guest as an error buffer,
+            // as natively.
             let result = engine
                 .dispatch(&module_id, &method_id, arg.as_ref())
-                .expect("arora_dispatch: engine.dispatch failed");
+                .unwrap_or_else(|error| error_buffer(&error.to_string()));
             let result_addr = call_u32_u32(&late.malloc, result.len() as u32)
                 .expect("arora_dispatch: malloc failed");
             write_bytes(&late.memory, result_addr, &result);
@@ -439,12 +441,12 @@ fn build_imports(engine_ptr: EngineRef) -> Result<(Object, ImportParts), LoadMod
         // SAFETY: re-entrant single-threaded access, like the
         // wasmtime executor's `HostState::engine`.
         let engine = unsafe { &mut *engine_ptr };
-        let value = engine
-            .arora_call_indirect(&CallableId {
-                id: callable_id as u64,
-            })
-            .expect("arora_dispatch_indirect: engine call failed");
-        let buf = serialize_value(&value);
+        let buf = match engine.arora_call_indirect(&CallableId {
+            id: callable_id as u64,
+        }) {
+            Ok(value) => serialize_value(&value),
+            Err(error) => error_buffer(&error.to_string()),
+        };
         let addr = call_u32_u32(&late.malloc, buf.len() as u32)
             .expect("arora_dispatch_indirect: malloc failed");
         write_bytes(&late.memory, addr, &buf);
