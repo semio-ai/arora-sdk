@@ -1149,10 +1149,9 @@ impl AroraBuilder {
     ///
     /// The default bridge is the open local bridge, unless the `studio-bridge`
     /// feature is on and the run asks for Semio Studio (`with_studio`), as
-    /// `arora::studio` says. Under the
-    /// terminal UI, a run that connects asks the operator for the
-    /// registration nothing else gives, and serves the open local bridge when
-    /// the operator declines.
+    /// `arora::studio` says. A run that connects enrolls a device that is not
+    /// enrolled with Studio: under the terminal UI, the operator names it and
+    /// is shown the code a person approves it with in Studio.
     ///
     /// **Stopping is dropping**: everything the run holds — the front end (and
     /// its terminal takeover), the device, its bridges and their servers —
@@ -1175,8 +1174,8 @@ impl AroraBuilder {
         if self.bridges.is_empty() {
             #[cfg(feature = "studio-bridge")]
             {
-                // Studio registers the model family and versions the HAL
-                // describes, so the operator is not asked for them.
+                // The device reports to Studio the model family and versions
+                // its HAL describes.
                 let description = match &self.hal {
                     Some(hal) => hal.describe().await,
                     None => arora_hal::HalDescription::default(),

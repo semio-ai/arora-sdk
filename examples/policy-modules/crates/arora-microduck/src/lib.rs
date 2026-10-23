@@ -221,9 +221,9 @@ impl Device {
 /// simulator paces itself at real time, the runtime steps at the policies'
 /// period, and the bridge is the run's default — the open local bridge on
 /// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio when
-/// `studio_choice` asks for it (a
-/// device registering is asked for the owner, the device name and the model
-/// family, or they come from `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`).
+/// `studio_choice` asks for it (a device that is not enrolled enrolls first,
+/// named by `DEVICE_NAME` or the operator, its code shown for a person to
+/// approve in Studio).
 pub async fn serve(config: DeviceConfig) -> Result<()> {
     #[cfg(feature = "studio")]
     let studio = config.studio_choice;
@@ -269,8 +269,8 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         control_hz: 50.0,
         clock: config.clock,
         record: config.record.clone(),
-        // What the device registers with Studio as: the family of the model
-        // it publishes for, the simulator as its hardware.
+        // The model the device reports to Studio: the family of the model it
+        // publishes for, the simulator as its hardware.
         description: HalDescription {
             model_family: Some(
                 config

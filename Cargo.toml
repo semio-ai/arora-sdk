@@ -100,4 +100,8 @@ debug = 1
 [patch.crates-io]
 arora-types = { path = "crates/arora-types" }
 arora-bridge = { path = "crates/arora-bridge" }
+# `arora-studio-bridge-client` 11 is not on crates.io yet: until it is, it
+# comes from its branch, with `semio-studio-session` 1, its path dependency in
+# the same repository. Remove this entry once 11.0.0 is published.
+arora-studio-bridge-client = { git = "https://github.com/semio-ai/studio-bridge", branch = "feat/device-enrollment" }
 

@@ -203,7 +203,6 @@ dependencies = [
  "log",
  "ratatui",
  "rustls 0.23.43",
- "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "sysinfo 0.33.1",
@@ -727,16 +726,14 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "10.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "655847e03688015f32d2a3dc0b14ea94499680c33aa0e143730928a518a0f3a0"
+version = "11.0.0"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#abe5b387b09fc5afe1353e083b2e85a5c4b5c151"
 dependencies = [
  "arora-bridge",
  "arora-types",
  "async-stream",
  "async-trait",
  "chrono",
- "crypto_secretbox",
  "firestore",
  "futures",
  "futures-util",
@@ -746,9 +743,9 @@ dependencies = [
  "rcgen 0.13.2",
  "reqwest",
  "rustls 0.23.43",
+ "semio-studio-session",
  "serde",
  "serde_json",
- "strfmt",
  "studio-bridge-msgs",
  "sync_wrapper",
  "tokio",
@@ -2718,7 +2715,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2872,7 +2869,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4739,7 +4736,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5665,7 +5662,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.5",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6231,7 +6228,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6333,7 +6330,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6609,6 +6606,23 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.17.2",
  "uuid",
+]
+
+[[package]]
+name = "semio-studio-session"
+version = "1.0.0"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#abe5b387b09fc5afe1353e083b2e85a5c4b5c151"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "crypto_secretbox",
+ "log",
+ "reqwest",
+ "rustls 0.23.43",
+ "serde",
+ "serde_json",
+ "tokio",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -7165,12 +7179,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "strfmt"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29fdc163db75f7b5ffa3daf0c5a7136fb0d4b2f35523cd1769da05e034159feb"
-
-[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7215,9 +7223,8 @@ dependencies = [
 
 [[package]]
 name = "studio-bridge-msgs"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a048c93ec21b4c2b61168b704715ece4f54182c4b751277ce7c19e768126047"
+version = "7.1.0"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#abe5b387b09fc5afe1353e083b2e85a5c4b5c151"
 dependencies = [
  "arora-types",
  "chrono",
@@ -7379,10 +7386,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8013,7 +8020,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 0.1.10",
+ "cfg-if 1.0.4",
  "static_assertions",
 ]
 
@@ -9008,7 +9015,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

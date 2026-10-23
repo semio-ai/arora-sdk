@@ -64,16 +64,15 @@ Then, for each demo:
        --studio --studio-model assets/microduck/studio-model.glb
    ```
 
-   The terminal asks for the owner (your Studio user id, shown in Studio's
-   **Register Device** dialog) and a device name, once: the device saves the
-   answers and its Studio credential, and every later run with `--studio`
-   connects and registers with them (`--no-studio` declines). An empty
-   owner serves the local bridge instead of Studio. The model family is the GLB's robot
-   name, capitalised (`Microduck`), and the hardware version `mujoco`.
-   `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY` and `HARDWARE_VERSION`
-   override them.
-   Without a terminal nothing is asked: a run that connects registers what
-   those variables say. The device keeps its Studio identity
+   The first run enrolls the device with Studio: the terminal asks for a
+   device name, then shows a code, which you enter in Studio, choosing the
+   device's owner. The device saves its Studio credential, and every later
+   run with `--studio` connects with it (`--no-studio` declines). The model
+   family is the GLB's robot name, capitalised (`Microduck`), and the
+   hardware version `mujoco`; `DEVICE_NAME`, `MODEL_FAMILY` and
+   `HARDWARE_VERSION` override them. Without a terminal nothing is asked: the
+   log shows the code, or the device enrolls with the enrollment token
+   `STUDIO_ENROLLMENT_TOKEN` holds. The device keeps its Studio identity
    in its device directory, `~/Library/Application
    Support/semio/arora/devices/<DEVICE_LOCAL_ID>/studio/` on macOS
    (`~/.local/share/…` on Linux; `default` when `DEVICE_LOCAL_ID` is unset),

@@ -3,8 +3,8 @@
 //! the state the input side maintains.
 //!
 //! Top to bottom: the identity header, the scrollable log pane, a one-line
-//! telemetry strip, the prompt line (present only while a question waits), and
-//! the shortcuts line.
+//! telemetry strip, the prompt line (present only while a question waits or an
+//! enrollment code is shown), and the shortcuts line.
 
 use std::time::Instant;
 
@@ -18,8 +18,7 @@ use super::state::{LogLine, Prompt, State};
 
 /// Draw the whole UI for one frame.
 pub(crate) fn draw(frame: &mut Frame, state: &State, now: Instant) {
-    let has_prompt = state.prompts.front().is_some();
-    let regions = regions(frame.area(), has_prompt);
+    let regions = regions(frame.area(), state.prompt_line_shown());
     frame.render_widget(header(state), regions[0]);
     frame.render_widget(logs(state, regions[1].height), regions[1]);
     frame.render_widget(telemetry(state), regions[2]);
@@ -37,8 +36,8 @@ pub(crate) fn log_height(size: Size, has_prompt: bool) -> u16 {
 }
 
 /// The vertical split: a one-line header, the flexible log pane, a one-line
-/// telemetry strip, the two-line prompt (nothing when no question waits), and
-/// the one-line shortcuts row.
+/// telemetry strip, the two-line prompt line (nothing when it is not shown),
+/// and the one-line shortcuts row.
 fn regions(area: Rect, has_prompt: bool) -> std::rc::Rc<[Rect]> {
     Layout::vertical([
         Constraint::Length(1),
@@ -122,7 +121,9 @@ fn telemetry(state: &State) -> Paragraph<'_> {
     Paragraph::new(Line::from(spans))
 }
 
-/// The prompt line: the question on top, the way to answer it below.
+/// The prompt line: the question on top, the way to answer it below; with no
+/// question waiting, the code enrolling the device on top, where to approve
+/// it below.
 fn prompt(state: &State) -> Paragraph<'_> {
     let bold = Style::default().add_modifier(Modifier::BOLD);
     let cursor = Style::default().add_modifier(Modifier::REVERSED);
@@ -159,7 +160,23 @@ fn prompt(state: &State) -> Paragraph<'_> {
                 Line::from(spans),
             ])
         }
-        None => Paragraph::new(""),
+        None => match &state.enrollment_code {
+            Some(code) => Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled("To enroll this device, enter the code ", bold),
+                    Span::styled(
+                        code.code.clone(),
+                        bold.fg(Color::Cyan).add_modifier(Modifier::REVERSED),
+                    ),
+                    Span::styled(" in Semio Studio", bold),
+                ]),
+                Line::from(match &code.approval_url {
+                    Some(url) => format!("or open {url}"),
+                    None => "and approve it there".to_string(),
+                }),
+            ]),
+            None => Paragraph::new(""),
+        },
     }
 }
 
@@ -225,5 +242,43 @@ mod tests {
         assert!(rendered.contains("Robo"), "header shows the device name");
         assert!(rendered.contains("engine started"), "log line is drawn");
         assert!(rendered.contains("Device name"), "prompt label is drawn");
+    }
+
+    /// The text a frame of `state` shows, row after row.
+    fn rendered(state: &State) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).expect("test backend");
+        terminal
+            .draw(|frame| draw(frame, state, Instant::now()))
+            .expect("draw");
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    /// The enrollment code holds the prompt line while no question waits, a
+    /// question taking it over.
+    #[test]
+    fn an_enrollment_code_shows_where_no_question_waits() {
+        let mut state = State::new();
+        state.enrollment_code = Some(crate::operator::EnrollmentCode {
+            code: "BCDF-GHJK".to_string(),
+            approval_url: Some("https://studio.example/approve?code=BCDF-GHJK".to_string()),
+        });
+        let shown = rendered(&state);
+        assert!(shown.contains("BCDF-GHJK in Semio Studio"), "{shown}");
+        assert!(
+            shown.contains("or open https://studio.example/approve?code=BCDF-GHJK"),
+            "{shown}"
+        );
+
+        let (question, _rx) = super::super::state::text_prompt("Device name".into(), false);
+        state.prompts.push_back(question);
+        let shown = rendered(&state);
+        assert!(shown.contains("Device name"), "{shown}");
+        assert!(!shown.contains("BCDF-GHJK"), "{shown}");
     }
 }

@@ -825,7 +825,7 @@ and a build with it still waits to be asked.
 
 The rule is the same on a terminal and headless. Connecting whenever nobody is
 there to decline would make every unattended start — a service, a CI job, an
-agent — a sign-up on Studio's production project.
+agent — a request to Studio's production project.
 
 A saved credential does not connect a run on its own, because it is not proof
 of an opt-in: a headless run of arora 13.4 or earlier signed the device up
@@ -834,3 +834,39 @@ directory. A run that does not ask still looks the credential up, only to say
 in its log that the device holds one and that `--studio` connects with it; the
 lookup never fails the run. `--no-studio` wins over `--studio` and
 `ARORA_STUDIO`, so a run overrides the variable without unsetting it.
+
+### A device enrolls with Semio Studio
+
+A device joins Studio by enrolling: a person approves it in Studio and chooses
+its owner, and Studio creates the device and gives it a credential marking it
+as a device. The device never declares its owner nor writes its own record: an
+owner a device names itself is one nobody accepted, and a record the device
+writes is one Studio cannot trust. So arora neither asks for an owner nor
+reads one from the environment, and after enrollment the device's name and
+owner are Studio's. The device writes only its model, which it knows better
+than anyone: each run reports the fields the environment and the HAL give,
+and only those, so a family the operator typed at enrollment, for a device
+nothing else describes, stays the record's.
+
+A run that asked for Studio and finds the device not enrolled enrolls it then,
+without a separate command: asking for Studio is the opt-in, and a person's
+approval in Studio is the consent the enrollment needs. Without an enrollment
+token, it enrolls by code, headless included: the code is in the log — or on
+standard error when the log shows no info lines, since the run waits on
+someone seeing it — and the run waits for a person's decision, so a service
+started with `--studio` joins Studio once someone approves it, and never
+before. A refused code, or a
+refused token, fails the run instead of serving the local bridge: the run
+asked for Studio, and serving something else would hide that Studio refused
+the device.
+
+Only a device the client finds not enrolled enrolls. Studio failing otherwise
+says nothing of the enrollment, and a credential of another Firebase project
+than the run's says the configuration and the device disagree on which Studio
+the device belongs to: either way enrolling would replace a credential that
+may be good, so the run fails and says what to do.
+
+The enrollment token is read from the environment only. A command-line option
+would put a secret where the host's other users read it (`ps`) and where the
+shell keeps it (its history); the environment of a service is its own. arora
+never logs it.
