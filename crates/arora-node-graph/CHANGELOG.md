@@ -16,8 +16,7 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   stateful node's state (`state`, a mutable parameter holding a value) are
   its parameters; a node with ports beyond `out` returns a structure of
   them. `NodeGraphModule` answers the calls in-process, through a bridge
-  over the device's, and runs each with the reference evaluator's per-node
-  code. It keeps, for each node it is called for, the parameters, port
+  over the device's, and runs each with its node kind's per-node code. It keeps, for each node it is called for, the parameters, port
   layouts and buffers of its last call, so a call whose parameters did not
   change prepares nothing, and it answers borrowed calls
   (`CallBridge::arora_call_borrowed`) without copying its arguments.
@@ -30,20 +29,19 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   returns nothing and writes nothing back, a leaf ticked at every tick
   otherwise. `TreeRuntime::load_with_functions` imports this way, with a
   device's function index.
-- `TreeRuntime`: a graph run on the behavior tree behind the reference
-  evaluator's surface, evaluating every node (`Evaluation::Every`) or what
-  the outputs read (`Evaluation::Demanded`). A reload keeps every node's
+- `TreeRuntime`: a graph run on the behavior tree, evaluating every node
+  (`Evaluation::Every`) or what the outputs read (`Evaluation::Demanded`). A reload keeps every node's
   state.
 - `TreeRuntime::set_params`: a node's parameters edited in place on the
   loaded tree, the edit an editor's slider makes, at about a tenth of the
   cost of loading the edited spec. It refuses, changing nothing, an edit
   only a load can make: one changing the node's output ports, the path an
   `input` or `output` node binds, or which parameters the node sets.
-- Every test of the reference evaluator has a counterpart on the tree
-  (`tree_tests`), and an equivalence test compares the two engines on every
-  fixture, port by port and write by write. The benchmark runs each graph on
-  both, and the `stress` example times loading and stepping a graph of any
-  size.
+- The tests run on the tree (`tree_tests`). The fixture tests run every
+  fixture evaluating every node and what its outputs read, and again with its
+  parameters edited in place, comparing port by port and write by write. The
+  benchmark and the `stress` example time loading and stepping a graph on the
+  tree.
 
 ### Changed
 
@@ -71,11 +69,19 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   first field. Their errors name what they received by its geometry type or
   its form (`vec3`, `record`, `text`).
 
+### Removed
+
+- The reference evaluator: graphs run on the tree (`TreeRuntime`). Gone are
+  `evaluate_all`, `evaluate_all_with_functions`,
+  `evaluate_writes_with_functions`, `evaluate_all_cached` and `eval_node`,
+  the plan cache (`PlanCache`) and the structural fingerprint
+  (`fingerprint_spec`, `GraphSpec::recompute_fingerprint`). `GraphRuntime`
+  holds what one node's evaluation reads and writes besides its ports.
+  `GraphSpec::with_cache` bumps `version` alone, and the `fingerprint` field
+  is not read.
+
 ### Fixed
 
-- `evaluate_all_cached` clears the runs an earlier evaluation requested, as
-  `evaluate_all` does: `GraphRuntime::spawns` holds the evaluation's own
-  requests, so a host reading it after each evaluation starts a run once.
 - The noise nodes evaluate far from the origin. Simplex noise sums its
   cell's lattice indices as `i64`, which overflowed an `i32` over 16
   octaves from 32768 on, and every noise wraps a lattice neighbour of a

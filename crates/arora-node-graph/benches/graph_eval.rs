@@ -3,7 +3,6 @@ use arora_node_graph::types::{
     EdgeInputEndpoint, EdgeOutputEndpoint, EdgeSpec, GraphSpec, InputDefault, NodeParams, NodeSpec,
     NodeType,
 };
-use arora_node_graph::{evaluate_all, GraphRuntime};
 use arora_shape::json::normalize_graph_spec_value;
 use arora_shape::value as vocab;
 use arora_shape::TypedPath;
@@ -549,43 +548,11 @@ fn load_fixture_spec(name: &str) -> GraphSpec {
 
 // Tunables (override via env, comma-separated aligned lists):
 //   GRAPH_KITCHEN_SIZES=1,20,200
-//   GRAPH_COLD_SAMPLES=100,100,10
 //   GRAPH_AMORT_STEPS=500,100,100
 //   GRAPH_AMORT_SAMPLES=100,50,10   (Criterion needs >=10)
 const DEFAULT_KITCHEN_SIZES: &[usize] = &[1, 50, 500];
-const DEFAULT_COLD_SAMPLES: &[usize] = &[100, 10, 10];
 const DEFAULT_AMORT_STEPS: &[u32] = &[500, 100, 100];
 const DEFAULT_AMORT_SAMPLES: &[usize] = &[100, 10, 10];
-
-fn warm_runtime(rt: &mut GraphRuntime, spec: &GraphSpec) {
-    rt.advance_epoch();
-    // First eval builds the plan cache; exclude it from timed loops.
-    evaluate_all(rt, spec).expect("graph evaluation");
-}
-
-fn bench_amortized_per_step(b: &mut criterion::Bencher, spec: &GraphSpec, steps: u32) {
-    b.iter_custom(|iters| {
-        let mut total = Duration::ZERO;
-        // Reuse a single runtime per iteration to avoid counting plan rebuilds.
-        for _ in 0..iters {
-            let mut rt = GraphRuntime {
-                dt: 1.0 / 60.0,
-                t: 0.0,
-                ..Default::default()
-            };
-            warm_runtime(&mut rt, spec);
-
-            let start = std::time::Instant::now();
-            for step in 0..steps {
-                rt.t = step as f32 * rt.dt;
-                rt.advance_epoch();
-                evaluate_all(&mut rt, spec).expect("graph evaluation");
-            }
-            total += start.elapsed() / steps;
-        }
-        total
-    });
-}
 
 /// The input paths of `spec`'s input nodes.
 fn input_paths(spec: &GraphSpec) -> Vec<TypedPath> {
@@ -604,43 +571,6 @@ enum Inputs {
     Defaults,
     /// A new value on every input at every step: everything changes.
     Moving,
-}
-
-/// The amortized cost of one step of `spec` on the reference evaluator.
-fn bench_reference_per_step(
-    b: &mut criterion::Bencher,
-    spec: &GraphSpec,
-    steps: u32,
-    inputs: Inputs,
-) {
-    let paths = input_paths(spec);
-    b.iter_custom(|iters| {
-        let mut total = Duration::ZERO;
-        for _ in 0..iters {
-            let mut rt = GraphRuntime {
-                dt: 1.0 / 60.0,
-                t: 0.0,
-                ..Default::default()
-            };
-            warm_runtime(&mut rt, spec);
-            let start = std::time::Instant::now();
-            for step in 0..steps {
-                rt.t = step as f32 * rt.dt;
-                if let Inputs::Moving = inputs {
-                    for (i, path) in paths.iter().enumerate() {
-                        rt.set_input(
-                            path.clone(),
-                            arora_shape::value::float((step + i as u32) as f32),
-                            None,
-                        );
-                    }
-                }
-                evaluate_all(&mut rt, spec).expect("graph evaluation");
-            }
-            total += start.elapsed() / steps;
-        }
-        total
-    });
 }
 
 /// The cost of importing, building and lowering `spec` on the tree, and
@@ -691,9 +621,9 @@ fn bench_tree_per_step(
     });
 }
 
-/// The tree's benchmarks of `spec`, beside the reference's: cold, and per
-/// step with the inputs at their defaults and with every input moving, both
-/// evaluating what the outputs read (a device) and every node (an editor).
+/// The tree's benchmarks of `spec`: cold, and per step with the inputs at
+/// their defaults and with every input moving, both evaluating what the
+/// outputs read (a device) and every node (an editor).
 fn bench_tree(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     name: &str,
@@ -717,123 +647,51 @@ fn bench_tree(
             );
         }
     }
-    group.bench_with_input(
-        BenchmarkId::new("reference/per_step_moving", name),
-        spec,
-        |b, spec| bench_reference_per_step(b, spec, steps, Inputs::Moving),
-    );
 }
 
 fn bench_graphs(c: &mut Criterion) {
     let kitchen_sizes = parse_list("GRAPH_KITCHEN_SIZES", DEFAULT_KITCHEN_SIZES);
-    let cold_samples = parse_list("GRAPH_COLD_SAMPLES", DEFAULT_COLD_SAMPLES);
     let amort_steps = parse_list("GRAPH_AMORT_STEPS", DEFAULT_AMORT_STEPS);
     let amort_samples = parse_list("GRAPH_AMORT_SAMPLES", DEFAULT_AMORT_SAMPLES);
     let len = kitchen_sizes
         .len()
-        .min(cold_samples.len())
         .min(amort_steps.len())
         .min(amort_samples.len());
 
     let mut group = c.benchmark_group("graph_eval");
 
     // Tiny smoke
-    {
-        group.sample_size(50);
-        let spec = chain_graph(8);
-        group.bench_with_input(
-            BenchmarkId::new("cold", "tiny-smoke-8"),
-            &spec,
-            |b, spec| {
-                b.iter(|| {
-                    let mut rt = GraphRuntime {
-                        dt: 1.0 / 60.0,
-                        t: 0.0,
-                        ..Default::default()
-                    };
-                    rt.advance_epoch();
-                    evaluate_all(&mut rt, black_box(spec)).expect("graph evaluation");
-                });
-            },
-        );
-        group.sample_size(10);
-        group.bench_with_input(
-            BenchmarkId::new("amortized_per_step", "tiny-smoke-8"),
-            &spec,
-            |b, spec| bench_amortized_per_step(b, black_box(spec), 100),
-        );
-        bench_tree(&mut group, "tiny-smoke-8", &spec, 100);
-    }
+    group.sample_size(10);
+    bench_tree(&mut group, "tiny-smoke-8", &chain_graph(8), 100);
 
     // Composite values
-    {
-        let spec = composite_chain_graph(32);
-        group.sample_size(20);
-        group.bench_with_input(
-            BenchmarkId::new("amortized_per_step", "composite-chain-32"),
-            &spec,
-            |b, spec| bench_amortized_per_step(b, black_box(spec), 100),
-        );
-        bench_tree(&mut group, "composite-chain-32", &spec, 100);
-    }
+    bench_tree(
+        &mut group,
+        "composite-chain-32",
+        &composite_chain_graph(32),
+        100,
+    );
 
     // Fixture
-    {
-        let spec = load_fixture_spec("simple-gain-offset");
-        group.sample_size(50);
-        group.bench_with_input(
-            BenchmarkId::new("cold", "fixture/simple-gain-offset"),
-            &spec,
-            |b, spec| {
-                b.iter(|| {
-                    let mut rt = GraphRuntime {
-                        dt: 1.0 / 60.0,
-                        t: 0.0,
-                        ..Default::default()
-                    };
-                    rt.advance_epoch();
-                    evaluate_all(&mut rt, black_box(spec)).expect("graph evaluation");
-                });
-            },
-        );
-        group.sample_size(10);
-        group.bench_with_input(
-            BenchmarkId::new("amortized_per_step", "fixture/simple-gain-offset"),
-            &spec,
-            |b, spec| bench_amortized_per_step(b, black_box(spec), 100),
-        );
-        bench_tree(&mut group, "fixture/simple-gain-offset", &spec, 100);
-    }
+    bench_tree(
+        &mut group,
+        "fixture/simple-gain-offset",
+        &load_fixture_spec("simple-gain-offset"),
+        100,
+    );
 
     // Kitchen variants
     for i in 0..len {
         let size = kitchen_sizes[i];
-        let cold_sample = cold_samples[i].max(1);
+        let sample = amort_samples[i].max(10); // Criterion min
         let steps = amort_steps[i].max(1);
-        let amort_sample = amort_samples[i].max(10); // Criterion min
-        let name = format!("kitchen-{}-blocks", size);
-        let spec = kitchen_chain(size);
-
-        group.sample_size(cold_sample);
-        group.bench_with_input(BenchmarkId::new("cold", &name), &spec, |b, spec| {
-            b.iter(|| {
-                let mut rt = GraphRuntime {
-                    dt: 1.0 / 60.0,
-                    t: 0.0,
-                    ..Default::default()
-                };
-                rt.advance_epoch();
-                evaluate_all(&mut rt, black_box(spec)).expect("graph evaluation");
-            });
-        });
-
-        group.sample_size(amort_sample);
-        group.bench_with_input(
-            BenchmarkId::new("amortized_per_step", &name),
-            &spec,
-            |b, spec| bench_amortized_per_step(b, black_box(spec), steps),
+        group.sample_size(sample);
+        bench_tree(
+            &mut group,
+            &format!("kitchen-{}-blocks", size),
+            &kitchen_chain(size),
+            steps,
         );
-        bench_tree(&mut group, &name, &spec, steps);
     }
 
     group.finish();

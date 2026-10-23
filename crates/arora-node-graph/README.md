@@ -6,16 +6,13 @@ as the detached nodes of an `arora-behavior-tree`
 
 - **the node vocabulary as module functions** (`functions`): one function of
   the module `@arora/node-graph` per node kind, and `NodeGraphModule`, which
-  answers their calls in-process through a bridge over the device's;
+  answers their calls in-process through a bridge over the device's. A
+  function runs its node kind's per-node code (`eval`);
 - **the importer** (`import`): a graph translated node for node into a tree
   and its detached nodes, as `BehaviorTree::try_from_groot_xml` reads a Groot
   file;
-- **`TreeRuntime`** (`tree_runtime`): a graph run on the tree behind the
-  reference evaluator's surface, for a host such as an editor or Vizij's
-  `ProcessingGraph`;
-- **the reference evaluator** (`GraphRuntime`, `evaluate_all`): the engine
-  the graph format was defined on. A node's function runs its per-node code,
-  and the equivalence test compares the two engines on every fixture.
+- **`TreeRuntime`** (`tree_runtime`): a graph run on the tree, for a host
+  such as an editor or Vizij's `ProcessingGraph`.
 
 ## On the behavior tree
 
@@ -54,13 +51,17 @@ How a graph translates:
 | `taskrun`, `spawn` | leaves under the root `PARALLEL`, ticked at every tick, as they act at each evaluation |
 | `externalfunction` | placed by its function's description (`placement`): left out when the function returns nothing and writes nothing back; otherwise a leaf ticked at every tick, as Vizij calls it, since a module's function may keep state its arguments do not show (the animation module's `step(dt)`) |
 
-What differs from the reference evaluator:
+How it evaluates:
 
-- **What runs.** The reference evaluates every node at every evaluation. On
-  the tree a node runs when something reads it and its arguments changed;
-  `Evaluation::Every` observes every node, as an editor does, and
+- **What runs.** A node runs when something reads it and its arguments
+  changed. `Evaluation::Every` observes every node, as an editor does, and
   `Evaluation::Demanded` runs what the outputs read, as a device does. A
   node nothing reads does not fail a demanded evaluation.
+- **Order.** A node runs after every node it reads from, and otherwise in
+  the order the spec lists it, so of two outputs writing one path the
+  later-listed wins.
+- **Inputs.** A value staged with `TreeRuntime::set_input` is seen by the
+  next evaluation alone; an input staged nothing reads its default.
 - **Shapes.** Ports carry values; a port's shape is its declared output
   shape, the shape staged with an input, or the one its value infers.
 - **Variadic ports.** A function declares `VARIADIC_PORTS` (64) ports of its
@@ -69,6 +70,9 @@ What differs from the reference evaluator:
   (`TreeRuntime::set_params`). An edit that changes what the tree is (a
   node's ports, the path an input or output binds, a node added or rewired)
   takes a new load of the whole graph, which keeps every node's state.
+- **Loads.** `TreeRuntime::evaluate_spec` loads a spec when it is not the
+  graph loaded. `GraphSpec::with_cache` bumps a spec's `version`, for a host
+  that reloads on a new version.
 
 The stress example times loading and stepping, and counts each step's calls:
 
@@ -79,27 +83,13 @@ cargo run --release -p arora-node-graph --example stress -- file graph.json
 
 ---
 
-# The reference evaluator
+## Nodes
 
-`GraphRuntime` and `evaluate_all` turn declarative `GraphSpec` documents into structured values and typed write operations, the semantics the node functions keep.
-
-## Overview
-
-- **Pure Rust runtime** that interprets `GraphSpec` documents using the shared `arora-shape` Value/Shape contract.
-- **GraphRuntime** retains staged inputs, node-local state, and cached outputs across frames.
-- **evaluate_all** walks the graph in topological order, performs selector projection, enforces declared shapes, and collects sink writes.
-- **Extensible node library** covering math, logic, vector ops, time/transition nodes (Spring/Damp/Slew), blending, range tools (including multi-segment piecewise remaps), and (optionally) robotics IK/FK helpers behind the `urdf_ik` feature flag.
-
-## Features
-
-- Deterministic topological evaluation with cycle detection: a node runs after
-  every node it reads from, and otherwise in the order the spec lists it, so of
-  two outputs writing one path the later-listed wins.
-- Input staging model with epoch tracking to prevent stale data from leaking between frames.
-- Shape-aware validators (`Shape`, `ShapeId`) for predictable coercions and helpful diagnostics.
-- Selector support (`field`, `index`) on edges for structured projection.
-- External `WriteBatch` accumulation from sink nodes for host-controlled side effects.
-- Optional URDF IK/FK nodes compiled in via the `urdf_ik` feature (enabled by default).
+The node library covers math, logic, vector operations, time and transitions
+(`Spring`, `Damp`, `Slew`), blending, ranges (including multi-segment
+piecewise remaps), records, calls to other modules, and robotics IK/FK behind
+the `urdf_ik` feature. Edges can select part of a value (`field`, `index`),
+and `Output` nodes write a `WriteBatch` the host applies.
 
 ## Installation
 
@@ -117,75 +107,31 @@ Disable defaults with `--no-default-features` if you want a minimal build.
 
 ---
 
-## Quick Start
-
-```rust
-use arora_shape::value::vec3;
-use arora_shape::{Shape, ShapeId, TypedPath};
-use arora_node_graph::{evaluate_all, GraphRuntime};
-use arora_node_graph::types::GraphSpec;
-
-let spec: GraphSpec = serde_json::from_str(include_str!("../fixtures/simple-gain-offset.json"))?;
-
-let mut runtime = GraphRuntime::default();
-
-// Stage an IK target for the next frame
-let target = TypedPath::parse("robot/arm/ik_target")?;
-runtime.advance_epoch();
-runtime.set_input(target, vec3([0.1, 0.2, 0.3]), Some(Shape::new(ShapeId::Vec3)));
-
-evaluate_all(&mut runtime, &spec)?;
-
-for (node_id, outputs) in &runtime.outputs {
-    println!("node {node_id}: {outputs:#?}");
-}
-for write in runtime.writes.iter() {
-    println!("write {:?} -> {:?}", write.path, write.value);
-}
-```
-
----
-
 ## Usage
 
-1. **Load or construct a `GraphSpec`.** Use `serde_json` to parse JSON, or build specs programmatically during tests.
+1. **Load or construct a `GraphSpec`.** `import::import_json` reads a graph's JSON as Vizij writes it; build specs programmatically in tests.
    - `spec.validate()` refuses a graph that would fail every evaluation — an edge to a missing node, two edges into one input, two nodes sharing an id, a cycle, or a node leaving one of its `schema::required_inputs` with neither an edge nor an inline default — naming the node at fault. A host checks it before installing a graph.
-2. **Create and reuse a `GraphRuntime`.** It retains node-local state (`Spring`, `Slew`, etc.), staged inputs, and cached outputs across frames.
-3. **Stage host inputs.**
+2. **Create and reuse a `TreeRuntime`**, and `load` the spec. It keeps every node's state across evaluations and loads.
+3. **Set the clock and stage host inputs** before each evaluation:
    ```rust
-   runtime.advance_epoch();
-   runtime.set_input(path, value, declared_shape);
+   rt.t += rt.dt;
+   rt.set_input(path, value, declared_shape);
    ```
    - Declared shapes help coerce numeric data or produce deterministically “null-of-shape” placeholders when staging fails.
-4. **Evaluate the graph.**
-   ```rust
-   let eval = evaluate_all(&mut runtime, &spec)?;
-   ```
+4. **Evaluate**: `rt.evaluate()?`.
 5. **Consume results.**
-   - `eval.nodes` – map of node → output key → `PortValue { value, shape }`.
-   - `eval.writes` – `WriteBatch` of `WriteOp { path, value, shape }` emitted by `Output` nodes.
+   - `rt.writes` – `WriteBatch` of `WriteOp { path, value, shape }` emitted by `Output` nodes.
+   - `rt.outputs` – map of node → output key → `PortValue { value, shape }`, for every observed node, unless `set_collect_outputs(false)`.
 6. **Integrate with hosts.** Apply writes to your own blackboard, engine, or animation runtime as needed.
 
 ---
 
 ## Key Concepts
 
-### GraphRuntime
+### The clock
 
-- Holds `t`/`dt`, per-node persistent state, staged inputs (`HashMap<TypedPath, StagedInput>`), and cached outputs.
-- `advance_epoch` bumps the staging epoch and evicts inputs not refreshed for the current frame.
-- Evaluation updates `t`/`dt` when driven by a host such as the Arora behavior interpreter (`vizij-arora-behavior`); if you embed the runtime directly, set them yourself before calling `evaluate_all` if time-based nodes are involved.
+- `TreeRuntime::t` and `dt` are what the next evaluation reads, in seconds; a host such as the Arora behavior interpreter (`vizij-arora-behavior`) sets them each frame.
 - A `dt` of zero is a step with no time in it, and moves nothing that time drives: `Time` and `Oscillator` read the unchanged `t`, `Spring` records its new target and keeps its position and velocity, and `Damp` and `Slew` keep their value (so does a negative or non-finite `dt`). An evaluation at `dt = 0` therefore carries a changed input through every node that does not depend on time — a paused scene showing an edit — and a smoother it reaches takes it as its new target, which shows once time passes; the next step with time in it moves on as if the zero step had not been. An IK node answers a request equal to its last one with its last solution, so it holds too.
-- **Plan cache note:** `arora-node-graph` caches a compiled execution plan (topological order + port layouts + resolved input bindings) inside `GraphRuntime`.
-  - The plan cache is a *structural* cache. It exists to avoid repeating "planning" work when the graph layout is unchanged frame-to-frame.
-  - For best steady-state performance, call `GraphSpec::with_cache()` on load and after any *structural* edit. This seeds/bumps `spec.version` and refreshes `spec.fingerprint`, enabling O(1) cache validation in `PlanCache::ensure_versioned()`.
-  - **What counts as structural?** Anything that can change topology, port layouts, or bindings (nodes/edges, selector wiring, input defaults, and variadic port counts like `Split.sizes`) — and the `value` of a `Constant` read through a selector: the plan resolves what such a selector reads when it is built, so the evaluation neither reads nor copies the constant for it.
-  - **What is not structural?** Most numeric `NodeParams` changes (e.g., `Oscillator.frequency`, the `value` of a `Constant` only read whole) affect evaluation outputs but do not change port layouts/bindings, so the cached plan remains valid.
-  - If you do mutate a `GraphSpec` in-place, you are responsible for keeping the cache key consistent: call `with_cache()` after structural edits or rebuild the runtime/spec to avoid stale layouts.
-
-#### Fingerprints and output shape hints
-
-`GraphSpec::fingerprint` is intended to track *structural* plan validity. In particular, `fingerprint_spec()` includes the `value` of every `Constant` an edge reads through a selector, and `NodeSpec.output_shapes` **keys** (because the presence of declared outputs affects the output port layout), but does not currently include the declared `Shape` values because they do not affect plan layout.
 
 ### Selectors
 
@@ -203,25 +149,23 @@ for write in runtime.writes.iter() {
 
 ### Parameter updates
 
-- `NodeParams` live on each `NodeSpec`. Mutate them before evaluation to tweak graph behaviour:
+- `TreeRuntime::set_params` sets a node's parameters in place on the loaded tree, the edit an editor's slider makes:
   ```rust
-  if let Some(node) = spec.nodes.iter_mut().find(|n| n.id == "gain") {
-      node.params.value = Some(arora_shape::value::float(0.5));
-  }
-  evaluate_all(&mut runtime, &spec)?;
+  let mut params = spec.nodes[0].params.clone();
+  params.value = Some(arora_shape::value::float(0.5));
+  let in_place = rt.set_params("gain", &params)?;
   ```
+  It returns `false`, changing nothing, for an edit only a load can make; the host then loads the edited spec.
 - Shapes are checked during evaluation; incompatible updates surface as detailed `Err(String)` messages (`"set_param: node 'gain' key 'value' expects Float"` in wasm bindings).
 
-### Cached outputs
+### Outputs
 
-- `GraphRuntime.outputs` stores a `HashMap<NodeId, HashMap<String, PortValue>>` containing the last evaluated value for every output port.
-- Each `PortValue` carries both the `Value` and its inferred `Shape`. Reuse these snapshots between frames to drive inspectors or diffing tools:
+- `TreeRuntime::outputs` holds, after each evaluation, every observed node's ports by node id and port name. Each `PortValue` carries both the `Value` and its `Shape`:
   ```rust
-  if let Some(port) = runtime.outputs.get("oscillator").and_then(|ports| ports.get("out")) {
+  if let Some(port) = rt.outputs.get("oscillator").and_then(|ports| ports.get("out")) {
       println!("shape: {:?}, value: {:?}", port.shape.id, port.value);
   }
   ```
-- Cached values persist until the node is removed from the spec; the runtime automatically purges entries when graphs change or when you clear the runtime.
 
 ### External Writes
 
@@ -250,16 +194,13 @@ Test the robotics nodes explicitly:
 cargo test -p arora-node-graph --features urdf_ik
 ```
 
-The benchmark evaluates chains, a mixed "kitchen" graph and the fixtures:
+The benchmark loads and steps chains, a mixed "kitchen" graph and a fixture on the tree:
 
 ```bash
 cargo bench -p arora-node-graph
 ```
 
-Benchmark ideas:
-
-- Evaluate large graphs under different topologies to profile numeric performance.
-- Leverage the graphs in `fixtures/` to validate schema migrations.
+The fixture tests run every graph in `fixtures/` evaluating every node and what its outputs read, and again with its parameters edited in place.
 
 ---
 

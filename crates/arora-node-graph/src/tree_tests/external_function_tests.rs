@@ -283,8 +283,7 @@ fn task_run_calls_with_the_stated_args_under_the_live_bundle() {
 }
 
 /// A graph on the tree always runs over a bridge: an external function no
-/// module is registered for fails the evaluation, naming the function, as
-/// one with no function host fails on the reference.
+/// module is registered for fails the evaluation, naming the function.
 #[test]
 fn external_function_without_host_errors() {
     let graph = external_function_graph(Uuid::from_u128(0x2222), Uuid::from_u128(0x3333));

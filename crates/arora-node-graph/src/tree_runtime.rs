@@ -1,6 +1,6 @@
-//! A node graph run on the behavior tree, behind the reference evaluator's
-//! surface: stage inputs and set the clock, evaluate, then read every
-//! node's ports and the writes of its `output` nodes.
+//! A node graph run on the behavior tree: stage inputs and set the clock,
+//! evaluate, then read every node's ports and the writes of its `output`
+//! nodes.
 //!
 //! [`TreeRuntime`] holds the graph's own store: the staged inputs, the clock
 //! and the keys the graph writes. It [imports](crate::import) the graph,
@@ -9,9 +9,8 @@
 //! of the tree.
 //!
 //! What it evaluates is a choice ([`Evaluation`]): every node at every tick,
-//! as the reference evaluator does, so every port can be read and every
-//! node's error surfaces; or only what the graph's outputs read, which is
-//! what a device runs.
+//! so every port can be read and every node's error surfaces; or only what
+//! the graph's outputs read, which is what a device runs.
 use std::collections::{HashMap, HashSet};
 
 use arora_behavior::FunctionIndex;
@@ -32,8 +31,8 @@ use crate::types::{GraphSpec, NodeId, NodeParams, NodeSpec, NodeType};
 /// What an evaluation brings up to date.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Evaluation {
-    /// Every node, at every tick, as the reference evaluator evaluates them:
-    /// each port can be read, and an error any node meets fails the tick.
+    /// Every node, at every tick, in topological order: each port can be
+    /// read, and an error any node meets fails the tick.
     #[default]
     Every,
     /// What the graph's outputs read: its sinks, its keyed outputs and what
@@ -85,7 +84,7 @@ struct Loaded {
     spec: GraphSpec,
     imported: ImportedGraph,
     lowered: LoweredTree,
-    /// The graph's node indices in the reference evaluator's order.
+    /// The graph's node indices in topological order.
     order: Vec<usize>,
     /// The indices of its `output` nodes, in that order.
     outputs: Vec<usize>,
@@ -185,8 +184,8 @@ impl TreeRuntime {
             .filter(|state| *state != Value::Unit)
     }
 
-    /// The runtime state of every stateful node of the graph, as the
-    /// reference evaluator holds it, by node id.
+    /// The runtime state of every stateful node of the graph, decoded, by
+    /// node id.
     #[cfg(test)]
     pub(crate) fn node_states(
         &self,
@@ -551,8 +550,8 @@ impl TreeRuntime {
 
 /// Carry into `tree`, built from `imported`, the state of `previous`: every
 /// node `imported` shares unchanged with it keeps the cells its arguments
-/// hold, and a changed stateful node keeps its state, as a node the reference
-/// evaluator keeps runs on with its state when its parameters change.
+/// hold, and a changed stateful node keeps its state: a node whose
+/// parameters change runs on from where it was.
 fn carry_state(tree: &BehaviorTree, previous: &Loaded, imported: &ImportedGraph) {
     let held: HashMap<Uuid, &arora_behavior_tree::schema::Node> = previous
         .imported
@@ -578,15 +577,13 @@ fn carry_state(tree: &BehaviorTree, previous: &Loaded, imported: &ImportedGraph)
     }
 }
 
-/// Evaluate `spec` on `rt`: the tree's counterpart of
-/// [`evaluate_all`](crate::evaluate_all).
+/// Evaluate `spec` on `rt`, loading it first when it is not the graph loaded.
 pub fn evaluate_all(rt: &mut TreeRuntime, spec: &GraphSpec) -> Result<(), String> {
     rt.evaluate_spec(spec)
 }
 
 /// Evaluate `spec` on `rt`, its external functions and task runs calling
-/// `functions`: the tree's counterpart of
-/// [`evaluate_all_with_functions`](crate::evaluate_all_with_functions).
+/// `functions`.
 pub fn evaluate_all_with_functions(
     rt: &mut TreeRuntime,
     spec: &GraphSpec,

@@ -1,14 +1,15 @@
-//! Mutable runtime state that persists across node evaluations.
+//! What a node's evaluation reads and writes besides its ports: the clock,
+//! the node's state, the inputs staged for it, and the writes and runs it
+//! makes.
 
 use crate::types::NodeId;
 use arora_shape::{Shape, TypedPath, Value, WriteBatch};
 use hashbrown::{hash_map::Entry, HashMap};
 use uuid::Uuid;
 
-use super::plan::PlanCache;
 #[cfg(feature = "urdf_ik")]
 use super::urdfik::{build_chain_from_urdf, IkKey, UrdfKinematicsState};
-use super::value_layout::{FlatValue, PortValue, ValueLayout};
+use super::value_layout::{FlatValue, ValueLayout};
 
 /// Internal integration state for a spring node. Values remain flattened for efficiency.
 #[derive(Clone, Debug)]
@@ -150,17 +151,13 @@ pub struct StagedInput {
     pub epoch: u64,
 }
 
-/// Runtime data shared by all node evaluations.
+/// What a node's evaluation reads and writes besides its ports.
 #[derive(Debug, Default)]
 pub struct GraphRuntime {
     /// Current graph time in seconds.
     pub t: f32,
     /// Step delta in seconds for the active evaluation.
     pub dt: f32,
-    /// Output map for external consumers/tests keyed by node id.
-    pub outputs: HashMap<NodeId, HashMap<String, PortValue>>,
-    /// Fast per-index storage aligned to spec.nodes order (mirrors `plan.node_index`).
-    pub outputs_vec: Vec<Vec<PortValue>>,
     /// Writes emitted by output/sink nodes during the current evaluation.
     pub writes: WriteBatch,
     /// Task runs requested by spawn nodes during the current evaluation, in
@@ -172,19 +169,12 @@ pub struct GraphRuntime {
     pub staged_inputs: HashMap<TypedPath, StagedInput>,
     /// Current input epoch. Newly staged values target `input_epoch + 1`.
     pub input_epoch: u64,
-    /// Cached execution plan and node-index lookup derived from the current spec.
-    pub plan: PlanCache,
 }
 
 impl GraphRuntime {
-    /// Reset runtime state for a new spec, clearing plan and per-node caches.
-    ///
-    /// Call this when a structural graph change invalidates cached layouts, bindings, or node
-    /// state. Ordinary param updates can continue reusing the existing runtime.
+    /// Clear every node's state, the staged inputs, and the writes and runs
+    /// made.
     pub fn reset_for_spec(&mut self) {
-        self.plan = PlanCache::default();
-        self.outputs.clear();
-        self.outputs_vec.clear();
         self.writes.0.clear();
         self.spawns.clear();
         self.node_states.clear();
@@ -225,22 +215,6 @@ impl GraphRuntime {
         self.staged_inputs
             .get(path)
             .filter(|staged| staged.epoch == self.input_epoch)
-    }
-
-    /// Consume a staged input for the current epoch, removing it from the cache.
-    ///
-    /// Entries staged for other epochs are left untouched and return `None`.
-    pub fn take_input(&mut self, path: &TypedPath) -> Option<StagedInput> {
-        let matches_epoch = self
-            .staged_inputs
-            .get(path)
-            .map(|staged| staged.epoch == self.input_epoch)
-            .unwrap_or(false);
-        if matches_epoch {
-            self.staged_inputs.remove(path)
-        } else {
-            None
-        }
     }
 
     /// Fetch the spring state for `node_id`, creating or reinitialising it from `flat` as needed.
