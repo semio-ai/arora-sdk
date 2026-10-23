@@ -8,20 +8,37 @@
 //! memory to read.
 //!
 //! Selected by `executor.name: wasm-component` in a module's header.
+//!
+//! A component may import the WASI 0.2 interfaces an ordinary program's
+//! runtime reaches for — `wasi:cli` (environment, exit, standard streams,
+//! terminals), `wasi:io`, `wasi:clocks`, `wasi:random` and `wasi:filesystem`,
+//! with no directory preopened, so a guest sees no file — and no other: no
+//! sockets ([`HOST_INTERFACES`](crate::component_layout::HOST_INTERFACES)).
+//! A C or C++ guest's libc reaches the filesystem's interfaces whenever it
+//! links its file descriptors' code, as a debug build of the Rust libraries it
+//! links does. A component importing another interface fails to instantiate.
+//!
+//! A component that traps — a Rust guest's panic, a C++ guest's failed
+//! `assert` — is entered no more: every later call fails with the trap it
+//! met, until the module is reloaded, which instantiates it afresh.
+
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use derive_more::{Display, Error, From};
 use uuid::Uuid;
-use wasmtime::component::{bindgen, Component, Linker};
+use wasmtime::component::{bindgen, Component, HasData, Linker};
 use wasmtime::{Config, Engine as WasmEngine, Store};
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use arora_types::module::low::ModuleDefinition;
+use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::call::{CallBridge, CallableId};
+use crate::compiled::{Code, CompiledModule};
 use crate::engine::EngineRef;
-use crate::module::{DispatchError, Module as AroraModule};
+use crate::load::module_definition_from_parts;
+use crate::module::{guest_error, DispatchError, Module as AroraModule};
 
 bindgen!({
     world: "module",
@@ -94,7 +111,6 @@ impl arora::module::host::Host for HostState {
 }
 
 pub struct ComponentExecutor {
-    engine: WasmEngine,
     linker: Linker<HostState>,
     arora_engine: Option<EngineRef>,
 }
@@ -115,20 +131,129 @@ fn config() -> Config {
     config
 }
 
-impl ComponentExecutor {
-    pub fn new() -> Result<Self, InitializationError> {
-        let engine = WasmEngine::new(&config()).map_err(anyhow::Error::from)?;
+/// The wasmtime engine every component compiles on and every instance runs
+/// in: one per process, created on first use, as the core-module executor's
+/// is. Unlike that one it allocates instances on demand, reserving address
+/// space per live instance: a pool reserves it for every slot when it is
+/// created, and a second pool would reserve as much again as the core-module
+/// engine's. A `Component` instantiates only in a store of the engine that compiled
+/// it, so one engine is what lets the devices of a process share a compiled
+/// module; each instance keeps a store of its own. A failure to create it is
+/// kept: every later executor and compilation fails with it.
+fn engine() -> Result<&'static WasmEngine, LoadModuleError> {
+    static ENGINE: OnceLock<Result<WasmEngine, String>> = OnceLock::new();
+    ENGINE
+        .get_or_init(|| WasmEngine::new(&config()).map_err(|e| format!("{e:#}")))
+        .as_ref()
+        .map_err(|e| {
+            LoadModuleError::Internal(format!("failed to create the component engine: {e}"))
+        })
+}
 
-        let mut linker: Linker<HostState> = Linker::new(&engine);
-        wasmtime_wasi::p2::add_to_linker_sync(&mut linker).map_err(anyhow::Error::from)?;
+/// Compile `executable` on the process-wide [`engine`].
+pub(crate) fn compile(executable: &[u8]) -> Result<Component, LoadModuleError> {
+    Component::new(engine()?, executable).map_err(|_| LoadModuleError::MalformedExecutable)
+}
+
+/// `wasi:io`'s host state: the store's resource table.
+struct HasIo;
+
+impl HasData for HasIo {
+    type Data<'a> = &'a mut ResourceTable;
+}
+
+/// Link the WASI 0.2 interfaces a component may import (see the module
+/// documentation), as `wasmtime_wasi::p2::add_to_linker_sync` links them, the
+/// sockets left out. The filesystem holds no directory: the context preopens
+/// none.
+fn add_wasi_to_linker(linker: &mut Linker<HostState>) -> wasmtime::Result<()> {
+    use wasmtime_wasi::cli::{WasiCli, WasiCliView};
+    use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
+    use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
+    use wasmtime_wasi::p2::bindings::{cli, clocks, filesystem, io, random, sync};
+    use wasmtime_wasi::random::WasiRandom;
+
+    let l = linker;
+    io::error::add_to_linker::<_, HasIo>(l, |t| t.ctx().table)?;
+    sync::io::poll::add_to_linker::<_, HasIo>(l, |t| t.ctx().table)?;
+    sync::io::streams::add_to_linker::<_, HasIo>(l, |t| t.ctx().table)?;
+    clocks::wall_clock::add_to_linker::<_, WasiClocks>(l, HostState::clocks)?;
+    clocks::monotonic_clock::add_to_linker::<_, WasiClocks>(l, HostState::clocks)?;
+    filesystem::preopens::add_to_linker::<_, WasiFilesystem>(l, HostState::filesystem)?;
+    sync::filesystem::types::add_to_linker::<_, WasiFilesystem>(l, HostState::filesystem)?;
+    random::random::add_to_linker::<_, WasiRandom>(l, |t| t.ctx().ctx.random())?;
+    random::insecure::add_to_linker::<_, WasiRandom>(l, |t| t.ctx().ctx.random())?;
+    random::insecure_seed::add_to_linker::<_, WasiRandom>(l, |t| t.ctx().ctx.random())?;
+    cli::exit::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::environment::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::stdin::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::stdout::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::stderr::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::terminal_input::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::terminal_output::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::terminal_stdin::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::terminal_stdout::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    cli::terminal_stderr::add_to_linker::<_, WasiCli>(l, HostState::cli)?;
+    Ok(())
+}
+
+impl ComponentExecutor {
+    /// An executor on the process-wide component engine, which this creates if
+    /// no executor has yet. Fails if the engine cannot be created.
+    pub fn new() -> Result<Self, InitializationError> {
+        let engine = engine().map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        let mut linker: Linker<HostState> = Linker::new(engine);
+        add_wasi_to_linker(&mut linker).map_err(anyhow::Error::from)?;
         Module::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)
             .map_err(anyhow::Error::from)?;
 
         Ok(Self {
-            engine,
             linker,
             arora_engine: None,
         })
+    }
+
+    /// Instantiate `component` in a store of its own, linked to this
+    /// executor's Arora engine, serving the functions `exports` declares.
+    fn instantiate(
+        &self,
+        exports: &[ExportSymbol],
+        component: &Component,
+    ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
+        let state = HostState {
+            wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+            table: ResourceTable::new(),
+            engine: EnginePtr(self.arora_engine.ok_or_else(|| {
+                LoadModuleError::Internal("ComponentExecutor: set_engine not called".into())
+            })?),
+        };
+        let mut store = Store::new(component.engine(), state);
+
+        let bindings = Module::instantiate(&mut store, component, &self.linker)
+            .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
+
+        // Every function the header declares is one the component serves, as
+        // a core module exports each under its own name.
+        let served = bindings
+            .call_functions(&mut store)
+            .map_err(|e| LoadModuleError::Internal(format!("functions trapped: {e:#}")))?;
+        let function_ids: Vec<Uuid> = exports.iter().map(|e| *e.id()).collect();
+        if let Some(missing) = function_ids
+            .iter()
+            .find(|id| !served.iter().any(|served| id_to_uuid(*served) == **id))
+        {
+            return Err(LoadModuleError::Internal(format!(
+                "failed to find function export {missing}: the component does not serve it"
+            )));
+        }
+
+        Ok(Box::new(ComponentModule {
+            bindings,
+            store,
+            function_ids,
+            trapped: None,
+        }))
     }
 }
 
@@ -145,33 +270,24 @@ impl Executor for ComponentExecutor {
         &mut self,
         module_definition: ModuleDefinition,
     ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
-        let component = Component::new(&self.engine, &module_definition.executable)
-            .map_err(|_| LoadModuleError::MalformedExecutable)?;
+        let component = compile(&module_definition.executable)?;
+        self.instantiate(&module_definition.header.exports, &component)
+    }
 
-        let state = HostState {
-            wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-            table: ResourceTable::new(),
-            engine: EnginePtr(self.arora_engine.ok_or_else(|| {
-                LoadModuleError::Internal("ComponentExecutor: set_engine not called".into())
-            })?),
-        };
-        let mut store = Store::new(&self.engine, state);
-
-        let bindings = Module::instantiate(&mut store, &component, &self.linker)
-            .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e}")))?;
-
-        let function_ids = module_definition
-            .header
-            .exports
-            .iter()
-            .map(|e| *e.id())
-            .collect();
-
-        Ok(Box::new(ComponentModule {
-            bindings,
-            store,
-            function_ids,
-        }))
+    fn load_compiled_module(
+        &mut self,
+        module: &CompiledModule,
+    ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
+        match &module.code {
+            Code::Component(component) => self.instantiate(&module.header.exports, component),
+            Code::Executable(executable) => self.load_module(module_definition_from_parts(
+                module.header.clone(),
+                executable.as_ref().into(),
+            )),
+            _ => Err(LoadModuleError::Internal(
+                "ComponentExecutor: the module was compiled for another executor".into(),
+            )),
+        }
     }
 
     fn unload_module(&mut self, _: Uuid) -> Result<(), UnloadModuleError> {
@@ -186,27 +302,48 @@ struct ComponentModule {
     store: Store<HostState>,
     /// Functions the module's header declares; dispatch refuses others.
     function_ids: Vec<Uuid>,
+    /// Why a call trapped, once one has: wasmtime enters a component instance
+    /// no more after a trap, and the module says so, naming the trap, until
+    /// it is reloaded.
+    trapped: Option<String>,
 }
 
 impl AroraModule for ComponentModule {
     fn dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
         if !self.function_ids.contains(method_id) {
-            return Err(DispatchError::Internal {
-                message: format!("function {method_id} not exported by this module"),
+            return Err(DispatchError::FunctionNotFound { id: *method_id });
+        }
+        if let Some(trap) = &self.trapped {
+            return Err(DispatchError::Trap {
+                message: format!("{TRAPPED} ({trap})"),
             });
         }
-        let result = self
+        let result = match self
             .bindings
             .call_dispatch(&mut self.store, uuid_to_id(method_id), arg)
-            .map_err(|e| DispatchError::Trap {
-                message: format!("dispatch trapped: {e:#?}"),
-            })?;
+        {
+            Ok(result) => result,
+            Err(e) => {
+                let message = format!("dispatch trapped: {e:#?}");
+                self.trapped = Some(message.clone());
+                return Err(DispatchError::Trap { message });
+            }
+        };
         match result {
-            Ok(bytes) => Ok(bytes.into_boxed_slice()),
+            // A guest that writes its error as an error buffer, as a core
+            // module does, has it read as its error, as a core module's is.
+            Ok(bytes) => match guest_error(&bytes) {
+                Some(message) => Err(DispatchError::Guest { message }),
+                None => Ok(bytes.into_boxed_slice()),
+            },
             Err(message) => Err(DispatchError::Guest { message }),
         }
     }
 }
+
+/// What a component that trapped answers each later call with.
+pub(crate) const TRAPPED: &str =
+    "the module trapped in an earlier call and runs no more calls until it is reloaded";
 
 #[cfg(test)]
 mod tests {

@@ -4,12 +4,12 @@ project(example-cpp CXX)
 # Required cache variables, which build.rs passes:
 #   ARORA_MODULE_CLI      host bin that generates C++ bindings from module.yaml
 #                         (with arora-module-cpp beside it)
-#   ARORA_BUFFERS_LIB     wasm32-wasip1 static library (.a) of arora-buffers
-#   ARORA_UTIL_LIB        wasm32-wasip1 static library (.a) of arora-util
+#   ARORA_BUFFERS_LIB     wasm32-wasip2 static library (.a) of arora-buffers
+#   ARORA_UTIL_LIB        wasm32-wasip2 static library (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR  source directory of libs/cpp
 #   ARORA_INCLUDE_DIR     directory holding the generated arora C headers
 #   ARORA_MODULE_DIR      the module directory to write
-# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip1 toolchain file.
+# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip2 toolchain file.
 foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB ARORA_UTIL_LIB
             ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR ARORA_MODULE_DIR)
   if(NOT DEFINED ${VAR})
@@ -51,20 +51,21 @@ add_custom_target(generate-example-cpp-bindings ALL
     ${GENERATED_DIR}/header.json
 )
 
-# The guest links as a WASI reactor: no `main`, and an `_initialize` that the
-# engine calls once, when it loads the module, to run the static constructors.
+# The guest is a component of the `arora:module` world: arora-cpp-component
+# serves the module's functions through the world's `functions` and `dispatch`
+# exports. It links as a WASI reactor: no `main`, and an `_initialize` the
+# component calls once, when it is instantiated, to run the static
+# constructors.
 add_executable(example-cpp
   src/module.cpp
   ${GENERATED_DIR}/source/example-cpp.cpp
 )
 add_dependencies(example-cpp generate-example-cpp-bindings)
 target_include_directories(example-cpp PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}/include)
-target_link_libraries(example-cpp PRIVATE arora-buffers arora-util arora-cpp)
+target_link_libraries(example-cpp PRIVATE arora-buffers arora-util arora-cpp arora-cpp-component)
 target_compile_options(example-cpp PRIVATE -fPIC -O3 -flto -fno-exceptions)
 target_link_options(example-cpp PRIVATE
   -mexec-model=reactor
-  -Wl,--export=arora_buffer_alloc
-  -Wl,--export=arora_buffer_free
   -Wl,--allow-multiple-definition
 )
 

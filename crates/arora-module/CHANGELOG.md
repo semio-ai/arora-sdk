@@ -4,6 +4,26 @@ All notable changes to `arora-module`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] - 2026-10-23
+
+### Added
+
+- `artifact!(module, …)`, written once at the root of the crate built as the
+  artifact: built for `wasm32-wasip2`, the artifact is a component of the
+  `arora:module` world serving the functions of the modules it names
+  (`functions`, `dispatch`), which a device loads under the
+  `wasm-component` executor. Built otherwise it expands to nothing.
+- `component`, the guest bindings of the `arora:module` world at 0.2.0 on
+  `wasm32-wasip2`: its `host` interface calls other modules through the
+  engine.
+- Code generated against the core-module ABI (arora-module-rust's) built for
+  `wasm32-wasip2` makes its engine calls, `arora_dispatch` and
+  `arora_dispatch_indirect`, through the `host` interface. The result each
+  returns stays valid until the next call, which frees it, so a guest holds
+  one result however many calls it makes; a result that is not an Arora
+  Buffer comes back as an error buffer.
+- Requires arora-module-macros 3.1 and arora-buffers 3.1.
+
 ## [2.2.0] - 2026-10-18
 
 ### Added

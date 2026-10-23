@@ -4,6 +4,67 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.5.0] - 2026-10-23
+
+### Added
+
+- `executor::browser::BrowserComponentExecutor`, the browser's
+  `wasm-component` executor, which `BrowserExecutor::component_executor()`
+  gives on the same loader. It instantiates the guest core module of a
+  component built for `wasm32-wasip2` and gives it, in the canonical ABI's
+  form, the `arora:module/host` interface and the WASI 0.2 interfaces the
+  native `ComponentExecutor` links: standard output and error go to the
+  console, standard input is closed, randomness comes from
+  `crypto.getRandomValues`, the clocks are `performance.now()` and
+  `Date.now()`, and every pollable is ready. A component's initializer runs a
+  reactor guest's `_initialize` once, as natively. A component
+  importing anything else fails to load, naming the import.
+- `component_layout`: the layout of a component an Arora host runs
+  (`guest_module`), and the interfaces every host provides
+  (`HOST_INTERFACES`, `provided`). The browser executor refuses any other
+  component at compilation: one with more than one guest core module or a
+  nested component, one importing anything but those interfaces, and one
+  whose exports are not the world's `functions` and `dispatch` with the
+  world's types, each lifting its guest module's export of that name as the
+  browser calls it, or whose shim, fixups or initializer do more or other
+  than `wit-component`'s; it reads no further, and does not check how the
+  guest module's own imports are wired, which the browser implements by
+  name.
+- `SharedLoader::prepare` stages a component as it stages a core module, by
+  the executable's preamble.
+- On `wasm32`, `CompiledModule::new` compiles a `wasm-component` module: the
+  guest core module of the component, which each engine instantiates.
+
+### Changed
+
+- **For guests:** the `arora:module` world is at 0.2.0 and exports
+  `functions`, the ids of the functions a component serves, which the
+  component executors check the functions a header declares against when
+  they load it, as a core module's exports are checked. A component built
+  against the world at 0.1.0 does not load. No component was published
+  against 0.1.0.
+- **For guests:** `ComponentExecutor` links only the interfaces
+  `HOST_INTERFACES` names: a component importing `wasi:sockets` no longer
+  loads (5.4 linked all of WASI 0.2). `wasi:filesystem` is linked with no
+  directory preopened, as 5.4 did, and the browser executor provides the
+  same.
+- A component that traps runs no more calls: each later call fails, naming
+  the trap, until the module is reloaded. wasmtime enters a component
+  instance no more after a trap, and the browser executor holds a component
+  to the same rule.
+- A component that returns an error buffer, as a core module writes its
+  errors, fails the call with `DispatchError::Guest`, as a core module does.
+- `ComponentExecutor` refuses a call to a function its module's header does
+  not declare with `DispatchError::FunctionNotFound`, as the other executors
+  do.
+
+### Fixed
+
+- An error buffer whose message's length runs past the buffer is read up to
+  the buffer's end; the `wasm` executor panicked on it.
+- `BrowserExecutor` reads a core module's error buffer as its error, as the
+  wasmtime executor does; it returned it as the call's result.
+
 ## [5.4.0] - 2026-10-22
 
 ### Added

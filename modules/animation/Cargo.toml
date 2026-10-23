@@ -1,6 +1,6 @@
 [package]
 name = "arora-animation-module"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -15,7 +15,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # 2.2: a declaration's scope and the records of the types its functions name.
-arora-module = { path = "../../crates/arora-module", version = "2.2" }
+arora-module = { path = "../../crates/arora-module", version = "2.3" }
 # 3.8: the records the derive gives each record type.
 arora-types = { path = "../../crates/arora-types", version = "3.8" }
 arora-animation = { path = "../../crates/arora-animation", version = "1" }

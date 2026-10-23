@@ -87,7 +87,9 @@ use arora_engine::engine::{
     EngineBuilder, LoadModuleError, PinnedEngine, ReloadModuleError, UnloadModuleError,
 };
 #[cfg(feature = "native")]
-use arora_engine::executor::{native::NativeExecutor, wasm::WebAssemblyExecutor};
+use arora_engine::executor::{
+    component::ComponentExecutor, native::NativeExecutor, wasm::WebAssemblyExecutor,
+};
 /// Re-exported so an embedder can assemble a host-side module — a set of
 /// in-process functions under a module id — and inject it with
 /// [`AroraBuilder::with_host_module`].
@@ -918,7 +920,8 @@ impl AroraBuilder {
     /// from a behavior tree, exactly as the same crate registered in-process
     /// with [`with_host_module`](Self::with_host_module)
     /// (`HostModule::of::<M>()`) would be. `executor` names how `executable`
-    /// runs — `"wasm"` for the `wasm32-wasip1` build of the declaring crate.
+    /// runs — `"wasm-component"` for the `wasm32-wasip2` build of the
+    /// declaring crate.
     ///
     /// ```ignore
     /// let device = Arora::builder()
@@ -1709,12 +1712,16 @@ fn freeze_exports<'a>(
     })
 }
 
-/// Build the engine with the right executor host for the target: the browser's
-/// native `WebAssembly` runtime on wasm, or the wasmtime + native (dynamic
-/// library) hosts otherwise.
+/// Build the engine with the right executor hosts for the target: components
+/// and core modules on the browser's `WebAssembly` runtime on wasm, or on
+/// wasmtime, with the native (dynamic library) host, otherwise.
 #[cfg(feature = "native")]
 fn build_engine() -> Result<PinnedEngine> {
     Ok(EngineBuilder::new()
+        .add_executor(
+            ComponentExecutor::new()
+                .map_err(|e| anyhow::anyhow!("failed to create the component executor: {e}"))?,
+        )
         .add_executor(
             WebAssemblyExecutor::new()
                 .map_err(|e| anyhow::anyhow!("failed to create wasm executor: {e}"))?,
@@ -1726,8 +1733,11 @@ fn build_engine() -> Result<PinnedEngine> {
 #[cfg(all(not(feature = "native"), target_arch = "wasm32"))]
 fn build_engine() -> Result<PinnedEngine> {
     use arora_engine::executor::browser::BrowserExecutor;
+    let executor = BrowserExecutor::new();
+    let components = executor.component_executor();
     Ok(EngineBuilder::new()
-        .add_executor(BrowserExecutor::new())
+        .add_executor(executor)
+        .add_executor(components)
         .build())
 }
 
@@ -1743,10 +1753,10 @@ fn build_engine() -> Result<PinnedEngine> {
 }
 
 /// Loading a guest wasm module through the builder and dispatching it. Needs
-/// the `native` feature: the module runs on the WebAssembly (wasmtime)
-/// executor. `test-rust-wasm` is a small guest built as a `wasm32-wasip1`
-/// cdylib artifact dependency; Cargo hands its generated header and `.wasm`
-/// bytes to the test.
+/// the `native` feature: the module runs on the component (wasmtime)
+/// executor. `test-rust-wasm` is a small guest built as a `wasm32-wasip2`
+/// cdylib artifact dependency, a component; Cargo hands its `.wasm` bytes to
+/// the test, and its header comes from its declaration.
 #[cfg(all(test, feature = "native"))]
 mod module_loading_tests {
     use super::*;
@@ -1762,7 +1772,7 @@ mod module_loading_tests {
     /// as a `module.yaml`, here handed straight to the engine.
     fn test_module_header() -> Header {
         test_rust_wasm::test_rust_wasm::header(arora_types::module::low::Executor {
-            name: "wasm".to_string(),
+            name: "wasm-component".to_string(),
             min_version: None,
             max_version: None,
         })
@@ -1779,7 +1789,7 @@ mod module_loading_tests {
         let mut arora = Arora::builder()
             .with_declared_module::<Module>(
                 arora_types::module::low::Executor {
-                    name: "wasm".to_string(),
+                    name: "wasm-component".to_string(),
                     min_version: None,
                     max_version: None,
                 },
@@ -1831,7 +1841,7 @@ mod module_loading_tests {
             .with_data_store(Box::new(store.clone()))
             .with_declared_module::<Module>(
                 arora_types::module::low::Executor {
-                    name: "wasm".to_string(),
+                    name: "wasm-component".to_string(),
                     min_version: None,
                     max_version: None,
                 },
@@ -1877,7 +1887,7 @@ mod module_loading_tests {
             .with_data_store(Box::new(store.clone()))
             .with_declared_module::<Module>(
                 arora_types::module::low::Executor {
-                    name: "wasm".to_string(),
+                    name: "wasm-component".to_string(),
                     min_version: None,
                     max_version: None,
                 },
@@ -1918,7 +1928,7 @@ mod module_loading_tests {
             .with_data_store(Box::new(store.clone()))
             .with_declared_module::<Module>(
                 arora_types::module::low::Executor {
-                    name: "wasm".to_string(),
+                    name: "wasm-component".to_string(),
                     min_version: None,
                     max_version: None,
                 },

@@ -455,6 +455,9 @@ fn failing(message: String) -> Status {
     Status::Failure
 }
 
+// Built for wasm32-wasip2, the guest is a component serving the policies.
+arora_module::artifact!(microduck_policies);
+
 #[arora_module::module(
     id = "5c0a2e7f-6b3d-4d9a-9a41-2f6c7d1e8b90",
     name = "microduck-policies",

@@ -30,7 +30,7 @@ use microduck_policies::microduck_policies::Module as Policies;
 
 pub use studio::StudioModel;
 
-/// The policy module's wasm32-wasip1 build, handed over by cargo (the
+/// The policy module's wasm32-wasip2 build, a component, handed over by cargo (the
 /// artifact dependency in `Cargo.toml`).
 const POLICY_WASM: &[u8] = include_bytes!(env!(
     "CARGO_CDYLIB_FILE_MICRODUCK_POLICIES_microduck_policies"
@@ -79,8 +79,8 @@ impl Default for Speech {
 /// How the policy module runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Executor {
-    /// As a wasm guest on the engine's WebAssembly executor — the portable
-    /// form, what a robot would be shipped.
+    /// As a wasm guest, a component, on the engine's component executor —
+    /// the portable form, what a robot would be shipped.
     Wasm,
     /// In-process, the same crate linked into the host — for debugging and
     /// speed of iteration.
@@ -349,10 +349,10 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
     Ok((builder.with_groot(config.tree), sim))
 }
 
-/// The engine's WebAssembly executor, as a module header names it.
+/// The engine's component executor, as a module header names it.
 fn wasm_executor() -> arora_types::module::low::Executor {
     arora_types::module::low::Executor {
-        name: "wasm".to_string(),
+        name: "wasm-component".to_string(),
         min_version: None,
         max_version: None,
     }

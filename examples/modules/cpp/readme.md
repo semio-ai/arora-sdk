@@ -2,8 +2,8 @@
 
 A module for the [Arora Engine](../../../crates/arora-engine/readme.md)
 written in C++. It adds two integers and counts the sums it returned, and
-builds into the same form as a Rust module: a `wasm32-wasip1` guest in the
-module directory a device loads it from.
+builds into the same form as a Rust module: a `wasm32-wasip2` component in
+the module directory a device loads it from.
 
 ## How it is made
 
@@ -15,13 +15,15 @@ module directory a device loads it from.
   calls into calls to them. It also writes the module's header and record.
 - [`src/module.cpp`](src/module.cpp) implements the functions.
 - [`CMakeLists.txt`](CMakeLists.txt) builds the guest with the WASI SDK's
-  `wasm32-wasip1` toolchain file, links it against `arora-buffers`,
-  `arora-util` and [`arora-cpp`](../../../libs/cpp), and calls
+  `wasm32-wasip2` toolchain file, links it against `arora-buffers`,
+  `arora-util`, [`arora-cpp`](../../../libs/cpp) and `arora-cpp-component`,
+  which serves the generated functions through the `arora:module` world's
+  `functions` and `dispatch` exports, and calls
   `arora_module_directory`, whose target `example-cpp-module-directory`
   builds the guest and writes the module directory.
 
 The guest links as a WASI reactor (`-mexec-model=reactor`). It has no
-`main`; the engine calls its `_initialize` once, when it loads the module,
+`main`; the component calls its `_initialize` once, when it is instantiated,
 which runs the C++ static constructors, and the module's globals then live
 across calls — the `sums` vector in `src/module.cpp`.
 

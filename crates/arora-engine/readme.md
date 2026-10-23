@@ -2,27 +2,40 @@
 
 Welcome to the core of the project!
 
-## WASM Executor
+## WebAssembly executors
 
 The Arora engine runs WASM modules — advertised with
 [a custom module description format (or schema)](https://github.com/semio-ai/arora-sdk) —
-through pluggable [`Executor`](src/executor/mod.rs) implementations.
-Two are shipped today:
+through pluggable [`Executor`](src/executor/mod.rs) implementations, chosen
+by the `executor.name` of a module's header. Each kind runs natively, on
+[`wasmtime`](https://docs.wasmtime.dev/) (the default `wasmtime-host`
+feature), and in the browser, on its native `WebAssembly` runtime, when
+`arora` itself is compiled to `wasm32-unknown-unknown` (the JS-facing
+wrapper is [`arora-web`](https://github.com/semio-ai/arora-sdk)):
 
-- [`wasm::WebAssemblyExecutor`](src/executor/wasm/mod.rs) hosts modules
-  via [`wasmtime`](https://docs.wasmtime.dev/) on native targets.
-  Gated behind the default `wasmtime-host` feature.
-- [`browser::BrowserExecutor`](src/executor/browser/mod.rs) hosts modules
-  via the browser's native `WebAssembly` runtime when `arora` itself is
-  compiled to `wasm32-unknown-unknown`. The JS-facing wrapper lives in
-  [`arora-web`](https://github.com/semio-ai/arora-sdk).
+- **`wasm-component`**, what Arora guests are built as: a component of the
+  `arora:module` world ([`wit/arora-module.wit`](wit/arora-module.wit)), as
+  Rust and C++ build one for `wasm32-wasip2`. It exports `functions` and
+  `dispatch`, and may import the world's `host` interface and the WASI 0.2
+  interfaces `wasi:cli`, `wasi:io`, `wasi:clocks`, `wasi:random` and
+  `wasi:filesystem`, with no directory preopened — no sockets
+  ([`component_layout`](src/component_layout.rs)).
+  Hosted by [`component::ComponentExecutor`](src/executor/component/mod.rs)
+  and [`browser::BrowserComponentExecutor`](src/executor/browser/component.rs),
+  which a `BrowserExecutor`'s `component_executor()` gives. A component that
+  traps runs no more calls until it is reloaded.
+- **`wasm`**, a core module speaking the core-module ABI
+  (`arora_buffer_alloc`/`free` and `arora_function_<uuid>` exports,
+  `arora_dispatch` / `arora_dispatch_indirect` imports), as guests built for
+  `wasm32-wasip1` are. Hosted by
+  [`wasm::WebAssemblyExecutor`](src/executor/wasm/mod.rs) and
+  [`browser::BrowserExecutor`](src/executor/browser/mod.rs).
 
-Both expose the same ABI to guests (`arora_buffer_alloc`/`free`,
-`arora_function_<uuid>` exports, `arora_dispatch` / `arora_dispatch_indirect`
-imports), so a module compiled once runs in either host. A guest that exports
-`_initialize` — a WASI reactor, which a C or C++ guest is when linked with
-`-mexec-model=reactor` — has it called once, when it loads, before any other
-export: it runs the guest's static constructors.
+A guest that exports `_initialize` — a WASI reactor, which a C or C++ guest
+is when linked with `-mexec-model=reactor` — has it run once, when it loads,
+before any other export: a component's initializer calls it, and the `wasm`
+executors call it for a core module. It runs the guest's static
+constructors.
 
 ### Compiling a module once
 
@@ -31,9 +44,10 @@ the engine that loads it. A module that several engines load — one per
 device, say — compiles once as a [`CompiledModule`](src/compiled.rs), which
 each engine loads with `Engine::load_compiled_module`: it instantiates the
 compiled code, with an instance (memory, globals) of its own, and compiles
-nothing. Natively, every `WebAssemblyExecutor` in the process runs on one
+nothing. Natively, every executor of a kind in the process runs on one
 wasmtime engine, the one a compiled module belongs to; in the browser, a
-`WebAssembly.Module` instantiates anywhere.
+`WebAssembly.Module` — for a component, of the guest's core module —
+instantiates anywhere.
 
 ## Native Executor
 

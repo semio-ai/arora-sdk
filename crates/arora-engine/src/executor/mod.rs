@@ -4,6 +4,7 @@ pub mod browser;
 pub mod component;
 #[cfg(feature = "native-host")]
 pub mod native;
+mod wasi_limits;
 #[cfg(feature = "wasmtime-host")]
 pub mod wasm;
 

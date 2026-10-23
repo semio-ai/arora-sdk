@@ -63,13 +63,14 @@ cargo test --release
 ```
 
 `cargo test` is self-sufficient: the `arora-integration-tests` crate declares
-the wasm guests as artifact dependencies — `test-rust-wasm` and
-`test-behavior-tree-nodes` (`wasm32-wasip1`) plus `test-rust-component`
-(`wasm32-wasip2`) — so running the tests builds the guests on its own and finds
-them through env vars forwarded by its `build.rs` (`CARGO_CDYLIB_FILE_*`). No
-separate `cargo build --target wasm32-wasip1` is needed. The `test-cpp` /
-`test-cpp-2` wasm (plus their `module.yaml` / `records/`) are published by those
-modules' `build.rs` under `target/<profile>/modules/` and read by path.
+the wasm guests as artifact dependencies — `test-rust-wasm`,
+`test-behavior-tree-nodes`, `test-rust-component` and the animation module,
+each a `wasm32-wasip2` component — so running the tests builds the guests on
+its own and finds them through env vars forwarded by its `build.rs`
+(`CARGO_CDYLIB_FILE_*`). No separate `cargo build --target` is needed. The
+C++ guests' module directories (`header.json`, `<name>.wasm`, `records/`) are
+written by those modules' `build.rs` under `target/<profile>/modules/` and
+read by path.
 
 Both integration tests run green from a clean build:
 `call_test_rust_wasm_from_engine` and the C++-into-wasm
@@ -128,12 +129,12 @@ flowchart TD
     polly[polly libpolly]
   end
 
-  subgraph wasm_guests [wasm guests wasip1 and wasip2]
+  subgraph wasm_guests [wasm guests, wasip2 components]
     tcpp[test-cpp module directory]
     tcpp2[test-cpp-2 module directory]
     btn[test-behavior-tree-nodes]
     trw[test-rust-wasm]
-    trc["test-rust-component (wasip2)"]
+    trc[test-rust-component]
   end
 
   subgraph tests [arora-integration-tests]
@@ -204,22 +205,26 @@ What the integration test crate actually declares as artifact dependencies
 
 - **`arora-cli`** as `artifact = "bin"` — `tests/build.rs` forwards its path as
   `ARORA_CLI_BIN`.
-- **`test-rust-wasm`** as `artifact = "cdylib", target = "wasm32-wasip1"` —
-  forces a wasm32-wasip1 build and exposes its `.wasm` as
+- **`test-rust-wasm`** as `artifact = "cdylib", target = "wasm32-wasip2"` —
+  forces a wasm32-wasip2 build, a component, and exposes its `.wasm` as
   `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm`; the
   `call_test_rust_wasm_from_engine` test loads it.
 - **`test-rust-component`** as `artifact = "cdylib", target = "wasm32-wasip2"` —
-  a wasip2 **component** guest.
-- **`test-behavior-tree-nodes`** as `artifact = "cdylib", target = "wasm32-wasip1"` —
-  built so `cargo fmt --check` / clippy have its generated sources and the
-  artifact is available; the control nodes it once shipped are now native in
-  `arora-behavior-tree`, so nothing in the default build depends on it at
-  runtime.
+  a component written against the WIT world directly, which the component
+  tests drive.
+- **`test-behavior-tree-nodes`** as `artifact = "cdylib", target = "wasm32-wasip2"` —
+  the module a `module.yaml` declares and arora-module-rust generates, which
+  `tests/behavior_tree_nodes.rs` drives; the control nodes it once shipped
+  are now native in `arora-behavior-tree`, so nothing in the default build
+  depends on it at runtime.
+- **`arora-animation-module`** as `artifact = "cdylib", target = "wasm32-wasip2"` —
+  the animation guest, which `tests/animation.rs` holds equal to the
+  host-linked module.
 - **`test-cpp`** and **`test-cpp-2`** are plain **dev-dependencies** (not
   bindeps): listing them makes `cargo test` run their `build.rs`, which builds
-  the wasm via cmake and publishes `*.wasm` / `module.yaml` / `records/` under
-  `target/<profile>/modules/`. The C++ integration test reads those published
-  files by path. (They are excluded from `default-members`, so a bare
+  the guest via cmake and writes its module directory (`header.json`,
+  `<name>.wasm`, `records/`) under `target/<profile>/modules/`. The C++
+  integration tests read those directories by path. (They are excluded from `default-members`, so a bare
   `cargo build` does not build them — `cargo test` does.) `polly` is not a
   dependency of this crate — it is a workspace member built in its own right and
   staged under `target/<profile>/modules/`.

@@ -14,6 +14,9 @@ crate-type = ["cdylib", "rlib"]
 arora-behavior = { path = "../../crates/arora-behavior" }
 arora-behavior-tree-types = { path = "../../crates/arora-behavior-tree-types" }
 arora-buffers = { path = "../../crates/arora-buffers" }
+# Built for wasm32-wasip2, the guest is a component (`artifact!`) whose calls
+# into the engine go through the world's `host` interface.
+arora-module = { path = "../../crates/arora-module" }
 arora-types = { path = "../../crates/arora-types", version = "3" }
 bytes = "1"
 derive_more = "2"

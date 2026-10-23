@@ -3,9 +3,9 @@
 //! ([`arora_animation_module::module_dir`]).
 //!
 //! ```text
-//! cargo build -p arora-animation-module --target wasm32-wasip1 --release
+//! cargo build -p arora-animation-module --target wasm32-wasip2 --release
 //! cargo run -p arora-animation-module --features module-dir --example module_dir -- \
-//!     <dir> target/wasm32-wasip1/release/arora_animation_module.wasm
+//!     <dir> target/wasm32-wasip2/release/arora_animation_module.wasm
 //! ```
 
 use std::path::PathBuf;

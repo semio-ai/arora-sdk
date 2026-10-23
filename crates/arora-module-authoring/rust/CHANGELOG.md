@@ -4,6 +4,26 @@ All notable changes to `arora-module-rust`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] - 2026-10-23
+
+### Added
+
+- Each function's `dispatch_buffer_<id>(input)`: a call as an artifact
+  receives it, the size-prefixed argument buffer in and the result buffer
+  out, with the function's error as `Err`. Its `arora_function_<id>` entry
+  point calls it, and so does the module's `dispatch_buffer(method, arg)`,
+  which, with `function_ids()`, `arora_module::artifact!` serves a
+  component's `functions` and `dispatch` from: a crate built for
+  `wasm32-wasip2` with `arora_module::artifact!(arora_generated::export)` at
+  its root is a component. An argument that is not an Arora Buffer
+  (`arora_buffers::well_formed`, arora-buffers 3.1) is the call's error. An
+  argument of another type than a parameter's still panics, which a
+  component's trap makes final until it is reloaded.
+- Built for `wasm32-wasip2`, the generated `arora_dispatch` and
+  `arora_dispatch_indirect` call the engine through the `arora:module`
+  world's `host` interface (arora-module 2.3), so the crate depends on
+  arora-module there.
+
 ## [4.0.0] - 2026-10-22
 
 ### Changed

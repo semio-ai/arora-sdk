@@ -1,6 +1,5 @@
-//! Browser integration tests. One loads the test-rust-wasm guest module
-//! (built by the workspace's `arora-integration-tests` crate as a
-//! bindep, into `target/wasm32-wasip1/debug/test_rust_wasm.wasm`)
+//! Browser integration tests. One loads the test-rust-wasm guest module — a
+//! component, built for `wasm32-wasip2` as a cdylib artifact dependency —
 //! through arora-web's JS-facing `Engine`, then calls its `ping`
 //! function; the others drive a device's client operations and drain its
 //! store's changes through `AroraRuntime`, on a device nobody steps, one the
@@ -52,7 +51,7 @@ const PING_FN_ID: &str = "5f423ba9-d5f9-46d7-a9b5-fb7d28f99ea6";
 /// as a `module.yaml`, here handed straight to the engine.
 fn header() -> Header {
     test_rust_wasm::test_rust_wasm::header(arora_types::module::low::Executor {
-        name: "wasm".to_string(),
+        name: "wasm-component".to_string(),
         min_version: None,
         max_version: None,
     })

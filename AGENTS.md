@@ -85,8 +85,10 @@ Key build concepts:
   builds the opt-in NAO cross-compile, which needs its own toolchain
 - Cross-compilation happens automatically via artifact dependencies
 - C++ modules use CMake, but invoked from Rust `build.rs`
-- Legacy wasm modules target `wasm32-wasip1`; component-model modules
-  target `wasm32-wasip2` against `wit/arora-module.wit`
+- Wasm guests, Rust and C++, are components built for `wasm32-wasip2` against
+  the `arora:module` world (`crates/arora-engine/wit/arora-module.wit`); their
+  headers name the `wasm-component` executor. The `wasm` executors still load
+  `wasm32-wasip1` core modules built before.
 - Browser engine uses `wasm32-unknown-unknown`
 
 ## Common Pitfalls and Solutions
@@ -194,9 +196,9 @@ script's `INPUTS`. The `verify` step fails otherwise and names the line to add.
 ### Cross-Compilation
 
 The workspace handles cross-compilation via artifact dependencies:
-- Rust wasm guests build for the **host** by default; their `wasm32-wasip1`
-  flavour is forced on demand by the behavior-tree and integration-test
-  crates' artifact dependencies, so `cargo test` builds them automatically.
+- Rust wasm guests build for the **host** by default; their `wasm32-wasip2`
+  flavour, a component, is forced on demand by the consuming crates' artifact
+  dependencies, so `cargo test` builds them automatically.
 - Host tools (CLI, code generators) build for host.
 - Build scripts receive artifact paths via env vars. **Mind the names:**
   `CARGO_BIN_FILE_<DEP>` works for bins, but for dash-named staticlib/cdylib
@@ -214,7 +216,9 @@ The workspace handles cross-compilation via artifact dependencies:
 2. Depend on [`arora-module`](crates/arora-module/readme.md)
 3. Put `#[arora_module::module(id = "…", …)]` on the Rust module and
    `#[export(id = "…")]` / `#[param(id = "…")]` on its functions
-4. Build and test; a host registers it with `HostModule::of::<M>()`
+4. Write `arora_module::artifact!(<module>)` once at the crate root: built for
+   `wasm32-wasip2`, the crate is then a component serving the module
+5. Build and test; a host registers it with `HostModule::of::<M>()`
 
 Functions that several modules implement, each under its own module id, are
 declared once as a contract: `#[arora_module::contract]` on a trait whose
@@ -226,8 +230,9 @@ See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) (wasm guest) or
 
 **In another language** (C++), the interface is a `module.yaml` and the
 `arora-module-*` generators produce the bindings: write the YAML, a `build.rs`
-driving the CMake build, then implement the functions. The guest links as a
-WASI reactor, and `arora_module_directory` (`libs/cpp/CMakeLists.txt`)
+driving the CMake build, then implement the functions. The guest links
+`arora-cpp-component`, which makes it a component of the `arora:module` world,
+as a WASI reactor, and `arora_module_directory` (`libs/cpp/CMakeLists.txt`)
 writes the module directory a device loads, the form a Rust guest ships in.
 See [`examples/modules/cpp/`](examples/modules/cpp/readme.md).
 
@@ -236,9 +241,11 @@ See [`examples/modules/cpp/`](examples/modules/cpp/readme.md).
 All modules communicate via:
 - **Structures** for call arguments and returns (UUID-identified)
 - **Buffers** for serialization (see `arora-buffers`)
-- **Dispatch functions** for cross-module calls:
-  - `arora_dispatch(module_id, method_id, arg)` — direct call
-  - `arora_dispatch_indirect(callable_id)` — anonymous callable
+- **Dispatch functions** for cross-module calls, the `arora:module` world's
+  `host` interface (`arora_dispatch` / `arora_dispatch_indirect` in the
+  code generated from a `module.yaml`):
+  - `dispatch(module, method, arg)` — direct call
+  - `dispatch-indirect(callable)` — anonymous callable
 
 See [`arora-types`](crates/arora-types/readme.md) for the runtime contract.
 

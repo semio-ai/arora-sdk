@@ -42,6 +42,13 @@ fn main() -> Result<()> {
     // cargo rebuilds on an edit (and CI selection, checked against cargo's
     // records, sees it).
     println!("cargo:rerun-if-changed={}", arora_cpp_source.display());
+    // The world the guest is a component of, which libs/cpp links it against.
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root
+            .join("crates/arora-engine/wit/arora-module.wit")
+            .display()
+    );
     let arora_include_dir = workspace_root.join("target").join("include");
 
     // The module directory a device loads the module from, which the cmake
@@ -56,13 +63,13 @@ fn main() -> Result<()> {
     // Build via cmake. We must override target/host flags: cmake-rs picks up
     // the build script's TARGET (host triple) and injects --target=arm64-apple-macosx
     // plus CMAKE_OSX_ARCHITECTURES=arm64 by default, which conflicts with the WASI
-    // toolchain. target("wasm32-wasip1") suppresses the OSX flags and names the
+    // toolchain. target("wasm32-wasip2") suppresses the OSX flags and names the
     // target the toolchain file compiles for, the one the Rust guests build
     // for; no_default_flags stops the C/CXX/ASM_FLAGS injection so the
     // toolchain file's flags win.
     let dst = cmake::Config::new(&manifest_dir)
-        .target("wasm32-wasip1")
-        .host("wasm32-wasip1")
+        .target("wasm32-wasip2")
+        .host("wasm32-wasip2")
         .no_default_flags(true)
         .define("CMAKE_TOOLCHAIN_FILE", &toolchain_file)
         .define("ARORA_MODULE_CLI", &arora_module_cli)

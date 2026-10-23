@@ -9,7 +9,7 @@ version:
   minor: 1
   patch: 0
 executor:
-  name: wasm
+  name: wasm-component
 exports:
   - type: function
     id: 6696f0bd-e781-40cd-aeb5-8dc616f810d2

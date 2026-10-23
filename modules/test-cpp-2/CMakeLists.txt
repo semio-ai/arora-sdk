@@ -4,14 +4,14 @@ project(test-cpp-2 CXX)
 # Required cache vars (normally passed by the wrapping build.rs):
 #   ARORA_MODULE_CLI            host bin (with arora-module-cpp sibling)
 #   records dir for arora-behavior-tree-types-yaml
-#   ARORA_BUFFERS_LIB           wasm32-wasip1 static lib (.a) of arora-buffers
-#   ARORA_UTIL_LIB              wasm32-wasip1 static lib (.a) of arora-util
+#   ARORA_BUFFERS_LIB           wasm32-wasip2 static lib (.a) of arora-buffers
+#   ARORA_UTIL_LIB              wasm32-wasip2 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp
 #   ARORA_INCLUDE_DIR           target/include (generated arora C headers)
 #   TEST_CPP_RECORDS            test-cpp's published records dir
 #   LOCAL_RECORDS               this module's records/ dir
 #   ARORA_MODULE_DIR            the module directory to write (see below)
-# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip1 toolchain file.
+# CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip2 toolchain file.
 foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB
             ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR
             TEST_CPP_RECORDS LOCAL_RECORDS ARORA_MODULE_DIR)
@@ -56,7 +56,7 @@ add_custom_target(generate-test-cpp-2-wrapper ALL
     ${GENERATED_DIR}/header.json
 )
 
-# Linked as a WASI reactor, as test-cpp is (see its CMakeLists.txt).
+# A component, linked as a WASI reactor, as test-cpp is (see its CMakeLists.txt).
 add_executable(test-cpp-2
   src/main.cpp
   ${GENERATED_DIR}/source/test-cpp-2.cpp
@@ -65,12 +65,10 @@ add_executable(test-cpp-2
 )
 add_dependencies(test-cpp-2 generate-test-cpp-2-wrapper)
 target_include_directories(test-cpp-2 PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}/include)
-target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp)
+target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp arora-cpp-component)
 target_compile_options(test-cpp-2 PRIVATE -fPIC -O3 -flto -fno-exceptions)
 target_link_options(test-cpp-2 PRIVATE
   -mexec-model=reactor
-  -Wl,--export=arora_buffer_alloc
-  -Wl,--export=arora_buffer_free
   -Wl,--allow-multiple-definition
 )
 

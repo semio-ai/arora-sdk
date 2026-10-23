@@ -219,7 +219,7 @@ swap `--target web` for `--target bundler`.
 ## Integration test (headless browser)
 
 ```bash
-# First, force a wasm32-wasip1 build of the test guest module:
+# First, force a wasm32-wasip2 build of the test guest module:
 cargo test -p arora-integration-tests
 
 # Then run the wasm-bindgen-test in a headless browser:

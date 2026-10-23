@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # 2.2: the declaration's `type_records`.
-arora-module = { path = "../../crates/arora-module", version = "2.2" }
+arora-module = { path = "../../crates/arora-module", version = "2.3" }
 # The derived types' records (`#[derive(AroraType)]`, 3.8).
 arora-types = { path = "../../crates/arora-types", version = "3.8" }
 

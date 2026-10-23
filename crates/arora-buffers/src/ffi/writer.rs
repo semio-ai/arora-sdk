@@ -515,3 +515,42 @@ pub extern "C" fn arora_buffer_writer_finalize(
         Box::into_raw(backing) as *mut u8
     }
 }
+
+/// Free a buffer [`arora_buffer_writer_finalize`] returned. The buffer's first
+/// four bytes hold its length, as `finalize` writes them. A null `buffer` is
+/// ignored.
+#[no_mangle]
+pub extern "C" fn arora_buffer_writer_finalized_free(buffer: *mut u8) {
+    if buffer.is_null() {
+        return;
+    }
+    unsafe {
+        let length = u32::from_le_bytes(*(buffer as *const [u8; 4])) as usize;
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            buffer, length,
+        )));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A finalized buffer's header holds the length of the allocation
+    /// `finalize` made, which `arora_buffer_writer_finalized_free` frees by;
+    /// a null buffer is ignored.
+    #[test]
+    fn a_finalized_buffer_s_header_holds_its_length() {
+        let writer = arora_buffer_writer_new();
+        for _ in 0..1000 {
+            arora_buffer_writer_add_u32(writer, 7);
+        }
+        let mut length = 0;
+        let buffer = arora_buffer_writer_finalize(writer, &mut length);
+        arora_buffer_writer_free(writer);
+        let header = unsafe { u32::from_le_bytes(*(buffer as *const [u8; 4])) };
+        assert_eq!(header as usize, length);
+        arora_buffer_writer_finalized_free(buffer);
+        arora_buffer_writer_finalized_free(std::ptr::null_mut());
+    }
+}

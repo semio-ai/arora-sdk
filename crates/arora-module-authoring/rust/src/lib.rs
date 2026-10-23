@@ -130,16 +130,24 @@ pub async fn generate_sources(
     );
 
     // Also declare arora engine functions.
-    // On wasm32 these are real imports from the host engine; on other
-    // targets (host iteration / `cargo test`) we emit panicking stubs so
-    // the crate still links and trivial tests can run natively.
+    // A core module (wasm32-wasip1) imports them from the engine; a component
+    // (wasm32-wasip2) reaches the engine through the `arora:module` world's
+    // `host` interface, which arora-module bridges them to. On other targets
+    // (host iteration / `cargo test`) we emit panicking stubs so the crate
+    // still links and trivial tests can run natively.
     let engine_functions_declarations = quote! {
-      #[cfg(target_arch = "wasm32")]
+      #[cfg(all(target_arch = "wasm32", not(all(target_os = "wasi", target_env = "p2"))))]
       #[link(wasm_import_module = "env")]
       extern "C" {
         pub fn arora_dispatch(module_id: usize, method_id: usize, arg: usize) -> usize;
         pub fn arora_dispatch_indirect(callable_id: u64) -> usize;
       }
+
+      // A module may call neither: as unused extern functions are, the
+      // unused names are left unremarked.
+      #[cfg(all(target_arch = "wasm32", target_os = "wasi", target_env = "p2"))]
+      #[allow(unused_imports)]
+      pub use arora_module::__rt::engine::{arora_dispatch, arora_dispatch_indirect};
 
       #[cfg(not(target_arch = "wasm32"))]
       pub unsafe extern "C" fn arora_dispatch(
@@ -1094,8 +1102,27 @@ async fn generate_module_source(
 
             let uuid_suffix = export_id.to_string().replace("-", "_");
             let arora_function_ident = format_ident!("arora_function_{}", uuid_suffix);
+            let buffer_function_ident = format_ident!("dispatch_buffer_{}", uuid_suffix);
             let doc = export.name.to_string();
+            let buffer_doc = format!(
+                "A call to `{}` as an artifact receives it: the size-prefixed argument \
+                 buffer in, the result buffer out.",
+                export.name
+            );
             function_declarations.push(quote! {
+        #[doc = #buffer_doc]
+        pub fn #buffer_function_ident(input: &[u8]) -> ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> {
+          #call_check
+          #deserialize_params
+          let mut writer = BufferWriter::new();
+          let writer = &mut writer;
+          writer.begin_structure(&#const_id_ident, (#nof_mutated_params + 1) as u32);
+          writer.add_structure_field(&#const_id_ident);
+          #call_and_write_result
+          #(#write_mutated_params)*
+          ::std::result::Result::Ok(writer.finalize())
+        }
+
         #[doc = #doc]
         #[no_mangle]
         pub extern "C" fn #arora_function_ident (input_addr: usize) -> usize {
@@ -1109,18 +1136,7 @@ async fn generate_module_source(
             // The size prefix counts itself.
             std::slice::from_raw_parts(input_ptr, input_size)
           };
-          let _result: ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> = (|| {
-            #call_check
-            #deserialize_params
-            let mut writer = BufferWriter::new();
-            let writer = &mut writer;
-            writer.begin_structure(&#const_id_ident, (#nof_mutated_params + 1) as u32);
-            writer.add_structure_field(&#const_id_ident);
-            #call_and_write_result
-            #(#write_mutated_params)*
-            ::std::result::Result::Ok(writer.finalize())
-          })();
-          match _result {
+          match #buffer_function_ident(input) {
             ::std::result::Result::Ok(buf) => ::std::boxed::Box::leak(buf).as_ptr() as usize,
             ::std::result::Result::Err(msg) => {
               let mut writer = BufferWriter::new();
@@ -1150,6 +1166,51 @@ async fn generate_module_source(
         quote! {}
     };
 
+    // The functions the module serves, for an artifact built as a component:
+    // `arora_module::artifact!` lists their ids and routes a call to one.
+    let served_ids: Vec<Ident> = exports
+        .values()
+        .map(|export| function_const_id_ident(&export.name))
+        .collect();
+    let served_calls: Vec<Ident> = exports
+        .keys()
+        .map(|id| format_ident!("dispatch_buffer_{}", id.to_string().replace("-", "_")))
+        .collect();
+    let served = quote! {
+      /// The ids of the functions this module serves, as a component's
+      /// `functions` export lists them (`arora_module::artifact!`).
+      pub fn function_ids() -> ::std::vec::Vec<::arora_types::Uuid> {
+        ::std::vec![#(::arora_types::Uuid::from_bytes(#served_ids)),*]
+      }
+
+      /// A call to the function `method`, as a component's `dispatch` export
+      /// receives it (`arora_module::artifact!`): the size-prefixed argument
+      /// buffer in, the size-prefixed result buffer out; `None` when the module
+      /// serves no function `method`.
+      #[allow(unreachable_code)]
+      pub fn dispatch_buffer(
+        method: ::arora_types::Uuid,
+        arg: &[u8],
+      ) -> ::std::option::Option<::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String>> {
+        let call: fn(&[u8]) -> ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> =
+          match *method.as_bytes() {
+            #(#served_ids => #served_calls,)*
+            _ => return ::std::option::Option::None,
+          };
+        // The argument is the buffer its size prefix counts, which the
+        // decoders panic on when it is not one.
+        ::std::option::Option::Some(match ::arora_buffers::well_formed(arg) {
+          ::std::result::Result::Ok(()) => {
+            let size = u32::from_le_bytes([arg[0], arg[1], arg[2], arg[3]]) as usize;
+            call(&arg[..size])
+          }
+          ::std::result::Result::Err(why) => ::std::result::Result::Err(
+            ::std::format!("the argument is not an Arora Buffer: {why}"),
+          ),
+        })
+      }
+    };
+
     // Putting it all together.
     let source = quote! {
       use arora_buffers::*;
@@ -1157,6 +1218,7 @@ async fn generate_module_source(
       use crate::{#(#use_functions),*};
       #(#function_declarations)*
       #(#function_ids)*
+      #served
     };
     token_stream_to_file("export.rs", &source).map_err(GenerationError::VfsError)
 }

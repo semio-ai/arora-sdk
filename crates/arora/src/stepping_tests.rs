@@ -162,7 +162,7 @@ fn a_remote_spawns_a_stepping_graph_edits_its_outputs_and_halts_it() {
     let mut arora = Arora::builder()
         .with_declared_module::<Module>(
             Executor {
-                name: "wasm".to_string(),
+                name: "wasm-component".to_string(),
                 min_version: None,
                 max_version: None,
             },

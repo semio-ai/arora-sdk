@@ -3,7 +3,7 @@
 //! A policy is a function from an observation vector to an action vector,
 //! evaluated at a fixed rate. This crate provides the three things every such
 //! module reimplements otherwise, robot-agnostic and free of any host
-//! dependency so the module builds for `wasm32-wasip1` unchanged:
+//! dependency so the module builds for `wasm32-wasip2` unchanged:
 //!
 //! - [`OnnxPolicy`]: the network itself, loaded from ONNX bytes the module
 //!   embeds (`include_bytes!`) and evaluated with [tract](https://github.com/sonos/tract),

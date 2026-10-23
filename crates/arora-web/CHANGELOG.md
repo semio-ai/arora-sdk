@@ -4,6 +4,15 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.4.0] - 2026-10-23
+
+### Added
+
+- `Engine` and `BehaviorTreeRunner` load `wasm-component` modules, through
+  arora-engine's `BrowserComponentExecutor`; `prepareModule` stages a
+  component as it stages a core module. Requires arora-engine 5.5 and
+  arora 13.7, which register the browser's component executor.
+
 ## [10.3.0] - 2026-10-19
 
 ### Added

@@ -7,7 +7,7 @@ use arora_animation_module::{
 };
 use arora_engine::{
     engine::{EngineBuilder, PinnedEngine},
-    executor::wasm::WebAssemblyExecutor,
+    executor::component::ComponentExecutor,
     load::load_module_from_parts,
     module::HostModule,
 };
@@ -68,10 +68,10 @@ fn clip() -> Clip {
 #[test]
 fn wasm_and_host_linked_animation_match_through_calls() {
     let mut guest = EngineBuilder::new()
-        .add_executor(WebAssemblyExecutor::new().unwrap())
+        .add_executor(ComponentExecutor::new().unwrap())
         .build();
     let header = animation::header(Executor {
-        name: "wasm".into(),
+        name: "wasm-component".into(),
         min_version: None,
         max_version: None,
     });

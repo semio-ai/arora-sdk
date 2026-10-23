@@ -129,7 +129,7 @@ fn the_module_is_animation_in_the_arora_scope() {
     use arora_types::module::declared::AroraModule;
     use arora_types::module::low::Executor;
     let header = animation::header(Executor {
-        name: "wasm".to_string(),
+        name: "wasm-component".to_string(),
         min_version: None,
         max_version: None,
     });

@@ -15,8 +15,8 @@ wasi-sdk = { path = "../../crates/wasi-sdk" }
 cmake = "0.1"
 arora-module-cli = { path = "../../crates/arora-module-authoring/cli", artifact = "bin" }
 arora-module-cpp = { path = "../../crates/arora-module-authoring/cpp", artifact = "bin" }
-arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip1" }
-arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip1" }
+arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip2" }
+arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip2" }
 # test-cpp publishes its generated `records` dir at a stable workspace
 # path; we depend on its lib so cargo will build it (and therefore run its
 # build.rs) before us. The artifact itself is unused.

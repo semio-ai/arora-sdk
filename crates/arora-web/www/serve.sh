@@ -14,16 +14,16 @@ here="$(cd "$(dirname "$0")" && pwd)"
 crate_dir="$(cd "$here/.." && pwd)"
 workspace_root="$(cd "$crate_dir/../.." && pwd)"
 
-guest_wasm="$workspace_root/target/wasm32-wasip1/debug/test_rust_wasm.wasm"
+guest_wasm="$workspace_root/target/wasm32-wasip2/debug/test_rust_wasm.wasm"
 guest_yaml="$workspace_root/modules/test-rust-wasm/src/arora_generated/module.yaml"
 guest_records="$workspace_root/modules/test-rust-wasm/records/records.json"
 
-bt_nodes_wasm="$workspace_root/target/wasm32-wasip1/debug/test_behavior_tree_nodes.wasm"
+bt_nodes_wasm="$workspace_root/target/wasm32-wasip2/debug/test_behavior_tree_nodes.wasm"
 bt_nodes_yaml="$workspace_root/modules/test-behavior-tree-nodes/src/arora_generated/module.yaml"
 bt_nodes_records="$workspace_root/modules/test-behavior-tree-nodes/records/records.json"
 
-echo "==> cargo build guest modules (wasm32-wasip1)"
-(cd "$workspace_root" && cargo build -p test-rust-wasm -p test-behavior-tree-nodes --target wasm32-wasip1)
+echo "==> cargo build guest modules (wasm32-wasip2)"
+(cd "$workspace_root" && cargo build -p test-rust-wasm -p test-behavior-tree-nodes --target wasm32-wasip2)
 
 echo "==> wasm-pack build $crate_dir"
 (cd "$crate_dir" && wasm-pack build --target web --dev)

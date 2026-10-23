@@ -25,14 +25,14 @@ out shipping the workspace itself on crates.io without further work.
 ### `-Z bindeps` (artifact dependencies) over recursive cargo
 
 Host code generators (`arora-module-cli`, `arora-module-cpp`) and cross-target
-static libraries (`arora-buffers`, `arora-util` built for `wasm32-wasip1`)
+static libraries (`arora-buffers`, `arora-util` built for `wasm32-wasip2`)
 are pulled into consumer crates via cargo's
 artifact dependencies:
 
 ```toml
 [build-dependencies]
 arora-module-cli = { path = "...", artifact = "bin" }
-arora-buffers    = { path = "...", artifact = "staticlib", target = "wasm32-wasip1" }
+arora-buffers    = { path = "...", artifact = "staticlib", target = "wasm32-wasip2" }
 ```
 
 Cargo exports the artifact paths to the consumer's `build.rs` as environment
@@ -77,16 +77,16 @@ own caching properly.
 There is **no** `per-package-target = true` in the config: the workspace does
 not actually use forced-target (see below).
 
-### Wasm guests build for the host by default; wasm32-wasip1 on demand
+### Wasm guests build for the host by default; wasm32-wasip2 on demand
 
 `test-behavior-tree-nodes` and `test-rust-wasm` are plain
 `crate-type = ["cdylib", "rlib"]` crates with **no** `forced-target` /
 `package.target`. A bare `cargo build` compiles them for the host (so
-`cargo test -p test-rust-wasm` runs natively). Their wasm32-wasip1 flavour is
-produced on demand by whoever needs it: the integration-test crate declares
-them as `artifact = "cdylib", target = "wasm32-wasip1"`, so `cargo test` builds
-the wasm guests and the tests locate them through the forwarded
-`CARGO_CDYLIB_FILE_*` env vars. No explicit `--target wasm32-wasip1` build is
+`cargo test -p test-rust-wasm` runs natively). Their wasm32-wasip2 flavour, a
+component, is produced on demand by whoever needs it: the integration-test
+crate declares them as `artifact = "cdylib", target = "wasm32-wasip2"`, so
+`cargo test` builds the wasm guests and the tests locate them through the
+forwarded `CARGO_CDYLIB_FILE_*` env vars. No explicit `--target` build is
 needed — `cargo test --release` is self-sufficient.
 
 (An earlier design used `forced-target` under `-Zper-package-target`; both it
@@ -102,39 +102,75 @@ builds, so each C++ module's `build.rs` calls
 
 ```rust
 cmake::Config::new(...)
-  .target("wasm32-wasip1")
-  .host("wasm32-wasip1")
+  .target("wasm32-wasip2")
+  .host("wasm32-wasip2")
   .no_default_flags(true)
   ...
 ```
 
 The cmake "target triple" here is purely a hint to cmake-rs's flag synthesis;
 the actual toolchain comes from `CMAKE_TOOLCHAIN_FILE` (wasi-sdk's
-`wasi-sdk-p1.cmake`, or the musl cross-toolchain's).
+`wasi-sdk-p2.cmake`, or the musl cross-toolchain's).
 
 ## Target choices
 
-### `wasm32-wasip1` for guest modules; `wasm32-wasip2` components incoming
+### Guests are `wasm32-wasip2` components of the `arora:module` world
 
-Legacy module guests target `wasm32-wasip1`. New-style guests are
-WebAssembly Components targeting `wasm32-wasip2` against the
-`arora:module` WIT world (`wit/arora-module.wit`).
+Every guest, Rust or C++, is a WebAssembly component of the `arora:module`
+WIT world (`crates/arora-engine/wit/arora-module.wit`), built for
+`wasm32-wasip2`, and its header names the `wasm-component` executor. One form
+is what a module registry can hold and every host can run.
 
-- `wasip1` is Tier 2 in rustc, fully supported by WASI SDK 33, and matches
-  what wasi-sdk's clang emits by default. The custom malloc/dispatch ABI
-  and `arora-buffers` exchange over raw linear memory live on this path.
-- `wasip2` is Tier 2 in rustc and emits components directly (via
-  `wasm-component-ld`). Components exchange data through the canonical
-  ABI (`list<u8>`), eliminating the guest allocator protocol. See
-  `modules/test-rust-component` and `executor::component`.
+- The world is the contract: a component exports `functions` (the ids it
+  serves, which the engine checks against the header at load) and
+  `dispatch`, and imports what it calls — the world's `host` interface and
+  the WASI 0.2 interfaces a host provides (`wasi:cli`, `wasi:io`,
+  `wasi:clocks`, `wasi:random`, and `wasi:filesystem` with no directory
+  preopened; no sockets), which
+  `arora_engine::component_layout::HOST_INTERFACES` lists. The filesystem is
+  there because a C or C++ guest's libc imports it as soon as it links its
+  file descriptors' code — a debug build of the Rust libraries it links does —
+  so refusing it would refuse guests that open no file; with no directory, a
+  guest that does sees none, on either host. Data crosses as
+  Arora Buffers in `list<u8>`, through the canonical ABI, so no guest
+  allocator protocol is part of the contract. A guest's error is the
+  `err` of `dispatch`; an error buffer in its `ok`, as a core module writes
+  its errors, is read as its error too.
+- A component that traps is entered no more. wasmtime refuses to re-enter a
+  component instance after a trap, since the trap may have left its state
+  half-written, and the browser executor holds a trapped component to the
+  same rule: every later call fails, naming the trap, until the module is
+  reloaded, which instantiates it afresh. A core module, by contrast, is
+  called again with whatever state the trap left.
+- `wasip2` is Tier 2 in rustc, and WASI SDK 33 links components with
+  `wasm-component-ld`. Rust guests export through `arora_module::artifact!`,
+  C++ guests through `arora-cpp-component` (see the C++ section below).
+- Both hosts run the same component. Natively wasmtime instantiates it; the
+  browser instantiates its guest core module and gives it the canonical-ABI
+  form of each import directly (`BrowserComponentExecutor`), so no
+  transpiler or JS glue stands between the published component and a page.
+  The browser does so only for a component whose own layer is what that
+  stands for: imports from the interfaces every host provides, and the
+  world's `functions` and `dispatch` with the world's types, each lifting
+  the guest module's export of that name with its memory, `cabi_realloc`,
+  UTF-8 strings and `cabi_post_` function, and a shim, fixups and initializer
+  that do what `wit-component`'s do (`component_layout`). Anything else it
+  reads is refused. It does not validate the rest of the binary, nor check how
+  the guest module's own imports are wired, which the browser implements by
+  name.
 - `wasip3` (WASI 0.3, native async) is the destination: the WIT world is
   shaped so its functions become `async` without structural changes. Not
   adopted yet because wasmtime's `p3` module is explicitly experimental,
   `wasm32-wasip3` is Tier 3 in rustc, and browsers lack a transpilation
   path (jco async needs JSPI, absent from Firefox).
-- `wasm32-unknown-unknown` is still used for pure-Rust wasm without a system
-  interface (`arora-buffers`, `arora-util` as staticlibs, and the
-  `arora-web` engine itself — see below).
+- The `wasm` executors still load `wasm32-wasip1` core modules, so a guest
+  built in that form before — Vizij's published animation module — runs
+  unchanged. Apart from the `wasm32-wasip1` build of test-rust-wasm that the
+  engine's browser test loads through that path, no guest here is built in
+  it.
+- The world's package version, `arora:module@0.2.0`, is what a component is
+  built against; a host provides that version's `host` interface, and a
+  component built against another does not load.
 
 ### `wasm32-unknown-unknown` for the browser-hosted engine
 
@@ -153,29 +189,40 @@ shims that would otherwise need to be polyfilled in JS.
 `crates/wasi-sdk` downloads and caches wasi-sdk-33 to
 `target/wasi-sdk-33/` on first use unless `WASI_SDK_PATH` is set. It exposes
 `clang()`, `clangpp()`, and `cmake_toolchain_file()` to other `build.rs`
-scripts. `cmake_toolchain_file()` is the SDK's `wasi-sdk-p1.cmake`, which
-compiles for `wasm32-wasip1`, the target the Rust guests build for; the SDK's
-generic `wasi-sdk.cmake` names the deprecated `wasm32-wasi` alias. The SDK
-also ships `wasi-sdk-p2.cmake` and `wasi-sdk-p3.cmake`, so the C++ guests
-follow the Rust guests to another target by changing that one file.
+scripts. `cmake_toolchain_file()` is the SDK's `wasi-sdk-p2.cmake`, which
+compiles for `wasm32-wasip2`, the target the Rust guests build for, and links
+a component with `wasm-component-ld`.
 
 **Why:** no suitable crates.io crate exists (`lucet-wasi-sdk` is
 unmaintained since 2020).
 
-### C++ guests are WASI reactors in module directories, as Rust guests are
+### C++ guests are components and WASI reactors in module directories, as Rust guests are
 
-A C++ guest links with `-mexec-model=reactor`: it has no `main` and no
-`_start`, and exports `_initialize`, which the engine calls once when it
-loads the guest and which runs the C++ static constructors. A guest linked
-as a WASI command instead runs them only from `_start`, which the engine
-never calls, so a global with a dynamic initializer stays zeroed memory.
+A C++ guest is a component of the `arora:module` world. The sources
+`arora-module-cli` generates from its `module.yaml` keep one entry point per
+function and a table of them (`arora_module_exports`, `arora/module.hpp`);
+`arora-cpp-component` (`libs/cpp/src/arora/component.cpp`), an object library
+the guest links, serves that table through the world's `functions` and
+`dispatch` exports and makes the generated code's calls to other modules
+(`arora_dispatch`) through the `host` interface. Its link options name the
+world for `wasm-component-ld` and export the `cabi_realloc` the canonical ABI
+allocates with.
+
+It links with `-mexec-model=reactor`: it has no `main` and no `_start`, and
+exports `_initialize`, which the component's initializer — a module
+`wit-component` adds — calls once when the component is instantiated, running
+the C++ static constructors. A guest linked as a WASI command instead runs
+them only from `_start`, which nothing calls, so a global with a dynamic
+initializer stays zeroed memory.
 
 Its build writes the module directory a device loads it from, the form a
 Rust guest ships in: `header.json`, the guest as `<name>.wasm`, and
 `records/` (`arora_module_directory` in `libs/cpp/CMakeLists.txt`). The
 header `arora-module-cli` generates carries the module's version, so a
 device describes the module from its record. `tests/tests/guest_parity.rs`
-checks that the C++ and Rust guests have the same form.
+checks that the C++ and Rust guests have the same form: a component with the
+world's exports, importing only what every host provides, around a guest
+core module with the same target features.
 
 ### NAO through a Rust HAL, not a C++ module
 
@@ -188,27 +235,34 @@ robot is opt-in and not run in CI. See
 
 ## Engine architecture
 
-### Four executors, one engine
+### Five executors, one engine
 
-The engine (`crates/arora-engine`) exposes four `Executor` implementations and
+The engine (`crates/arora-engine`) exposes five `Executor` implementations and
 selects between them by the `executor.name` in a module's header:
 
-| Executor                   | Name             | Module location  | Cfg                                | Default feature |
-| -------------------------- | ---------------- | ---------------- | ---------------------------------- | --------------- |
-| `executor::native`         | `native`         | `native.rs`      | `cfg(not(target_arch = "wasm32"))` | `native-host`   |
-| `executor::wasm` (wasmtime)| `wasm`           | `wasm/mod.rs`    | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
-| `executor::component`      | `wasm-component` | `component/mod.rs` | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
-| `executor::browser`        | `wasm`           | `browser/mod.rs` | `cfg(target_arch = "wasm32")`      | always-on on wasm32 |
+| Executor                                     | Name             | Module location        | Cfg                                | Default feature |
+| -------------------------------------------- | ---------------- | ---------------------- | ---------------------------------- | --------------- |
+| `executor::native`                           | `native`         | `native.rs`            | `cfg(not(target_arch = "wasm32"))` | `native-host`   |
+| `executor::component`                        | `wasm-component` | `component/mod.rs`     | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
+| `executor::wasm` (wasmtime)                  | `wasm`           | `wasm/mod.rs`          | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
+| `executor::browser::BrowserComponentExecutor`| `wasm-component` | `browser/component.rs` | `cfg(target_arch = "wasm32")`      | always-on on wasm32 |
+| `executor::browser::BrowserExecutor`         | `wasm`           | `browser/mod.rs`       | `cfg(target_arch = "wasm32")`      | always-on on wasm32 |
 
-`native` uses `libloading` to dlopen host cdylibs. `wasm` uses `wasmtime`
-core modules with the legacy malloc/dispatch ABI. `component` uses
+`native` uses `libloading` to dlopen host cdylibs. `component` uses
 `wasmtime::component` against the `arora:module` WIT world plus
 `wasmtime-wasi` p2, with wasmtime's concurrency support off: the world
 declares no async function, stream or future, so a component that uses the
-component model's concurrency ABI is refused at compilation. `browser` uses
-`js_sys::WebAssembly::{Module, Instance, Memory}` and implements its own
-WASI stubs (`proc_exit`, `fd_write` → console, `random_get` via
-`crypto.getRandomValues`, …).
+component model's concurrency ABI is refused at compilation. `wasm` uses
+`wasmtime` core modules with the core-module malloc/dispatch ABI. The browser
+executors use `js_sys::WebAssembly::{Module, Instance, Memory}`:
+`BrowserComponentExecutor` instantiates a component's guest core module and
+implements, in the canonical ABI's form, the `host` interface and the WASI
+0.2 interfaces the native executor links (standard output and error to the
+console, random bytes from `crypto.getRandomValues`, clocks from
+`performance.now()` and `Date.now()`, every pollable ready); `BrowserExecutor`
+implements WASI preview 1 stubs for core modules (`proc_exit`, `fd_write`,
+`random_get`, …). The two share a loader, so `prepare` stages either kind
+asynchronously.
 
 `wasmtime`, `wasmtime-wasi`, `libloading`, and `tempfile` are gated behind
 the `wasmtime-host` and `native-host` features (both default-on for native
@@ -226,14 +280,19 @@ one into N devices compiles once, not N times. Loading a module from its bytes
 is the same path with the compilation in front.
 
 Natively, every `WebAssemblyExecutor` in a process shares one wasmtime engine,
-created on first use, rather than one each: a module compiled for one engine
+and every `ComponentExecutor` another, each created on first use, rather than
+one each: a module compiled for one engine
 cannot be instantiated in another, so per-executor engines would rule out
 sharing. Each instance keeps its own `Store`, so guests share no state. The
-pooling allocator is process-wide with it: it reserves address space for all
-its slots when the engine is created, so one engine per device would bound the
-devices a process holds by its address space, and one engine bounds instead
-the guest instances running at once — 1000 on 64-bit targets, 100 on 32-bit,
-wasmtime's defaults.
+core-module engine's pooling allocator is process-wide with it: it reserves
+address space for all its slots when the engine is created, so one engine per
+device would bound the devices a process holds by its address space, and one
+engine bounds instead the core-module instances running at once — 1000 on
+64-bit targets, 100 on 32-bit, wasmtime's defaults. The component engine
+allocates its instances on demand, reserving address space per live instance:
+a second pool would reserve, when it is created, as much again as the first.
+Bounding a guest's memory and time per call is
+[ARORA-188](https://linear.app/semio-ai/issue/ARORA-188)'s.
 
 ### `arora-web` is a separate crate
 
@@ -354,10 +413,9 @@ nothing in the default build loads it for control flow.)
 
 `tests/Cargo.toml` (`arora-integration-tests`) pulls in artefacts two ways:
 
-- **Bindeps** (`[build-dependencies]`): `arora-cli` (`artifact = "bin"`),
-  `test-rust-wasm` and `test-behavior-tree-nodes`
-  (`artifact = "cdylib", target = "wasm32-wasip1"`), and `test-rust-component`
-  (`artifact = "cdylib", target = "wasm32-wasip2"`). `tests/build.rs` forwards
+- **Bindeps** (`[build-dependencies]`): `arora-cli` (`artifact = "bin"`), and
+  `test-rust-wasm`, `test-behavior-tree-nodes`, `test-rust-component` and the
+  animation module (`artifact = "cdylib", target = "wasm32-wasip2"`). `tests/build.rs` forwards
   their paths to the test binary via `cargo::rustc-env` (`ARORA_CLI_BIN`,
   `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm`), and `integration.rs` reads
   them with `env!`. (`polly` is not a dependency of this crate — it is a
@@ -366,9 +424,9 @@ nothing in the default build loads it for control flow.)
   bindep'd — declaring an empty-lib C++ module as a `cdylib` artifact adds
   nothing and their `build.rs` is what matters. Listing them as
   dev-dependencies makes `cargo test` run those build scripts, which compile
-  the wasm via cmake and publish `*.wasm`, `module.yaml`, and `records/` to
-  `target/<profile>/modules/`. The C++ integration test reads those published
-  files directly.
+  the guest via cmake and write its module directory — `header.json`,
+  `<name>.wasm` and `records/` — to `target/<profile>/modules/<name>/`. The
+  C++ integration tests read those directories directly.
 
 A bare `cargo build` (default-members) does **not** build `test-cpp`/`test-cpp-2`
 (they are excluded from `default-members`); `cargo test` does, through the

@@ -15,10 +15,12 @@ pub mod froto_checked_value;
 pub mod froto_serde;
 pub mod froto_value;
 pub mod reader;
+pub mod well_formed;
 pub mod writer;
 
 pub use format::*;
 pub use reader::*;
+pub use well_formed::well_formed;
 pub use writer::*;
 
 /// Migration alias: `serde_uuid` was the old name of the generic `Value` codec,

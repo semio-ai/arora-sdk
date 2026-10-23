@@ -3,6 +3,10 @@
 #[allow(clippy::all, dead_code)]
 mod arora_generated;
 
+// Built for wasm32-wasip2, the guest is a component serving the generated
+// exports.
+arora_module::artifact!(arora_generated::export);
+
 use crate::arora_generated::arora::arora_dispatch_indirect;
 use arora_behavior::Status;
 use arora_behavior_tree_types::TickId;
@@ -206,8 +210,8 @@ fn call_tick_function(tick_id: &TickId) -> Status {
             .try_into()
             .expect("input is too small");
     let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
-    let input =
-        unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
+    // The size prefix counts itself.
+    let input = unsafe { std::slice::from_raw_parts(result_buffer_ptr, input_size) };
     let mut reader = BufferReader::new(input);
     Status::try_from(arora_buffers::froto_value::deserialize_from_reader(
         &mut reader,

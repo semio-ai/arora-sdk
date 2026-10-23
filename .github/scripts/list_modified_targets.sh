@@ -30,6 +30,10 @@ INPUTS=(
   'libs/cpp/* test-cpp-2'
   'libs/cpp/* example-cpp'
   'crates/arora-engine/wit/* test-rust-component'   # wit_bindgen::generate!
+  'crates/arora-engine/wit/* test-cpp'      # wasm-component-ld --component-type (libs/cpp)
+  'crates/arora-engine/wit/* test-cpp-2'
+  'crates/arora-engine/wit/* example-cpp'
+  'crates/arora-engine/wit/* arora-module'   # tests/wit.rs: one world for guest and engine
 )
 
 meta=$(cargo metadata --format-version 1 --all-features)

@@ -192,6 +192,9 @@ pub mod compass {
     }
 }
 
+// The artifact carries both modules: a device loads it once under each header.
+arora_module::artifact!(test_rust_wasm, compass);
+
 #[cfg(test)]
 mod tests {
     use super::test_rust_wasm::*;

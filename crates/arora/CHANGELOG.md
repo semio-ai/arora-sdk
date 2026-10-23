@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [13.7.0] - 2026-10-23
+
+### Added
+
+- A device runs `wasm-component` modules: its engine carries
+  `ComponentExecutor` natively and `BrowserComponentExecutor` in the browser,
+  beside the `wasm` and native executors. A module directory whose header
+  names `wasm-component` holds its component as `<name>.wasm`.
+- Requires arora-engine 5.5.
+
 ## [13.6.0] - 2026-10-19
 
 ### Changed

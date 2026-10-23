@@ -1130,7 +1130,11 @@ impl Engine {
         install_panic_hook();
         let executor = BrowserExecutor::new();
         let loader = executor.shared();
-        let inner = EngineBuilder::new().add_executor(executor).build();
+        let components = executor.component_executor();
+        let inner = EngineBuilder::new()
+            .add_executor(executor)
+            .add_executor(components)
+            .build();
         Engine {
             inner,
             loader,
@@ -1497,7 +1501,11 @@ impl BehaviorTreeRunner {
         install_panic_hook();
         let executor = BrowserExecutor::new();
         let loader = executor.shared();
-        let inner = EngineBuilder::new().add_executor(executor).build();
+        let components = executor.component_executor();
+        let inner = EngineBuilder::new()
+            .add_executor(executor)
+            .add_executor(components)
+            .build();
         BehaviorTreeRunner {
             inner,
             loader,

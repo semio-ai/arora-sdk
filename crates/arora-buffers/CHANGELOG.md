@@ -4,6 +4,18 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - 2026-10-23
+
+### Added
+
+- `arora_buffer_writer_finalized_free`: frees a buffer
+  `arora_buffer_writer_finalize` returned, by the length its header holds.
+- `well_formed(buffer)`, and `arora_buffer_well_formed` for C: whether a
+  buffer holds the value it starts with, read as `froto_value::deserialize`
+  reads it, which panics on one that is not, within the bytes its size prefix
+  counts and nested no deeper than `well_formed::MAX_DEPTH` (128). Code given
+  a buffer it did not write checks it before decoding it.
+
 ## [3.0.0] - 2026-09-25
 
 ### Added

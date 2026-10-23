@@ -1,5 +1,5 @@
 //! `arora-animation` as the Arora module `@arora/animation`: a
-//! `wasm32-wasip1` guest, which a device loads from its module directory
+//! `wasm32-wasip2` component, which a device loads from its module directory
 //! (`module_dir`, the `module-dir` feature), or host-linked, with a state per
 //! registration.
 //!
@@ -213,6 +213,9 @@ fn guest<T>(f: impl FnOnce(&mut AnimationModule) -> T) -> T {
         f(unsafe { &mut *state.get() })
     })
 }
+
+// Built for wasm32-wasip2, the guest is a component serving `animation`.
+arora_module::artifact!(animation);
 
 /// The module as the guest declares it: its header, and an entry point per
 /// function, each acting on the guest's state.

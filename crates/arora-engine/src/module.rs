@@ -22,10 +22,30 @@ pub enum DispatchError {
     Internal {
         message: String,
     },
-    /// The guest returned a TYPE_ERROR buffer instead of a result.
+    /// The guest returned an error: a TYPE_ERROR buffer instead of a result,
+    /// or a component's `err`.
     Guest {
         message: String,
     },
+}
+
+/// The message of a guest's error buffer — what a guest returns for an error
+/// in the Arora Buffers format (`BufferWriter::add_error`): after the size
+/// prefix, the error type, then the message's length and bytes. `None` for any
+/// other buffer. A message that runs past the buffer is cut where the buffer
+/// ends.
+pub(crate) fn guest_error(buffer: &[u8]) -> Option<String> {
+    use arora_buffers::{BUFFER_SIZE_SIZE, TYPE_ERROR};
+    if buffer.get(BUFFER_SIZE_SIZE) != Some(&TYPE_ERROR) {
+        return None;
+    }
+    let start = BUFFER_SIZE_SIZE + 1 + 4;
+    let message = buffer.get(BUFFER_SIZE_SIZE + 1..start).map(|len| {
+        let len = u32::from_le_bytes(len.try_into().expect("4 bytes")) as usize;
+        let message = &buffer[start..buffer.len().min(start.saturating_add(len))];
+        String::from_utf8_lossy(message).into_owned()
+    });
+    Some(message.unwrap_or_else(|| "guest returned error (no message)".to_string()))
 }
 
 pub trait Module {

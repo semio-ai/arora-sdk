@@ -35,7 +35,7 @@ fn call_test_rust_wasm_from_engine() {
     // is written from that declaration, which is what an export step does.
     let module_yaml = std::env::temp_dir().join("arora-test-rust-wasm-header.yaml");
     let header = test_rust_wasm::test_rust_wasm::header(arora_types::module::low::Executor {
-        name: "wasm".to_string(),
+        name: "wasm-component".to_string(),
         min_version: None,
         max_version: None,
     });

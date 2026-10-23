@@ -32,7 +32,8 @@ applies to any robot.
   inputs are the sensors and the command, whose one `&mut` output is the joint
   targets, and whose return is a `Status`. The module embeds the network
   (ONNX bytes) and keeps the small state a policy needs between ticks. Built
-  for `wasm32-wasip1` it runs on the engine's WebAssembly executor; the same
+  for `wasm32-wasip2` it is a component and runs on the engine's component
+  executor; the same
   crate linked into the host runs in-process. Updating the robot's control
   policy is shipping a new module.
 

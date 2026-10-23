@@ -157,7 +157,7 @@ async fn setup_engine_with_modules(
     modules: &Vec<String>,
 ) -> (PinnedEngine, HashMap<Uuid, ModuleFunction>) {
     let mut engine = EngineBuilder::new()
-        .add_executor(arora_engine::executor::wasm::WebAssemblyExecutor::new().unwrap())
+        .add_executor(arora_engine::executor::component::ComponentExecutor::new().unwrap())
         .add_executor(arora_engine::executor::native::NativeExecutor::new())
         .build();
 
@@ -193,8 +193,8 @@ async fn load_module<R: ReadableRegistry + EditableRegistry + Resolver>(
 
     let (module_target_dir, executable_prefix, executable_extension) =
         match header.executor.name.as_str() {
-            "wasm" => (
-                repo_root_path().join("target").join("wasm32-wasip1"),
+            "wasm-component" => (
+                repo_root_path().join("target").join("wasm32-wasip2"),
                 "",
                 "wasm",
             ),

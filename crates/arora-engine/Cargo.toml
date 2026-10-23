@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "5.4.0"
+version = "5.5.0"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
@@ -30,6 +30,10 @@ rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
+# Reads a component's layer (`component_layout`), which the browser checks
+# before it runs the guest module: the parser alone, without the validator,
+# which would ship ~0.9 MB more to the browser. 0.261 is wasmtime 50's.
+wasmparser = { version = "0.261", default-features = false, features = ["std", "component-model"] }
 
 # Native-only optional deps. Disabled when targeting wasm32 (browser host).
 libloading = { version = "0.9", optional = true }
@@ -55,21 +59,25 @@ cbindgen = "0.29"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 uuid = { version = "1", features = ["serde", "v4"] }
+# The text-format assembler for the hand-written guests and components.
+wat = "1"
 
 # Browser-host integration test (tests/browser.rs), wasm32-only. serde_yaml +
 # uuid above supply the header/value types; these add the test harness, the
-# panic hook, the text-format assembler for the hand-written guests, and the
-# guest module the test loads through the browser executor.
+# panic hook, and the guest modules the tests load through the browser
+# executors.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 arora-types = { path = "../arora-types", version = "3" }
 wasm-bindgen-test = "0.3"
 console_error_panic_hook = "0.1"
-wat = "1"
 # test-rust-wasm guest (wasm32-wasip1) that the browser test include_bytes!s;
 # cargo exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
 # `lib = true` also brings the crate in for the test's own target: the header
 # the test loads comes from the module's Rust declaration.
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+# The component guest tests/browser_component.rs include_bytes!s; cargo exposes
+# its path as CARGO_CDYLIB_FILE_TEST_RUST_COMPONENT_test_rust_component.
+test-rust-component = { path = "../../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
 
 # Native-host integration test (tests/native.rs): the same guest built for the
 # host as a cdylib, loaded through NativeExecutor; cargo exposes its path as
