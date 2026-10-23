@@ -160,6 +160,16 @@ pub struct ImportedGraph {
 const NODES: Uuid = Uuid::from_u128(0x6e6f_6465_2d67_7261_7068_0000_0000_0002);
 /// The namespace of variable ids, derived from their names.
 const VARIABLES: Uuid = Uuid::from_u128(0x6e6f_6465_2d67_7261_7068_0000_0000_0003);
+/// The namespace of the ids of the check nodes, derived from the id of the
+/// node each checks. Each tree node the importer adds has its ids in a
+/// namespace of its own, apart from the graph's nodes': a graph's node ids
+/// are any strings, so no prefix keeps a node from taking an added one's.
+const CHECKS: Uuid = Uuid::from_u128(0x6e6f_6465_2d67_7261_7068_0000_0000_0004);
+/// The namespace of the ids of the select nodes: under it, the id of the
+/// node whose input each feeds, then that input's name.
+const SELECTS: Uuid = Uuid::from_u128(0x6e6f_6465_2d67_7261_7068_0000_0000_0005);
+/// The tree's root. Not a name-based id, so no node's id is it.
+const ROOT: Uuid = Uuid::from_u128(0x6e6f_6465_2d67_7261_7068_0000_0000_0006);
 
 /// The tree node id of the graph's node `id`.
 pub fn tree_node_id(id: &str) -> Uuid {
@@ -336,8 +346,10 @@ pub fn import_with(
             let argument = match (read, &connection.default_value) {
                 (Some(read), _) => match &connection.selector {
                     Some(selector) if !selector.is_empty() => {
-                        let select_id =
-                            Uuid::new_v5(&NODES, format!("select:{}:{port}", node.id).as_bytes());
+                        let select_id = Uuid::new_v5(
+                            &Uuid::new_v5(&SELECTS, node.id.as_bytes()),
+                            port.as_bytes(),
+                        );
                         selects.push(Node {
                             id: select_id,
                             function: select_function(),
@@ -434,14 +446,14 @@ pub fn import_with(
         .collect();
     let root = if leaves.is_empty() {
         Node {
-            id: Uuid::new_v5(&NODES, b"root"),
+            id: ROOT,
             function: SUCCEED_FUNCTION_ID,
             arguments: HashMap::new(),
             children: None,
         }
     } else {
         Node {
-            id: Uuid::new_v5(&NODES, b"root"),
+            id: ROOT,
             function: PARALLEL_FUNCTION_ID,
             arguments: HashMap::new(),
             children: Some(leaves),
@@ -556,7 +568,7 @@ fn checks_shapes(node: &NodeSpec) -> Result<bool, String> {
 
 /// The tree node id of the check of the graph's node `id`.
 fn check_node_id(id: &str) -> Uuid {
-    Uuid::new_v5(&NODES, format!("check:{id}").as_bytes())
+    Uuid::new_v5(&CHECKS, id.as_bytes())
 }
 
 /// The tree node `check` checking the shapes `node`, as `graph_node`, declares

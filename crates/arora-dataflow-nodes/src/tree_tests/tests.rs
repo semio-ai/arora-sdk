@@ -1181,6 +1181,113 @@ fn an_input_declaring_the_shape_of_another_port_is_refused() {
     );
 }
 
+/// An `input`'s value fitted to its declared shape is checked against it: a
+/// shape's `NaN`-filled value is not always of the shape.
+#[test]
+fn an_input_s_fitted_value_is_checked_against_its_shape() {
+    let input = NodeSpec {
+        id: "in".to_string(),
+        kind: NodeType::Input,
+        params: NodeParams {
+            path: Some(TypedPath::parse("robot/x").expect("valid path")),
+            ..Default::default()
+        },
+        output_shapes: HashMap::from([("out".to_string(), Shape::new(ShapeId::Enum(vec![])))]),
+        input_defaults: HashMap::new(),
+    };
+    let spec = GraphSpec {
+        nodes: vec![input],
+        ..Default::default()
+    };
+    let err = evaluate_all(&mut TreeRuntime::default(), &spec).expect_err("the shape is refused");
+    assert!(err.contains("does not match declared shape"), "{err}");
+}
+
+/// A declared shape is checked against the node's return as it is: an
+/// option is not the number it holds.
+#[test]
+fn a_declared_shape_is_checked_against_the_return_as_it_is() {
+    struct ReturnsAnOption;
+    impl NodeFunctions for ReturnsAnOption {
+        fn call(&mut self, _: uuid::Uuid, _: &[(uuid::Uuid, Value)]) -> Result<Value, String> {
+            Ok(Value::Option(Some(Box::new(Value::F32(1.0)))))
+        }
+    }
+    let spec = GraphSpec {
+        nodes: vec![NodeSpec {
+            id: "call".to_string(),
+            kind: NodeType::ExternalFunction,
+            params: NodeParams {
+                function: Some(uuid::Uuid::from_u128(0x1)),
+                ..Default::default()
+            },
+            output_shapes: HashMap::from([("out".to_string(), Shape::new(ShapeId::Scalar))]),
+            input_defaults: HashMap::new(),
+        }],
+        ..Default::default()
+    };
+    let err = evaluate_all_with_functions(&mut TreeRuntime::default(), &spec, &mut ReturnsAnOption)
+        .expect_err("the shape is refused");
+    assert!(err.contains("does not match declared shape"), "{err}");
+}
+
+/// A graph's node ids are any strings: one named as the importer would name
+/// a node it adds (a check, a selection, the root) is a node of its own.
+#[test]
+fn a_node_named_like_an_added_one_is_a_node_of_its_own() {
+    let mut checked = constant_node("a", Value::F32(1.0));
+    checked
+        .output_shapes
+        .insert("out".to_string(), Shape::new(ShapeId::Scalar));
+    let spec = GraphSpec {
+        nodes: vec![
+            checked,
+            constant_node("check:a", Value::F32(2.0)),
+            constant_node("root", Value::F32(3.0)),
+            constant_node("select:sink:in", Value::F32(4.0)),
+            constant_node("pose", vocab::record([("x", vocab::float(5.0))])),
+            NodeSpec {
+                id: "sink".to_string(),
+                kind: NodeType::Output,
+                params: NodeParams {
+                    path: Some(TypedPath::parse("robot/x").expect("valid path")),
+                    ..Default::default()
+                },
+                output_shapes: HashMap::new(),
+                input_defaults: HashMap::new(),
+            },
+        ],
+        edges: vec![link_with_selector(
+            "pose",
+            "out",
+            "sink",
+            "in",
+            vec![SelectorSegment::Field("x".to_string())],
+        )],
+        ..Default::default()
+    };
+    let mut rt = TreeRuntime::default();
+    evaluate_all(&mut rt, &spec).expect("the graph evaluates");
+    for (id, value) in [
+        ("a", 1.0),
+        ("check:a", 2.0),
+        ("root", 3.0),
+        ("select:sink:in", 4.0),
+    ] {
+        assert_eq!(
+            rt.outputs[id]["out"].value,
+            Value::F32(value),
+            "node '{id}'"
+        );
+    }
+    let written: Vec<Value> = rt.writes.iter().map(|op| op.value.clone()).collect();
+    assert_eq!(
+        written,
+        [vocab::float(5.0)],
+        "the selection reaches the sink"
+    );
+}
+
 #[test]
 fn it_should_reject_invalid_paths_during_deserialization() {
     let json = r#"{

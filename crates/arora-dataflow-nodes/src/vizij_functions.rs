@@ -202,13 +202,19 @@ impl VizijFunctions {
                 TypedPath::parse(text).map_err(|e| e.to_string())
             })?;
             let shape = decode(&mut statics.shape, text(shape_param()), parse_json)?;
-            vizij::input(
+            let value = vizij::input(
                 node,
                 path,
                 shape,
                 arg(in_param()).cloned(),
                 arg(default_param()),
-            )
+            )?;
+            // A value fitted to a shape may still not have it: a shape's
+            // `NaN`-filled value is not always of the shape.
+            if let Some(shape) = shape {
+                vizij::check_shape(node, "out", shape, &value)?;
+            }
+            Ok(value)
         } else if function == output_function() {
             let shape = decode(&mut statics.shape, text(shape_param()), parse_json)?;
             let value = arg(in_param()).cloned().unwrap_or(Value::F32(0.0));
@@ -217,7 +223,11 @@ impl VizijFunctions {
             }
             Ok(value)
         } else if function == check_function() {
-            let value = arg(in_param()).cloned().unwrap_or(Value::Unit);
+            // The node's return as it is: a check passes it on unchanged.
+            let value = args
+                .iter()
+                .find(|(parameter, _)| *parameter == in_param())
+                .map_or(Value::Unit, |(_, value)| (*value).clone());
             let Some(shapes) = decode(&mut statics.shapes, text(shapes_param()), parse_json)?
             else {
                 return Ok(value);
