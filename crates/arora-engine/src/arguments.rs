@@ -249,13 +249,11 @@ impl Buffer<'_> {
     }
 }
 
-/// Whether `id` is a dynamic value type, which a guest takes as a `Value`,
-/// whatever it holds.
-/// Whether `id` names a record: an id no well-known type has. A structure or
-/// enumeration carries its record's id, and one carrying a well-known type's
-/// id is not of that type.
+/// Whether `id` names a record: an id no well-known type has, a uuid, an
+/// option or a typed array's included. A structure or enumeration carries its
+/// record's id, and one carrying a well-known type's id is not of that type.
 fn names_a_record(id: &Uuid) -> bool {
-    !ty::PRIMITIVE_IDS.contains(id)
+    !ty::WELL_KNOWN_IDS.contains(id)
 }
 
 /// How an error names the type `id`: its primitive's name, or the record.
@@ -266,6 +264,8 @@ fn describe(id: &Uuid) -> String {
     }
 }
 
+/// Whether `id` is a dynamic value type, which a guest takes as a `Value`,
+/// whatever it holds.
 fn dynamic(id: &Uuid) -> bool {
     *id == *ty::KEY_VALUE_ID || *id == *ty::ARRAY_VALUE_ID
 }
@@ -347,7 +347,9 @@ mod tests {
     use arora_buffers::serde_uuid::serialize;
     use arora_types::module::low::ExportFunction;
     use arora_types::ty::low::validate_type_ref;
-    use arora_types::value::{Enumeration, Structure, StructureField, StructureWithoutId, Value};
+    use arora_types::value::{
+        Enumeration, EnumerationWithoutId, Structure, StructureField, StructureWithoutId, Value,
+    };
 
     // Clear of the well-known type ids (`ty::U16_ID` is 7, …).
     const FUNCTION: Uuid = Uuid::from_u128(0xf1c7_0001);
@@ -693,6 +695,42 @@ mod tests {
             }
         }
         assert_eq!(pairs, values.len() * types.len());
+    }
+
+    /// A packed structure or enumeration array carrying a well-known type's
+    /// id is not an array of that type, a uuid, an option or a typed array
+    /// included. `validate_type_ref` takes it for a record array, so the
+    /// matrix above, checked against it, does not hold these.
+    #[test]
+    fn a_record_array_under_a_well_known_id_is_not_of_that_type() {
+        let well_known = [
+            *ty::UUID_ID,
+            *ty::OPTION_ID,
+            *ty::ARRAY_U32_ID,
+            *ty::ARRAY_STRING_ID,
+            *ty::U32_ID,
+        ];
+        for id in well_known {
+            for value in [
+                Value::ArrayStructure {
+                    id,
+                    elements: vec![StructureWithoutId { fields: vec![] }],
+                },
+                Value::ArrayEnumeration {
+                    id,
+                    elements: vec![EnumerationWithoutId {
+                        variant_id: Uuid::from_u128(0xf1c7_0051),
+                        value: Box::new(Value::Unit),
+                    }],
+                },
+            ] {
+                for ty in [TypeRef::Array { id }, TypeRef::FixedArray { id, len: 1 }] {
+                    let checked = signatures_with(ty.clone())
+                        .check(&FUNCTION, &call(FUNCTION, vec![(COUNT, value.clone())]));
+                    assert!(checked.is_err(), "{value:?} as {ty:?}");
+                }
+            }
+        }
     }
 
     /// A function `f(count: ty)`.
