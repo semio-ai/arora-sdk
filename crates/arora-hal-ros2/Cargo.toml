@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-ros2"
-version = "5.6.0"
+version = "6.0.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/UR5, G1) as Arora devices"
@@ -24,13 +24,12 @@ default = ["dds"]
 dds = ["ros2-client/dds", "arora-msgs-ros2/dds"]
 zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 # The arora-ros2 binary: pulls the full arora runtime. The library (the HAL
-# itself) stays lean without it. It enables `studio` for now; the next major
-# stops, and a runner that connects to Semio Studio is then built with
-# `--features runner,studio`.
-runner = ["dep:arora", "dep:anyhow", "dep:clap", "studio"]
+# itself) stays lean without it. It serves the open local bridge; a runner that
+# connects to Semio Studio is built with `--features runner,studio`.
+runner = ["dep:arora", "dep:anyhow", "dep:clap"]
 # The Semio Studio connection (arora's `studio-bridge`) for the runner, which
-# then takes `--studio` and `--no-studio` and connects a device holding a
-# saved Studio credential. It adds nothing to the library.
+# then takes `--studio` and `--no-studio` and connects a run passing
+# `--studio`. It adds nothing to the library.
 studio = ["arora?/studio-bridge"]
 
 [dependencies]
@@ -44,9 +43,9 @@ arora-types = { path = "../arora-types", version = "3.1" }
 # shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
 # a Zenoh publisher keys on. Core only here — a backend is selected via [features].
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
-# 13.5: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
-# Studio choice.
-arora = { path = "../arora", version = "15", optional = true }
+# 16: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
+# Studio choice, a run connecting only when it asks.
+arora = { path = "../arora", version = "16", optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"
@@ -65,7 +64,7 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] 
 
 [dev-dependencies]
 # A device over the HAL, for the tests of what it opens to remote writers.
-arora = { path = "../arora", version = "15" }
+arora = { path = "../arora", version = "16" }
 rand = "0.10"
 # `time` (tests only): the DDS round-trip tests sleep and time out around
 # discovery; the HAL itself needs no timers.

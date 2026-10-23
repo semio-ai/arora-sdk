@@ -4,6 +4,40 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [16.0.0] - 2026-10-23
+
+### Changed
+
+- A `studio-bridge` run connects to Semio Studio only when it asks for it:
+  `--studio`, `ARORA_STUDIO=1`, or `AroraBuilder::with_studio(Choice::Studio)`.
+  A device holding a saved Studio credential serves the open local bridge
+  when its run does not ask, because a saved credential is not proof of an
+  opt-in: a headless run of 13.4 or earlier signed the device up unasked.
+  - Such a run logs, naming the credential's directory,
+    `Studio: serving the local bridge, as the run does not ask for Studio. Pass --studio to connect with the saved credential in <path>.`
+    It looks the credential up only for that line: a credential that does
+    not read gives a warning, and a lookup that fails, such as a device
+    directory that cannot be named, gives a warning instead of failing the
+    start.
+  - `run`, `run_with_hal` and `run_with` do not ask, so in a `studio-bridge`
+    build they serve the open local bridge.
+  - `studio::Choice::Local` is the default: what a run that asks nothing
+    gives, and what `--no-studio` gives. `--no-studio` still wins over
+    `--studio` and `ARORA_STUDIO`.
+  - The `studio::connect` functions are unchanged: an embedder calling one
+    asks for Studio.
+
+  To migrate a device that connects with its saved credential, pass
+  `--studio` to its runner, or set `ARORA_STUDIO=1` in its environment. An
+  embedder building its device with `AroraBuilder` passes
+  `with_studio(studio::Choice::Studio)`.
+
+### Removed
+
+- `studio::Choice::IfSaved`, connecting on a saved credential alone. Use
+  `Choice::Studio` to connect, or `Choice::Local`, the default, to serve the
+  local bridge.
+
 ## [15.0.0] - 2026-10-23
 
 ### Changed

@@ -5,8 +5,8 @@
 //! Firebase options, Zenoh endpoints), loads the modules in its device
 //! directory and those `--module` names, serves the open local bridge, and
 //! runs the arora runtime. A `studio-bridge` build connects to Semio Studio
-//! over Zenoh instead when the device holds a saved Studio credential or the
-//! run passes `--studio`; `--no-studio` keeps it on the local bridge. See
+//! over Zenoh instead when the run passes `--studio` (or sets
+//! `ARORA_STUDIO=1`); `--no-studio` keeps it on the local bridge. See
 //! [`arora::run_with_hal`] for the configuration env vars and the full run.
 //!
 //! A device-specific build is a thin downstream binary that depends on `arora`

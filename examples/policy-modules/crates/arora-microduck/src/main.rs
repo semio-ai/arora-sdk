@@ -3,8 +3,8 @@
 //! Without `--duration` the device serves at real time on the standard Arora
 //! run: the operator front end (the terminal UI on a terminal), and the open
 //! local bridge on `ws://127.0.0.1:9000` — or, built with `--features
-//! studio`, Semio Studio when the device holds a saved Studio credential or
-//! the run passes `--studio` (`--no-studio` declines). With
+//! studio`, Semio Studio when the run passes `--studio` (`--no-studio`
+//! declines). With
 //! `--duration`, the device runs that much simulated time in lockstep, as
 //! fast as the machine allows, and prints what happened.
 

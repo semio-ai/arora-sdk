@@ -1,18 +1,20 @@
 //! arora-ros2: runs a ROS 2 robot as an Arora device.
 //!
 //! Usage: `arora-ros2 [--module <DIR>]... [--studio | --no-studio] <ROBOT>
-//! [OVERRIDES]` (`--help` lists the options).
+//! [OVERRIDES]` (`--help` lists the options; `--studio` and `--no-studio` in a
+//! build with the `studio` feature).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var)
 //! is a well-known robot name or a path to a `ROS2RobotConfig` JSON file. An
 //! optional second JSON file overrides the selected config. `ROS_DOMAIN_ID`
 //! overrides the config's domain id.
 //!
-//! The device serves the open local bridge, and connects to Semio Studio
-//! instead when it holds a saved Studio credential or the run passes
-//! `--studio` (`ARORA_STUDIO=1`), which registers a device holding none;
-//! `--no-studio` keeps it on the local bridge. Its identity, registration and
-//! credential are arora's (`arora::studio`), configured from the environment.
+//! The device serves the open local bridge. Built with the `studio` feature, it
+//! connects to Semio Studio instead when the run passes `--studio`
+//! (`ARORA_STUDIO=1`), which registers a device holding no saved Studio
+//! credential; `--no-studio` keeps it on the local bridge. Its identity,
+//! registration and credential are arora's (`arora::studio`), configured from
+//! the environment.
 //!
 //! The device carries the modules its device directory holds under `modules/`,
 //! then each `--module` directory, as the `arora` runner does
@@ -135,8 +137,7 @@ mod tests {
     }
 
     /// `--studio` and `--no-studio` parse into the run's Studio choice,
-    /// anywhere on the command line; neither leaves it to the saved
-    /// credential.
+    /// anywhere on the command line; neither serves the open local bridge.
     #[cfg(feature = "studio")]
     #[test]
     fn studio_and_no_studio_give_the_run_s_studio_choice() {
@@ -149,8 +150,18 @@ mod tests {
                 .choice()
                 .expect("ARORA_STUDIO is unset or a boolean")
         };
-        assert_eq!(choice(&["arora-ros2", "nao"]), Choice::IfSaved);
+        assert_eq!(choice(&["arora-ros2", "nao"]), Choice::Local);
         assert_eq!(choice(&["arora-ros2", "--studio", "nao"]), Choice::Studio);
         assert_eq!(choice(&["arora-ros2", "nao", "--no-studio"]), Choice::Local);
+    }
+
+    /// Built without the `studio` feature, the runner takes no Studio option:
+    /// `--studio` is refused, not ignored.
+    #[cfg(not(feature = "studio"))]
+    #[test]
+    fn studio_is_refused_without_the_studio_feature() {
+        let error = Cli::try_parse_from(["arora-ros2", "--studio", "nao"])
+            .expect_err("--studio is refused");
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 }

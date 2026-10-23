@@ -4,6 +4,23 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-10-23
+
+### Changed
+
+- `runner` no longer enables `studio`: the `arora-ros2` runner it builds serves
+  the open local bridge and takes no Studio option. A runner that connects to
+  Semio Studio is built with `--features runner,studio`.
+- Requires arora 16: a runner built with `studio` connects to Semio Studio only
+  when the run passes `--studio` (or sets `ARORA_STUDIO=1`), a device holding a
+  saved Studio credential included. A run that does not ask serves the open
+  local bridge, and logs that `--studio` connects with the credential the
+  device holds.
+
+  To migrate a runner that connects with its saved credential, build it with
+  `--features runner,studio` and pass `--studio` on every run that should
+  connect, or set `ARORA_STUDIO=1` in its environment.
+
 ## [5.6.0] - 2026-10-21
 
 ### Changed

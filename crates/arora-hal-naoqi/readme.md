@@ -80,8 +80,9 @@ A run that connects to Studio ([Semio Studio](#semio-studio)) first asks, on the
 UI, what neither the Studio variables nor an earlier answer give: your Studio owner UID, a
 device name, a model family (`nao`). Leave the owner empty to run without Studio after all.
 
-Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; `--studio`
-connects to Semio Studio, `--no-studio` keeps a registered device on the local bridge; a
+Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; in a build
+with the `studio` feature, `--studio` connects to Semio Studio and `--no-studio` serves the
+local bridge even when `ARORA_STUDIO=1` asks for Studio; a
 JSON configuration ([`configs/nao.json`](configs/nao.json): joint ids, sampling period,
 joint speed, sensor families, Autonomous Life) can replace the address, and a second JSON
 file overrides it.
@@ -153,9 +154,9 @@ ssh -t nao@<robot_name>.local   # -t: the terminal UI needs a terminal
 ```
 
 The device then behaves as [from your computer](#3-use-it). To register it with Semio
-Studio, run it once with `--studio` and answer the prompts. To leave it running after you
-log out, run it headless with `nohup`: a registered device connects to Studio with its saved
-credential.
+Studio, build it with `--features runner,studio`, run it once with `--studio` and answer the
+prompts. To leave it running after you log out, run it headless with `nohup`, still with
+`--studio`: a registered device connects to Studio with its saved credential.
 
 On the robot, the device directory follows the same rule as anywhere: `DEVICE_DIR` when it
 is set, else `semio/arora/devices/<DEVICE_LOCAL_ID>/` in the user data directory
@@ -187,14 +188,15 @@ bridge client, Studio included: the runner opens `command.ready` to remote write
 
 ## Semio Studio
 
-Semio Studio is opt-in. The runner is built with the Studio connection (this crate's
-`studio` feature, which `runner` enables), and a device connects to Studio only when it
-holds a saved Studio credential, or when the run passes `--studio` (or sets
-`ARORA_STUDIO=1`). Otherwise it serves the open local bridge, and says so:
-`Studio: no saved credential in <path>; serving the local bridge. Pass --studio to register this device with Semio Studio.`
-`--no-studio` keeps a device that holds a credential on the local bridge. A device may hold
-one without having asked: a headless run of an earlier `arora-naoqi` connected on its own.
-Delete the device's `studio/` directory (below) to make it a device with none.
+Semio Studio is opt-in. The runner connects to Studio only when it is built with the Studio
+connection (this crate's `studio` feature: `--features runner,studio`) and the run passes
+`--studio` (or sets `ARORA_STUDIO=1`). Otherwise it serves the open local bridge, whatever
+the device holds. A saved Studio credential does not connect a run on its own, because a
+device may hold one without having asked: a headless run of an earlier `arora-naoqi` signed
+it up unasked. A run that does not ask says so when the device holds one:
+`Studio: serving the local bridge, as the run does not ask for Studio. Pass --studio to connect with the saved credential in <path>.`
+`--no-studio` serves the local bridge even when `ARORA_STUDIO=1` asks for Studio. Delete the
+device's `studio/` directory (below) to make it a device with none.
 
 There is no pairing code yet: a device declares its owners itself, by their Studio user ids
 (UIDs).
@@ -218,14 +220,10 @@ There is no pairing code yet: a device declares its owners itself, by their Stud
 The device's identity (its Studio credentials) is kept on the machine that runs
 `arora-naoqi`, under `semio/arora/devices/default/studio/` in its user data directory:
 `~/.local/share` on Linux and on the robot, `~/Library/Application Support` on macOS. The
-next runs connect with it, without `--studio` and without asking again; a device run from
+next runs with `--studio` connect with it without asking again; a device run from
 your computer, then deployed on the robot, registers twice. To register the robot afresh,
 delete that directory and run with `--studio`, or give the run another identity with
 `DEVICE_LOCAL_ID=<name>` (or a whole other directory with `DEVICE_DIR`).
-
-The next major of this crate stops enabling `studio` from `runner`, and a runner then
-connects to Studio only with `--studio`: build it with `--features runner,studio`, as above,
-and pass `--studio` on every run that should connect.
 
 ## Keys
 
