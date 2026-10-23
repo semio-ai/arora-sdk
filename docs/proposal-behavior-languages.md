@@ -371,7 +371,7 @@ the standard adaptations), about 23,050 nodes over 86 node kinds:
 | arithmetic, ranges, vectors, logic, noise | one function of `@arora/node-graph` each, called by one detached node per graph node |
 | `input` | a store key as an argument; the `input` function applies the node's default when the key is unset |
 | `output` | an output port bound to a store key, with the later sink winning, as the later `output` does in a `flow` |
-| the keyed-batch `output`, which writes keys named by data | a detached node its host observes, and whose batch the host writes. A `Scatter` node of the tree writes keys named by data under a literal prefix, which a graph's batch does not state; a detached node's output binds static keys only (§9) |
+| the keyed-batch `output`, which writes keys named by data | a detached node its host observes, and whose batch the host writes. A `Scatter` node of the tree writes keys named by data, under a literal prefix or anywhere in the tree's namespace; a detached node's output binds static keys only (§9) |
 | non-input params (`half_life`, `case_labels`, noise settings) | literal arguments, `param.<field>` |
 | variadic inputs (`operand_N`, `args_N`), most edges | one parameter per port: a function declares 64 ports of its variadic group, and the importer refuses a graph wiring one past them |
 | named output ports (`weightedsumvector`, `readrecord`, `urdffk`) | a structure returned, each port a field, read through a selection |
@@ -386,7 +386,8 @@ the standard adaptations), about 23,050 nodes over 86 node kinds:
 
 The animation step returns its tracks as values named by data. A `Scatter`
 node of the tree ([#399](https://github.com/semio-ai/arora-sdk/pull/399))
-writes them under the keys the tracks name, within the face's key prefix.
+writes them under the keys the tracks name, anywhere in the tree's namespace
+([#403](https://github.com/semio-ai/arora-sdk/pull/403)).
 
 ## 5. What carries over from the previous design
 
@@ -568,11 +569,10 @@ The design holds without them. Each is settled before the stage it touches.
   would let a pure one be a detached node, and an effect would let an impure
   one run at every tick it is read rather than at every tick.
 - **Keyed outputs on detached nodes.** `Scatter`, a node of the tree, writes
-  keys named by data within a literal prefix. Whether a detached node's
-  output binds such keys itself, as a sink, and how the write analysis treats
-  a prefix instead of a key, remain. Until then, the host of a translated
-  graph writes its keyed batches, whose keys share no prefix a `Scatter`
-  could be bounded by.
+  keys named by data, within a literal prefix or anywhere in the tree's
+  namespace. Whether a detached node's output binds such keys itself, as a
+  sink, and how the write analysis treats a prefix instead of a key, remain.
+  Until then, the host of a translated graph writes its keyed batches.
 - **Variadic inputs**: 64 declared ports per group, or an array parameter, or
   functions specialized by arity.
 - **Incremental lowering.** A parameter value changes in place, as a literal
