@@ -1121,6 +1121,66 @@ fn it_should_validate_vector_length_against_declared_shape() {
     assert!(err.contains("does not match declared shape"));
 }
 
+/// What a device runs, the nodes its outputs read, checks each one's
+/// declared shapes as an evaluation of every node does.
+#[test]
+fn a_declared_shape_is_checked_where_an_output_reads_the_node() {
+    let mut node = constant_node("a", Value::ArrayF32(vec![1.0, 2.0, 3.0]));
+    node.output_shapes.insert(
+        "out".to_string(),
+        Shape::new(ShapeId::Vector { len: Some(4) }),
+    );
+    let sink = NodeSpec {
+        id: "sink".to_string(),
+        kind: NodeType::Output,
+        params: NodeParams {
+            path: Some(TypedPath::parse("robot/x").expect("valid path")),
+            ..Default::default()
+        },
+        output_shapes: HashMap::new(),
+        input_defaults: HashMap::new(),
+    };
+    let spec = GraphSpec {
+        nodes: vec![node, sink],
+        edges: vec![link("a", "sink", "in")],
+        ..Default::default()
+    };
+    let mut rt = TreeRuntime::new(crate::tree_runtime::Evaluation::Demanded);
+    rt.load(&spec).expect("the graph loads");
+    let err = rt
+        .evaluate()
+        .expect_err("vector length mismatch should error");
+    assert!(err.contains("does not match declared shape"), "{err}");
+    assert!(rt.writes.is_empty(), "nothing is written");
+}
+
+/// An `input` or `output` node has the one port `out`: a shape it declares
+/// of another port is refused when the graph loads.
+#[test]
+fn an_input_declaring_the_shape_of_another_port_is_refused() {
+    let input = NodeSpec {
+        id: "in".to_string(),
+        kind: NodeType::Input,
+        params: NodeParams {
+            path: Some(TypedPath::parse("robot/x").expect("valid path")),
+            ..Default::default()
+        },
+        output_shapes: HashMap::from([("extra".to_string(), Shape::new(ShapeId::Scalar))]),
+        input_defaults: HashMap::new(),
+    };
+    let spec = GraphSpec {
+        nodes: vec![input],
+        ..Default::default()
+    };
+    let err = TreeRuntime::default()
+        .load(&spec)
+        .expect_err("the graph is refused");
+    assert_eq!(
+        err,
+        "node 'in' declares the shape of an output 'extra' it does not have"
+    );
+}
+
 #[test]
 fn it_should_reject_invalid_paths_during_deserialization() {
     let json = r#"{

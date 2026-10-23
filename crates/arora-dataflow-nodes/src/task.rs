@@ -1,4 +1,4 @@
-//! The behavior `Status` vocabulary a [`TaskRun`](crate::types::NodeType::TaskRun)
+//! The behavior `Status` vocabulary a [`TaskRun`](crate::kind::Kind::TaskRun)
 //! node speaks on the value plane.
 //!
 //! A run's lifecycle travels as the behavior `Status` enumeration — `Running` /

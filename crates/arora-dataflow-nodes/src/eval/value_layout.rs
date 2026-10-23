@@ -9,45 +9,12 @@
 //! list of value types.
 
 use crate::vocab;
-use arora_shape::{Shape, Value};
+use arora_types::value::Value;
 use arora_types::value::{Structure, StructureField};
 use hashbrown::HashMap;
 use std::cell::RefCell;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use super::shape_helpers::infer_shape;
-
-/// Evaluated output captured alongside its inferred shape.
-#[derive(Clone, Debug)]
-pub struct PortValue {
-    pub value: Value,
-    pub shape: Shape,
-}
-
-impl PortValue {
-    /// Construct a `PortValue`, inferring the [`Shape`] from the [`Value`].
-    pub fn new(value: Value) -> Self {
-        let shape = infer_shape(&value);
-        PortValue { value, shape }
-    }
-
-    /// Construct a `PortValue` with an explicit [`Shape`], bypassing inference.
-    pub fn with_shape(value: Value, shape: Shape) -> Self {
-        PortValue { value, shape }
-    }
-
-    /// Overwrite the cached [`Shape`] while leaving the [`Value`] untouched.
-    pub fn set_shape(&mut self, shape: Shape) {
-        self.shape = shape;
-    }
-}
-
-impl Default for PortValue {
-    fn default() -> Self {
-        PortValue::new(vocab::float(0.0))
-    }
-}
 
 /// How a value whose leaves are numbers is laid out when flattened.
 ///

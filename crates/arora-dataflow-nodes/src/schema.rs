@@ -2912,6 +2912,7 @@ pub fn registry() -> Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kind::Kind;
     use crate::ports::{ports, Variadic};
 
     /// The registry describes the ports each node kind's function declares,
@@ -2927,8 +2928,17 @@ mod tests {
         };
         let nodes = registry().nodes;
         for signature in &nodes {
-            let declared = ports(&signature.type_id);
             let kind = &signature.type_id;
+            let Some(declared) = kind.kind().map(|kind| ports(&kind)) else {
+                // An `input` or `output` node: the importer's ports.
+                let inputs = match kind {
+                    NodeType::Output => vec!["in"],
+                    _ => vec![],
+                };
+                assert_eq!(ids(&signature.inputs), inputs, "{kind:?}'s inputs");
+                assert_eq!(ids(&signature.outputs), ["out"], "{kind:?}'s outputs");
+                continue;
+            };
             assert_eq!(ids(&signature.inputs), declared.inputs, "{kind:?}'s inputs");
             assert_eq!(
                 ids(&signature.outputs),
@@ -2946,19 +2956,17 @@ mod tests {
                 "{kind:?}'s variadic outputs"
             );
         }
-        let urdf = |kind: &NodeType| {
-            matches!(
-                kind,
-                NodeType::UrdfIkPosition | NodeType::UrdfIkPose | NodeType::UrdfFk
-            )
-        };
+        let urdf =
+            |kind: &Kind| matches!(kind, Kind::UrdfIkPosition | Kind::UrdfIkPose | Kind::UrdfFk);
         for kind in crate::functions::KINDS {
             if urdf(kind) && !cfg!(feature = "urdf_ik") {
                 // The registry describes them with the feature alone.
                 continue;
             }
             assert!(
-                nodes.iter().any(|signature| signature.type_id == *kind),
+                nodes
+                    .iter()
+                    .any(|signature| signature.type_id.kind().as_ref() == Some(kind)),
                 "the registry describes {kind:?}"
             );
         }

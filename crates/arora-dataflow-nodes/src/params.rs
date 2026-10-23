@@ -35,21 +35,21 @@ pub struct Params {
     pub out_min: Option<f32>,
     /// Destination high bound for remap-style nodes.
     pub out_max: Option<f32>,
-    /// Rounding mode used by [`NodeType::Round`](crate::types::NodeType::Round).
+    /// Rounding mode used by [`Kind::Round`](crate::kind::Kind::Round).
     pub round_mode: Option<RoundMode>,
-    /// Clamp behavior for [`NodeType::PiecewiseRemap`](crate::types::NodeType::PiecewiseRemap).
+    /// Clamp behavior for [`Kind::PiecewiseRemap`](crate::kind::Kind::PiecewiseRemap).
     pub clamp: Option<bool>,
-    /// Input low anchor for [`NodeType::CenteredRemap`](crate::types::NodeType::CenteredRemap).
+    /// Input low anchor for [`Kind::CenteredRemap`](crate::kind::Kind::CenteredRemap).
     pub in_low: Option<f32>,
-    /// Input center anchor for [`NodeType::CenteredRemap`](crate::types::NodeType::CenteredRemap).
+    /// Input center anchor for [`Kind::CenteredRemap`](crate::kind::Kind::CenteredRemap).
     pub in_anchor: Option<f32>,
-    /// Input high anchor for [`NodeType::CenteredRemap`](crate::types::NodeType::CenteredRemap).
+    /// Input high anchor for [`Kind::CenteredRemap`](crate::kind::Kind::CenteredRemap).
     pub in_high: Option<f32>,
-    /// Output low anchor for [`NodeType::CenteredRemap`](crate::types::NodeType::CenteredRemap).
+    /// Output low anchor for [`Kind::CenteredRemap`](crate::kind::Kind::CenteredRemap).
     pub out_low: Option<f32>,
-    /// Output center anchor for [`NodeType::CenteredRemap`](crate::types::NodeType::CenteredRemap).
+    /// Output center anchor for [`Kind::CenteredRemap`](crate::kind::Kind::CenteredRemap).
     pub out_anchor: Option<f32>,
-    /// Output high anchor for [`NodeType::CenteredRemap`](crate::types::NodeType::CenteredRemap).
+    /// Output high anchor for [`Kind::CenteredRemap`](crate::kind::Kind::CenteredRemap).
     pub out_high: Option<f32>,
     /// Bone length for lightweight analytic IK nodes.
     pub bone1: Option<f32>,
@@ -77,7 +77,7 @@ pub struct Params {
     pub joint_defaults: Option<Vec<(String, f32)>>,
     /// Zero-based component index used by indexing/splitting nodes.
     pub index: Option<f32>,
-    /// Segment sizes for [`NodeType::Split`](crate::types::NodeType::Split), floored to whole-number widths by the evaluator.
+    /// Segment sizes for [`Kind::Split`](crate::kind::Kind::Split), floored to whole-number widths by the evaluator.
     pub sizes: Option<Vec<f32>>,
     /// Noise seed value passed into procedural noise nodes.
     pub noise_seed: Option<f32>,
@@ -97,29 +97,29 @@ pub struct Params {
     pub half_life: Option<f32>,
     /// Maximum change rate for slew nodes.
     pub max_rate: Option<f32>,
-    /// Branch labels for [`NodeType::Case`](crate::types::NodeType::Case), matched in declaration order.
+    /// Branch labels for [`Kind::Case`](crate::kind::Kind::Case), matched in declaration order.
     pub case_labels: Option<Vec<String>>,
     /// For BuildRecord/ReadRecord/TaskRun – one key string per variadic slot, in
     /// slot order (a TaskRun key is the id of the out-parameter the slot carries)
     pub record_keys: Option<Vec<String>>,
     /// For SplitRecord – comma-separated field keys to include in `included` output
     pub keys: Option<String>,
-    /// Stable id of the node-function invoked by [`NodeType::ExternalFunction`](crate::types::NodeType::ExternalFunction).
+    /// Stable id of the node-function invoked by [`Kind::ExternalFunction`](crate::kind::Kind::ExternalFunction).
     ///
     /// The graph attaches no meaning to this id beyond passing it to the host
     /// [`NodeFunctions`](crate::eval::NodeFunctions); the host resolves and invokes it.
     pub function: Option<Uuid>,
-    /// Ordered arg-key handles matching the [`NodeType::ExternalFunction`](crate::types::NodeType::ExternalFunction) variadic `args` inputs.
+    /// Ordered arg-key handles matching the [`Kind::ExternalFunction`](crate::kind::Kind::ExternalFunction) variadic `args` inputs.
     ///
     /// These are opaque to the graph; the host pairs each with the positional value in the call.
     pub param_ids: Option<Vec<Uuid>>,
-    /// Module the [`NodeType::TaskRun`](crate::types::NodeType::TaskRun) function is dispatched to, when the run
+    /// Module the [`Kind::TaskRun`](crate::kind::Kind::TaskRun) function is dispatched to, when the run
     /// names one. `None` leaves resolution to the host's function→module map,
-    /// like an [`NodeType::ExternalFunction`](crate::types::NodeType::ExternalFunction) call.
+    /// like an [`Kind::ExternalFunction`](crate::kind::Kind::ExternalFunction) call.
     pub module: Option<Uuid>,
 }
 
-/// Rounding strategy for [`NodeType::Round`](crate::types::NodeType::Round).
+/// Rounding strategy for [`Kind::Round`](crate::kind::Kind::Round).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RoundMode {

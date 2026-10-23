@@ -5,8 +5,9 @@
 //! [`TreeRuntime`] holds the graph's own store: the staged inputs, the clock
 //! and the keys the graph writes. It [imports](crate::import) the graph,
 //! builds the tree over that store, and lowers it onto a bridge running the
-//! [node functions](crate::functions) in-process. An evaluation is one tick
-//! of the tree.
+//! [node functions](crate::functions) and the
+//! [graph format's](crate::vizij_functions) in-process. An evaluation is one
+//! tick of the tree.
 //!
 //! What it evaluates is a choice ([`Evaluation`]): every node at every tick,
 //! so every port can be read and every node's error surfaces; or only what
@@ -24,9 +25,10 @@ use uuid::Uuid;
 
 use crate::eval::shape_helpers::infer_shape;
 use crate::eval::{NodeFunctions, PortValue, SpawnRequest};
-use crate::functions::{encode_params, function_index, is_stateful, state_param, DataflowNodes};
-use crate::import::{import_with, ports_of, ImportOptions, ImportedGraph};
+use crate::functions::{is_stateful, state_param, DataflowNodes};
+use crate::import::{import_with, node_arguments, ports_of, ImportOptions, ImportedGraph};
 use crate::types::{GraphSpec, NodeId, NodeParams, NodeSpec, NodeType};
+use crate::vizij_functions::VizijFunctions;
 
 /// What an evaluation brings up to date.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -65,6 +67,7 @@ pub struct TreeRuntime {
     evaluation: Evaluation,
     store: SimpleDataStore,
     module: DataflowNodes,
+    vizij: VizijFunctions,
     /// The store key of each path an input was staged on.
     keys: hashbrown::HashMap<TypedPath, Key>,
     /// Values staged for the next evaluation, with their declared shapes.
@@ -117,6 +120,7 @@ impl TreeRuntime {
             evaluation,
             store: SimpleDataStore::new(),
             module: DataflowNodes::new(),
+            vizij: VizijFunctions::default(),
             keys: hashbrown::HashMap::new(),
             staged: HashMap::new(),
             live: HashMap::new(),
@@ -211,7 +215,7 @@ impl TreeRuntime {
                         )
                     });
                 }
-                crate::functions::decode_state(&node.kind, value?)
+                crate::functions::decode_state(&node.kind.kind()?, value?)
                     .map(|state| (node.id.clone(), state))
             })
             .collect()
@@ -254,7 +258,7 @@ impl TreeRuntime {
             Evaluation::Every => imported
                 .graph_nodes
                 .iter()
-                .map(|node| node.tree_id)
+                .flat_map(|node| std::iter::once(node.tree_id).chain(node.check))
                 .collect(),
             Evaluation::Demanded => Vec::new(),
         };
@@ -276,7 +280,8 @@ impl TreeRuntime {
             .copied()
             .filter(|at| spec.nodes[*at].kind == NodeType::Output)
             .collect();
-        let mut bridge = self.module.bridge(inner);
+        let mut vizij = self.vizij.bridge(inner);
+        let mut bridge = self.module.bridge(&mut vizij);
         if let Some(previous) = &self.loaded {
             carry_state(&tree, previous, &imported);
         }
@@ -287,6 +292,7 @@ impl TreeRuntime {
         }
         self.loads += 1;
         self.module.retain_sites(|node| index.contains_key(node));
+        self.vizij.retain(|node| index.contains_key(node));
         let input_keys = spec
             .nodes
             .iter()
@@ -349,11 +355,12 @@ impl TreeRuntime {
             .filter(|edge| edge.from.node_id == id)
             .map(|edge| edge.from.output.clone())
             .collect();
-        if ports_of(&edited, &referenced) != graph_node.ports {
+        let edited_params = params.params();
+        if ports_of(&edited, &edited_params, &referenced) != graph_node.ports {
             return Ok(false);
         }
-        let before = encode_params(&node.params)?;
-        let after = encode_params(params)?;
+        let before = node_arguments(node, &node.params.params())?;
+        let after = node_arguments(&edited, &edited_params)?;
         if before.len() != after.len()
             || before
                 .iter()
@@ -441,7 +448,8 @@ impl TreeRuntime {
         self.live = live;
         self.store.write(change).map_err(|e| e.to_string())?;
 
-        let mut bridge = self.module.bridge(inner);
+        let mut vizij = self.vizij.bridge(inner);
+        let mut bridge = self.module.bridge(&mut vizij);
         loaded
             .lowered
             .tick(&mut bridge)
@@ -563,7 +571,8 @@ fn carry_state(tree: &BehaviorTree, previous: &Loaded, imported: &ImportedGraph)
     let before = previous.lowered.tree();
     tree.keep_state(before, &fresh);
     for node in &imported.graph_nodes {
-        if fresh.contains(&node.tree_id) && is_stateful(&node.kind) {
+        let stateful = node.kind.kind().is_some_and(|kind| is_stateful(&kind));
+        if fresh.contains(&node.tree_id) && stateful {
             let state = before.argument_value(node.tree_id, state_param());
             if state.is_some() {
                 tree.set_argument_value(node.tree_id, state_param(), state);
@@ -647,6 +656,21 @@ impl CallBridge for FunctionsBridge<'_> {
             message: format!("no callable {}", callable_id.id),
         })
     }
+}
+
+/// The functions a graph's tree calls in-process: the node vocabulary's
+/// and the graph format's.
+fn function_index() -> &'static FunctionIndex {
+    static INDEX: std::sync::OnceLock<FunctionIndex> = std::sync::OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index = crate::functions::function_index().clone();
+        index.extend(
+            crate::vizij_functions::function_index()
+                .iter()
+                .map(|(id, function)| (*id, function.clone())),
+        );
+        index
+    })
 }
 
 /// A bridge to no module: what a graph runs over when it calls none.

@@ -8,13 +8,16 @@
 pub mod eval;
 pub mod functions;
 pub mod import;
+pub mod kind;
 pub mod params;
 pub mod ports;
 pub mod schema;
+pub mod select;
 pub mod task;
 pub mod topo;
 pub mod tree_runtime;
 pub mod types;
+pub mod vizij_functions;
 pub mod vocab;
 
 #[cfg(test)]

@@ -5,8 +5,8 @@ use crate::eval::context::Context;
 use crate::eval::node_function::NodeFunctions;
 use crate::eval::plan::PortLayout;
 use crate::eval::variadic::collect_operand_ports;
+use crate::kind::Kind;
 use crate::params::{Params, RoundMode};
-use crate::types::NodeType;
 use crate::vocab;
 use arora_types::value::Value;
 use hashbrown::HashMap;
@@ -169,7 +169,7 @@ fn single_output(outputs: &mut OutputSlots, value: Value) -> Result<(), String> 
 #[derive(Clone, Copy, Debug)]
 pub struct Node<'a> {
     pub id: &'a str,
-    pub kind: &'a NodeType,
+    pub kind: &'a Kind,
     pub params: &'a Params,
 }
 
@@ -194,106 +194,96 @@ fn evaluate_kind_inner(
 ) -> Result<(), String> {
     let params = node.params;
     match &node.kind {
-        NodeType::Constant => eval_constant(params, outputs),
-        NodeType::Slider => eval_slider(params, outputs),
-        NodeType::MultiSlider => eval_multi_slider(params, outputs),
-        node_type @ (NodeType::Add
-        | NodeType::Subtract
-        | NodeType::Multiply
-        | NodeType::Divide
-        | NodeType::Power
-        | NodeType::Log
-        | NodeType::Modulo) => eval_arithmetic(node_type, inputs, outputs),
-        node_type @ (NodeType::Sin | NodeType::Cos | NodeType::Tan) => {
-            eval_trig(node_type, inputs, outputs)
-        }
-        node_type @ (NodeType::Abs | NodeType::Sqrt | NodeType::Sign) => {
+        Kind::Constant => eval_constant(params, outputs),
+        Kind::Slider => eval_slider(params, outputs),
+        Kind::MultiSlider => eval_multi_slider(params, outputs),
+        node_type @ (Kind::Add
+        | Kind::Subtract
+        | Kind::Multiply
+        | Kind::Divide
+        | Kind::Power
+        | Kind::Log
+        | Kind::Modulo) => eval_arithmetic(node_type, inputs, outputs),
+        node_type @ (Kind::Sin | Kind::Cos | Kind::Tan) => eval_trig(node_type, inputs, outputs),
+        node_type @ (Kind::Abs | Kind::Sqrt | Kind::Sign) => {
             eval_unary_scalar(node_type, inputs, outputs)
         }
-        node_type @ (NodeType::Min | NodeType::Max) => eval_min_max(node_type, inputs, outputs),
-        NodeType::Round => eval_round(params, inputs, outputs),
-        NodeType::Time => eval_time(rt, outputs),
-        NodeType::Oscillator => eval_oscillator(rt, inputs, outputs),
-        node_type @ (NodeType::Spring | NodeType::Damp | NodeType::Slew) => {
+        node_type @ (Kind::Min | Kind::Max) => eval_min_max(node_type, inputs, outputs),
+        Kind::Round => eval_round(params, inputs, outputs),
+        Kind::Time => eval_time(rt, outputs),
+        Kind::Oscillator => eval_oscillator(rt, inputs, outputs),
+        node_type @ (Kind::Spring | Kind::Damp | Kind::Slew) => {
             eval_stateful(node_type, rt, params, inputs, outputs)
         }
-        node_type @ (NodeType::And | NodeType::Or | NodeType::Not | NodeType::Xor) => {
+        node_type @ (Kind::And | Kind::Or | Kind::Not | Kind::Xor) => {
             eval_logic(node_type, inputs, outputs)
         }
-        node_type @ (NodeType::GreaterThan
-        | NodeType::LessThan
-        | NodeType::Equal
-        | NodeType::NotEqual) => eval_comparison(node_type, inputs, outputs),
-        NodeType::If => eval_if(inputs, outputs),
-        NodeType::Clamp => eval_clamp(inputs, outputs),
-        NodeType::Remap => eval_remap(inputs, outputs),
-        NodeType::CenteredRemap => eval_centered_remap(inputs, outputs),
-        NodeType::PiecewiseRemap => eval_piecewise_remap(params, inputs, outputs),
-        NodeType::Vec3Cross => eval_vec3_cross(inputs, outputs),
-        NodeType::VectorConstant => eval_vector_constant(params, outputs),
-        node_type @ (NodeType::VectorAdd
-        | NodeType::VectorSubtract
-        | NodeType::VectorMultiply
-        | NodeType::VectorScale) => eval_vector_arithmetic(node_type, inputs, outputs),
-        NodeType::VectorNormalize => eval_vector_normalize(inputs, outputs),
-        NodeType::VectorDot => eval_vector_dot(inputs, outputs),
-        NodeType::VectorLength => eval_vector_length(inputs, outputs),
-        NodeType::VectorIndex => eval_vector_index(inputs, outputs),
-        NodeType::Join => eval_join(inputs, outputs),
-        NodeType::Split => eval_split(params, inputs, outputs),
-        NodeType::ToVector => eval_to_vector(inputs, outputs),
-        NodeType::FromVector => eval_from_vector(inputs, outputs),
-        node_type @ (NodeType::VectorMin
-        | NodeType::VectorMax
-        | NodeType::VectorMean
-        | NodeType::VectorMedian
-        | NodeType::VectorMode) => eval_vector_reducer(node_type, inputs, outputs),
-        NodeType::WeightedSumVector => eval_weighted_sum_vector(inputs, outputs),
-        NodeType::DefaultBlend => eval_default_blend(inputs, outputs),
-        NodeType::BlendWeightedAverage => eval_blend_weighted_average(inputs, outputs),
-        NodeType::BlendAdditive => eval_blend_additive(inputs, outputs),
-        NodeType::BlendMultiply => eval_blend_multiply(inputs, outputs),
-        NodeType::BlendWeightedOverlay => eval_blend_weighted_overlay(inputs, outputs),
-        NodeType::BlendWeightedAverageOverlay => {
-            eval_blend_weighted_average_overlay(inputs, outputs)
+        node_type @ (Kind::GreaterThan | Kind::LessThan | Kind::Equal | Kind::NotEqual) => {
+            eval_comparison(node_type, inputs, outputs)
         }
-        NodeType::BlendMax => eval_blend_max(inputs, outputs),
-        node_type @ (NodeType::SimpleNoise | NodeType::PerlinNoise | NodeType::SimplexNoise) => {
+        Kind::If => eval_if(inputs, outputs),
+        Kind::Clamp => eval_clamp(inputs, outputs),
+        Kind::Remap => eval_remap(inputs, outputs),
+        Kind::CenteredRemap => eval_centered_remap(inputs, outputs),
+        Kind::PiecewiseRemap => eval_piecewise_remap(params, inputs, outputs),
+        Kind::Vec3Cross => eval_vec3_cross(inputs, outputs),
+        Kind::VectorConstant => eval_vector_constant(params, outputs),
+        node_type @ (Kind::VectorAdd
+        | Kind::VectorSubtract
+        | Kind::VectorMultiply
+        | Kind::VectorScale) => eval_vector_arithmetic(node_type, inputs, outputs),
+        Kind::VectorNormalize => eval_vector_normalize(inputs, outputs),
+        Kind::VectorDot => eval_vector_dot(inputs, outputs),
+        Kind::VectorLength => eval_vector_length(inputs, outputs),
+        Kind::VectorIndex => eval_vector_index(inputs, outputs),
+        Kind::Join => eval_join(inputs, outputs),
+        Kind::Split => eval_split(params, inputs, outputs),
+        Kind::ToVector => eval_to_vector(inputs, outputs),
+        Kind::FromVector => eval_from_vector(inputs, outputs),
+        node_type @ (Kind::VectorMin
+        | Kind::VectorMax
+        | Kind::VectorMean
+        | Kind::VectorMedian
+        | Kind::VectorMode) => eval_vector_reducer(node_type, inputs, outputs),
+        Kind::WeightedSumVector => eval_weighted_sum_vector(inputs, outputs),
+        Kind::DefaultBlend => eval_default_blend(inputs, outputs),
+        Kind::BlendWeightedAverage => eval_blend_weighted_average(inputs, outputs),
+        Kind::BlendAdditive => eval_blend_additive(inputs, outputs),
+        Kind::BlendMultiply => eval_blend_multiply(inputs, outputs),
+        Kind::BlendWeightedOverlay => eval_blend_weighted_overlay(inputs, outputs),
+        Kind::BlendWeightedAverageOverlay => eval_blend_weighted_average_overlay(inputs, outputs),
+        Kind::BlendMax => eval_blend_max(inputs, outputs),
+        node_type @ (Kind::SimpleNoise | Kind::PerlinNoise | Kind::SimplexNoise) => {
             eval_noise(node_type, params, inputs, outputs)
         }
-        NodeType::InverseKinematics => eval_inverse_kinematics(inputs, outputs),
+        Kind::InverseKinematics => eval_inverse_kinematics(inputs, outputs),
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfIkPosition => eval_urdf_position(rt, params, inputs, outputs),
+        Kind::UrdfIkPosition => eval_urdf_position(rt, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
-        NodeType::UrdfIkPosition => {
+        Kind::UrdfIkPosition => {
             Err("UrdfIkPosition node requires the 'urdf_ik' feature".to_string())
         }
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfIkPose => eval_urdf_pose(rt, params, inputs, outputs),
+        Kind::UrdfIkPose => eval_urdf_pose(rt, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
-        NodeType::UrdfIkPose => Err("UrdfIkPose node requires the 'urdf_ik' feature".to_string()),
+        Kind::UrdfIkPose => Err("UrdfIkPose node requires the 'urdf_ik' feature".to_string()),
         #[cfg(feature = "urdf_ik")]
-        NodeType::UrdfFk => eval_urdf_fk(rt, params, inputs, outputs),
+        Kind::UrdfFk => eval_urdf_fk(rt, params, inputs, outputs),
         #[cfg(not(feature = "urdf_ik"))]
-        NodeType::UrdfFk => Err("UrdfFk node requires the 'urdf_ik' feature".to_string()),
-        NodeType::Case => eval_case(params, inputs, outputs),
-        NodeType::BuildRecord => eval_build_record(params, inputs, outputs),
-        NodeType::ReadRecord => eval_read_record(params, inputs, outputs),
-        NodeType::SwitchRecord => eval_switch_record(inputs, outputs),
-        NodeType::MergeRecord => eval_merge_record(inputs, outputs),
-        NodeType::SplitRecord => eval_split_record(params, inputs, outputs),
-        NodeType::MathMultRecord => eval_math_record(inputs, outputs, |a, b| a * b),
-        NodeType::MathAddRecord => eval_math_record(inputs, outputs, |a, b| a + b),
-        NodeType::MathDivRecord => eval_math_record(inputs, outputs, |a, b| a / b),
-        NodeType::MathSubRecord => eval_math_record(inputs, outputs, |a, b| a - b),
-        NodeType::Input => Err(format!(
-            "node '{}': an input node's value is what its store key holds",
-            node.id
-        )),
-        NodeType::Output => eval_output(inputs, outputs),
-        NodeType::ExternalFunction => eval_external_function(params, inputs, outputs, functions),
-        NodeType::TaskRun => eval_task_run(rt, node, inputs, outputs, functions),
-        NodeType::Spawn => eval_spawn(rt, node, inputs, outputs),
+        Kind::UrdfFk => Err("UrdfFk node requires the 'urdf_ik' feature".to_string()),
+        Kind::Case => eval_case(params, inputs, outputs),
+        Kind::BuildRecord => eval_build_record(params, inputs, outputs),
+        Kind::ReadRecord => eval_read_record(params, inputs, outputs),
+        Kind::SwitchRecord => eval_switch_record(inputs, outputs),
+        Kind::MergeRecord => eval_merge_record(inputs, outputs),
+        Kind::SplitRecord => eval_split_record(params, inputs, outputs),
+        Kind::MathMultRecord => eval_math_record(inputs, outputs, |a, b| a * b),
+        Kind::MathAddRecord => eval_math_record(inputs, outputs, |a, b| a + b),
+        Kind::MathDivRecord => eval_math_record(inputs, outputs, |a, b| a / b),
+        Kind::MathSubRecord => eval_math_record(inputs, outputs, |a, b| a - b),
+        Kind::ExternalFunction => eval_external_function(params, inputs, outputs, functions),
+        Kind::TaskRun => eval_task_run(rt, node, inputs, outputs, functions),
+        Kind::Spawn => eval_spawn(rt, node, inputs, outputs),
     }
 }
 
@@ -527,27 +517,27 @@ fn eval_multi_slider(params: &Params, outputs: &mut OutputSlots) -> Result<(), S
 }
 
 fn eval_arithmetic(
-    kind: &NodeType,
+    kind: &Kind,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     match kind {
-        NodeType::Add => {
+        Kind::Add => {
             let values = inputs.variadic("operand");
             let result = fold_numeric_variadic(values, |x, y| x + y, vocab::float(0.0));
             single_output(outputs, result)
         }
-        NodeType::Multiply => {
+        Kind::Multiply => {
             let values = inputs.variadic("operand");
             let result = fold_numeric_variadic(values, |x, y| x * y, vocab::float(1.0));
             single_output(outputs, result)
         }
-        NodeType::Subtract => {
+        Kind::Subtract => {
             let lhs = input_or_default(inputs, "lhs");
             let rhs = input_or_default(inputs, "rhs");
             single_output(outputs, binary_numeric(lhs, rhs, |x, y| x - y))
         }
-        NodeType::Divide => {
+        Kind::Divide => {
             let lhs = input_or_default(inputs, "lhs");
             let rhs = input_or_default(inputs, "rhs");
             single_output(
@@ -561,17 +551,17 @@ fn eval_arithmetic(
                 }),
             )
         }
-        NodeType::Power => {
+        Kind::Power => {
             let base = input_or_default(inputs, "base");
             let exp = input_or_default(inputs, "exp");
             single_output(outputs, binary_numeric(base, exp, |x, y| x.powf(y)))
         }
-        NodeType::Log => {
+        Kind::Log => {
             let value = input_or_default(inputs, "value");
             let base = input_or_default(inputs, "base");
             single_output(outputs, binary_numeric(value, base, |x, b| x.log(b)))
         }
-        NodeType::Modulo => {
+        Kind::Modulo => {
             let lhs = input_or_default(inputs, "lhs");
             let rhs = input_or_default(inputs, "rhs");
             single_output(
@@ -590,15 +580,15 @@ fn eval_arithmetic(
 }
 
 fn eval_unary_scalar(
-    kind: &NodeType,
+    kind: &Kind,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
     match kind {
-        NodeType::Abs => single_output(outputs, unary_numeric(input, |x| x.abs())),
-        NodeType::Sqrt => single_output(outputs, unary_numeric(input, |x| x.sqrt())),
-        NodeType::Sign => single_output(
+        Kind::Abs => single_output(outputs, unary_numeric(input, |x| x.abs())),
+        Kind::Sqrt => single_output(outputs, unary_numeric(input, |x| x.sqrt())),
+        Kind::Sign => single_output(
             outputs,
             unary_numeric(input, |x| {
                 if x > 0.0 {
@@ -614,16 +604,12 @@ fn eval_unary_scalar(
     }
 }
 
-fn eval_min_max(
-    kind: &NodeType,
-    inputs: &InputSlots,
-    outputs: &mut OutputSlots,
-) -> Result<(), String> {
+fn eval_min_max(kind: &Kind, inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let values = inputs.variadic("operand");
     let empty = vocab::float(f32::NAN);
     let op = match kind {
-        NodeType::Min => f32::min,
-        NodeType::Max => f32::max,
+        Kind::Min => f32::min,
+        Kind::Max => f32::max,
         _ => unreachable!(),
     };
     let result = fold_numeric_variadic(values, op, empty);
@@ -645,16 +631,12 @@ fn eval_round(
     single_output(outputs, unary_numeric(input, op))
 }
 
-fn eval_trig(
-    kind: &NodeType,
-    inputs: &InputSlots,
-    outputs: &mut OutputSlots,
-) -> Result<(), String> {
+fn eval_trig(kind: &Kind, inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
     let op = match kind {
-        NodeType::Sin => f32::sin,
-        NodeType::Cos => f32::cos,
-        NodeType::Tan => f32::tan,
+        Kind::Sin => f32::sin,
+        Kind::Cos => f32::cos,
+        Kind::Tan => f32::tan,
         _ => unreachable!(),
     };
     single_output(outputs, unary_numeric(input, op))
@@ -805,7 +787,7 @@ impl SpringStep {
 }
 
 fn eval_stateful(
-    kind: &NodeType,
+    kind: &Kind,
     rt: &mut Context,
     params: &Params,
     inputs: &InputSlots,
@@ -813,7 +795,7 @@ fn eval_stateful(
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
     match (kind, flatten_numeric(input)) {
-        (NodeType::Spring, Some(flat)) => {
+        (Kind::Spring, Some(flat)) => {
             let dt = if rt.dt.is_finite() {
                 rt.dt.max(0.0)
             } else {
@@ -873,7 +855,7 @@ fn eval_stateful(
 
             single_output(outputs, state.layout.reconstruct(&state.position))
         }
-        (NodeType::Damp, Some(flat)) => {
+        (Kind::Damp, Some(flat)) => {
             let dt = if rt.dt.is_finite() {
                 rt.dt.max(0.0)
             } else {
@@ -899,7 +881,7 @@ fn eval_stateful(
             }
             single_output(outputs, state.layout.reconstruct(&state.value))
         }
-        (NodeType::Slew, Some(flat)) => {
+        (Kind::Slew, Some(flat)) => {
             let dt = if rt.dt.is_finite() {
                 rt.dt.max(0.0)
             } else {
@@ -931,39 +913,35 @@ fn eval_stateful(
     }
 }
 
-fn eval_logic(
-    kind: &NodeType,
-    inputs: &InputSlots,
-    outputs: &mut OutputSlots,
-) -> Result<(), String> {
+fn eval_logic(kind: &Kind, inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let value = match kind {
-        NodeType::And => {
+        Kind::And => {
             as_bool(input_or_default(inputs, "lhs")) && as_bool(input_or_default(inputs, "rhs"))
         }
-        NodeType::Or => {
+        Kind::Or => {
             as_bool(input_or_default(inputs, "lhs")) || as_bool(input_or_default(inputs, "rhs"))
         }
-        NodeType::Xor => {
+        Kind::Xor => {
             as_bool(input_or_default(inputs, "lhs")) ^ as_bool(input_or_default(inputs, "rhs"))
         }
-        NodeType::Not => !as_bool(input_or_default(inputs, "in")),
+        Kind::Not => !as_bool(input_or_default(inputs, "in")),
         _ => unreachable!(),
     };
     single_output(outputs, vocab::bool_(value))
 }
 
 fn eval_comparison(
-    kind: &NodeType,
+    kind: &Kind,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     let lhs = input_or_default(inputs, "lhs");
     let rhs = input_or_default(inputs, "rhs");
     let value = match kind {
-        NodeType::GreaterThan => as_float(lhs) > as_float(rhs),
-        NodeType::LessThan => as_float(lhs) < as_float(rhs),
-        NodeType::Equal => (as_float(lhs) - as_float(rhs)).abs() < 1e-6,
-        NodeType::NotEqual => (as_float(lhs) - as_float(rhs)).abs() > 1e-6,
+        Kind::GreaterThan => as_float(lhs) > as_float(rhs),
+        Kind::LessThan => as_float(lhs) < as_float(rhs),
+        Kind::Equal => (as_float(lhs) - as_float(rhs)).abs() < 1e-6,
+        Kind::NotEqual => (as_float(lhs) - as_float(rhs)).abs() > 1e-6,
         _ => unreachable!(),
     };
     single_output(outputs, vocab::bool_(value))
@@ -1301,27 +1279,27 @@ fn eval_vector_constant(params: &Params, outputs: &mut OutputSlots) -> Result<()
 }
 
 fn eval_vector_arithmetic(
-    kind: &NodeType,
+    kind: &Kind,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     match kind {
-        NodeType::VectorAdd => {
+        Kind::VectorAdd => {
             let a = input_or_default(inputs, "a");
             let b = input_or_default(inputs, "b");
             single_output(outputs, binary_numeric(a, b, |x, y| x + y))
         }
-        NodeType::VectorSubtract => {
+        Kind::VectorSubtract => {
             let a = input_or_default(inputs, "a");
             let b = input_or_default(inputs, "b");
             single_output(outputs, binary_numeric(a, b, |x, y| x - y))
         }
-        NodeType::VectorMultiply => {
+        Kind::VectorMultiply => {
             let a = input_or_default(inputs, "a");
             let b = input_or_default(inputs, "b");
             single_output(outputs, binary_numeric(a, b, |x, y| x * y))
         }
-        NodeType::VectorScale => {
+        Kind::VectorScale => {
             let vector = input_or_default(inputs, "v");
             let scalar = input_or_default(inputs, "scalar");
             single_output(outputs, binary_numeric(vector, scalar, |x, s| x * s))
@@ -1452,7 +1430,7 @@ fn eval_from_vector(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<()
 }
 
 fn eval_noise(
-    kind: &NodeType,
+    kind: &Kind,
     params: &Params,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
@@ -1467,9 +1445,9 @@ fn eval_noise(
     let persistence = params.persistence.unwrap_or(0.5);
 
     let base_fn: fn(f32, f32, i32) -> f32 = match kind {
-        NodeType::SimpleNoise => noise::value_noise_2d,
-        NodeType::PerlinNoise => noise::perlin_noise_2d,
-        NodeType::SimplexNoise => noise::simplex_noise_2d,
+        Kind::SimpleNoise => noise::value_noise_2d,
+        Kind::PerlinNoise => noise::perlin_noise_2d,
+        Kind::SimplexNoise => noise::simplex_noise_2d,
         _ => unreachable!(),
     };
 
@@ -1487,7 +1465,7 @@ fn eval_noise(
 }
 
 fn eval_vector_reducer(
-    kind: &NodeType,
+    kind: &Kind,
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
@@ -1495,28 +1473,28 @@ fn eval_vector_reducer(
         .map(|f| f.data)
         .unwrap_or_default();
     let result = match kind {
-        NodeType::VectorMin => {
+        Kind::VectorMin => {
             if data.is_empty() {
                 f32::NAN
             } else {
                 data.iter().fold(f32::INFINITY, |acc, x| acc.min(*x))
             }
         }
-        NodeType::VectorMax => {
+        Kind::VectorMax => {
             if data.is_empty() {
                 f32::NAN
             } else {
                 data.iter().fold(f32::NEG_INFINITY, |acc, x| acc.max(*x))
             }
         }
-        NodeType::VectorMean => {
+        Kind::VectorMean => {
             if data.is_empty() {
                 f32::NAN
             } else {
                 data.iter().sum::<f32>() / (data.len() as f32)
             }
         }
-        NodeType::VectorMedian => {
+        Kind::VectorMedian => {
             if data.is_empty() {
                 f32::NAN
             } else {
@@ -1529,7 +1507,7 @@ fn eval_vector_reducer(
                 }
             }
         }
-        NodeType::VectorMode => {
+        Kind::VectorMode => {
             if data.is_empty() {
                 f32::NAN
             } else {
@@ -2187,10 +2165,6 @@ fn eval_urdf_pose(
     })?;
 
     single_output(outputs, state.solution_record(&solution))
-}
-
-fn eval_output(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
-    single_output(outputs, input_or_default(inputs, "in").clone())
 }
 
 fn eval_build_record(

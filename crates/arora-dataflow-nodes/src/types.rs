@@ -6,23 +6,13 @@
 use arora_shape::{Shape, TypedPath, Value};
 use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+
+pub use crate::kind::Kind;
+pub use crate::select::{Selector, SelectorSegment};
 use uuid::Uuid;
 
 /// Stable node identifier within a single [`GraphSpec`].
 pub type NodeId = String;
-
-/// One step of a selector path applied to a structured output value.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
-pub enum SelectorSegment {
-    /// Traverse into a record/struct field by name.
-    Field(String),
-    /// Traverse into an array/vector/list position by zero-based index.
-    Index(usize),
-}
-
-/// Selector path applied after reading an upstream output port.
-pub type Selector = Vec<SelectorSegment>;
 
 /// Canonical node kinds accepted by graph JSON and emitted by the schema registry.
 ///
@@ -180,6 +170,191 @@ pub enum NodeType {
     /// once the evaluation is done. The graph keeps no handle — a run it
     /// spawns is the host's to end and clean up.
     Spawn,
+}
+
+impl NodeType {
+    /// The kind of function a node of this type calls: `None` for an
+    /// `input` or `output` node, which read and write the store.
+    pub fn kind(&self) -> Option<Kind> {
+        Some(match self {
+            NodeType::Constant => Kind::Constant,
+            NodeType::Slider => Kind::Slider,
+            NodeType::MultiSlider => Kind::MultiSlider,
+            NodeType::Add => Kind::Add,
+            NodeType::Subtract => Kind::Subtract,
+            NodeType::Multiply => Kind::Multiply,
+            NodeType::Divide => Kind::Divide,
+            NodeType::Power => Kind::Power,
+            NodeType::Log => Kind::Log,
+            NodeType::Abs => Kind::Abs,
+            NodeType::Modulo => Kind::Modulo,
+            NodeType::Sqrt => Kind::Sqrt,
+            NodeType::Sign => Kind::Sign,
+            NodeType::Min => Kind::Min,
+            NodeType::Max => Kind::Max,
+            NodeType::Round => Kind::Round,
+            NodeType::Sin => Kind::Sin,
+            NodeType::Cos => Kind::Cos,
+            NodeType::Tan => Kind::Tan,
+            NodeType::Time => Kind::Time,
+            NodeType::Oscillator => Kind::Oscillator,
+            NodeType::Spring => Kind::Spring,
+            NodeType::Damp => Kind::Damp,
+            NodeType::Slew => Kind::Slew,
+            NodeType::And => Kind::And,
+            NodeType::Or => Kind::Or,
+            NodeType::Not => Kind::Not,
+            NodeType::Xor => Kind::Xor,
+            NodeType::GreaterThan => Kind::GreaterThan,
+            NodeType::LessThan => Kind::LessThan,
+            NodeType::Equal => Kind::Equal,
+            NodeType::NotEqual => Kind::NotEqual,
+            NodeType::If => Kind::If,
+            NodeType::Case => Kind::Case,
+            NodeType::Clamp => Kind::Clamp,
+            NodeType::Remap => Kind::Remap,
+            NodeType::CenteredRemap => Kind::CenteredRemap,
+            NodeType::PiecewiseRemap => Kind::PiecewiseRemap,
+            NodeType::Vec3Cross => Kind::Vec3Cross,
+            NodeType::VectorConstant => Kind::VectorConstant,
+            NodeType::VectorAdd => Kind::VectorAdd,
+            NodeType::VectorSubtract => Kind::VectorSubtract,
+            NodeType::VectorMultiply => Kind::VectorMultiply,
+            NodeType::VectorScale => Kind::VectorScale,
+            NodeType::VectorNormalize => Kind::VectorNormalize,
+            NodeType::VectorDot => Kind::VectorDot,
+            NodeType::VectorLength => Kind::VectorLength,
+            NodeType::VectorIndex => Kind::VectorIndex,
+            NodeType::Join => Kind::Join,
+            NodeType::Split => Kind::Split,
+            NodeType::VectorMin => Kind::VectorMin,
+            NodeType::VectorMax => Kind::VectorMax,
+            NodeType::VectorMean => Kind::VectorMean,
+            NodeType::VectorMedian => Kind::VectorMedian,
+            NodeType::VectorMode => Kind::VectorMode,
+            NodeType::ToVector => Kind::ToVector,
+            NodeType::FromVector => Kind::FromVector,
+            NodeType::SimpleNoise => Kind::SimpleNoise,
+            NodeType::PerlinNoise => Kind::PerlinNoise,
+            NodeType::SimplexNoise => Kind::SimplexNoise,
+            NodeType::WeightedSumVector => Kind::WeightedSumVector,
+            NodeType::DefaultBlend => Kind::DefaultBlend,
+            NodeType::BlendWeightedAverage => Kind::BlendWeightedAverage,
+            NodeType::BlendAdditive => Kind::BlendAdditive,
+            NodeType::BlendMultiply => Kind::BlendMultiply,
+            NodeType::BlendWeightedOverlay => Kind::BlendWeightedOverlay,
+            NodeType::BlendWeightedAverageOverlay => Kind::BlendWeightedAverageOverlay,
+            NodeType::BlendMax => Kind::BlendMax,
+            NodeType::InverseKinematics => Kind::InverseKinematics,
+            NodeType::UrdfIkPosition => Kind::UrdfIkPosition,
+            NodeType::UrdfIkPose => Kind::UrdfIkPose,
+            NodeType::UrdfFk => Kind::UrdfFk,
+            NodeType::BuildRecord => Kind::BuildRecord,
+            NodeType::ReadRecord => Kind::ReadRecord,
+            NodeType::SwitchRecord => Kind::SwitchRecord,
+            NodeType::MergeRecord => Kind::MergeRecord,
+            NodeType::SplitRecord => Kind::SplitRecord,
+            NodeType::MathMultRecord => Kind::MathMultRecord,
+            NodeType::MathAddRecord => Kind::MathAddRecord,
+            NodeType::MathDivRecord => Kind::MathDivRecord,
+            NodeType::MathSubRecord => Kind::MathSubRecord,
+            NodeType::ExternalFunction => Kind::ExternalFunction,
+            NodeType::TaskRun => Kind::TaskRun,
+            NodeType::Spawn => Kind::Spawn,
+            NodeType::Input | NodeType::Output => return None,
+        })
+    }
+}
+
+impl From<Kind> for NodeType {
+    fn from(kind: Kind) -> Self {
+        match kind {
+            Kind::Constant => NodeType::Constant,
+            Kind::Slider => NodeType::Slider,
+            Kind::MultiSlider => NodeType::MultiSlider,
+            Kind::Add => NodeType::Add,
+            Kind::Subtract => NodeType::Subtract,
+            Kind::Multiply => NodeType::Multiply,
+            Kind::Divide => NodeType::Divide,
+            Kind::Power => NodeType::Power,
+            Kind::Log => NodeType::Log,
+            Kind::Abs => NodeType::Abs,
+            Kind::Modulo => NodeType::Modulo,
+            Kind::Sqrt => NodeType::Sqrt,
+            Kind::Sign => NodeType::Sign,
+            Kind::Min => NodeType::Min,
+            Kind::Max => NodeType::Max,
+            Kind::Round => NodeType::Round,
+            Kind::Sin => NodeType::Sin,
+            Kind::Cos => NodeType::Cos,
+            Kind::Tan => NodeType::Tan,
+            Kind::Time => NodeType::Time,
+            Kind::Oscillator => NodeType::Oscillator,
+            Kind::Spring => NodeType::Spring,
+            Kind::Damp => NodeType::Damp,
+            Kind::Slew => NodeType::Slew,
+            Kind::And => NodeType::And,
+            Kind::Or => NodeType::Or,
+            Kind::Not => NodeType::Not,
+            Kind::Xor => NodeType::Xor,
+            Kind::GreaterThan => NodeType::GreaterThan,
+            Kind::LessThan => NodeType::LessThan,
+            Kind::Equal => NodeType::Equal,
+            Kind::NotEqual => NodeType::NotEqual,
+            Kind::If => NodeType::If,
+            Kind::Case => NodeType::Case,
+            Kind::Clamp => NodeType::Clamp,
+            Kind::Remap => NodeType::Remap,
+            Kind::CenteredRemap => NodeType::CenteredRemap,
+            Kind::PiecewiseRemap => NodeType::PiecewiseRemap,
+            Kind::Vec3Cross => NodeType::Vec3Cross,
+            Kind::VectorConstant => NodeType::VectorConstant,
+            Kind::VectorAdd => NodeType::VectorAdd,
+            Kind::VectorSubtract => NodeType::VectorSubtract,
+            Kind::VectorMultiply => NodeType::VectorMultiply,
+            Kind::VectorScale => NodeType::VectorScale,
+            Kind::VectorNormalize => NodeType::VectorNormalize,
+            Kind::VectorDot => NodeType::VectorDot,
+            Kind::VectorLength => NodeType::VectorLength,
+            Kind::VectorIndex => NodeType::VectorIndex,
+            Kind::Join => NodeType::Join,
+            Kind::Split => NodeType::Split,
+            Kind::VectorMin => NodeType::VectorMin,
+            Kind::VectorMax => NodeType::VectorMax,
+            Kind::VectorMean => NodeType::VectorMean,
+            Kind::VectorMedian => NodeType::VectorMedian,
+            Kind::VectorMode => NodeType::VectorMode,
+            Kind::ToVector => NodeType::ToVector,
+            Kind::FromVector => NodeType::FromVector,
+            Kind::SimpleNoise => NodeType::SimpleNoise,
+            Kind::PerlinNoise => NodeType::PerlinNoise,
+            Kind::SimplexNoise => NodeType::SimplexNoise,
+            Kind::WeightedSumVector => NodeType::WeightedSumVector,
+            Kind::DefaultBlend => NodeType::DefaultBlend,
+            Kind::BlendWeightedAverage => NodeType::BlendWeightedAverage,
+            Kind::BlendAdditive => NodeType::BlendAdditive,
+            Kind::BlendMultiply => NodeType::BlendMultiply,
+            Kind::BlendWeightedOverlay => NodeType::BlendWeightedOverlay,
+            Kind::BlendWeightedAverageOverlay => NodeType::BlendWeightedAverageOverlay,
+            Kind::BlendMax => NodeType::BlendMax,
+            Kind::InverseKinematics => NodeType::InverseKinematics,
+            Kind::UrdfIkPosition => NodeType::UrdfIkPosition,
+            Kind::UrdfIkPose => NodeType::UrdfIkPose,
+            Kind::UrdfFk => NodeType::UrdfFk,
+            Kind::BuildRecord => NodeType::BuildRecord,
+            Kind::ReadRecord => NodeType::ReadRecord,
+            Kind::SwitchRecord => NodeType::SwitchRecord,
+            Kind::MergeRecord => NodeType::MergeRecord,
+            Kind::SplitRecord => NodeType::SplitRecord,
+            Kind::MathMultRecord => NodeType::MathMultRecord,
+            Kind::MathAddRecord => NodeType::MathAddRecord,
+            Kind::MathDivRecord => NodeType::MathDivRecord,
+            Kind::MathSubRecord => NodeType::MathSubRecord,
+            Kind::ExternalFunction => NodeType::ExternalFunction,
+            Kind::TaskRun => NodeType::TaskRun,
+            Kind::Spawn => NodeType::Spawn,
+        }
+    }
 }
 
 /// Node-construction parameters consumed selectively by different [`NodeType`] variants.

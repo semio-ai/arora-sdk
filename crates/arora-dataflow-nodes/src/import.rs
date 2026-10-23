@@ -14,15 +14,21 @@
 //!   is a [`select`](crate::functions::SELECT) node between the two.
 //! - **An inline default** is a literal argument, for an input no edge feeds
 //!   or one whose edge names a port the source does not have.
-//! - **An `input` node** reads the store key its path names, a variable of
-//!   that name. A node reading the clock reads the variables
-//!   [`ImportOptions::time`] and [`ImportOptions::dt`].
-//! - **An `output` node with a path** binds its return value to the store key
-//!   of its path: it is a **sink**, written at every tick after the tree
-//!   ticks; of two sinks of one key, the later wins, as the later `output`
-//!   does in the graph. An `output` with no path, which writes the keys a
-//!   batch of records names, is listed in [`ImportedGraph::keyed_outputs`]
-//!   for its host to apply.
+//! - **An `input` node** is a call to [`vizij_functions::input_function`],
+//!   reading the store key its path names, a variable of that name. A node
+//!   reading the clock reads the variables [`ImportOptions::time`] and
+//!   [`ImportOptions::dt`].
+//! - **An `output` node** is a call to [`vizij_functions::output_function`].
+//!   With a path, it binds its return value to the store key of its path:
+//!   it is a **sink**, written at every tick after the tree ticks; of two
+//!   sinks of one key, the later wins, as the later `output` does in the
+//!   graph. An `output` with no path, which writes the keys a batch of
+//!   records names, is listed in [`ImportedGraph::keyed_outputs`] for its
+//!   host to apply.
+//! - **A node declaring the shapes of its outputs** is followed by a call to
+//!   [`vizij_functions::check_function`], which its readers read in its
+//!   place: a value the node returns that does not fit its declared shape
+//!   fails the call. An `input` or `output` node checks its own `out`.
 //! - **A node that acts** at each evaluation (`externalfunction`, `taskrun`,
 //!   `spawn`) is a leaf the tree holds under its root `PARALLEL`, in the
 //!   graph's order, ticked at every tick. Its return value is the tree-local
@@ -41,12 +47,14 @@ use uuid::Uuid;
 
 use crate::eval::plan::output_layout;
 use crate::functions::{
-    declares_input, dt_param, encode_params, encode_selector, external_function, function_id,
-    input_param, is_stateful, node_param, output_field, output_shapes_param, placement,
-    ports_param, reads_dt, reads_time, select_function, selector_param, state_param, time_param,
-    VARIADIC_PORTS,
+    declares_input, dt_param, encode, encode_selector, external_function, function_id, input_param,
+    is_stateful, node_param, output_field, placement, ports_param, reads_dt, reads_time,
+    select_function, selector_param, state_param, time_param, VARIADIC_PORTS,
 };
+use crate::kind::Kind;
+use crate::params::Params;
 use crate::types::{GraphSpec, InputConnection, NodeSpec, NodeType};
+use crate::vizij_functions;
 
 pub use crate::functions::Placement;
 
@@ -90,6 +98,9 @@ pub struct GraphNode {
     /// nothing and writes nothing back ([`Placement::Ignored`]). It has no
     /// ports, so an edge from it reads as an input with no edge.
     pub ignored: bool,
+    /// The tree node checking the shapes the node declares of its outputs,
+    /// which its readers read in its place.
+    pub check: Option<Uuid>,
 }
 
 impl GraphNode {
@@ -249,24 +260,31 @@ pub fn import_with(
             .insert(edge.from.output.clone());
     }
     let empty = hashbrown::HashSet::new();
-    let graph_nodes: Vec<GraphNode> = spec
-        .nodes
-        .iter()
-        .map(|node| {
-            let placed = placement(node, functions);
-            GraphNode {
-                id: node.id.clone(),
-                kind: node.kind.clone(),
-                tree_id: tree_node_id(&node.id),
-                ports: match placed {
-                    Placement::Ignored => Vec::new(),
-                    _ => ports_of(node, referenced.get(node.id.as_str()).unwrap_or(&empty)),
-                },
-                attached: placed == Placement::Attached,
-                ignored: placed == Placement::Ignored,
-            }
-        })
-        .collect();
+    let params: Vec<Params> = spec.nodes.iter().map(|node| node.params.params()).collect();
+    let mut graph_nodes = Vec::with_capacity(spec.nodes.len());
+    for (node, params) in spec.nodes.iter().zip(&params) {
+        let placed = match node.kind.kind() {
+            Some(kind) => placement(&kind, params, functions),
+            None => Placement::Detached,
+        };
+        let ignored = placed == Placement::Ignored;
+        graph_nodes.push(GraphNode {
+            id: node.id.clone(),
+            kind: node.kind.clone(),
+            tree_id: tree_node_id(&node.id),
+            ports: match placed {
+                Placement::Ignored => Vec::new(),
+                _ => ports_of(
+                    node,
+                    params,
+                    referenced.get(node.id.as_str()).unwrap_or(&empty),
+                ),
+            },
+            attached: placed == Placement::Attached,
+            ignored,
+            check: (!ignored && checks_shapes(node)?).then(|| check_node_id(&node.id)),
+        });
+    }
     let by_id: HashMap<&str, &GraphNode> = graph_nodes
         .iter()
         .map(|node| (node.id.as_str(), node))
@@ -281,19 +299,24 @@ pub fn import_with(
 
     let mut tree_nodes = Vec::with_capacity(spec.nodes.len() + 1);
     let mut selects = Vec::new();
+    let mut checks = Vec::new();
     let mut keyed_outputs = Vec::new();
     let no_connections = hashbrown::HashMap::new();
-    for (node, graph_node) in spec.nodes.iter().zip(&graph_nodes) {
+    for ((node, params), graph_node) in spec.nodes.iter().zip(&params).zip(&graph_nodes) {
         if graph_node.ignored {
             continue;
         }
+        let kind = node.kind.kind();
         let mut arguments: HashMap<Uuid, Expression> = HashMap::with_capacity(8);
         let wired = connections.get(&node.id).unwrap_or(&no_connections);
         let mut ports: Vec<(&String, &InputConnection)> = wired.iter().collect();
         ports.sort_by(|a, b| a.0.cmp(b.0));
         for (port, connection) in ports {
-            if !declares_input(&node.kind, port) {
-                if is_variadic_past_the_last(&node.kind, port) {
+            let Some(parameter) = input_parameter(&node.kind, port) else {
+                if kind
+                    .as_ref()
+                    .is_some_and(|kind| is_variadic_past_the_last(kind, port))
+                {
                     return Err(format!(
                         "node '{}' wires its input '{port}', past the {VARIADIC_PORTS} ports \
                          of its variadic group a function declares",
@@ -302,7 +325,7 @@ pub fn import_with(
                 }
                 // An input the node's evaluation never reads.
                 continue;
-            }
+            };
             let read = connection.node_id.as_ref().and_then(|source| {
                 let source = by_id.get(source.as_str())?;
                 source
@@ -341,42 +364,33 @@ pub fn import_with(
                 (None, Some(default)) => Expression::Value(default.clone()),
                 (None, None) => continue,
             };
-            arguments.insert(input_param(port), argument);
+            arguments.insert(parameter, argument);
         }
 
-        for (parameter, value) in encode_params(&node.params)? {
+        for (parameter, value) in node_arguments(node, params)? {
             arguments.insert(parameter, Expression::Value(value));
         }
-        arguments.insert(
-            node_param(),
-            Expression::Value(Value::String(node.id.clone())),
-        );
-        if !node.output_shapes.is_empty() {
-            let shapes = serde_json::to_string(&node.output_shapes).map_err(|e| e.to_string())?;
-            arguments.insert(
-                output_shapes_param(),
-                Expression::Value(Value::String(shapes)),
-            );
-        }
-        if !graph_node.returns_out() {
-            arguments.insert(
-                ports_param(),
-                Expression::Value(Value::ArrayString(graph_node.ports.clone())),
-            );
-        }
-        if reads_time(&node.kind) {
-            arguments.insert(time_param(), variable(&options.time));
-        }
-        if reads_dt(&node.kind) {
-            arguments.insert(dt_param(), variable(&options.dt));
-        }
-        if is_stateful(&node.kind) {
-            arguments.insert(state_param(), Expression::Value(Value::Unit));
+        if let Some(kind) = &kind {
+            if !graph_node.returns_out() {
+                arguments.insert(
+                    ports_param(),
+                    Expression::Value(Value::ArrayString(graph_node.ports.clone())),
+                );
+            }
+            if reads_time(kind) {
+                arguments.insert(time_param(), variable(&options.time));
+            }
+            if reads_dt(kind) {
+                arguments.insert(dt_param(), variable(&options.dt));
+            }
+            if is_stateful(kind) {
+                arguments.insert(state_param(), Expression::Value(Value::Unit));
+            }
         }
         if node.kind == NodeType::Input {
             if let Some(path) = &node.params.path {
                 arguments.insert(
-                    input_param("in"),
+                    vizij_functions::in_param(),
                     variable(&Key::new(path.to_string()).path),
                 );
             }
@@ -402,9 +416,12 @@ pub fn import_with(
         if graph_node.attached {
             arguments.insert(_RET_PARAM_ID, variable(&attached_output(&node.id)));
         }
+        if let Some(check) = graph_node.check {
+            checks.push(check_node(node, graph_node, check, &mut variable)?);
+        }
         tree_nodes.push(Node {
             id: graph_node.tree_id,
-            function: function_of(node),
+            function: function_of(&node.kind),
             arguments,
             children: None,
         });
@@ -432,6 +449,7 @@ pub fn import_with(
     };
     let nodes = std::iter::once(root)
         .chain(tree_nodes)
+        .chain(checks)
         .chain(selects)
         .collect();
     Ok(ImportedGraph {
@@ -442,17 +460,27 @@ pub fn import_with(
     })
 }
 
-/// The output ports of `node` whose edges read `referenced`, in order.
+/// The output ports of `node`, of the parameters `params`, whose edges read
+/// `referenced`, in order.
 ///
 /// A port an edge names but the node's evaluation never sets is no port:
-/// the edge reads as an input with no edge.
-pub(crate) fn ports_of(node: &NodeSpec, referenced: &hashbrown::HashSet<String>) -> Vec<String> {
-    let set = output_layout(node, &hashbrown::HashSet::new());
+/// the edge reads as an input with no edge. An `input` or `output` node has
+/// the one port `out`.
+pub(crate) fn ports_of(
+    node: &NodeSpec,
+    params: &Params,
+    referenced: &hashbrown::HashSet<String>,
+) -> Vec<String> {
+    let Some(kind) = node.kind.kind() else {
+        return vec!["out".to_string()];
+    };
+    let declared: Vec<&str> = node.output_shapes.keys().map(String::as_str).collect();
+    let set = output_layout(&kind, params, &declared, &hashbrown::HashSet::new());
     // Edges reading only ports the node sets leave its layout as it is.
     if referenced.iter().all(|port| set.slot(port).is_some()) {
         return set.slots;
     }
-    let layout = output_layout(node, referenced);
+    let layout = output_layout(&kind, params, &declared, referenced);
     layout
         .slots
         .iter()
@@ -467,11 +495,126 @@ pub(crate) fn ports_of(node: &NodeSpec, referenced: &hashbrown::HashSet<String>)
         .collect()
 }
 
-/// The function a node of the graph calls.
-fn function_of(node: &NodeSpec) -> Uuid {
-    match node.kind {
-        NodeType::ExternalFunction => external_function(),
-        ref kind => function_id(kind),
+/// The literal arguments the parameters of `node` give its call, `params`
+/// being those its kind's function reads: its node id, and each parameter
+/// that differs from its default. An `input` node's are its store path,
+/// its default value and its declared shape; an `output` node's, its
+/// declared shape.
+pub(crate) fn node_arguments(
+    node: &NodeSpec,
+    params: &Params,
+) -> Result<Vec<(Uuid, Value)>, String> {
+    let id = Value::String(node.id.clone());
+    if node.kind.kind().is_some() {
+        let mut arguments = encode(params)?;
+        arguments.push((node_param(), id));
+        return Ok(arguments);
+    }
+    let mut arguments = vec![(vizij_functions::node_param(), id)];
+    if node.kind == NodeType::Input {
+        if let Some(path) = &node.params.path {
+            arguments.push((
+                vizij_functions::path_param(),
+                Value::String(path.to_string()),
+            ));
+        }
+        if let Some(default) = &node.params.value {
+            arguments.push((vizij_functions::default_param(), default.clone()));
+        }
+    }
+    if let Some(shape) = node.output_shapes.get("out") {
+        let shape = serde_json::to_string(shape).map_err(|e| e.to_string())?;
+        arguments.push((vizij_functions::shape_param(), Value::String(shape)));
+    }
+    Ok(arguments)
+}
+
+/// The parameter of `kind`'s function an edge into its input `port` sets:
+/// `None` for an input the function does not declare.
+fn input_parameter(kind: &NodeType, port: &str) -> Option<Uuid> {
+    match kind.kind() {
+        Some(kind) => declares_input(&kind, port).then(|| input_param(port)),
+        None => (*kind == NodeType::Output && port == "in").then(vizij_functions::in_param),
+    }
+}
+
+/// Whether `node` declares the shape of an output its function does not
+/// check: any for a node of the vocabulary; refused for an `input` or
+/// `output` node, whose one port `out` its function checks.
+fn checks_shapes(node: &NodeSpec) -> Result<bool, String> {
+    if node.kind.kind().is_some() {
+        return Ok(!node.output_shapes.is_empty());
+    }
+    match node.output_shapes.keys().find(|port| *port != "out") {
+        Some(port) => Err(format!(
+            "node '{}' declares the shape of an output '{port}' it does not have",
+            node.id
+        )),
+        None => Ok(false),
+    }
+}
+
+/// The tree node id of the check of the graph's node `id`.
+fn check_node_id(id: &str) -> Uuid {
+    Uuid::new_v5(&NODES, format!("check:{id}").as_bytes())
+}
+
+/// The tree node `check` checking the shapes `node`, as `graph_node`, declares
+/// of its outputs.
+fn check_node(
+    node: &NodeSpec,
+    graph_node: &GraphNode,
+    check: Uuid,
+    variable: &mut impl FnMut(&str) -> Expression,
+) -> Result<Node, String> {
+    let shapes = serde_json::to_string(&node.output_shapes).map_err(|e| e.to_string())?;
+    let mut arguments = HashMap::from([
+        (
+            vizij_functions::in_param(),
+            returned_read(graph_node, variable),
+        ),
+        (
+            vizij_functions::shapes_param(),
+            Expression::Value(Value::String(shapes)),
+        ),
+        (
+            vizij_functions::node_param(),
+            Expression::Value(Value::String(node.id.clone())),
+        ),
+    ]);
+    if !graph_node.returns_out() {
+        arguments.insert(
+            vizij_functions::ports_param(),
+            Expression::Value(Value::ArrayString(graph_node.ports.clone())),
+        );
+    }
+    Ok(Node {
+        id: check,
+        function: vizij_functions::check_function(),
+        arguments,
+        children: None,
+    })
+}
+
+/// The function a node of the graph of `kind` calls.
+fn function_of(kind: &NodeType) -> Uuid {
+    match kind.kind() {
+        Some(Kind::ExternalFunction) => external_function(),
+        Some(kind) => function_id(&kind),
+        None if *kind == NodeType::Input => vizij_functions::input_function(),
+        None => vizij_functions::output_function(),
+    }
+}
+
+/// How a node reads what the call of `source` returned.
+fn returned_read(source: &GraphNode, variable: &mut impl FnMut(&str) -> Expression) -> Expression {
+    if source.attached {
+        variable(&attached_output(&source.id))
+    } else {
+        Expression::NodeArgument(NodeParameterId {
+            node: source.tree_id,
+            parameter: _RET_PARAM_ID,
+        })
     }
 }
 
@@ -481,13 +624,12 @@ fn port_read(
     port: &str,
     variable: &mut impl FnMut(&str) -> Expression,
 ) -> Expression {
-    let returned = if source.attached {
-        variable(&attached_output(&source.id))
-    } else {
-        Expression::NodeArgument(NodeParameterId {
-            node: source.tree_id,
+    let returned = match source.check {
+        Some(check) => Expression::NodeArgument(NodeParameterId {
+            node: check,
             parameter: _RET_PARAM_ID,
-        })
+        }),
+        None => returned_read(source, variable),
     };
     if source.returns_out() {
         returned
@@ -501,7 +643,7 @@ fn port_read(
 
 /// Whether `port` is a port of `kind`'s variadic group past the last its
 /// function declares.
-fn is_variadic_past_the_last(kind: &NodeType, port: &str) -> bool {
+fn is_variadic_past_the_last(kind: &Kind, port: &str) -> bool {
     let (group, index) = crate::eval::variadic::parse_variadic_key(port);
     let declared_group = crate::ports::ports(kind)
         .variadic_inputs
