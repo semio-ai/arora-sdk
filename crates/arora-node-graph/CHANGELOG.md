@@ -55,8 +55,8 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   form, where they listed the vizij composites by type id. A structure of
   any type now computes component by component, keeping its id, its field
   ids and its field types, where a structure outside the vizij vocabulary
-  gave `NaN`; it computes in `f32`, and an integer field takes the nearest
-  integer. A structure's layout is shared between values of its form, so
+  gave `NaN`; it computes in `f32`. A structure with an integer field has
+  no numeric form, as one with a text field. A structure's layout is shared between values of its form, so
   flattening one allocates nothing but its numbers. Two operands
   combine when they have the same form, as before. A value's numeric reading
   (truthiness, blend weights, IK seeds) holds every number of a structure, so

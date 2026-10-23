@@ -66,9 +66,9 @@ pub enum ValueLayout {
     /// A number on its own, in a record or in a sequence, rebuilt as `F32`,
     /// the graph's number type, whatever width it was read from.
     Scalar,
-    /// A structure's number field, rebuilt in the field's own type: a
+    /// A structure's float field, rebuilt in the field's own type: a
     /// structure keeps the field types it declares.
-    Field(Number),
+    Field(Float),
     /// An `ArrayF32` of this length.
     Vector(usize),
     /// A structure: its id, and its fields' ids and layouts in declaration
@@ -116,56 +116,53 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
-/// The type of a structure's number field.
+/// The type of a structure's float field.
+///
+/// A structure's fields flatten when they are floats: an `f32` reading of an
+/// `F64` and its `F64` rebuilt from it round-trip exactly, so a node's
+/// intermediate results and a smoothing node's saved state lose nothing
+/// between flattenings. An integer field would be rounded at each one, so a
+/// structure holding one has no flat form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Number {
+pub enum Float {
     F32,
     F64,
-    U8,
-    U16,
-    U32,
-    U64,
-    I8,
-    I16,
-    I32,
-    I64,
 }
 
-impl Number {
-    /// The type of `value` and its reading as an `f32`, for a number.
-    fn read(value: &Value) -> Option<(Number, f32)> {
-        Some(match value {
-            Value::F32(x) => (Number::F32, *x),
-            Value::F64(x) => (Number::F64, *x as f32),
-            Value::U8(x) => (Number::U8, *x as f32),
-            Value::U16(x) => (Number::U16, *x as f32),
-            Value::U32(x) => (Number::U32, *x as f32),
-            Value::U64(x) => (Number::U64, *x as f32),
-            Value::I8(x) => (Number::I8, *x as f32),
-            Value::I16(x) => (Number::I16, *x as f32),
-            Value::I32(x) => (Number::I32, *x as f32),
-            Value::I64(x) => (Number::I64, *x as f32),
-            _ => return None,
-        })
-    }
-
-    /// `x` as a value of this type. An integer type takes the nearest
-    /// integer it holds, and `NaN` as zero.
-    fn write(self, x: f32) -> Value {
-        let n = x.round();
-        match self {
-            Number::F32 => Value::F32(x),
-            Number::F64 => Value::F64(f64::from(x)),
-            Number::U8 => Value::U8(n as u8),
-            Number::U16 => Value::U16(n as u16),
-            Number::U32 => Value::U32(n as u32),
-            Number::U64 => Value::U64(n as u64),
-            Number::I8 => Value::I8(n as i8),
-            Number::I16 => Value::I16(n as i16),
-            Number::I32 => Value::I32(n as i32),
-            Number::I64 => Value::I64(n as i64),
+impl Float {
+    /// The type of `value` and its reading as an `f32`, for a float.
+    fn read(value: &Value) -> Option<(Float, f32)> {
+        match value {
+            Value::F32(x) => Some((Float::F32, *x)),
+            Value::F64(x) => Some((Float::F64, *x as f32)),
+            _ => None,
         }
     }
+
+    /// `x` as a value of this type.
+    fn write(self, x: f32) -> Value {
+        match self {
+            Float::F32 => Value::F32(x),
+            Float::F64 => Value::F64(f64::from(x)),
+        }
+    }
+}
+
+/// A number's reading as an `f32`: any width of float or integer.
+fn number(value: &Value) -> Option<f32> {
+    Some(match value {
+        Value::F32(x) => *x,
+        Value::F64(x) => *x as f32,
+        Value::U8(x) => *x as f32,
+        Value::U16(x) => *x as f32,
+        Value::U32(x) => *x as f32,
+        Value::U64(x) => *x as f32,
+        Value::I8(x) => *x as f32,
+        Value::I16(x) => *x as f32,
+        Value::I32(x) => *x as f32,
+        Value::I64(x) => *x as f32,
+        _ => return None,
+    })
 }
 
 /// Numeric data flattened into row-major storage with an associated layout description.
@@ -233,7 +230,7 @@ impl ValueLayout {
         let rest = |offset: usize| data.get(offset..).unwrap_or(&[]);
         match self {
             ValueLayout::Scalar => Value::F32(at(0)),
-            ValueLayout::Field(number) => number.write(at(0)),
+            ValueLayout::Field(float) => float.write(at(0)),
             ValueLayout::Vector(len) => Value::ArrayF32((0..*len).map(at).collect()),
             ValueLayout::Structure(structure) => {
                 let mut offset = 0usize;
@@ -287,8 +284,8 @@ impl ValueLayout {
     /// whether it did. On `false`, `data` may hold some of them.
     fn read(&self, value: &Value, data: &mut Vec<f32>) -> bool {
         match (self, value) {
-            (ValueLayout::Scalar, value) => match Number::read(value) {
-                Some((_, x)) => {
+            (ValueLayout::Scalar, value) => match number(value) {
+                Some(x) => {
                     data.push(x);
                     true
                 }
@@ -311,8 +308,8 @@ impl ValueLayout {
                         .zip(values)
                         .all(|(layout, item)| layout.read(item, data))
             }
-            (ValueLayout::Field(number), value) => match Number::read(value) {
-                Some((read, x)) if read == *number => {
+            (ValueLayout::Field(float), value) => match Float::read(value) {
+                Some((read, x)) if read == *float => {
                     data.push(x);
                     true
                 }
@@ -329,9 +326,9 @@ impl ValueLayout {
 }
 
 /// Flatten a [`Value`] whose leaves are all numbers: a number, an
-/// `ArrayF32`, or a structure, record or sequence of those. Any other value
-/// (a boolean, text, an enumeration, a structure with a field that is none of
-/// these) has no flat form.
+/// `ArrayF32`, or a structure, record or sequence of those, where a
+/// structure's number fields are floats. Any other value (a boolean, text, an
+/// enumeration, a structure with an integer or text field) has no flat form.
 pub fn flatten_numeric(value: &Value) -> Option<FlatValue> {
     // Room for a number, a numeric array, or a structure up to a transform's
     // ten numbers, so that reading them does not grow the buffer.
@@ -345,15 +342,20 @@ pub fn flatten_numeric(value: &Value) -> Option<FlatValue> {
 }
 
 /// Push `value`'s numbers onto `data` and return its layout. `in_structure`
-/// marks a structure's field, whose number keeps its type.
+/// marks a structure's field, which flattens when it is a float and keeps its
+/// type.
 fn flatten_into(value: &Value, data: &mut Vec<f32>, in_structure: bool) -> Option<ValueLayout> {
-    if let Some((number, x)) = Number::read(value) {
+    if in_structure {
+        if let Some((float, x)) = Float::read(value) {
+            data.push(x);
+            return Some(ValueLayout::Field(float));
+        }
+        if number(value).is_some() {
+            return None;
+        }
+    } else if let Some(x) = number(value) {
         data.push(x);
-        return Some(if in_structure {
-            ValueLayout::Field(number)
-        } else {
-            ValueLayout::Scalar
-        });
+        return Some(ValueLayout::Scalar);
     }
     match value {
         Value::ArrayF32(xs) => {
