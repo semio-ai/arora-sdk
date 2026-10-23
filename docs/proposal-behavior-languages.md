@@ -289,22 +289,23 @@ refined before they reach the editors.
 
 ## 4. The node vocabulary moves into arora-sdk
 
-arora-sdk stays free of Vizij. What moves is the generic node vocabulary, the
-value vocabulary, and the engine, which stays as the reference evaluator until
-faces leave `ProcessingGraph` (§6). Animation has already moved the same way.
+arora-sdk stays free of Vizij. What moves is the generic node vocabulary, as
+the functions of Arora modules, and the geometry types. Vizij's graph format,
+its value vocabulary and the importer from a graph to a tree stay in vizij-rs,
+over them. Animation has already moved the same way.
 
 ### 4.1 What moves, what stays
 
 | vizij-rs | In arora-sdk | Stays in vizij-rs |
 |---|---|---|
-| `vizij-graph-core` 3.1 | **`arora-node-graph`**: the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature) as module functions (§4.3); the engine and plan, as the reference evaluator; the importer from a Vizij graph to a tree and its detached nodes | — |
-| `vizij-api-core` 2.1 | **`arora-shape`**: shapes, typed paths, the value vocabulary (vec2–4, quat, color, transform), blend, coercion, write batches, the graph-spec JSON forms | — |
-| `vizij-arora-behavior` 7.2 | — | `ProcessingGraph`, until faces run on the tree; then it retires |
-| `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the editor's wasm bindings and registry export, over `arora-node-graph` |
+| `vizij-graph-core` 3.1 | **`arora-dataflow-nodes`**: the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature) as the functions of `@arora/dataflow`, `@arora/geometry` and `@arora/kinematics` (§4.3) | `vizij-graph-core` 4: the graph format, the editor registry, the importer from a graph to a tree and its detached nodes, `TreeRuntime`, and `@vizij/graph`'s `input`, `output` and declared-shape check |
+| `vizij-api-core` 2.1 | **`arora-geometry`**: vec2–4, quat, transform and the blending of values | `vizij-api-core` 3: shapes, typed paths, color, coercion, write batches and the graph-spec JSON forms, over `arora-geometry` |
+| `vizij-arora-behavior` 7.2 | — | `ProcessingGraph`, which runs a face on the tree through `vizij-graph-core` |
+| `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the editor's wasm bindings and registry export, over `vizij-graph-core` |
 | `vizij-arora-host` | — | the face's composition, the standard and ROS4HRI mappings, the profiles, the skills |
 | `vizij-animation-core` 5.0, `vizij-animation-module`, `vizij-animation-wasm` | **Moved**: `arora-animation` and `arora-animation-module` (`@arora/animation`) | until vizij-rs depends on the arora crates, then removed |
 
-- **No Vizij node kind enters `arora-node-graph`.** What is specific to Vizij
+- **No Vizij node kind enters `arora-dataflow-nodes`.** What is specific to Vizij
   is content: the face's sources, the mappings, the skills. A node only Vizij
   needs is a function of a Vizij module.
 - **Wire ids stay.** The value vocabulary's type and field ids and the node
@@ -354,8 +355,9 @@ git branch -D vizij-extract
 5. **The new crates' first versions are published by hand**, `1.0.0`. Then
    each crate's trusted publisher is registered, and the release workflow
    publishes every later version.
-6. **In vizij-rs**, the crates depend on the arora crates, and the moved
-   crates are removed. Their last published versions stay on crates.io.
+6. **In vizij-rs**, `vizij-graph-core` and `vizij-api-core` keep the graph
+   format and Vizij's values, over `arora-dataflow-nodes` and
+   `arora-geometry`, and the Vizij half of each moved crate returns there.
 
 The vizij-rs crates are licensed "MIT OR Apache-2.0", which allows them under
 arora-sdk's Apache-2.0.
@@ -366,16 +368,17 @@ A Vizij graph translates node for node. Counted over 64 unique graphs (13
 face GLBs, the fixtures, the perf scenes, the host's skill and mapping assets,
 the standard adaptations), about 23,050 nodes over 86 node kinds:
 
-| Vizij feature | On the tree (`arora-node-graph`) |
+| Vizij feature | On the tree (`arora-dataflow-nodes`, and `vizij-graph-core`'s importer) |
 |---|---|
-| arithmetic, ranges, vectors, logic, noise | one function of `@arora/node-graph` each, called by one detached node per graph node |
-| `input` | a store key as an argument; the `input` function applies the node's default when the key is unset |
-| `output` | an output port bound to a store key, with the later sink winning, as the later `output` does in a `flow` |
+| arithmetic, ranges, vectors, logic, noise | one function of `@arora/dataflow` each (`@arora/geometry` and `@arora/kinematics` for the geometry and robotics kinds), called by one detached node per graph node |
+| `input` | a call of `@vizij/graph`'s `input`, with a store key as an argument: it applies the node's default when the key is unset, and fits the value to the node's declared shape |
+| `output` | a call of `@vizij/graph`'s `output`, its return bound to a store key, with the later sink winning, as the later `output` does in a `flow` |
+| a node's declared output shapes | a call of `@vizij/graph`'s `check` after the node, which its readers read in its place |
 | the keyed-batch `output`, which writes keys named by data | a detached node its host observes, and whose batch the host writes. A `Scatter` node of the tree writes keys named by data, under a literal prefix or anywhere in the tree's namespace; a detached node's output binds static keys only (§9) |
 | non-input params (`half_life`, `case_labels`, noise settings) | literal arguments, `param.<field>` |
 | variadic inputs (`operand_N`, `args_N`), most edges | one parameter per port: a function declares 64 ports of its variadic group, and the importer refuses a graph wiring one past them |
 | named output ports (`weightedsumvector`, `readrecord`, `urdffk`) | a structure returned, each port a field, read through a selection |
-| an edge's selector, which reads a field by name | a `select` node between the two, which reads it as the reference evaluator does |
+| an edge's selector, which reads a field by name | a `select` node between the two, which reads it on the value alone |
 | hidden state (`damp`, `spring`, `slew`, IK) | the function exposes its state as the mutable parameter `state`, as a value; a URDF chain is a cache of the module |
 | `time`, `oscillator`, `dt` | functions taking the clock as arguments (`arora/time` and `arora/dt` on a device), so they run once per tick |
 | implicit coercion and broadcasting | inside the functions, whose parameters stay dynamically typed |
@@ -452,8 +455,9 @@ Each stage lands on its own and states what it hands to the next.
 | `arora-behavior-tree` | 9.3: detached nodes, `behavior-tree 1.3`. `Expression` does not change. |
 | `arora-behavior` (9.6) | No change for detached nodes: `Graph` carries them. Minor with §5: `Replace` and `Overlap`, since `RunPolicy` is non-exhaustive. |
 | `arora` (13.6), `arora-web` | Minor: `load` and `edit` described. Major with §5: `Concurrent` refuses an overlap it accepted before. |
-| `arora-node-graph`, `arora-shape` | New, `1.0.0`. |
-| `vizij-graph-core`, `vizij-api-core`, `vizij-arora-behavior`, `vizij-animation-core`, `vizij-animation-module` | No further release once vizij-rs depends on the arora crates. |
+| `arora-dataflow-nodes`, `arora-geometry` | New, `1.0.0`. |
+| `vizij-graph-core` 4, `vizij-api-core` 3 | Major: over `arora-dataflow-nodes` and `arora-geometry`. |
+| `vizij-animation-core`, `vizij-animation-module` | No further release once vizij-rs depends on the arora crates. |
 | `vizij-arora-host` | Major: it registers the skills as trees. |
 | Studio Bridge, WebSocket and ROS 2 bridges | No change: they list and call described functions already. |
 | Graph formats | `behavior-tree 1.3` (9.3) runs the calls no node holds. A Vizij node graph is read by the importer only. |

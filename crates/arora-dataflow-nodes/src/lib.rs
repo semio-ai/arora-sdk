@@ -1,31 +1,25 @@
-//! Node graphs on Arora's behavior tree.
+//! Arora's dataflow nodes: the node vocabulary as the functions of three
+//! modules ([`functions`]), `@arora/dataflow`, `@arora/geometry` and
+//! `@arora/kinematics`, each node kind one function, computing on Arora's
+//! values.
 //!
-//! This crate defines the graph schema, the node registry metadata and topology helpers, the
-//! node vocabulary as the functions of Arora modules ([`functions`]), Vizij's graph format's own
-//! functions ([`vizij_functions`]), the importer from a graph to a behavior tree ([`import`]), and
-//! [`TreeRuntime`](tree_runtime::TreeRuntime), which runs a graph on the tree.
+//! A loader of a graph format puts these calls on a behavior tree, each a
+//! detached node, and [`functions::DataflowNodes`] answers them in-process.
+//! What a loader needs is public: each kind's function and parameter ids
+//! ([`functions`]), its ports ([`ports`]) and port layouts
+//! ([`eval::plan`]), its parameters ([`params::Params`]) and where a tree
+//! places it ([`functions::placement`]).
 
 pub mod eval;
 pub mod functions;
-pub mod import;
 pub mod kind;
 pub mod params;
 pub mod ports;
-pub mod schema;
 pub mod select;
 pub mod task;
-pub mod topo;
-pub mod tree_runtime;
-pub mod types;
-pub mod vizij_functions;
 pub mod vocab;
 
-#[cfg(test)]
-mod fixtures;
-#[cfg(test)]
-mod tree_tests;
-
-pub use eval::{Context, NodeFunction, NodeFunctionRegistry, NodeFunctions, PortValue};
-pub use schema::registry;
-pub use topo::topo_order;
-pub use types::*;
+pub use eval::{Context, NodeFunction, NodeFunctionRegistry, NodeFunctions, SpawnRequest};
+pub use kind::Kind;
+pub use params::{Params, RoundMode};
+pub use select::{Selector, SelectorSegment};

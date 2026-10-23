@@ -1126,7 +1126,7 @@ fn encode_state(state: NodeRuntimeState) -> Value {
 
 /// The runtime state `value` encodes for a node of `kind`, `None` for one it
 /// does not encode (a node's first call).
-pub(crate) fn decode_state(kind: &Kind, value: Value) -> Option<NodeRuntimeState> {
+fn decode_state(kind: &Kind, value: Value) -> Option<NodeRuntimeState> {
     let flat = |value: &Value| flatten_numeric(value);
     match (kind, value) {
         (Kind::Spring, Value::ArrayValue(parts)) if parts.len() == 3 => {
@@ -1194,7 +1194,7 @@ pub struct DataflowNodes {
     default_module: Option<Uuid>,
     /// The URDF chains built, by the hash of their configuration.
     #[cfg(feature = "urdf_ik")]
-    pub(crate) chains: crate::eval::urdfik::Chains,
+    chains: crate::eval::urdfik::Chains,
     /// The runs `spawn` nodes requested since they were last taken.
     spawns: Vec<SpawnRequest>,
     /// The input layouts built, by function and the ports a call passes.
@@ -1252,15 +1252,37 @@ impl DataflowNodes {
     }
 
     /// Forget what the module keeps for each node `keep` refuses, such as
-    /// the nodes a load removed.
-    pub(crate) fn retain_sites(&mut self, keep: impl Fn(&str) -> bool) {
+    /// the nodes a load removed. A node is named by the `node` argument its
+    /// calls pass.
+    pub fn retain_sites(&mut self, keep: impl Fn(&str) -> bool) {
         self.sites.retain(|node, _| keep(node));
     }
 
     /// The number of nodes the module keeps something for.
-    #[cfg(test)]
-    pub(crate) fn sites(&self) -> usize {
+    pub fn sites(&self) -> usize {
         self.sites.len()
+    }
+
+    /// The runtime state the `state` argument `value` holds for a node of
+    /// `kind` with the parameters `params`: what its next call starts from.
+    /// `None` before its first call.
+    pub fn state(
+        &self,
+        kind: &Kind,
+        params: &Params,
+        value: Option<&Value>,
+    ) -> Option<NodeRuntimeState> {
+        // No state before the first call, whatever the module keeps for
+        // other nodes of the same configuration.
+        let value = value?;
+        #[cfg(feature = "urdf_ik")]
+        if matches!(kind, Kind::UrdfIkPosition | Kind::UrdfIkPose | Kind::UrdfFk) {
+            return crate::eval::urdfik::prepared_state(&self.chains, params, Some(value))
+                .map(NodeRuntimeState::UrdfKinematics);
+        }
+        #[cfg(not(feature = "urdf_ik"))]
+        let _ = params;
+        decode_state(kind, value.clone())
     }
 
     /// A bridge answering this module's calls and passing every other to

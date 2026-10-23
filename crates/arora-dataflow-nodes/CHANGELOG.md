@@ -2,120 +2,82 @@
 
 All notable changes to `arora-dataflow-nodes`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
-[Semantic Versioning](https://semver.org/). Versions up to 3.1.1 were
-published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
-`vizij-graph-core`.
+[Semantic Versioning](https://semver.org/). Versions up to 3.1.1 are the
+node graph's, published from [vizij-rs](https://github.com/vizij-ai/vizij-rs)
+as `vizij-graph-core`, whose node code this crate continues; the graph
+format continues there, in `vizij-graph-core` 4.
 
-## [1.0.0] - 2026-10-22
+## [1.0.0] - Unreleased
 
 ### Added
 
 - The node vocabulary as the functions of three modules (`functions`):
-  `@arora/dataflow` for the general node kinds, `@arora/geometry` for
-  `vec3cross` and `@arora/kinematics` for `inversekinematics` and the URDF
-  nodes. Each node kind is one function, named by its graph-JSON name. Input
-  ports, node parameters (`param.<field>`), the clock (`t`, `dt`) and a
-  stateful node's state (`state`, a mutable parameter holding a value) are
-  its parameters; a node with ports beyond `out` returns a structure of
-  them. `DataflowNodes` answers the calls in-process, through a bridge
-  over the device's, and runs each with its node kind's per-node code. It
-  keeps, for each node it is called for, the parameters, port
-  layouts and buffers of its last call, so a call whose parameters did not
-  change prepares nothing, and it answers borrowed calls
-  (`CallBridge::arora_call_borrowed`) without copying its arguments.
-- The importer (`import`, `import_json`): a graph, or its JSON document,
-  translated node for node into the nodes of a behavior tree, each a
-  detached call, an `output` node with a path a sink on its key, and a
-  task run or a spawn a leaf under the root, ticked at every tick.
-  `import_with` places a call to another module (`externalfunction`) by
-  its function's description (`placement`): left out when the function
-  returns nothing and writes nothing back, a leaf ticked at every tick
-  otherwise. `TreeRuntime::load_with_functions` imports this way, with a
-  device's function index.
-- `TreeRuntime`: a graph run on the behavior tree, evaluating every node
-  (`Evaluation::Every`) or what the outputs read (`Evaluation::Demanded`). A reload keeps every node's
-  state.
-- `TreeRuntime::set_params`: a node's parameters edited in place on the
-  loaded tree, the edit an editor's slider makes, at about a tenth of the
-  cost of loading the edited spec. It refuses, changing nothing, an edit
-  only a load can make: one changing the node's output ports, the path an
-  `input` or `output` node binds, or which parameters the node sets.
-- The tests run on the tree (`tree_tests`). The fixture tests run every
-  fixture evaluating every node and what its outputs read, and again with its
-  parameters edited in place, comparing port by port and write by write. The
-  benchmark and the `stress` example time loading and stepping a graph on the
-  tree.
+  `@arora/dataflow` for the general node kinds, `select` and `external`,
+  `@arora/geometry` for `vec3cross`, and `@arora/kinematics` for
+  `inversekinematics` and the URDF nodes. Each node kind (`kind::Kind`) is
+  one function, named by its graph-JSON name. Input ports, node parameters
+  (`param.<field>`), the clock (`t`, `dt`) and a stateful node's state
+  (`state`, a mutable parameter holding a value) are its parameters; a node
+  with ports beyond `out` returns a structure of them.
+- `DataflowNodes` answers the calls in-process, through a bridge over the
+  device's, and runs each with its node kind's per-node code. It keeps, for
+  each node it is called for, the parameters, port layouts and buffers of
+  its last call, so a call whose parameters did not change prepares
+  nothing, and it answers borrowed calls (`CallBridge::arora_call_borrowed`)
+  without copying its arguments. `DataflowNodes::state` decodes a node's
+  `state` argument, and `retain_sites` forgets the nodes a loader removed.
+- What a loader needs to put the calls on a behavior tree: each kind's
+  function and parameter ids, `encode` (the arguments a node's parameters
+  set), `placement` (a detached call, a leaf ticked at every tick, or left
+  out), the ports (`ports::ports`) and port layouts (`eval::plan`).
+- `select`: selectors (`Selector`, `SelectorSegment`) and the selection of
+  a part of a value, on the value alone.
+- `vocab`: the name-keyed record, the name-identified enumeration and the
+  plain values, under the ids values were first stored under.
+- `tests/calls.rs`: the functions called alone and on a behavior tree, as a
+  loader calls them.
 
 ### Changed
 
-- The crate is `arora-dataflow-nodes`, in arora-sdk, continuing
-  `vizij-graph-core` 3.1.1 with its history. Its library is
-  `arora_dataflow_nodes`, and it depends on
-  `arora-shape` where it depended on `vizij-api-core`. Its graph format and
-  its evaluation do not change, except as below.
 - The numeric nodes flatten any value whose leaves are numbers, by its own
   form, where they listed the vizij composites by type id. A structure of
   any type now computes component by component, keeping its id, its field
   ids and its field types, where a structure outside the vizij vocabulary
   gave `NaN`; it computes in `f32`. A structure with an integer field has
-  no numeric form, as one with a text field. A structure's layout is shared between values of its form, so
-  flattening one allocates nothing but its numbers. Two operands
-  combine when they have the same form, as before. A value's numeric reading
-  (truthiness, blend weights, IK seeds) holds every number of a structure, so
-  a transform's is its ten components where it was its translation.
+  no numeric form, as one with a text field. A structure's layout is shared
+  between values of its form, so flattening one allocates nothing but its
+  numbers. Two operands combine when they have the same form, as before. A
+  value's numeric reading (truthiness, blend weights, IK seeds) holds every
+  number of a structure, so a transform's is its ten components where it
+  was its translation.
 - The geometry types are `arora-geometry`'s, and only the geometry and
-  kinematics nodes and edge selection name them.
-- An edge's index selector picks a structure's field in declaration order,
+  kinematics nodes and selectors name them.
+- An index selector picks a structure's field in declaration order,
   whatever the structure's type, and gives the field's value as it is. An
   index past a structure's fields names its geometry type, or the number of
   its fields.
 - The URDF nodes read a joint's value from any structure of numbers, as its
   first field. Their errors name what they received by its geometry type or
   its form (`vec3`, `record`, `text`).
-
-- The node functions compute on values and their own parameters. A node's
-  code reads and writes `Value`s, where it read and wrote `PortValue`s with a
-  shape inferred for each; it takes a `Node` (id, kind, `params::Params`)
-  where it took a `NodeSpec`. `Params` holds every `NodeParams` field but the
-  store path and the keyed-batch fields (`NodeParams::params`), and
-  `RoundMode` moves to `params`, re-exported from `types`.
-- `GraphRuntime` is `eval::Context`: one call's clock, its node's state and
-  the runs it requests. It stages no inputs: an `input` node's call takes
-  the value its key holds as an argument.
-- `Kind` is the vocabulary's node kinds, one function each; `NodeType`, the
-  graph JSON's, is those and `input` and `output` (`NodeType::kind`). The
-  per-node code, `ports::ports`, `placement` and the function index take a
-  `Kind`.
+- A node's code reads and writes `Value`s, where it read and wrote
+  `PortValue`s with a shape inferred for each; it takes a `Node` (id, kind,
+  `params::Params`) where it took a `NodeSpec`. `GraphRuntime` is
+  `eval::Context`: one call's clock, its node's state and the runs it
+  requests.
 - Each node kind's ports are the module's own (`ports::ports`): its fixed
-  inputs and outputs and its variadic groups. A node's layouts start from
-  them, where they read Vizij's editor registry; a test holds the registry
-  to them.
-- Vizij's graph format's own functions are the module `@vizij/graph`'s
-  (`vizij_functions`), apart from the vocabulary's: `input`, which reads its
-  store key and fits the value to the node's declared shape, `output`, which
-  checks its value against its own, and `check`, the check of a node's
-  declared output shapes. The importer places a `check` after each other
-  node that declares shapes, and its readers read it in the node's place,
-  so a value that does not fit fails a demanded evaluation as it fails one
-  of every node. `TreeRuntime` answers the module's calls beside the
-  vocabulary's. An `input` or `output` node declaring the shape of a port
-  other than `out` is refused at import, where its evaluation failed.
-- Selectors are the `select` module's (`Selector` and `SelectorSegment`,
-  re-exported from `types`), which selects on the value alone. A failed
-  selection names what it selected in by its geometry type or its form.
-  `PortValue`, a port's value with its shape, is the graph format's
-  (`eval::vizij`), as are the writes of a path-less `output` node's keyed
-  batch.
+  inputs and outputs and its variadic groups.
 
 ### Removed
 
-- The reference evaluator: graphs run on the tree (`TreeRuntime`). Gone are
-  `evaluate_all`, `evaluate_all_with_functions`,
-  `evaluate_writes_with_functions`, `evaluate_all_cached` and `eval_node`,
-  the plan cache (`PlanCache`) and the structural fingerprint
-  (`fingerprint_spec`, `GraphSpec::recompute_fingerprint`), and
-  `StagedInput`. `GraphSpec::with_cache` bumps `version` alone, and the
-  `fingerprint` field is not read.
+- Vizij's graph format: the graph types (`GraphSpec`, `NodeSpec`,
+  `NodeParams`, `NodeType`), the editor registry (`schema`), the importer
+  to a behavior tree, `TreeRuntime`, the topological order, the `input` and
+  `output` nodes, declared shapes and `PortValue` are `vizij-graph-core`'s,
+  in vizij-rs.
+- The reference evaluator: `evaluate_all`, `evaluate_all_with_functions`,
+  `evaluate_writes_with_functions`, `evaluate_all_cached`, the plan cache
+  (`PlanCache`), the structural fingerprint and `StagedInput`. A graph runs
+  on the behavior tree.
 
 ### Fixed
 

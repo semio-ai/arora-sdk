@@ -1,107 +1,97 @@
 # arora-dataflow-nodes
 
-Node graphs for Arora: a Vizij node graph (`GraphSpec`, its JSON form) runs
-as the detached nodes of an `arora-behavior-tree`
-([proposal](../../docs/proposal-behavior-languages.md)). The crate holds:
+Arora's dataflow nodes: a node vocabulary of arithmetic, logic, time,
+smoothing, vectors, noise, blending, records, calls to other modules and
+robotics, each node kind one function of an Arora module, computing on
+Arora's values (`arora_types::value::Value`). A loader puts the calls on a
+behavior tree ([proposal](../../docs/proposal-behavior-languages.md)), each a
+detached node, and `functions::DataflowNodes` answers them in-process.
 
-- **the node vocabulary as module functions** (`functions`): one function
-  per node kind, in one of three modules: `@arora/dataflow` for the general
-  kinds, `@arora/geometry` for `vec3cross`, and `@arora/kinematics` for
-  `inversekinematics` and the URDF nodes. `DataflowNodes` answers their calls
-  in-process through a bridge over the device's. A
-  function runs its node kind's per-node code (`eval`) over values, its
-  parameters (`params::Params`), the clock and its state. A node's kind is a
-  `kind::Kind`;
-- **Vizij's graph format's own functions** (`vizij_functions`), the module
-  `@vizij/graph`: `input`, reading a store key and fitting its value to the
-  node's declared shape, `output`, checking its value against its own, and
-  `check`, the check of a node's declared output shapes. The graph JSON's
-  node kinds (`types::NodeType`) are the vocabulary's and these two;
-- **the importer** (`import`): a graph translated node for node into a tree
-  and its detached nodes, as `BehaviorTree::try_from_groot_xml` reads a Groot
-  file;
-- **`TreeRuntime`** (`tree_runtime`): a graph run on the tree, for a host
-  such as an editor or Vizij's `ProcessingGraph`.
+| Module | Functions |
+|---|---|
+| `@arora/dataflow` (`functions::DATAFLOW`) | the general node kinds, `select`, which applies a selector, and `external`, a call to another module |
+| `@arora/geometry` (`functions::GEOMETRY`) | `vec3cross`, which builds a vec3 |
+| `@arora/kinematics` (`functions::KINEMATICS`) | `inversekinematics` and the URDF nodes, behind the `urdf_ik` feature |
 
-## On the behavior tree
+Vizij's node graph is one such loader: its graph format, the importer from a
+graph to a tree and `TreeRuntime` are vizij-rs's
+[`vizij-graph-core`](https://github.com/vizij-ai/vizij-rs/tree/main/crates/node-graph/vizij-graph-core).
+
+## A node kind's function
+
+A node kind (`kind::Kind`) is the function `functions::function_id(kind)`
+of the module `functions::module_of(kind)`; `functions::function_index()`
+describes every function. Its parameters:
+
+| Parameter | Id | What it holds |
+|---|---|---|
+| an input port | `input_param(port)` | the port's value, an optional argument: a port with none reads its default |
+| a node parameter | `param_field(field)` | a `params::Params` field; `functions::encode` gives the arguments a node's parameters set |
+| the clock | `time_param()`, `dt_param()` | the time and the step's duration, in seconds, for the kinds `reads_time` and `reads_dt` name |
+| the state | `state_param()` | a stateful node's state, a mutable parameter: the call writes it back, and the next starts from it |
+| the node | `node_param()` | the node's id, which names it in an error and keys what the module keeps for it |
+| the ports | `ports_param()` | the output ports of a node returning more than `out`, in order |
+
+A node whose one port is `out` returns that port's value; any other returns
+a structure of its ports, each under the field `output_field(port)`. A
+node's ports are its kind's (`ports::ports`), and its output ports depend on
+its parameters too: a split's sizes, a record's keys
+(`eval::plan::output_layout`).
 
 ```rust
-use arora_dataflow_nodes::import::import_json;
-use arora_dataflow_nodes::tree_runtime::TreeRuntime;
-use arora_shape::{TypedPath, Value};
+use arora_dataflow_nodes::functions::{function_id, input_param, node_param, DataflowNodes};
+use arora_dataflow_nodes::Kind;
+use arora_types::value::Value;
 
-// A graph's JSON as Vizij writes it: a spec, or a document holding one.
-let (spec, _) = import_json(include_str!("../fixtures/sine-driver.json"), &Default::default())?;
-let mut rt = TreeRuntime::default();
-rt.load(&spec)?;
-rt.dt = 1.0 / 60.0;
-rt.t += rt.dt;
-rt.set_input(TypedPath::parse("driver/time.seconds")?, Value::F32(0.5), None);
-rt.evaluate()?;
-for write in rt.writes.iter() {
-    println!("{} = {:?}", write.path, write.value);
-}
+// `device_bridge` runs the calls a function makes to other modules.
+let mut nodes = DataflowNodes::new();
+let (a, b, node) = (Value::F32(1.0), Value::F32(2.5), Value::String("sum".into()));
+let sum = nodes.call_borrowed(
+    function_id(&Kind::Add),
+    &[(input_param("operand_0"), &a), (input_param("operand_1"), &b), (node_param(), &node)],
+    &mut device_bridge,
+)?;
+assert_eq!(sum.ret, Value::F32(3.5));
 ```
 
-How a graph translates:
+## On a behavior tree
 
-| In the graph | On the tree |
-|---|---|
-| a node | a detached call of its kind's function: it runs when what it outputs is read, once per tick, and only when its arguments changed |
-| an input port | an optional parameter of the port's name; an edge reads the source's port: `@node`, or a field of the structure a node with ports beyond `out` returns |
-| an edge's selector | a `select` node between the two |
-| an inline default | a literal argument |
-| a node parameter | a literal argument, `param.<field>` |
-| hidden state (`spring`, `damp`, `slew`, IK) | the mutable parameter `state`, as a value: a smoother's buffers in its input's shape, an IK node's joints and last solve |
-| `time`, `oscillator`, the smoothers' step | the parameters `t` and `dt`, read from the variables `ImportOptions` names (`arora/time` and `arora/dt` by default) |
-| an `input` node | a call to `@vizij/graph`'s `input`, reading the store key its path names and fitting its value to its declared shape |
-| an `output` node with a path | a call to `@vizij/graph`'s `output`, checking its value against its declared shape; a sink: its return value bound to the store key of its path, written after the tree ticks; the later-listed writer of a key wins |
-| an `output` node with no path (a keyed batch) | listed in `ImportedGraph::keyed_outputs`, for its host to apply |
-| a node's declared output shapes | a call to `@vizij/graph`'s `check` after it, which its readers read in its place; an `input` or `output` node checks its own `out`, and one declaring the shape of another port is refused |
-| `taskrun`, `spawn` | leaves under the root `PARALLEL`, ticked at every tick, as they act at each evaluation |
-| `externalfunction` | placed by its function's description (`placement`): left out when the function returns nothing and writes nothing back; otherwise a leaf ticked at every tick, as Vizij calls it, since a module's function may keep state its arguments do not show (the animation module's `step(dt)`) |
+- **Placement.** `functions::placement` says where a tree holds a call. A
+  node of the vocabulary is a detached call, run when what it returns is read
+  and only when its arguments changed. A task run and a spawn are leaves
+  ticked at every tick, as they act at each evaluation. A call to another
+  module (`externalfunction`) is left out when its function returns nothing
+  and writes nothing back, and is otherwise a leaf ticked at every tick,
+  since a module's function may keep state its arguments do not show.
+- **The bridge.** `DataflowNodes::bridge(inner)` answers the three modules'
+  calls and passes every other to `inner`, the device's. It registers the
+  tree's callables itself, so a tree lowered over it ticks through it.
+- **What it keeps.** `DataflowNodes` keeps, for each node it is called for,
+  the decoded parameters, port layouts and buffers of its last call, so a
+  call whose parameters did not change prepares nothing.
+  `DataflowNodes::retain_sites` forgets the nodes a loader removed.
+  `DataflowNodes::state` decodes a node's `state` argument.
+- **Calls to other modules.** An `external` call goes to the module its
+  function is routed to (`DataflowNodes::set_function_modules`), with its
+  `args` ports under the parameter ids the node names.
 
-How it evaluates:
+`tests/calls.rs` calls the functions alone and on a tree, as a loader does.
 
-- **What runs.** A node runs when something reads it and its arguments
-  changed. `Evaluation::Every` observes every node, as an editor does, and
-  `Evaluation::Demanded` runs what the outputs read, as a device does. A
-  node nothing reads does not fail a demanded evaluation.
-- **Order.** A node runs after every node it reads from, and otherwise in
-  the order the spec lists it, so of two outputs writing one path the
-  later-listed wins.
-- **Inputs.** A value staged with `TreeRuntime::set_input` is seen by the
-  next evaluation alone; an input staged nothing reads its default.
-- **Shapes.** Ports carry values; a port's shape is its declared output
-  shape, the shape staged with an input, or the one its value infers. A
-  node's declared output shapes are checked where it is read: a value that
-  does not fit fails the evaluation, as a device runs it or an editor.
-- **Variadic ports.** A function declares `VARIADIC_PORTS` (64) ports of its
-  kind's variadic group; the importer refuses a graph wiring one past them.
-- **Edits.** A node's parameter value is set in place on the loaded tree
-  (`TreeRuntime::set_params`). An edit that changes what the tree is (a
-  node's ports, the path an input or output binds, a node added or rewired)
-  takes a new load of the whole graph, which keeps every node's state.
-- **Loads.** `TreeRuntime::evaluate_spec` loads a spec when it is not the
-  graph loaded. `GraphSpec::with_cache` bumps a spec's `version`, for a host
-  that reloads on a new version.
+## Values
 
-The stress example times loading and stepping, and counts each step's calls:
+- The numeric nodes read a value's form off the value itself, so they need no list of value types. A value whose leaves are numbers flattens: a structure field by field in declaration order, a record in key-name order, a sequence item by item (`eval::value_layout`). The result has the same form, with the same structure ids, field ids and keys. A structure flattens when its number fields are floats, and keeps their types (an `F64` field stays `F64`), though every number computes in `f32`. A structure with an integer field has no numeric form, as one with a text field: rebuilding it between a node's steps would round it. A number on its own, in a record or in a sequence, of any width, is an `F32`. Two operands combine when they have the same form, or when one is a number, which applies to every component of the other: a vec4, a quaternion and a colour each hold four numbers, and do not combine.
+- The geometry types (vec2, vec3, vec4, quat, transform) are [`arora-geometry`](../arora-geometry/README.md)'s, and only the geometry and kinematics nodes and selectors name them.
+- Records and enumerations are `KeyValue`s and `Enumeration`s under the ids `vocab` declares: a name-keyed record (`vocab::record`) and a name-identified enumeration (`vocab::enumeration`, `vocab::variant_id`).
 
-```bash
-cargo run --release -p arora-dataflow-nodes --example stress -- chain 10000
-cargo run --release -p arora-dataflow-nodes --example stress -- file graph.json
-```
+## Selectors
 
----
+- A selector (`select::Selector`) is a path of field names and indices, which `select::select` applies to a value, and the `select` function to its input.
+- A field picks a record's field, a transform's part (`translation` or `position`, `rotation`, `scale`) or an enumeration's payload. An index picks an element of a numeric vector, an item of a sequence, or a structure's field in declaration order, whatever the structure's type: `["translation", 1]` on a transform is its translation's y.
+- A selection reads the value alone. An invalid path fails with an error naming what it selected in (“selector index 5 out of bounds for vec3”).
 
-## Nodes
+## The clock
 
-The node library covers math, logic, vector operations, time and transitions
-(`Spring`, `Damp`, `Slew`), blending, ranges (including multi-segment
-piecewise remaps), records, calls to other modules, and robotics IK/FK behind
-the `urdf_ik` feature. Edges can select part of a value (`field`, `index`),
-and `Output` nodes write a `WriteBatch` the host applies.
+- A `dt` of zero is a step with no time in it, and moves nothing that time drives: `Time` and `Oscillator` read the unchanged `t`, `Spring` records its new target and keeps its position and velocity, and `Damp` and `Slew` keep their value (so does a negative or non-finite `dt`). A call at `dt = 0` therefore carries a changed input through every node that does not depend on time — a paused scene showing an edit — and a smoother it reaches takes it as its new target, which shows once time passes; the next step with time in it moves on as if the zero step had not been. An IK node answers a request equal to its last one with its last solution, so it holds too.
 
 ## Installation
 
@@ -109,116 +99,21 @@ and `Output` nodes write a `WriteBatch` the host applies.
 cargo add arora-dataflow-nodes
 ```
 
-Features:
-
-| Feature   | Default | Description                                           |
-|-----------|---------|-------------------------------------------------------|
-| `urdf_ik` | ✔       | Enables URDF chain parsing + IK/FK nodes (depends on `k` and `urdf-rs`). |
-
-Disable defaults with `--no-default-features` if you want a minimal build.
-
----
-
-## Usage
-
-1. **Load or construct a `GraphSpec`.** `import::import_json` reads a graph's JSON as Vizij writes it; build specs programmatically in tests.
-   - `spec.validate()` refuses a graph that would fail every evaluation — an edge to a missing node, two edges into one input, two nodes sharing an id, a cycle, or a node leaving one of its `schema::required_inputs` with neither an edge nor an inline default — naming the node at fault. A host checks it before installing a graph.
-2. **Create and reuse a `TreeRuntime`**, and `load` the spec. It keeps every node's state across evaluations and loads.
-3. **Set the clock and stage host inputs** before each evaluation:
-   ```rust
-   rt.t += rt.dt;
-   rt.set_input(path, value, declared_shape);
-   ```
-   - Declared shapes help coerce numeric data or produce deterministically “null-of-shape” placeholders when staging fails.
-4. **Evaluate**: `rt.evaluate()?`.
-5. **Consume results.**
-   - `rt.writes` – `WriteBatch` of `WriteOp { path, value, shape }` emitted by `Output` nodes.
-   - `rt.outputs` – map of node → output key → `PortValue { value, shape }`, for every observed node, unless `set_collect_outputs(false)`.
-6. **Integrate with hosts.** Apply writes to your own blackboard, engine, or animation runtime as needed.
-
----
-
-## Key Concepts
-
-### The clock
-
-- `TreeRuntime::t` and `dt` are what the next evaluation reads, in seconds; a host such as the Arora behavior interpreter (`vizij-arora-behavior`) sets them each frame.
-- A `dt` of zero is a step with no time in it, and moves nothing that time drives: `Time` and `Oscillator` read the unchanged `t`, `Spring` records its new target and keeps its position and velocity, and `Damp` and `Slew` keep their value (so does a negative or non-finite `dt`). An evaluation at `dt = 0` therefore carries a changed input through every node that does not depend on time — a paused scene showing an edit — and a smoother it reaches takes it as its new target, which shows once time passes; the next step with time in it moves on as if the zero step had not been. An IK node answers a request equal to its last one with its last solution, so it holds too.
-
-### Selectors
-
-- Edges can include selectors composed of field/index segments.
-- Field selectors pick a record's field, a transform's part (`translation` or `position`, `rotation`, `scale`) or an enumeration's payload (`["state", "translation"]`). Index selectors pick an element of a numeric vector, an item of a sequence, or a structure's field in declaration order, whatever the structure's type (`["translation", 1]`).
-- Example: `{"selector": ["translation", 1]}` on a `Transform` output lifts the Y component; chaining `["record_field", 2, "nested_field"]` is also supported.
-- A selection reads the value alone (`select::select`). An invalid path fails with a descriptive error (“selector index 5 out of bounds for vec3”) instead of guessing. Catch these errors during development to keep graph definitions deterministic.
-
-### Shapes & Values
-
-- Values are `arora_shape::Value` (Arora's `Value`, re-exported). The geometry types (vec2, vec3, vec4, quat, transform) are `arora-geometry`'s, and only the geometry and kinematics nodes and edge selection name them. `arora_shape::value` re-exports them with Vizij's colour, records and enumerations.
-- The numeric nodes read a value's form off the value itself, so they need no list of value types. A value whose leaves are numbers flattens: a structure field by field in declaration order, a record in key-name order, a sequence item by item. The result has the same form, with the same structure ids, field ids and keys. A structure flattens when its number fields are floats, and keeps their types (an `F64` field stays `F64`), though every number computes in `f32`, as everywhere in a graph. A structure with an integer field has no numeric form, as one with a text field: rebuilding it between a node's steps would round it. A number on its own, in a record or in a sequence, of any width, is an `F32`. Two operands combine when they have the same form, or when one is a number, which applies to every component of the other: a vec4, a quaternion and a colour each hold four numbers, and do not combine.
-- Shapes (`ShapeId`) describe numeric layouts and support inference. Sequences travel as one wire kind, so declared `Array`/`List`/`Tuple` shapes carry the distinction.
-- Declared shapes on node outputs guard against schema drift and provide better error messages.
-
-### Parameter updates
-
-- `TreeRuntime::set_params` sets a node's parameters in place on the loaded tree, the edit an editor's slider makes:
-  ```rust
-  let mut params = spec.nodes[0].params.clone();
-  params.value = Some(arora_shape::value::float(0.5));
-  let in_place = rt.set_params("gain", &params)?;
-  ```
-  It returns `false`, changing nothing, for an edit only a load can make; the host then loads the edited spec.
-- Shapes are checked during evaluation; incompatible updates surface as detailed `Err(String)` messages (`"set_param: node 'gain' key 'value' expects Float"` in wasm bindings).
-
-### Outputs
-
-- `TreeRuntime::outputs` holds, after each evaluation, every observed node's ports by node id and port name. Each `PortValue` carries both the `Value` and its `Shape`:
-  ```rust
-  if let Some(port) = rt.outputs.get("oscillator").and_then(|ports| ports.get("out")) {
-      println!("shape: {:?}, value: {:?}", port.shape.id, port.value);
-  }
-  ```
-
-### External Writes
-
-- `Output` nodes enqueue writes automatically when `params.path` is set.
-- Writes include optional shapes so hosts can validate or coerce downstream.
-- Use hosts like the Arora behavior interpreter (`vizij-arora-behavior`) or your own glue to apply them.
-
-### URDF Feature
-
-- Enable `urdf_ik` to pull in robotics helpers (`UrdfIkPosition`, `UrdfIkPose`, `UrdfFk` nodes).
-- The WASM build ships with the feature enabled; native builds can opt out to reduce dependencies.
-
----
+| Feature   | Default | Description |
+|-----------|---------|-------------|
+| `urdf_ik` | ✔       | The URDF IK/FK nodes (depends on `k` and `urdf-rs`). |
 
 ## Development & Testing
 
-Run the crate tests (unit + integration):
-
 ```bash
 cargo test -p arora-dataflow-nodes
+cargo test -p arora-dataflow-nodes --no-default-features
 ```
 
-Test the robotics nodes explicitly:
-
-```bash
-cargo test -p arora-dataflow-nodes --features urdf_ik
-```
-
-The benchmark loads and steps chains, a mixed "kitchen" graph and a fixture on the tree:
-
-```bash
-cargo bench -p arora-dataflow-nodes
-```
-
-The fixture tests run every graph in `fixtures/` evaluating every node and what its outputs read, and again with its parameters edited in place.
-
----
+Vizij's graphs, their fixtures and the benchmark of a graph on the tree run in vizij-rs, in `vizij-graph-core`.
 
 ## Related Packages
 
-- [`vizij-graph-wasm`](https://github.com/vizij-ai/vizij-rs/blob/main/crates/node-graph/vizij-graph-wasm/README.md): wasm-bindgen binding that exposes JSON-friendly APIs plus normalization helpers.
-- [`@vizij/node-graph`](https://github.com/vizij-ai/vizij-rs/blob/main/npm/@vizij/node-graph/README.md): npm wrapper around the wasm build with ABI guards and utilities.
-
-
+- [`arora-geometry`](../arora-geometry/README.md): the geometry types and the blending of values.
+- [`arora-behavior-tree`](../arora-behavior-tree/readme.md): the tree the calls run on.
+- [`vizij-graph-core`](https://github.com/vizij-ai/vizij-rs/tree/main/crates/node-graph/vizij-graph-core): Vizij's graph format, loaded onto the tree as calls of these functions.
