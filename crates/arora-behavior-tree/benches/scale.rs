@@ -1,5 +1,6 @@
-//! `cargo bench -p arora-behavior-tree --bench scale -- [ticks] [samples]`
-//! prints one row per graph size, scenario and form: the median microseconds
+//! `cargo bench -p arora-behavior-tree --bench scale -- [ticks] [samples] [N/scenario/form]`
+//! prints one row per graph size, scenario and form, or only the row the
+//! third argument names (`1000/clock/detached`, for a profiler): the median microseconds
 //! per tick over the samples and their interquartile range, with module calls
 //! and engine indirect dispatches per measured tick. Defaults: 200 warm-up
 //! ticks, then 7 samples of 500 ticks. Each tick's input writes are timed with
@@ -30,29 +31,32 @@
 //! its seed are those of the design comparison's JavaScript model, number for
 //! number, so the two measure the same graphs.
 //!
-//! The forms. A published call binds its `_ret` to its key in every form, so
-//! no form adds a node or a call to publish:
+//! The forms. A lone graph's published call binds its `_ret` to its key, or is
+//! a sink. A branch's graph is published by its branch, so only the taken
+//! branch publishes, each form the way its code can: incremental leaves sit in
+//! their branch and bind `_ret` to the key; placement's file publishes with the
+//! native `Copy`; today's executor and detached nodes call `publish`, a module
+//! function returning its argument with `_ret` bound to the key, since the
+//! tree has no native node that writes a number to a key.
 //!
 //! - `attached-naive`: today's executor. Every call is a leaf of the root
 //!   `PARALLEL`, in data order, ahead of the tree, and runs at every tick,
-//!   whichever branch the tree takes. An attached reader of a published call
-//!   reads its key; of any other, the tree-local variable its `_ret` is bound
-//!   to.
-//! - `detached`: every call is a detached node, read as `@node`. A published
-//!   call is a sink, so it is brought up to date at every tick, whichever
-//!   branch the tree takes.
+//!   whichever branch the tree takes. An attached reader of a call a lone
+//!   graph publishes reads its key; of any other, the tree-local variable its
+//!   `_ret` is bound to.
+//! - `detached`: every call is a detached node, read as `@node`. A call a lone
+//!   graph publishes is a sink; a branch's `publish` leaves read their calls,
+//!   so a branch the tree does not take is not computed.
 //! - `attached-incremental`: the attached leaves, `_on_change`, on the
 //!   incremental executor, each graph's leaves in its own branch:
 //!   `PARALLEL[ leaf × n, RUN ]`.
 //! - `placed`: the detached form placed with `place_detached(…,
 //!   PlacementScope::Readers)`, on the incremental executor. Sinks place before
-//!   the root.
+//!   the root, and a branch's groups before the branch's body, which reads them.
 //!
-//! The bench compares the values the forms publish. In `branches`, it compares
-//! the first branch's keys: the incremental leaves alone publish no other
-//! branch, since only they are held by their branch. In `branches-switching`,
-//! it leaves the incremental leaves out, as their damping pauses while their
-//! branch is not taken.
+//! The bench compares the values the forms publish. In `branches-switching`, it
+//! leaves today's executor out: its damping keeps running in a branch the tree
+//! does not take, where the other forms' damping pauses.
 //!
 //! The host is a native test bridge, not wasm execution. It answers owned calls
 //! (`arora_call`) and lent ones (`arora_call_borrowed`) alike, reading the
@@ -66,8 +70,9 @@ use std::time::Instant;
 
 use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_behavior_tree::nodes::{
-    EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
-    PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID,
+    COPY_FUNCTION_ID, COPY_OUT_PARAM_ID, COPY_VALUE_PARAM_ID, EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID,
+    EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID,
+    SEQ_FUNCTION_ID,
 };
 use arora_behavior_tree::schema::{
     Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
@@ -103,6 +108,7 @@ const TARGET: Uuid = Uuid::from_u128(0x5ca1_000d);
 const HALF_LIFE: Uuid = Uuid::from_u128(0x5ca1_000e);
 const T: Uuid = Uuid::from_u128(0x5ca1_000f);
 const FREQUENCY: Uuid = Uuid::from_u128(0x5ca1_0010);
+const VALUE: Uuid = Uuid::from_u128(0x5ca1_0011);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Op {
@@ -118,6 +124,8 @@ enum Op {
     Remap,
     Damp,
     Osc,
+    /// Returns its argument: what a branch calls to write a value to a key.
+    Publish,
 }
 impl Op {
     /// The parameters, in order, and whether each is mutable.
@@ -144,6 +152,7 @@ impl Op {
                 (STATE, "state", true),
             ],
             Op::Osc => &[(T, "t", false), (FREQUENCY, "frequency", false)],
+            Op::Publish => &[(VALUE, "value", false)],
         }
     }
 }
@@ -242,6 +251,7 @@ impl Bridge {
                     + (v(X) - v(IN_MIN)) * (v(OUT_MAX) - v(OUT_MIN)) / (v(IN_MAX) - v(IN_MIN))
             }
             Op::Osc => (2.0 * PI * v(FREQUENCY) * v(T)).sin(),
+            Op::Publish => v(VALUE),
             Op::Damp => {
                 // The first call starts from its target; the state then eases
                 // toward it and snaps once it is within 1e-4, so it settles.
@@ -577,6 +587,10 @@ fn call_id(c: usize) -> Uuid {
 fn function_id(c: usize) -> Uuid {
     Uuid::from_u128(0x5000_0000 + c as u128)
 }
+/// The `publish` function a branch calls for call `c`.
+fn publish_id(c: usize) -> Uuid {
+    Uuid::from_u128(0x5100_0000 + c as u128)
+}
 fn key_variable(k: usize) -> Uuid {
     Uuid::from_u128(0x2000_0000 + k as u128)
 }
@@ -593,6 +607,10 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
         .enumerate()
         .map(|(k, (name, _))| (key_variable(k), name.clone()))
         .collect();
+    // A branch's graph is published by the branch, except by incremental
+    // leaves, which the branch holds and which bind their keys themselves.
+    let by_branch = graph.bodies[0].on.is_some() && !incremental_leaves(form);
+    let bound = |c: usize| graph.calls[c].publishes.filter(|_| !by_branch);
     let source = |source: Source| match source {
         Source::Key(k) => Expression::VariableId(key_variable(k)),
         Source::Value(x) => Expression::Value(Value::F64(x)),
@@ -600,7 +618,7 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
             node: call_id(c),
             parameter: _RET_PARAM_ID,
         }),
-        Source::Call(c) => Expression::VariableId(match graph.calls[c].publishes {
+        Source::Call(c) => Expression::VariableId(match bound(c) {
             Some(k) => key_variable(k),
             None => local_variable(c),
         }),
@@ -615,7 +633,7 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
         if graph_call.op == Op::Damp {
             arguments.insert(STATE, Expression::Value(Value::F64(f64::NAN)));
         }
-        match (graph_call.publishes, form.detached()) {
+        match (bound(c), form.detached()) {
             (Some(k), _) => {
                 arguments.insert(_RET_PARAM_ID, Expression::VariableId(key_variable(k)));
             }
@@ -643,12 +661,28 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
         .iter()
         .map(|body| {
             let run = tree.push(RUN_FUNCTION_ID, HashMap::new(), None);
-            if form != Form::AttachedIncremental {
+            if incremental_leaves(form) {
+                tree.nodes.extend(body.calls.iter().map(|&c| call(c)));
+                let leaves = body.calls.iter().map(|&c| call_id(c)).chain([run]);
+                return tree.push(PARALLEL_FUNCTION_ID, HashMap::new(), Some(leaves.collect()));
+            }
+            if !by_branch {
                 return run;
             }
-            tree.nodes.extend(body.calls.iter().map(|&c| call(c)));
-            let leaves = body.calls.iter().map(|&c| call_id(c)).chain([run]);
-            tree.push(PARALLEL_FUNCTION_ID, HashMap::new(), Some(leaves.collect()))
+            let published: Vec<_> = body
+                .calls
+                .iter()
+                .filter_map(|&c| graph.calls[c].publishes.map(|k| (c, k)))
+                .map(|(c, k)| {
+                    let (value, key) = (
+                        source(Source::Call(c)),
+                        Expression::VariableId(key_variable(k)),
+                    );
+                    publish(&mut tree, form, c, value, key)
+                })
+                .chain([run])
+                .collect();
+            tree.push(PARALLEL_FUNCTION_ID, HashMap::new(), Some(published))
         })
         .collect();
     let mut root = if graph.bodies[0].on.is_none() {
@@ -688,6 +722,24 @@ fn build(graph: &Graph, form: Form) -> (Vec<Node>, HashMap<Uuid, String>) {
     let root = nodes.remove(at);
     nodes.insert(0, root);
     (nodes, names)
+}
+
+/// Whether the form holds each graph's leaves in its branch, as the
+/// incremental executor's form does.
+fn incremental_leaves(form: Form) -> bool {
+    form == Form::AttachedIncremental
+}
+
+/// The leaf with which a branch publishes call `c`'s value to `key`:
+/// placement's file uses the native `Copy`, the other forms call `publish`.
+fn publish(tree: &mut Builder, form: Form, c: usize, value: Expression, key: Expression) -> Uuid {
+    if form == Form::Placed {
+        let arguments = [(COPY_VALUE_PARAM_ID, value), (COPY_OUT_PARAM_ID, key)];
+        tree.push(COPY_FUNCTION_ID, HashMap::from(arguments), None)
+    } else {
+        let arguments = [(VALUE, value), (_RET_PARAM_ID, key)];
+        tree.push(publish_id(c), HashMap::from(arguments), None)
+    }
 }
 
 /// Control and check nodes, numbered from 1, beside the calls.
@@ -761,6 +813,11 @@ fn measure(
             .iter()
             .enumerate()
             .map(|(c, call)| (function_id(c), call.op))
+            .chain(
+                (0..graph.calls.len())
+                    .filter(|&c| graph.calls[c].publishes.is_some())
+                    .map(|c| (publish_id(c), Op::Publish)),
+            )
             .collect(),
         ..Bridge::default()
     };
@@ -812,15 +869,9 @@ fn measure(
         calls: bridge.module_calls as f64 / divisor,
         dispatches: bridge.dispatches as f64 / divisor,
         published: graph
-            .bodies
+            .calls
             .iter()
-            .take(if scenario == Scenario::Branches {
-                1
-            } else {
-                graph.bodies.len()
-            })
-            .flat_map(|body| &body.calls)
-            .filter_map(|&c| graph.calls[c].publishes)
+            .filter_map(|call| call.publishes)
             .map(|k| slots[k].get())
             .collect(),
     }
@@ -833,6 +884,7 @@ fn main() {
         .collect();
     let ticks: usize = args.first().map_or(500, |arg| arg.parse().expect("ticks"));
     let samples: usize = args.get(1).map_or(7, |arg| arg.parse().expect("samples"));
+    let only = args.get(2).map(|arg| arg.as_str());
     assert!(
         ticks > 0 && samples > 0 && samples % 2 == 1,
         "positive ticks and odd samples"
@@ -846,9 +898,13 @@ fn main() {
             let graph = scenario.graph(n);
             let mut expected = None;
             for form in Form::ALL {
+                let cell = format!("{n}/{}/{}", scenario.name(), form.name());
+                if only.is_some_and(|only| only != cell) {
+                    continue;
+                }
                 let row = measure(&graph, scenario, form, warm_up, ticks, samples);
                 let compared =
-                    !(scenario == Scenario::BranchesSwitching && form == Form::AttachedIncremental);
+                    !(scenario == Scenario::BranchesSwitching && form == Form::AttachedNaive);
                 if compared {
                     match &expected {
                         Some(expected) => assert_eq!(
