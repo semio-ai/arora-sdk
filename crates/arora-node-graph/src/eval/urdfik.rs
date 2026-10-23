@@ -2,7 +2,9 @@
 
 use arora_shape::value as vocab;
 use arora_shape::value::ShapeKind;
-use arora_shape::{coercion, Value};
+use arora_shape::Value;
+
+use super::numeric;
 use hashbrown::HashMap;
 use k::InverseKinematicsSolver;
 use std::collections::hash_map::DefaultHasher;
@@ -391,7 +393,7 @@ pub fn fetch_joint_vector(
             ))
         }
         _ => {
-            let sequence = coercion::to_vector(value);
+            let sequence = numeric::as_vector(value);
             Ok(align_sequence_with_defaults(
                 &sequence,
                 expected,

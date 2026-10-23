@@ -2745,3 +2745,205 @@ fn output_path_takes_precedence_over_key_fields() {
     assert_eq!(writes[0].path.to_string(), "whole/batch");
     assert_eq!(writes[0].value, batch);
 }
+
+// --- numbers in structures of any type ---------------------------------------
+
+/// A structure no node names: three fields, declared out of id order, of
+/// their own float types.
+fn foreign_structure(a: f64, b: f64, c: f32) -> Value {
+    use arora_shape::value::{Structure, StructureField};
+    let field = |id: u128, value: Value| StructureField {
+        id: Uuid::from_u128(id),
+        value: Box::new(value),
+    };
+    Value::Structure(Structure {
+        id: Uuid::from_u128(0xF0),
+        fields: vec![
+            field(0xF3, Value::F64(a)),
+            field(0xF1, Value::F64(b)),
+            field(0xF2, Value::F32(c)),
+        ],
+    })
+}
+
+/// What a node of `kind` reading the constants `inputs` on its ports outputs.
+fn output_of(kind: NodeType, inputs: Vec<(&str, Value)>) -> Value {
+    let mut nodes: Vec<NodeSpec> = inputs
+        .iter()
+        .map(|(port, value)| constant_node(port, value.clone()))
+        .collect();
+    nodes.push(NodeSpec {
+        id: "n".to_string(),
+        kind,
+        params: NodeParams::default(),
+        output_shapes: HashMap::new(),
+        input_defaults: HashMap::new(),
+    });
+    let edges = inputs
+        .iter()
+        .map(|(port, _)| link(port, "n", port))
+        .collect();
+    let spec = graph_spec!({ nodes, edges, });
+
+    let mut rt = TreeRuntime::default();
+    evaluate_all(&mut rt, &spec).expect("the graph should evaluate");
+    rt.outputs
+        .get("n")
+        .and_then(|outputs| outputs.get("out"))
+        .map(|port| port.value.clone())
+        .expect("the node should output")
+}
+
+fn sum_of(lhs: Value, rhs: Value) -> Value {
+    output_of(NodeType::Add, vec![("operand_1", lhs), ("operand_2", rhs)])
+}
+
+#[test]
+fn arithmetic_on_any_structure_keeps_its_form_and_field_types() {
+    // A scalar broadcasts.
+    assert_eq!(
+        sum_of(foreign_structure(1.5, 2.0, 3.0), Value::F32(0.5)),
+        foreign_structure(2.0, 2.5, 3.5)
+    );
+    assert_eq!(
+        sum_of(
+            foreign_structure(1.0, 2.0, 3.0),
+            foreign_structure(0.25, 0.5, -1.0)
+        ),
+        foreign_structure(1.25, 2.5, 2.0)
+    );
+}
+
+#[test]
+fn a_transform_adds_component_by_component() {
+    let transform = |offset: f32| {
+        vocab::transform(vocab::Transform {
+            translation: [1.0 + offset, 2.0, 3.0],
+            rotation: [0.0, 0.0, offset, 1.0],
+            scale: [1.0, 1.0, 1.0 + offset],
+        })
+    };
+    let sum = vocab::as_transform(&sum_of(transform(0.0), transform(0.5)))
+        .expect("the sum should be a transform");
+    assert_eq!(sum.translation, [2.5, 4.0, 6.0]);
+    assert_eq!(sum.rotation, [0.0, 0.0, 0.5, 2.0]);
+    assert_eq!(sum.scale, [2.0, 2.0, 2.5]);
+}
+
+#[test]
+fn structures_combine_only_with_their_own_form() {
+    // A vec4 and a quaternion each hold four numbers, and do not combine.
+    let mixed = sum_of(
+        vocab::vec4([1.0, 2.0, 3.0, 4.0]),
+        vocab::quat([0.0, 0.0, 0.0, 1.0]),
+    );
+    let mixed = vocab::as_vec4(&mixed).unwrap_or_else(|| panic!("expected vec4, got {mixed:?}"));
+    assert!(mixed.iter().all(|x| x.is_nan()), "{mixed:?}");
+
+    // Three numbers each, of two structures: the left one's form, NaN-filled.
+    let Value::Structure(mixed) = sum_of(
+        foreign_structure(1.0, 2.0, 3.0),
+        vocab::vec3([1.0, 2.0, 3.0]),
+    ) else {
+        panic!("expected a structure");
+    };
+    assert_eq!(mixed.id, Uuid::from_u128(0xF0));
+    assert!(matches!(*mixed.fields[0].value, Value::F64(x) if x.is_nan()));
+    assert!(matches!(*mixed.fields[1].value, Value::F64(x) if x.is_nan()));
+    assert!(matches!(*mixed.fields[2].value, Value::F32(x) if x.is_nan()));
+}
+
+#[test]
+fn a_structure_reads_its_fields_in_declaration_order() {
+    for (index, expected) in [(0.0, 7.0), (1.0, 8.0), (2.0, 9.0)] {
+        let read = output_of(
+            NodeType::VectorIndex,
+            vec![
+                ("v", foreign_structure(7.0, 8.0, 9.0)),
+                ("index", Value::F32(index)),
+            ],
+        );
+        assert_eq!(read, Value::F32(expected), "index {index}");
+    }
+}
+
+#[test]
+fn a_structure_holding_more_than_floats_has_no_numeric_form() {
+    use arora_shape::value::{Structure, StructureField};
+    // A text field, and an integer field: a node's intermediate results would
+    // round it at every step.
+    for other in [Value::String("label".to_string()), Value::I32(5)] {
+        let mixed = Value::Structure(Structure {
+            id: Uuid::from_u128(0xF4),
+            fields: vec![
+                StructureField {
+                    id: Uuid::from_u128(0xF5),
+                    value: Box::new(Value::F32(1.0)),
+                },
+                StructureField {
+                    id: Uuid::from_u128(0xF6),
+                    value: Box::new(other.clone()),
+                },
+            ],
+        });
+        let sum = sum_of(mixed, Value::F32(1.0));
+        assert!(
+            matches!(sum, Value::F32(x) if x.is_nan()),
+            "{other:?}: {sum:?}"
+        );
+    }
+}
+
+#[test]
+fn a_slew_on_a_structure_keeps_its_progress_between_steps() {
+    use arora_shape::value::{Structure, StructureField};
+    let at = |x: f64| {
+        Value::Structure(Structure {
+            id: Uuid::from_u128(0xF7),
+            fields: vec![StructureField {
+                id: Uuid::from_u128(0xF8),
+                value: Box::new(Value::F64(x)),
+            }],
+        })
+    };
+    let slew = NodeSpec {
+        id: "slew".to_string(),
+        kind: NodeType::Slew,
+        params: NodeParams {
+            max_rate: Some(1.0),
+            ..Default::default()
+        },
+        output_shapes: HashMap::new(),
+        input_defaults: HashMap::new(),
+    };
+    let mut spec = GraphSpec {
+        nodes: vec![constant_node("target", at(0.0)), slew],
+        edges: vec![link("target", "slew", "in")],
+        ..Default::default()
+    }
+    .with_cache();
+
+    let mut rt = TreeRuntime::default();
+    evaluate_all(&mut rt, &spec).expect("initial evaluate");
+    spec.nodes[0].params.value = Some(at(1.0));
+    rt.dt = 1.0 / 60.0;
+    for _ in 0..30 {
+        rt.t += rt.dt;
+        evaluate_all(&mut rt, &spec).expect("slew step");
+    }
+
+    let out = rt
+        .outputs
+        .get("slew")
+        .and_then(|outputs| outputs.get("out"))
+        .map(|port| port.value.clone())
+        .expect("slew output");
+    let Value::Structure(out) = out else {
+        panic!("expected a structure, got {out:?}");
+    };
+    // Thirty steps of a sixtieth of a second at one unit a second.
+    assert!(
+        matches!(*out.fields[0].value, Value::F64(x) if (x - 0.5).abs() < 1e-5),
+        "{out:?}"
+    );
+}

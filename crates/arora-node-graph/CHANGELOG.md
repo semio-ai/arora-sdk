@@ -50,7 +50,17 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
 - The crate is `arora-node-graph`, in arora-sdk, continuing `vizij-graph-core`
   3.1.1 with its history. Its library is `arora_node_graph`, and it depends on
   `arora-shape` where it depended on `vizij-api-core`. Its graph format and
-  its evaluation do not change.
+  its evaluation do not change, except as below.
+- The numeric nodes flatten any value whose leaves are numbers, by its own
+  form, where they listed the vizij composites by type id. A structure of
+  any type now computes component by component, keeping its id, its field
+  ids and its field types, where a structure outside the vizij vocabulary
+  gave `NaN`; it computes in `f32`. A structure with an integer field has
+  no numeric form, as one with a text field. A structure's layout is shared between values of its form, so
+  flattening one allocates nothing but its numbers. Two operands
+  combine when they have the same form, as before. A value's numeric reading
+  (truthiness, blend weights, IK seeds) holds every number of a structure, so
+  a transform's is its ten components where it was its translation.
 
 ### Fixed
 
