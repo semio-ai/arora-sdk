@@ -61,6 +61,15 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   combine when they have the same form, as before. A value's numeric reading
   (truthiness, blend weights, IK seeds) holds every number of a structure, so
   a transform's is its ten components where it was its translation.
+- The geometry types are `arora-geometry`'s, and only the geometry and
+  kinematics nodes and edge selection name them.
+- An edge's index selector picks a structure's field in declaration order,
+  whatever the structure's type, and gives the field's value as it is. An
+  index past a structure's fields names its geometry type, or the number of
+  its fields.
+- The URDF nodes read a joint's value from any structure of numbers, as its
+  first field. Their errors name what they received by its geometry type or
+  its form (`vec3`, `record`, `text`).
 
 ### Fixed
 

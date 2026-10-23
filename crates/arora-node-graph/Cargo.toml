@@ -11,6 +11,7 @@ categories = ["science::robotics", "game-engines"]
 
 [dependencies]
 anyhow = "1"
+arora-geometry = { path = "../arora-geometry", version = "1" }
 arora-shape = { path = "../arora-shape", version = "1" }
 # Declares the behavior `Status` enumeration (type + variant ids) a task run
 # speaks — the cross-interpreter run-status contract.

@@ -190,13 +190,13 @@ for write in runtime.writes.iter() {
 ### Selectors
 
 - Edges can include selectors composed of field/index segments.
-- Field selectors drill into records or structs (`["state", "translation"]`), while index selectors pick array/list elements (`["translation", 1]`).
+- Field selectors pick a record's field, a transform's part (`translation` or `position`, `rotation`, `scale`) or an enumeration's payload (`["state", "translation"]`). Index selectors pick an element of a numeric vector, an item of a sequence, or a structure's field in declaration order, whatever the structure's type (`["translation", 1]`).
 - Example: `{"selector": ["translation", 1]}` on a `Transform` output lifts the Y component; chaining `["record_field", 2, "nested_field"]` is also supported.
 - Selector evaluation respects shapes; invalid paths throw descriptive errors (“selector index 5 out of bounds for vec3”) instead of guessing. Catch these errors during development to keep graph definitions deterministic.
 
 ### Shapes & Values
 
-- Values are `arora_shape::Value` (Arora's `Value`, re-exported); the vizij composites (vec2/vec3/vec4/quat/color/transform) are built and read through the `arora_shape::value` constructors and accessors.
+- Values are `arora_shape::Value` (Arora's `Value`, re-exported). The geometry types (vec2, vec3, vec4, quat, transform) are `arora-geometry`'s, and only the geometry and kinematics nodes and edge selection name them. `arora_shape::value` re-exports them with Vizij's colour, records and enumerations.
 - The numeric nodes read a value's form off the value itself, so they need no list of value types. A value whose leaves are numbers flattens: a structure field by field in declaration order, a record in key-name order, a sequence item by item. The result has the same form, with the same structure ids, field ids and keys. A structure flattens when its number fields are floats, and keeps their types (an `F64` field stays `F64`), though every number computes in `f32`, as everywhere in a graph. A structure with an integer field has no numeric form, as one with a text field: rebuilding it between a node's steps would round it. A number on its own, in a record or in a sequence, of any width, is an `F32`. Two operands combine when they have the same form, or when one is a number, which applies to every component of the other: a vec4, a quaternion and a colour each hold four numbers, and do not combine.
 - Shapes (`ShapeId`) describe numeric layouts and support inference. Sequences travel as one wire kind, so declared `Array`/`List`/`Tuple` shapes carry the distinction.
 - Declared shapes on node outputs guard against schema drift and provide better error messages.

@@ -4,6 +4,7 @@ resolver = "2"
 members = [
   "crates/arora",
   "crates/arora-animation",
+  "crates/arora-geometry",
   "crates/arora-node-graph",
   "crates/arora-shape",
   "modules/animation",
@@ -51,6 +52,7 @@ members = [
 default-members = [
   "crates/arora",
   "crates/arora-animation",
+  "crates/arora-geometry",
   "crates/arora-node-graph",
   "crates/arora-shape",
   "modules/animation",
