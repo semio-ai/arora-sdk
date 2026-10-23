@@ -539,9 +539,9 @@ pub fn quat_from_value(value: &Value, label: &str) -> Result<[f32; 4], String> {
 pub(crate) type Chains = std::collections::HashMap<u64, (k::SerialChain<f32>, Vec<String>)>;
 
 /// The hash of the chain configuration `params` names, as
-/// [`kinematics_state_mut`](crate::eval::GraphRuntime::kinematics_state_mut)
+/// [`kinematics_state_mut`](crate::eval::Context::kinematics_state_mut)
 /// keys it; `None` without URDF XML.
-fn configuration_hash(params: &crate::types::NodeParams) -> Option<u64> {
+fn configuration_hash(params: &crate::params::Params) -> Option<u64> {
     let urdf_xml = params
         .urdf_xml
         .as_deref()
@@ -559,7 +559,7 @@ fn configuration_hash(params: &crate::types::NodeParams) -> Option<u64> {
 /// `None` when `chains` has not built the chain yet.
 pub(crate) fn prepared_state(
     chains: &Chains,
-    params: &crate::types::NodeParams,
+    params: &crate::params::Params,
     state: Option<&Value>,
 ) -> Option<UrdfKinematicsState> {
     let hash = configuration_hash(params)?;

@@ -55,9 +55,7 @@ fn step(rt: &mut TreeRuntime, spec: &GraphSpec, dt: f32) {
 /// The spring's position and velocity.
 fn state(rt: &TreeRuntime) -> (f32, f32) {
     match rt.node_states().get("spring") {
-        Some(graph_runtime::NodeRuntimeState::Spring(spring)) => {
-            (spring.position[0], spring.velocity[0])
-        }
+        Some(context::NodeRuntimeState::Spring(spring)) => (spring.position[0], spring.velocity[0]),
         other => panic!("the spring keeps a spring state, got {other:?}"),
     }
 }

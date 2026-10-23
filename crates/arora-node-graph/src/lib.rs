@@ -8,6 +8,7 @@
 pub mod eval;
 pub mod functions;
 pub mod import;
+pub mod params;
 pub mod schema;
 pub mod task;
 pub mod topo;
@@ -19,9 +20,7 @@ mod fixtures;
 #[cfg(test)]
 mod tree_tests;
 
-pub use eval::{
-    GraphRuntime, NodeFunction, NodeFunctionRegistry, NodeFunctions, PortValue, StagedInput,
-};
+pub use eval::{Context, NodeFunction, NodeFunctionRegistry, NodeFunctions, PortValue};
 pub use schema::registry;
 pub use topo::topo_order;
 pub use types::*;

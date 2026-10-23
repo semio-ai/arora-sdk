@@ -187,9 +187,7 @@ impl TreeRuntime {
     /// The runtime state of every stateful node of the graph, decoded, by
     /// node id.
     #[cfg(test)]
-    pub(crate) fn node_states(
-        &self,
-    ) -> HashMap<String, crate::eval::graph_runtime::NodeRuntimeState> {
+    pub(crate) fn node_states(&self) -> HashMap<String, crate::eval::context::NodeRuntimeState> {
         let Some(loaded) = &self.loaded else {
             return HashMap::new();
         };
@@ -203,13 +201,13 @@ impl TreeRuntime {
                 if matches!(node.kind, NodeType::UrdfIkPosition | NodeType::UrdfIkPose) {
                     return crate::eval::urdfik::prepared_state(
                         &self.module.chains,
-                        &node.params,
+                        &node.params.params(),
                         value.as_ref(),
                     )
                     .map(|state| {
                         (
                             node.id.clone(),
-                            crate::eval::graph_runtime::NodeRuntimeState::UrdfKinematics(state),
+                            crate::eval::context::NodeRuntimeState::UrdfKinematics(state),
                         )
                     });
                 }
@@ -513,12 +511,9 @@ impl TreeRuntime {
                 } else if let (Some(key_field), Some(value_field), Some(port)) =
                     (node.params.key_field, node.params.value_field, port)
                 {
-                    for op in crate::eval::eval_node::keyed_batch_writes(
-                        &port.value,
-                        key_field,
-                        value_field,
-                    )
-                    .map_err(|message| format!("node '{}': {message}", node.id))?
+                    for op in
+                        crate::eval::vizij::keyed_batch_writes(&port.value, key_field, value_field)
+                            .map_err(|message| format!("node '{}': {message}", node.id))?
                     {
                         keyed
                             .set

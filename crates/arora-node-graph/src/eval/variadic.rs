@@ -7,7 +7,6 @@ use arora_shape::Value;
 
 use super::eval_node::InputSlots;
 use super::numeric::binary_numeric;
-use super::PortValue;
 
 /// Split a variadic input key into its prefix and optional positional suffix.
 pub fn parse_variadic_key(key: &str) -> (&str, Option<usize>) {
@@ -36,7 +35,7 @@ pub fn compare_variadic_keys(a: &str, b: &str) -> Ordering {
 }
 
 /// Collect operand_* ports in stable slot order.
-pub fn collect_operand_ports<'a>(inputs: &'a InputSlots<'a>) -> Vec<&'a PortValue> {
+pub fn collect_operand_ports<'a>(inputs: &'a InputSlots<'a>) -> Vec<&'a Value> {
     inputs.variadic("operand").iter().collect()
 }
 

@@ -7,7 +7,11 @@ as the detached nodes of an `arora-behavior-tree`
 - **the node vocabulary as module functions** (`functions`): one function of
   the module `@arora/node-graph` per node kind, and `NodeGraphModule`, which
   answers their calls in-process through a bridge over the device's. A
-  function runs its node kind's per-node code (`eval`);
+  function runs its node kind's per-node code (`eval`) over values, its
+  parameters (`params::Params`), the clock and its state. What a call does
+  that belongs to Vizij's graph format (an `input` node fitting its value to
+  its declared shape, the check of declared output shapes) is apart, in
+  `eval::vizij`;
 - **the importer** (`import`): a graph translated node for node into a tree
   and its detached nodes, as `BehaviorTree::try_from_groot_xml` reads a Groot
   file;

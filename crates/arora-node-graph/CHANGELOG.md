@@ -69,16 +69,29 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   first field. Their errors name what they received by its geometry type or
   its form (`vec3`, `record`, `text`).
 
+- The node functions compute on values and their own parameters. A node's
+  code reads and writes `Value`s, where it read and wrote `PortValue`s with a
+  shape inferred for each; it takes a `Node` (id, kind, `params::Params`)
+  where it took a `NodeSpec`. `Params` holds every `NodeParams` field but the
+  store path and the keyed-batch fields (`NodeParams::params`), and
+  `RoundMode` moves to `params`, re-exported from `types`.
+- `GraphRuntime` is `eval::Context`: one call's clock, its node's state and
+  the runs it requests. It stages no inputs: the module hands an `input` node
+  the value its key holds.
+- What a call does for Vizij's graph format moves to `eval::vizij`: an
+  `input` node fitting its value to its declared shape, the check of a
+  node's declared output shapes, and the writes of a path-less `output`
+  node's keyed batch.
+
 ### Removed
 
 - The reference evaluator: graphs run on the tree (`TreeRuntime`). Gone are
   `evaluate_all`, `evaluate_all_with_functions`,
   `evaluate_writes_with_functions`, `evaluate_all_cached` and `eval_node`,
   the plan cache (`PlanCache`) and the structural fingerprint
-  (`fingerprint_spec`, `GraphSpec::recompute_fingerprint`). `GraphRuntime`
-  holds what one node's evaluation reads and writes besides its ports.
-  `GraphSpec::with_cache` bumps `version` alone, and the `fingerprint` field
-  is not read.
+  (`fingerprint_spec`, `GraphSpec::recompute_fingerprint`), and
+  `StagedInput`. `GraphSpec::with_cache` bumps `version` alone, and the
+  `fingerprint` field is not read.
 
 ### Fixed
 

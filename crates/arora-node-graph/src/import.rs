@@ -218,9 +218,8 @@ pub fn import_json(
 ///
 /// Refuses, naming the node: an edge naming a node the graph does not have,
 /// two edges into one input, two nodes of one id, and a variadic port past
-/// the last a function declares
-/// ([`VARIADIC_PORTS`](crate::functions::VARIADIC_PORTS)). A cycle is
-/// refused when the tree is lowered. A call to another module is placed as
+/// the last a function declares ([`VARIADIC_PORTS`]). A cycle is refused when
+/// the tree is lowered. A call to another module is placed as
 /// [`placement`] says with no function described: ticked at every tick.
 pub fn import(spec: &GraphSpec, options: &ImportOptions) -> Result<ImportedGraph, String> {
     import_with(spec, options, &FunctionIndex::new())
