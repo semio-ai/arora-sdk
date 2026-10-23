@@ -43,7 +43,7 @@ arora-types = { path = "../arora-types", version = "3.1" }
 # shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
 # a Zenoh publisher keys on. Core only here — a backend is selected via [features].
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
-# 16: `AroraBuilder::with_studio` and `RunnerArgs::studio`, the run's
+# 16: `AroraBuilder::with_studio` and `studio::StudioArgs`, the run's
 # Studio choice, a run connecting only when it asks.
 arora = { path = "../arora", version = "16", optional = true }
 async-trait = "0.1"
