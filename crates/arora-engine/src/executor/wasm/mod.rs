@@ -246,7 +246,7 @@ impl WebAssemblyModule {
         module_id: u32,
         method_id: u32,
         arg: u32,
-    ) -> u32 {
+    ) -> wasmtime::Result<u32> {
         println!(
             "arora_dispatch: module_id: {}, method_id: {}, arg: {}",
             module_id, method_id, arg
@@ -274,16 +274,19 @@ impl WebAssemblyModule {
             .dispatch(&module_id, &method_id, arg.as_ref())
             .unwrap_or_else(|error| error_buffer(&error.to_string()));
 
-        let result_addr = malloc.call(&mut context, (result.len() as u32,)).unwrap();
+        // The calling guest is past its deadline when the call outlasted it:
+        // allocating the result then traps it, as its own code would.
+        let result_addr = malloc.call(&mut context, (result.len() as u32,))?;
 
-        memory
-            .write(&mut context, result_addr as usize, &result)
-            .unwrap();
+        memory.write(&mut context, result_addr as usize, &result)?;
 
-        result_addr
+        Ok(result_addr)
     }
 
-    fn arora_dispatch_indirect(mut caller: Caller<'_, HostState>, callable_id: u64) -> u32 {
+    fn arora_dispatch_indirect(
+        mut caller: Caller<'_, HostState>,
+        callable_id: u64,
+    ) -> wasmtime::Result<u32> {
         // SAFETY: re-entrant access to the engine; see `HostState::engine`.
         let arora_caller: &mut dyn CallBridge = unsafe { &mut *caller.data().engine.0 };
         // As in `arora_dispatch`: a call that fails is an error buffer.
@@ -302,15 +305,12 @@ impl WebAssemblyModule {
 
         let mut context = caller.as_context_mut();
 
-        let result_addr = malloc
-            .call(&mut context, (result_buffer.len() as u32,))
-            .unwrap();
+        // As in `arora_dispatch`: past the deadline, the allocation traps.
+        let result_addr = malloc.call(&mut context, (result_buffer.len() as u32,))?;
 
-        memory
-            .write(&mut context, result_addr as usize, &result_buffer)
-            .unwrap();
+        memory.write(&mut context, result_addr as usize, &result_buffer)?;
 
-        result_addr
+        Ok(result_addr)
     }
 
     pub fn new(
@@ -485,6 +485,7 @@ impl WebAssemblyModule {
         // Free the result.
         self.free
             .call(&mut self.store, (result,))
+            .inspect_err(|e| self.note_interrupt(e))
             .map_err(|e| DispatchError::Trap {
                 message: format!(
                     "failed to free the result for module {}: {:#?}",
@@ -805,6 +806,37 @@ exports:
         );
     }
 
+    /// A header for module `id`, named `name`, exporting `functions`, each
+    /// taking no parameter.
+    fn functions(id: Uuid, name: &str, functions: &[Uuid]) -> Header {
+        let exports: String = functions
+            .iter()
+            .map(|function| {
+                format!(
+                    "  - type: function\n    id: {function}\n    name: f{n}\n    \
+                     parameters: []\n    \
+                     ret: {{ kind: scalar, id: 00000000-0000-0000-0000-000000000000 }}\n",
+                    n = function.as_u128(),
+                )
+            })
+            .collect();
+        serde_yaml::from_str(&format!(
+            r#"
+id: {id}
+name: {name}
+author: ""
+description: ~
+license: ""
+version: {{ major: 1, minor: 0, patch: 0 }}
+executor: {{ name: wasm, min_version: ~, max_version: ~ }}
+imports: []
+executable_mime: ""
+exports:
+{exports}"#
+        ))
+        .expect("parse the header")
+    }
+
     /// A header for module `id` exporting `function`, taking no parameter.
     fn one_function(id: Uuid, function: Uuid) -> Header {
         serde_yaml::from_str(&format!(
@@ -933,6 +965,269 @@ exports:
                 .dispatch(&module, &grow, &[])
                 .expect("the call returns");
             assert_eq!(&*result, &[5, 0, 0, 0, grown], "a cap of {memory} bytes");
+            // A reloaded module is under the same cap.
+            engine.reload_module(&compiled).expect("reloads");
+            let result = engine
+                .dispatch(&module, &grow, &[])
+                .expect("the call returns");
+            assert_eq!(
+                &*result,
+                &[5, 0, 0, 0, grown],
+                "reloaded, a cap of {memory} bytes"
+            );
         }
+    }
+    /// A call without arguments to `function`, as a guest writes one.
+    fn no_arguments(function: Uuid) -> String {
+        use arora_types::value::{Structure, Value};
+        wat_bytes(&arora_buffers::serde_uuid::serialize(&Value::Structure(
+            Structure {
+                id: function,
+                fields: vec![],
+            },
+        )))
+    }
+
+    /// A guest calling another through `arora_dispatch`, when the callee
+    /// outlasts the caller's deadline, is interrupted once the call returns:
+    /// its call fails, it does not take the host down, and both modules
+    /// refuse calls until they are reloaded.
+    #[test]
+    fn a_guest_whose_callee_outlasts_its_deadline_is_interrupted() {
+        use crate::limits::EPOCH;
+        use std::time::{Duration, Instant};
+        let (caller, call) = (Uuid::from_u128(0xd3_0001), Uuid::from_u128(0xd3_0002));
+        let (callee, spin) = (Uuid::from_u128(0xd3_0003), Uuid::from_u128(0xd3_0004));
+        let caller_guest = format!(
+            r#"(module
+                (import "env" "arora_dispatch" (func $dispatch (param i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 256) "{callee}")
+                (data (i32.const 272) "{spin}")
+                (data (i32.const 512) "{arguments}")
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 4096)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{call}") (param i32) (result i32)
+                    (call $dispatch (i32.const 256) (i32.const 272) (i32.const 512))))"#,
+            callee = wat_bytes(callee.as_bytes()),
+            spin = wat_bytes(spin.as_bytes()),
+            arguments = no_arguments(spin),
+            call = call.to_string().replace('-', "_"),
+        );
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        for (header, guest) in [
+            (functions(caller, "caller", &[call]), caller_guest),
+            (functions(callee, "callee", &[spin]), spinning(spin)),
+        ] {
+            let compiled = CompiledModule::new(header, guest.as_bytes()).expect("compiles");
+            engine.load_compiled_module(&compiled).expect("loads");
+        }
+        // Only the caller has a budget: the callee's call ends by it.
+        let budget = Duration::from_millis(30);
+        engine.set_guest_limits(
+            caller,
+            crate::limits::GuestLimits {
+                call_budget: Some(budget),
+                ..crate::limits::GuestLimits::default()
+            },
+        );
+        let started = Instant::now();
+        let overran = engine.dispatch(&caller, &call, &[]).unwrap_err();
+        let took = started.elapsed();
+        assert!(
+            took >= budget && took < budget + 2 * EPOCH + Duration::from_millis(200),
+            "{took:?}"
+        );
+        assert!(
+            matches!(&overran, DispatchError::Trap { message }
+                if message.contains("of 'caller' overran its budget")),
+            "{overran:?}"
+        );
+        for (module, function) in [(caller, call), (callee, spin)] {
+            let refused = engine.dispatch(&module, &function, &[]).unwrap_err();
+            assert!(
+                matches!(&refused, DispatchError::Trap { message } if message.contains(OVERRAN)),
+                "{refused:?}"
+            );
+        }
+    }
+
+    /// A guest calling itself through `arora_dispatch` does not extend its
+    /// call's deadline: a loop of calls back into it is interrupted at its
+    /// budget.
+    #[test]
+    fn a_guest_calling_itself_keeps_its_call_s_deadline() {
+        use crate::limits::{GuestLimits, EPOCH};
+        use std::time::{Duration, Instant};
+        let (module, again, answer) = (
+            Uuid::from_u128(0xd4_0001),
+            Uuid::from_u128(0xd4_0002),
+            Uuid::from_u128(0xd4_0003),
+        );
+        // `again` calls `answer` of its own module, forever; `answer` returns
+        // a four-byte buffer at once.
+        let guest = format!(
+            r#"(module
+                (import "env" "arora_dispatch" (func $dispatch (param i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 256) "{module}")
+                (data (i32.const 272) "{answer}")
+                (data (i32.const 512) "{arguments}")
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 4096)
+                (func (export "arora_buffer_free") (param i32))
+                (func (export "arora_function_{again_name}") (param i32) (result i32)
+                    (loop $forever
+                        (drop (call $dispatch (i32.const 256) (i32.const 272) (i32.const 512)))
+                        (br $forever))
+                    i32.const 0)
+                (func (export "arora_function_{answer_name}") (param i32) (result i32)
+                    (i32.store (i32.const 2048) (i32.const 4))
+                    i32.const 2048))"#,
+            module = wat_bytes(module.as_bytes()),
+            answer = wat_bytes(answer.as_bytes()),
+            arguments = no_arguments(answer),
+            again_name = again.to_string().replace('-', "_"),
+            answer_name = answer.to_string().replace('-', "_"),
+        );
+        let budget = Duration::from_millis(50);
+        let mut engine = EngineBuilder::new()
+            .with_guest_limits(GuestLimits {
+                call_budget: Some(budget),
+                ..GuestLimits::default()
+            })
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        let compiled = CompiledModule::new(
+            functions(module, "reentrant", &[again, answer]),
+            guest.as_bytes(),
+        )
+        .expect("compiles");
+        engine.load_compiled_module(&compiled).expect("loads");
+        let started = Instant::now();
+        let overran = engine.dispatch(&module, &again, &[]).unwrap_err();
+        let took = started.elapsed();
+        assert!(
+            took >= budget && took < budget + 2 * EPOCH + Duration::from_millis(200),
+            "{took:?}"
+        );
+        assert!(
+            matches!(&overran, DispatchError::Trap { message }
+                if message.contains("of 'reentrant' overran its budget of 50 ms")),
+            "{overran:?}"
+        );
+    }
+
+    /// A guest interrupted while freeing its result is interrupted as in its
+    /// function: the module refuses calls until it is reloaded.
+    #[test]
+    fn a_guest_interrupted_freeing_its_result_refuses_calls() {
+        use crate::limits::GuestLimits;
+        use std::time::Duration;
+        let (module, function) = (Uuid::from_u128(0xd5_0001), Uuid::from_u128(0xd5_0002));
+        // Freeing the result, at 2048, never returns.
+        let guest = format!(
+            r#"(module
+                (memory (export "memory") 1)
+                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 1024)
+                (func (export "arora_buffer_free") (param i32)
+                    (if (i32.eq (local.get 0) (i32.const 2048))
+                        (then (loop $forever (br $forever)))))
+                (func (export "arora_function_{f}") (param i32) (result i32)
+                    (i32.store (i32.const 2048) (i32.const 4))
+                    i32.const 2048))"#,
+            f = function.to_string().replace('-', "_"),
+        );
+        let mut engine = EngineBuilder::new()
+            .with_guest_limits(GuestLimits {
+                call_budget: Some(Duration::from_millis(50)),
+                ..GuestLimits::default()
+            })
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        let compiled =
+            CompiledModule::new(functions(module, "freeing", &[function]), guest.as_bytes())
+                .expect("compiles");
+        engine.load_compiled_module(&compiled).expect("loads");
+        let overran = engine.dispatch(&module, &function, &[]).unwrap_err();
+        assert!(
+            matches!(&overran, DispatchError::Trap { message }
+                if message.contains("of 'freeing' overran its budget of 50 ms")),
+            "{overran:?}"
+        );
+        let refused = engine.dispatch(&module, &function, &[]).unwrap_err();
+        assert!(
+            matches!(&refused, DispatchError::Trap { message } if message.contains(OVERRAN)),
+            "{refused:?}"
+        );
+    }
+
+    /// During a step, a module's own budget and the time left in the step
+    /// bound its call together: whichever ends first.
+    #[test]
+    fn a_call_ends_by_the_earlier_of_the_step_and_its_module_s_budget() {
+        use crate::limits::{GuestLimits, EPOCH};
+        use std::time::{Duration, Instant};
+        let (module, spin) = (Uuid::from_u128(0xd6_0001), Uuid::from_u128(0xd6_0002));
+        let compiled =
+            CompiledModule::new(one_function(module, spin), spinning(spin).as_bytes()).unwrap();
+        let mut engine = EngineBuilder::new()
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        engine.load_compiled_module(&compiled).expect("loads");
+        let (short, long) = (Duration::from_millis(30), Duration::from_millis(400));
+        for (step, own) in [(long, short), (short, long)] {
+            engine.reload_module(&compiled).expect("reloads");
+            engine.set_guest_limits(
+                module,
+                GuestLimits {
+                    call_budget: Some(own),
+                    ..GuestLimits::default()
+                },
+            );
+            engine.set_step_budget(Some(step));
+            let started = Instant::now();
+            let overran = engine.dispatch(&module, &spin, &[]).unwrap_err();
+            let took = started.elapsed();
+            engine.set_step_budget(None);
+            assert!(
+                took < short + 2 * EPOCH + Duration::from_millis(200),
+                "step {step:?}, own {own:?}: {took:?}"
+            );
+            assert!(
+                matches!(&overran, DispatchError::Trap { message } if message.contains("overran")),
+                "{overran:?}"
+            );
+        }
+    }
+
+    /// The epoch counter follows the wall clock: a long budget is not
+    /// stretched by the ticker's sleeps overrunning.
+    #[test]
+    fn a_long_budget_is_kept_to_the_wall_clock() {
+        use crate::limits::GuestLimits;
+        use std::time::{Duration, Instant};
+        let (module, spin) = (Uuid::from_u128(0xd7_0001), Uuid::from_u128(0xd7_0002));
+        let compiled =
+            CompiledModule::new(one_function(module, spin), spinning(spin).as_bytes()).unwrap();
+        let budget = Duration::from_millis(800);
+        let mut engine = EngineBuilder::new()
+            .with_guest_limits(GuestLimits {
+                call_budget: Some(budget),
+                ..GuestLimits::default()
+            })
+            .add_executor(WebAssemblyExecutor::new().expect("the wasm executor"))
+            .build();
+        engine.load_compiled_module(&compiled).expect("loads");
+        let started = Instant::now();
+        engine.dispatch(&module, &spin, &[]).unwrap_err();
+        let took = started.elapsed();
+        // Counting sleeps instead overruns by several percent: 50 ms and more
+        // here.
+        assert!(
+            took >= budget && took < budget + Duration::from_millis(40),
+            "{took:?}"
+        );
     }
 }

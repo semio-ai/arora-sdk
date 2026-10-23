@@ -138,6 +138,12 @@ pub struct Engine {
     /// When the step under way ends, which no guest call outlasts.
     #[cfg(not(target_arch = "wasm32"))]
     step_deadline: Option<std::time::Instant>,
+    /// The guest calls under way, outermost first, each with its deadline: a
+    /// guest calling another, or itself, through the host. A nested call
+    /// ends by its caller's deadline, and a module called again while its
+    /// call is under way keeps that call's deadline.
+    #[cfg(not(target_arch = "wasm32"))]
+    guest_calls: Vec<(Uuid, std::time::Instant)>,
 }
 
 /// A module the engine dispatches to, and the executor that loaded it —
@@ -164,6 +170,8 @@ impl Engine {
             module_limits: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             step_deadline: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            guest_calls: Vec::new(),
         });
 
         {
@@ -362,6 +370,11 @@ impl Engine {
             (None, Some(own)) => own,
             (None, None) => now + crate::limits::DEFAULT_CALL_BUDGET,
         };
+        // A guest's call to another ends by its caller's deadline.
+        let deadline = match self.guest_calls.last() {
+            Some((_, caller)) => deadline.min(*caller),
+            None => deadline,
+        };
         (deadline, deadline.saturating_duration_since(now))
     }
 
@@ -405,13 +418,38 @@ impl Engine {
             .modules
             .get_mut(module_id)
             .ok_or(DispatchError::ModuleNotFound { id: *module_id })?;
+        let guest = match &module.signatures {
+            Some(signatures) => {
+                signatures
+                    .check(function_id, arg)
+                    .map_err(|message| DispatchError::Argument { message })?;
+                true
+            }
+            None => false,
+        };
         #[cfg(not(target_arch = "wasm32"))]
-        module.module.set_call_deadline(deadline, budget);
-        if let Some(signatures) = &module.signatures {
-            signatures
-                .check(function_id, arg)
-                .map_err(|message| DispatchError::Argument { message })?;
+        if guest {
+            // A module called again while its call is under way keeps that
+            // call's deadline and budget: setting them anew would extend the
+            // call under way, and an interrupted one would read as not.
+            let under_way = self
+                .guest_calls
+                .iter()
+                .find(|(id, _)| id == module_id)
+                .map(|(_, deadline)| *deadline);
+            let deadline = match under_way {
+                Some(deadline) => deadline,
+                None => {
+                    module.module.set_call_deadline(deadline, budget);
+                    deadline
+                }
+            };
+            self.guest_calls.push((*module_id, deadline));
+            let result = module.module.dispatch(function_id, arg);
+            self.guest_calls.pop();
+            return result;
         }
+        let _ = guest;
         module.module.dispatch(function_id, arg)
     }
 }

@@ -9,16 +9,17 @@ All notable changes to `arora-engine`. The format follows
 ### Added
 
 - A call to a guest module on wasmtime ends by a deadline, and its instance's
-  linear memory is capped (`arora_engine::limits`).
+  linear memories are capped (`arora_engine::limits`).
   - **Time.** The deadline is the end of the step a device is running
     (`Engine::set_step_budget`), else `DEFAULT_CALL_BUDGET`, one second, and
-    a module's `GuestLimits::call_budget` tightens it. A call still running
-    at its deadline is interrupted within one millisecond and fails with
-    `DispatchError::Trap`, naming the module, the function and the budget;
-    the module refuses its calls until it is reloaded.
-  - **Memory.** An instance holds at most `GuestLimits::memory` bytes,
-    `DEFAULT_MEMORY` (256 MiB) by default: a `memory.grow` past it returns -1
-    to the guest.
+    a module's `GuestLimits::call_budget` tightens it; a guest's call to
+    another ends by its caller's deadline. A call still running at its
+    deadline is interrupted less than two milliseconds past it and fails
+    with `DispatchError::Trap`, naming the module, the function and the
+    budget; the module refuses its calls until it is reloaded.
+  - **Memory.** Each linear memory of an instance holds at most
+    `GuestLimits::memory` bytes, `DEFAULT_MEMORY` (256 MiB) by default: a
+    `memory.grow` past it returns -1 to the guest.
   - Set for every module with `EngineBuilder::with_guest_limits`, for one
     with `Engine::set_guest_limits`.
   - `Executor::load_module_limited` and `load_compiled_module_limited`, which

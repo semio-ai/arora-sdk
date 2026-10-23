@@ -122,14 +122,19 @@ linear memory is capped ([`limits`](src/limits.rs)):
   outlast it. Outside a step it is `DEFAULT_CALL_BUDGET`, one second. A
   module's own `GuestLimits::call_budget`, set with `Engine::set_guest_limits`
   or for every module with `EngineBuilder::with_guest_limits`, tightens it, or
-  sets it outside a step. A call still running at its deadline is interrupted
-  within one millisecond: it fails with `DispatchError::Trap`, naming the
+  sets it outside a step. A guest's call to another guest ends by its
+  caller's deadline, and a guest calling back into itself keeps its call's.
+  A call still running at its deadline is interrupted less than two
+  milliseconds past it: it fails with `DispatchError::Trap`, naming the
   module, the function and the budget. The module then refuses its calls
   until it is reloaded, since the interrupted call can have left its state
-  half updated.
-- **Memory.** An instance holds at most `GuestLimits::memory` bytes, 256 MiB
-  by default. A `memory.grow` past it returns -1 to the guest, whose
-  allocator then reports the allocation failed.
+  half updated. A caller whose callee ran past the caller's deadline is
+  interrupted once the call returns.
+- **Memory.** Each linear memory of a guest's instance holds at most
+  `GuestLimits::memory` bytes, 256 MiB by default. A core module has one; a
+  component can hold several, each under the cap. A `memory.grow` past it
+  returns -1 to the guest, whose allocator then reports the allocation
+  failed.
 
 In the browser a guest runs on the JS thread, which nothing interrupts: the
 browser executors bound neither a call's time nor, beyond the maximum its

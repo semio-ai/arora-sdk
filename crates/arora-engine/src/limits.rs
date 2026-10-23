@@ -8,7 +8,8 @@
 //! the step's, and outside a step replaces the default. A guest still
 //! running at its deadline is interrupted: wasmtime checks an epoch counter,
 //! which a thread advances every [`EPOCH`], at function entries and loop
-//! back-edges, so a call returns within its deadline plus one epoch. Time a guest spends in a host
+//! back-edges, so a call is interrupted after its deadline and less than two
+//! epochs past it, as the counter's thread is scheduled. Time a guest spends in a host
 //! function, a WASI wait or a call to another module, is not interrupted:
 //! the guest is, once the host function returns. Its call fails with
 //! [`DispatchError::Trap`], naming the module, the function and the budget,
@@ -19,10 +20,16 @@
 //! 16.7 ms. Loading a module (its `_initialize`, a component's `functions`)
 //! runs under [`DEFAULT_CALL_BUDGET`].
 //!
-//! **Memory.** A guest's instance may hold up to [`GuestLimits::memory`]
-//! bytes of linear memory, [`DEFAULT_MEMORY`] by default: a `memory.grow`
-//! past it fails inside the guest, which sees the grow return -1, and the
-//! host grows nothing.
+//! A guest's call to another guest ends by its caller's deadline, and a guest
+//! calling back into itself keeps its call's deadline: the call under way is
+//! not extended. A caller whose callee ran past the caller's deadline is
+//! interrupted once the call returns.
+//!
+//! **Memory.** Each linear memory of a guest's instance may hold up to
+//! [`GuestLimits::memory`] bytes, [`DEFAULT_MEMORY`] by default: a
+//! `memory.grow` past it fails inside the guest, which sees the grow return
+//! -1, and the host grows nothing. A core module has one memory; a component
+//! can hold several, each under the cap.
 //!
 //! **In the browser** a guest runs on the JS thread, which nothing
 //! interrupts: the browser executors bound neither a call's time nor, beyond
@@ -42,13 +49,14 @@ pub const DEFAULT_CALL_BUDGET: Duration = Duration::from_secs(1);
 pub const DEFAULT_MEMORY: usize = 256 << 20;
 
 /// How often the counter a guest's deadline is checked against advances: a
-/// call overruns its deadline by at most this much.
+/// call overruns its deadline by less than two of these, as its thread is
+/// scheduled.
 pub const EPOCH: Duration = Duration::from_millis(1);
 
 /// What one guest module may spend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GuestLimits {
-    /// The linear memory its instance may hold, in bytes.
+    /// The bytes each linear memory of its instance may hold.
     pub memory: usize,
     /// The most a call to it may take. `None`: the time left in the step, or
     /// [`DEFAULT_CALL_BUDGET`] outside one. A budget longer than the time
@@ -66,13 +74,14 @@ impl Default for GuestLimits {
 }
 
 /// The deadline a guest's store runs to, as wasmtime counts it: the epochs
-/// from now until `deadline`, rounded up and at least one, so a call made
-/// with no time left still runs for one epoch rather than failing unentered.
+/// from now until `deadline`, rounded up, and one more. The counter's next
+/// tick can come at once, so `n` ticks span more than `n - 1` epochs: one
+/// more keeps a call from ending before `deadline`, and lets a call made with
+/// no time left run for an epoch rather than fail unentered.
 #[cfg(feature = "wasmtime-host")]
 pub(crate) fn epochs_until(deadline: std::time::Instant) -> u64 {
     let left = deadline.saturating_duration_since(std::time::Instant::now());
-    let epochs = left.as_nanos().div_ceil(EPOCH.as_nanos());
-    (epochs as u64).max(1)
+    left.as_nanos().div_ceil(EPOCH.as_nanos()) as u64 + 1
 }
 
 /// Advance `engine`'s epoch every [`EPOCH`], from a thread of its own, for the
@@ -83,10 +92,20 @@ pub(crate) fn tick(engine: &wasmtime::Engine) {
     std::thread::Builder::new()
         .name("arora-epoch".into())
         .spawn(move || {
+            // The counter follows the wall clock, not the count of sleeps:
+            // every sleep overruns, and a deadline counted in epochs would
+            // drift later by as much.
+            let start = std::time::Instant::now();
+            let mut ticked: u128 = 0;
             while let Some(engine) = engine.upgrade() {
-                engine.increment_epoch();
+                let due = start.elapsed().as_nanos() / EPOCH.as_nanos();
+                while ticked < due {
+                    engine.increment_epoch();
+                    ticked += 1;
+                }
                 drop(engine);
-                std::thread::sleep(EPOCH);
+                let next = start + Duration::from_nanos(((ticked + 1) * EPOCH.as_nanos()) as u64);
+                std::thread::sleep(next.saturating_duration_since(std::time::Instant::now()));
             }
         })
         .expect("spawn the epoch thread");
@@ -108,11 +127,11 @@ mod tests {
 
     #[cfg(feature = "wasmtime-host")]
     #[test]
-    fn a_deadline_is_counted_in_whole_epochs_and_at_least_one() {
+    fn a_deadline_is_counted_in_whole_epochs_and_one_more() {
         let now = std::time::Instant::now();
         assert_eq!(epochs_until(now), 1);
         assert_eq!(epochs_until(now - Duration::from_secs(1)), 1);
         let ten = epochs_until(now + Duration::from_millis(10));
-        assert!((9..=10).contains(&ten), "{ten}");
+        assert!((10..=11).contains(&ten), "{ten}");
     }
 }

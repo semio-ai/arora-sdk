@@ -1371,11 +1371,9 @@ exports:
                 answers: answers.clone(),
             }),
         );
-        arora
-            .load_module(
-                &arora_engine::compiled::CompiledModule::new(header, guest.as_bytes()).unwrap(),
-            )
-            .unwrap();
+        let compiled =
+            arora_engine::compiled::CompiledModule::new(header, guest.as_bytes()).unwrap();
+        arora.load_module(&compiled).unwrap();
         let _ = tokio::time::timeout(
             Duration::from_millis(300),
             arora.run(Duration::from_millis(20)),
@@ -1399,6 +1397,23 @@ exports:
                 "{refused}"
             );
         }
+        drop(answers);
+
+        // Once the run is over, no step bounds a call: reloaded, the module's
+        // call gets its own budget.
+        arora.reload_module(&compiled).unwrap();
+        arora.engine.set_guest_limits(
+            module,
+            arora_engine::limits::GuestLimits {
+                call_budget: Some(Duration::from_millis(100)),
+                ..Default::default()
+            },
+        );
+        let overran = arora.engine.dispatch(&module, &spin, &[]).unwrap_err();
+        assert!(
+            overran.to_string().contains("overran its budget of 100 ms"),
+            "{overran}"
+        );
     }
 
     /// `run` paces the step at the requested period: over a fixed wall-clock
