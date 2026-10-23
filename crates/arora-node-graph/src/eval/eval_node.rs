@@ -20,18 +20,18 @@ use super::urdfik::{
     apply_joint_positions, describe, fetch_joint_vector, hash_urdf_config, quat_from_value,
     tip_pose, vector_from_value, IkKey, IkRequest, IkTarget,
 };
-use super::value_layout::{align_flattened, flatten_numeric, FlatValue, PortValue};
+use super::value_layout::{align_flattened, flatten_numeric, FlatValue};
 use super::variadic::fold_numeric_variadic;
 
 /// Read-only view of a node's inputs backed by slot-indexed storage.
 pub struct InputSlots<'a> {
-    slots: &'a [PortValue],
+    slots: &'a [Value],
     present: &'a [bool],
     layout: &'a PortLayout,
 }
 
 impl<'a> InputSlots<'a> {
-    pub fn new(slots: &'a [PortValue], present: &'a [bool], layout: &'a PortLayout) -> Self {
+    pub fn new(slots: &'a [Value], present: &'a [bool], layout: &'a PortLayout) -> Self {
         InputSlots {
             slots,
             present,
@@ -40,7 +40,7 @@ impl<'a> InputSlots<'a> {
     }
 
     /// Fetch an input by name if present.
-    pub fn get(&self, name: &str) -> Option<&PortValue> {
+    pub fn get(&self, name: &str) -> Option<&Value> {
         self.layout.slot(name).and_then(|idx| {
             if self.present.get(idx).copied().unwrap_or(false) {
                 self.slots.get(idx)
@@ -51,7 +51,7 @@ impl<'a> InputSlots<'a> {
     }
 
     /// Fetch an input by slot index.
-    pub fn get_slot(&self, slot: usize) -> Option<&PortValue> {
+    pub fn get_slot(&self, slot: usize) -> Option<&Value> {
         if self.present.get(slot).copied().unwrap_or(false) {
             self.slots.get(slot)
         } else {
@@ -74,7 +74,7 @@ impl<'a> InputSlots<'a> {
     }
 
     /// Iterate over inputs in slot order.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &PortValue)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
         self.layout
             .slots
             .iter()
@@ -83,7 +83,7 @@ impl<'a> InputSlots<'a> {
     }
 
     /// Slice a variadic group by name; returns an empty slice when the group is absent.
-    pub fn variadic(&self, group: &str) -> &[PortValue] {
+    pub fn variadic(&self, group: &str) -> &[Value] {
         if let Some(range) = self.layout.variadic_range(group) {
             let end = range.start.saturating_add(range.len);
             if range.start <= self.slots.len() && end <= self.slots.len() {
@@ -96,20 +96,20 @@ impl<'a> InputSlots<'a> {
 
 /// Mutable view of a node's outputs backed by slot-indexed storage.
 pub struct OutputSlots<'a> {
-    slots: &'a mut Vec<PortValue>,
+    slots: &'a mut Vec<Value>,
     layout: &'a PortLayout,
 }
 
 impl<'a> OutputSlots<'a> {
-    pub fn new(slots: &'a mut Vec<PortValue>, layout: &'a PortLayout) -> Self {
+    pub fn new(slots: &'a mut Vec<Value>, layout: &'a PortLayout) -> Self {
         OutputSlots { slots, layout }
     }
 
-    pub fn as_slice(&self) -> &[PortValue] {
+    pub fn as_slice(&self) -> &[Value] {
         self.slots.as_slice()
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut [PortValue] {
+    pub fn as_mut_slice(&mut self) -> &mut [Value] {
         self.slots.as_mut_slice()
     }
 
@@ -118,29 +118,21 @@ impl<'a> OutputSlots<'a> {
         self.slots.clear();
     }
 
-    /// Write a port to a named slot.
-    pub fn set(&mut self, name: &str, port: PortValue) -> Result<(), String> {
+    /// Write a value to a named slot.
+    pub fn set(&mut self, name: &str, value: Value) -> Result<(), String> {
         let slot = self
             .layout
             .slot(name)
             .ok_or_else(|| format!("unknown output slot '{}'", name))?;
         if self.slots.len() <= slot {
-            self.slots.resize(slot + 1, PortValue::default());
+            self.slots.resize(slot + 1, Value::F32(0.0));
         }
-        self.slots[slot] = port;
+        self.slots[slot] = value;
         Ok(())
     }
 
-    pub fn set_value(&mut self, name: &str, value: Value) -> Result<(), String> {
-        self.set(name, PortValue::new(value))
-    }
-
-    pub fn set_port(&mut self, name: &str, port: PortValue) -> Result<(), String> {
-        self.set(name, port)
-    }
-
     /// Write into a variadic group by index (0-based inside the group).
-    pub fn set_variadic(&mut self, group: &str, idx: usize, port: PortValue) -> Result<(), String> {
+    pub fn set_variadic(&mut self, group: &str, idx: usize, value: Value) -> Result<(), String> {
         let range = self
             .layout
             .variadic_range(group)
@@ -153,9 +145,9 @@ impl<'a> OutputSlots<'a> {
         }
         let slot = range.start + idx;
         if self.slots.len() <= slot {
-            self.slots.resize(slot + 1, PortValue::default());
+            self.slots.resize(slot + 1, Value::F32(0.0));
         }
-        self.slots[slot] = port;
+        self.slots[slot] = value;
         Ok(())
     }
 }
@@ -165,12 +157,7 @@ const PIECEWISE_OUTPUT_EPS: f32 = 1e-5;
 
 /// Write to a named output slot.
 fn keyed_output(outputs: &mut OutputSlots, key: &str, value: Value) -> Result<(), String> {
-    outputs.set_value(key, value)
-}
-
-/// Write a pre-shaped port value to a named output slot.
-fn keyed_port(outputs: &mut OutputSlots, key: &str, port: PortValue) -> Result<(), String> {
-    outputs.set_port(key, port)
+    outputs.set(key, value)
 }
 
 /// Write to the default `out` slot.
@@ -188,37 +175,12 @@ pub fn eval_node_inner(
     functions: Option<&mut dyn NodeFunctions>,
 ) -> Result<(), String> {
     evaluate_kind_inner(rt, spec, inputs, outputs, functions)?;
-    enforce_output_shapes_slots(spec, outputs.layout, outputs.as_mut_slice())?;
-
-    // Only explicit sink nodes (Output) publish external writes.
-    if matches!(spec.kind, NodeType::Output) {
-        if let Some(path) = spec.params.path.clone() {
-            if let Some(slot) = outputs.layout.slot("out") {
-                if let Some(port) = outputs.as_slice().get(slot) {
-                    rt.writes.push(WriteOp::new_with_shape(
-                        path,
-                        port.value.clone(),
-                        Some(port.shape.clone()),
-                    ));
-                }
-            }
-        } else if let (Some(key_field), Some(value_field)) =
-            (spec.params.key_field, spec.params.value_field)
-        {
-            if let Some(slot) = outputs.layout.slot("out") {
-                if let Some(port) = outputs.as_slice().get(slot) {
-                    expand_keyed_batch(rt, &port.value, key_field, value_field)
-                        .map_err(|message| format!("node '{}': {message}", spec.id))?;
-                }
-            }
-        }
-    }
-    Ok(())
+    enforce_output_shapes_slots(spec, outputs.layout, outputs.as_slice())
 }
 
-/// Expand a keyed record batch into one write per record: how a **path-less**
-/// [`NodeType::Output`] applies a value that names its own keys (e.g. a module
-/// call's "what changed") onto them by default.
+/// The writes a keyed record batch makes, in batch order: how a
+/// **path-less** [`NodeType::Output`] applies a value that names its own keys
+/// (e.g. a module call's "what changed") onto them.
 ///
 /// The batch is a `Value::ArrayStructure`; in every record, `key_field` holds
 /// the target path as a string and `value_field` the value to write. A record
@@ -227,21 +189,6 @@ pub fn eval_node_inner(
 /// Records repeating a key produce writes in batch order, and the per-tick
 /// flush keeps the last one; explicit combination of concurrent publishers is
 /// VIZ-76's ground (https://linear.app/semio-ai/issue/VIZ-76).
-fn expand_keyed_batch(
-    rt: &mut GraphRuntime,
-    batch: &Value,
-    key_field: Uuid,
-    value_field: Uuid,
-) -> Result<(), String> {
-    for op in keyed_batch_writes(batch, key_field, value_field)? {
-        rt.writes.push(op);
-    }
-    Ok(())
-}
-
-/// The writes a keyed record batch makes, in batch order: one per record,
-/// of its `value_field` under the path its `key_field` holds; see
-/// [`expand_keyed_batch`].
 pub fn keyed_batch_writes(
     batch: &Value,
     key_field: Uuid,
@@ -442,7 +389,7 @@ fn eval_task_run(
     // run's update key reaches the call each tick. A live field wins over a
     // stated one for the same parameter.
     let mut args = bundle_fields(spec.params.value.as_ref())?;
-    for (id, value) in bundle_fields(inputs.get("args").map(|port| &port.value))? {
+    for (id, value) in bundle_fields(inputs.get("args"))? {
         set_arg(&mut args, id, value);
     }
 
@@ -510,10 +457,10 @@ fn eval_spawn(
             .ok_or_else(|| format!("Spawn arg slot {i} has no parameter id in record_keys"))?;
         let id = Uuid::parse_str(key)
             .map_err(|e| format!("Spawn arg slot {i}: '{key}' is not a parameter id: {e}"))?;
-        set_arg(&mut args, id, slot.value.clone());
+        set_arg(&mut args, id, slot.clone());
     }
 
-    let when = inputs.get("when").map(|port| port.value.clone());
+    let when = inputs.get("when").cloned();
 
     let changed = match rt.node_states.get_mut(&spec.id) {
         Some(NodeRuntimeState::Spawn(state)) => {
@@ -571,7 +518,7 @@ fn out_parameter_ports(
                 .map(|(_, v)| (*v).clone())
                 .unwrap_or(vocab::float(0.0))
         };
-        outputs.set_variadic("mutated", i, PortValue::new(value))?;
+        outputs.set_variadic("mutated", i, value)?;
     }
     Ok(())
 }
@@ -596,19 +543,19 @@ fn eval_external_function(
     let args: Vec<(Uuid, Value)> = param_ids
         .iter()
         .copied()
-        .zip(inputs.variadic("args").iter().map(|pv| pv.value.clone()))
+        .zip(inputs.variadic("args").iter().cloned())
         .collect();
 
     let ret = functions.call(function, &args)?;
 
-    outputs.set_value("out", ret)
+    outputs.set("out", ret)
 }
 
-fn input_or_default(inputs: &InputSlots, key: &str) -> PortValue {
-    inputs
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| PortValue::new(vocab::float(0.0)))
+/// The value an input reads, or `0` for an input with no edge and no
+/// default.
+fn input_or_default<'a>(inputs: &'a InputSlots, key: &str) -> &'a Value {
+    static ZERO: Value = Value::F32(0.0);
+    inputs.get(key).unwrap_or(&ZERO)
 }
 
 fn eval_constant(params: &NodeParams, outputs: &mut OutputSlots) -> Result<(), String> {
@@ -635,35 +582,26 @@ fn eval_arithmetic(
 ) -> Result<(), String> {
     match kind {
         NodeType::Add => {
-            let values: Vec<Value> = collect_operand_ports(inputs)
-                .iter()
-                .map(|pv| pv.value.clone())
-                .collect();
-            let result = fold_numeric_variadic(&values, |x, y| x + y, vocab::float(0.0));
+            let values = inputs.variadic("operand");
+            let result = fold_numeric_variadic(values, |x, y| x + y, vocab::float(0.0));
             single_output(outputs, result)
         }
         NodeType::Multiply => {
-            let values: Vec<Value> = collect_operand_ports(inputs)
-                .iter()
-                .map(|pv| pv.value.clone())
-                .collect();
-            let result = fold_numeric_variadic(&values, |x, y| x * y, vocab::float(1.0));
+            let values = inputs.variadic("operand");
+            let result = fold_numeric_variadic(values, |x, y| x * y, vocab::float(1.0));
             single_output(outputs, result)
         }
         NodeType::Subtract => {
             let lhs = input_or_default(inputs, "lhs");
             let rhs = input_or_default(inputs, "rhs");
-            single_output(
-                outputs,
-                binary_numeric(&lhs.value, &rhs.value, |x, y| x - y),
-            )
+            single_output(outputs, binary_numeric(lhs, rhs, |x, y| x - y))
         }
         NodeType::Divide => {
             let lhs = input_or_default(inputs, "lhs");
             let rhs = input_or_default(inputs, "rhs");
             single_output(
                 outputs,
-                binary_numeric(&lhs.value, &rhs.value, |x, y| {
+                binary_numeric(lhs, rhs, |x, y| {
                     if y.abs() <= f32::EPSILON {
                         f32::NAN
                     } else {
@@ -675,25 +613,19 @@ fn eval_arithmetic(
         NodeType::Power => {
             let base = input_or_default(inputs, "base");
             let exp = input_or_default(inputs, "exp");
-            single_output(
-                outputs,
-                binary_numeric(&base.value, &exp.value, |x, y| x.powf(y)),
-            )
+            single_output(outputs, binary_numeric(base, exp, |x, y| x.powf(y)))
         }
         NodeType::Log => {
             let value = input_or_default(inputs, "value");
             let base = input_or_default(inputs, "base");
-            single_output(
-                outputs,
-                binary_numeric(&value.value, &base.value, |x, b| x.log(b)),
-            )
+            single_output(outputs, binary_numeric(value, base, |x, b| x.log(b)))
         }
         NodeType::Modulo => {
             let lhs = input_or_default(inputs, "lhs");
             let rhs = input_or_default(inputs, "rhs");
             single_output(
                 outputs,
-                binary_numeric(&lhs.value, &rhs.value, |x, y| {
+                binary_numeric(lhs, rhs, |x, y| {
                     if y.abs() <= f32::EPSILON {
                         f32::NAN
                     } else {
@@ -713,11 +645,11 @@ fn eval_unary_scalar(
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
     match kind {
-        NodeType::Abs => single_output(outputs, unary_numeric(&input.value, |x| x.abs())),
-        NodeType::Sqrt => single_output(outputs, unary_numeric(&input.value, |x| x.sqrt())),
+        NodeType::Abs => single_output(outputs, unary_numeric(input, |x| x.abs())),
+        NodeType::Sqrt => single_output(outputs, unary_numeric(input, |x| x.sqrt())),
         NodeType::Sign => single_output(
             outputs,
-            unary_numeric(&input.value, |x| {
+            unary_numeric(input, |x| {
                 if x > 0.0 {
                     1.0
                 } else if x < 0.0 {
@@ -736,17 +668,14 @@ fn eval_min_max(
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
-    let values: Vec<Value> = collect_operand_ports(inputs)
-        .iter()
-        .map(|pv| pv.value.clone())
-        .collect();
+    let values = inputs.variadic("operand");
     let empty = vocab::float(f32::NAN);
     let op = match kind {
         NodeType::Min => f32::min,
         NodeType::Max => f32::max,
         _ => unreachable!(),
     };
-    let result = fold_numeric_variadic(&values, op, empty);
+    let result = fold_numeric_variadic(values, op, empty);
     single_output(outputs, result)
 }
 
@@ -762,7 +691,7 @@ fn eval_round(
         RoundMode::Ceil => f32::ceil,
         RoundMode::Trunc => f32::trunc,
     };
-    single_output(outputs, unary_numeric(&input.value, op))
+    single_output(outputs, unary_numeric(input, op))
 }
 
 fn eval_trig(
@@ -777,7 +706,7 @@ fn eval_trig(
         NodeType::Tan => f32::tan,
         _ => unreachable!(),
     };
-    single_output(outputs, unary_numeric(&input.value, op))
+    single_output(outputs, unary_numeric(input, op))
 }
 
 fn eval_time(rt: &GraphRuntime, outputs: &mut OutputSlots) -> Result<(), String> {
@@ -792,8 +721,8 @@ fn eval_oscillator(
     let freq_port = input_or_default(inputs, "frequency");
     let phase_port = input_or_default(inputs, "phase");
 
-    let freq_value = freq_port.value.clone();
-    let phase_value = phase_port.value.clone();
+    let freq_value = freq_port.clone();
+    let phase_value = phase_port.clone();
 
     let freq_flat = flatten_numeric(&freq_value);
     let phase_flat = flatten_numeric(&phase_value);
@@ -933,7 +862,7 @@ fn eval_stateful(
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
-    match (kind, flatten_numeric(&input.value)) {
+    match (kind, flatten_numeric(input)) {
         (NodeType::Spring, Some(flat)) => {
             let dt = if rt.dt.is_finite() {
                 rt.dt.max(0.0)
@@ -1059,18 +988,15 @@ fn eval_logic(
 ) -> Result<(), String> {
     let value = match kind {
         NodeType::And => {
-            as_bool(&input_or_default(inputs, "lhs").value)
-                && as_bool(&input_or_default(inputs, "rhs").value)
+            as_bool(input_or_default(inputs, "lhs")) && as_bool(input_or_default(inputs, "rhs"))
         }
         NodeType::Or => {
-            as_bool(&input_or_default(inputs, "lhs").value)
-                || as_bool(&input_or_default(inputs, "rhs").value)
+            as_bool(input_or_default(inputs, "lhs")) || as_bool(input_or_default(inputs, "rhs"))
         }
         NodeType::Xor => {
-            as_bool(&input_or_default(inputs, "lhs").value)
-                ^ as_bool(&input_or_default(inputs, "rhs").value)
+            as_bool(input_or_default(inputs, "lhs")) ^ as_bool(input_or_default(inputs, "rhs"))
         }
-        NodeType::Not => !as_bool(&input_or_default(inputs, "in").value),
+        NodeType::Not => !as_bool(input_or_default(inputs, "in")),
         _ => unreachable!(),
     };
     single_output(outputs, vocab::bool_(value))
@@ -1084,23 +1010,23 @@ fn eval_comparison(
     let lhs = input_or_default(inputs, "lhs");
     let rhs = input_or_default(inputs, "rhs");
     let value = match kind {
-        NodeType::GreaterThan => as_float(&lhs.value) > as_float(&rhs.value),
-        NodeType::LessThan => as_float(&lhs.value) < as_float(&rhs.value),
-        NodeType::Equal => (as_float(&lhs.value) - as_float(&rhs.value)).abs() < 1e-6,
-        NodeType::NotEqual => (as_float(&lhs.value) - as_float(&rhs.value)).abs() > 1e-6,
+        NodeType::GreaterThan => as_float(lhs) > as_float(rhs),
+        NodeType::LessThan => as_float(lhs) < as_float(rhs),
+        NodeType::Equal => (as_float(lhs) - as_float(rhs)).abs() < 1e-6,
+        NodeType::NotEqual => (as_float(lhs) - as_float(rhs)).abs() > 1e-6,
         _ => unreachable!(),
     };
     single_output(outputs, vocab::bool_(value))
 }
 
 fn eval_if(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
-    let cond = as_bool(&input_or_default(inputs, "cond").value);
+    let cond = as_bool(input_or_default(inputs, "cond"));
     let branch = if cond {
         input_or_default(inputs, "then")
     } else {
         input_or_default(inputs, "else")
     };
-    single_output(outputs, branch.value)
+    single_output(outputs, branch.clone())
 }
 
 fn eval_clamp(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
@@ -1114,11 +1040,8 @@ fn eval_clamp(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), Stri
         .get("max")
         .ok_or_else(|| "Clamp requires 'max' input".to_string())?;
 
-    let clamped_low = binary_numeric(&value.value, &min.value, |x, m| x.max(m));
-    single_output(
-        outputs,
-        binary_numeric(&clamped_low, &max.value, |x, m| x.min(m)),
-    )
+    let clamped_low = binary_numeric(value, min, |x, m| x.max(m));
+    single_output(outputs, binary_numeric(&clamped_low, max, |x, m| x.min(m)))
 }
 
 fn eval_remap(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
@@ -1138,19 +1061,19 @@ fn eval_remap(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), Stri
         .get("out_max")
         .ok_or_else(|| "Remap requires 'out_max' input".to_string())?;
 
-    let numer = binary_numeric(&value.value, &in_min.value, |v, min| v - min);
-    let denom = binary_numeric(&in_max.value, &in_min.value, |max, min| max - min);
+    let numer = binary_numeric(value, in_min, |v, min| v - min);
+    let denom = binary_numeric(in_max, in_min, |max, min| max - min);
     let ratio = binary_numeric(
         &numer,
         &denom,
         |n, d| if d != 0.0 { n / d } else { f32::NAN },
     );
     let ratio_clamped = unary_numeric(&ratio, |x| x.clamp(0.0, 1.0));
-    let span = binary_numeric(&out_max.value, &out_min.value, |max, min| max - min);
+    let span = binary_numeric(out_max, out_min, |max, min| max - min);
     let scaled = binary_numeric(&ratio_clamped, &span, |t, span| t * span);
     single_output(
         outputs,
-        binary_numeric(&scaled, &out_min.value, |scaled, min| scaled + min),
+        binary_numeric(&scaled, out_min, |scaled, min| scaled + min),
     )
 }
 
@@ -1177,12 +1100,12 @@ fn eval_centered_remap(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result
         .get("out_high")
         .ok_or_else(|| "CenteredRemap requires 'out_high' input".to_string())?;
 
-    let in_low = as_float(&in_low.value);
-    let in_anchor = as_float(&in_anchor.value);
-    let in_high = as_float(&in_high.value);
-    let out_low = as_float(&out_low.value);
-    let out_anchor = as_float(&out_anchor.value);
-    let out_high = as_float(&out_high.value);
+    let in_low = as_float(in_low);
+    let in_anchor = as_float(in_anchor);
+    let in_high = as_float(in_high);
+    let out_low = as_float(out_low);
+    let out_anchor = as_float(out_anchor);
+    let out_high = as_float(out_high);
 
     let below_span = in_anchor - in_low;
     let above_span = in_high - in_anchor;
@@ -1197,7 +1120,7 @@ fn eval_centered_remap(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result
         0.0
     };
 
-    let remapped = unary_numeric(&value.value, |x| {
+    let remapped = unary_numeric(value, |x| {
         if x <= in_anchor {
             out_anchor + below_slope * (x - in_anchor)
         } else {
@@ -1222,15 +1145,15 @@ fn eval_piecewise_remap(
         .get("output_breakpoints")
         .ok_or_else(|| "PiecewiseRemap requires 'output_breakpoints' input".to_string())?;
 
-    let input_flat = flatten_numeric(&input_breakpoints_port.value)
+    let input_flat = flatten_numeric(input_breakpoints_port)
         .ok_or_else(|| "PiecewiseRemap expects numeric input breakpoints".to_string())?;
-    let output_flat = flatten_numeric(&output_breakpoints_port.value)
+    let output_flat = flatten_numeric(output_breakpoints_port)
         .ok_or_else(|| "PiecewiseRemap expects numeric output breakpoints".to_string())?;
 
     let config = prepare_piecewise_breakpoints(input_flat.data, output_flat.data)?;
     let clamp_enabled = params.clamp.unwrap_or(false);
 
-    let remapped = match flatten_numeric(&value_port.value) {
+    let remapped = match flatten_numeric(value_port) {
         Some(flat) => {
             let data: Vec<f32> = flat
                 .data
@@ -1400,7 +1323,7 @@ fn approx_equal(a: f32, b: f32) -> bool {
 fn eval_vec3_cross(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let a = input_or_default(inputs, "a");
     let b = input_or_default(inputs, "b");
-    match (flatten_numeric(&a.value), flatten_numeric(&b.value)) {
+    match (flatten_numeric(a), flatten_numeric(b)) {
         (Some(a_flat), Some(b_flat))
             if a_flat.layout.scalar_len() == 3 && b_flat.layout.scalar_len() == 3 =>
         {
@@ -1436,25 +1359,22 @@ fn eval_vector_arithmetic(
         NodeType::VectorAdd => {
             let a = input_or_default(inputs, "a");
             let b = input_or_default(inputs, "b");
-            single_output(outputs, binary_numeric(&a.value, &b.value, |x, y| x + y))
+            single_output(outputs, binary_numeric(a, b, |x, y| x + y))
         }
         NodeType::VectorSubtract => {
             let a = input_or_default(inputs, "a");
             let b = input_or_default(inputs, "b");
-            single_output(outputs, binary_numeric(&a.value, &b.value, |x, y| x - y))
+            single_output(outputs, binary_numeric(a, b, |x, y| x - y))
         }
         NodeType::VectorMultiply => {
             let a = input_or_default(inputs, "a");
             let b = input_or_default(inputs, "b");
-            single_output(outputs, binary_numeric(&a.value, &b.value, |x, y| x * y))
+            single_output(outputs, binary_numeric(a, b, |x, y| x * y))
         }
         NodeType::VectorScale => {
             let vector = input_or_default(inputs, "v");
             let scalar = input_or_default(inputs, "scalar");
-            single_output(
-                outputs,
-                binary_numeric(&vector.value, &scalar.value, |x, s| x * s),
-            )
+            single_output(outputs, binary_numeric(vector, scalar, |x, s| x * s))
         }
         _ => unreachable!(),
     }
@@ -1462,7 +1382,7 @@ fn eval_vector_arithmetic(
 
 fn eval_vector_normalize(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let value = input_or_default(inputs, "in");
-    match flatten_numeric(&value.value) {
+    match flatten_numeric(value) {
         Some(flat) => {
             let len_sq: f32 = flat.data.iter().map(|x| x * x).sum();
             let len = len_sq.sqrt();
@@ -1480,7 +1400,7 @@ fn eval_vector_normalize(inputs: &InputSlots, outputs: &mut OutputSlots) -> Resu
 fn eval_vector_dot(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let a = input_or_default(inputs, "a");
     let b = input_or_default(inputs, "b");
-    match (flatten_numeric(&a.value), flatten_numeric(&b.value)) {
+    match (flatten_numeric(a), flatten_numeric(b)) {
         (Some(lhs), Some(rhs)) => match align_flattened(&lhs, &rhs) {
             Ok((_, da, db)) => {
                 let sum = da.iter().zip(db.iter()).map(|(x, y)| x * y).sum::<f32>();
@@ -1494,7 +1414,7 @@ fn eval_vector_dot(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(),
 
 fn eval_vector_length(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let value = input_or_default(inputs, "in");
-    match flatten_numeric(&value.value) {
+    match flatten_numeric(value) {
         Some(flat) => {
             let len_sq: f32 = flat.data.iter().map(|x| x * x).sum();
             single_output(outputs, vocab::float(len_sq.sqrt()))
@@ -1505,8 +1425,8 @@ fn eval_vector_length(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<
 
 fn eval_vector_index(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let value = input_or_default(inputs, "v");
-    let index = as_float(&input_or_default(inputs, "index").value);
-    if let Some(flat) = flatten_numeric(&value.value) {
+    let index = as_float(input_or_default(inputs, "index"));
+    if let Some(flat) = flatten_numeric(value) {
         let i = index.floor() as isize;
         let len = flat.data.len() as isize;
         if i >= 0 && i < len {
@@ -1522,7 +1442,7 @@ fn eval_vector_index(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(
 fn eval_join(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let mut out: Vec<f32> = Vec::new();
     for port in collect_operand_ports(inputs) {
-        if let Some(flat) = flatten_numeric(&port.value) {
+        if let Some(flat) = flatten_numeric(port) {
             out.extend(flat.data);
         }
     }
@@ -1535,9 +1455,7 @@ fn eval_split(
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
-    let data = flatten_numeric(&input.value)
-        .map(|f| f.data)
-        .unwrap_or_default();
+    let data = flatten_numeric(input).map(|f| f.data).unwrap_or_default();
     let sizes = params.sizes.clone().unwrap_or_default();
     let sizes_usize: Vec<usize> = sizes.iter().map(|x| x.floor().max(0.0) as usize).collect();
 
@@ -1552,12 +1470,12 @@ fn eval_split(
         } else {
             vec![f32::NAN; sz]
         };
-        outputs.set_variadic("parts", i, PortValue::new(vocab::vector(value_vec)))?;
+        outputs.set_variadic("parts", i, vocab::vector(value_vec))?;
     }
 
     // If no sizes provided, emit a single empty part.
     if sizes_usize.is_empty() {
-        outputs.set_variadic("parts", 0, PortValue::new(vocab::vector(Vec::new())))?;
+        outputs.set_variadic("parts", 0, vocab::vector(Vec::new()))?;
     }
 
     Ok(())
@@ -1565,20 +1483,18 @@ fn eval_split(
 
 fn eval_to_vector(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let operands = collect_operand_ports(inputs);
-    let vec: Vec<f32> = operands.iter().map(|pv| as_float(&pv.value)).collect();
+    let vec: Vec<f32> = operands.iter().map(|pv| as_float(pv)).collect();
     single_output(outputs, vocab::vector(vec))
 }
 
 fn eval_from_vector(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
-    let data = flatten_numeric(&input.value)
-        .map(|f| f.data)
-        .unwrap_or_default();
+    let data = flatten_numeric(input).map(|f| f.data).unwrap_or_default();
 
     if let Some(range) = outputs.layout.variadic_range("elements") {
         for i in 0..range.len {
             let val = data.get(i).copied().unwrap_or(f32::NAN);
-            outputs.set_variadic("elements", i, PortValue::new(vocab::float(val)))?;
+            outputs.set_variadic("elements", i, vocab::float(val))?;
         }
     }
 
@@ -1591,8 +1507,8 @@ fn eval_noise(
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
-    let x = as_float(&input_or_default(inputs, "x").value);
-    let y = as_float(&input_or_default(inputs, "y").value);
+    let x = as_float(input_or_default(inputs, "x"));
+    let y = as_float(input_or_default(inputs, "y"));
 
     let seed = params.noise_seed.unwrap_or(0.0).floor() as i32;
     let frequency = params.frequency.unwrap_or(1.0);
@@ -1625,7 +1541,7 @@ fn eval_vector_reducer(
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
-    let mut data = flatten_numeric(&input_or_default(inputs, "in").value)
+    let mut data = flatten_numeric(input_or_default(inputs, "in"))
         .map(|f| f.data)
         .unwrap_or_default();
     let result = match kind {
@@ -1706,10 +1622,7 @@ fn vec_port_to_vec(inputs: &InputSlots, key: &str) -> Vec<f32> {
     if !inputs.is_present(key) {
         return Vec::new();
     }
-    inputs
-        .get(key)
-        .map(|port| as_vector(&port.value))
-        .unwrap_or_default()
+    inputs.get(key).map(as_vector).unwrap_or_default()
 }
 
 fn eval_default_blend(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
@@ -1728,14 +1641,13 @@ fn eval_default_blend(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<
 
     if !target_ports.is_empty() && !weights.is_empty() && weights.len() != target_ports.len() {
         // A NaN-filled value of the first numeric operand's form.
-        let nan_like = |port: &PortValue| {
-            flatten_numeric(&port.value).map(|flat| flat.layout.fill_with(f32::NAN))
-        };
+        let nan_like =
+            |port: &Value| flatten_numeric(port).map(|flat| flat.layout.fill_with(f32::NAN));
         let fallback_value = target_ports
             .first()
             .and_then(|port| nan_like(port))
-            .or_else(|| nan_like(&baseline_port))
-            .or_else(|| nan_like(&offset_port))
+            .or_else(|| nan_like(baseline_port))
+            .or_else(|| nan_like(offset_port))
             .unwrap_or(vocab::float(f32::NAN));
 
         return single_output(outputs, fallback_value);
@@ -1753,7 +1665,7 @@ fn eval_default_blend(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<
         total_weight_sum += weight;
 
         let weight_value = vocab::float(weight);
-        let weighted = binary_numeric(&port.value, &weight_value, |x, y| x * y);
+        let weighted = binary_numeric(port, &weight_value, |x, y| x * y);
 
         target_sum = Some(match target_sum {
             Some(current) => binary_numeric(&current, &weighted, |x, y| x + y),
@@ -1764,15 +1676,15 @@ fn eval_default_blend(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<
     let targets_value = target_sum.unwrap_or_else(|| vocab::float(0.0));
     let baseline_factor = (1.0 - total_weight_sum).max(0.0);
     let baseline_weight = vocab::float(baseline_factor);
-    let baseline_scaled = binary_numeric(&baseline_port.value, &baseline_weight, |x, y| x * y);
+    let baseline_scaled = binary_numeric(baseline_port, &baseline_weight, |x, y| x * y);
     let blended = binary_numeric(&targets_value, &baseline_scaled, |x, y| x + y);
-    let final_value = binary_numeric(&blended, &offset_port.value, |x, y| x + y);
+    let final_value = binary_numeric(&blended, offset_port, |x, y| x + y);
 
     single_output(outputs, final_value)
 }
 
 fn float_port_opt(inputs: &InputSlots, key: &str) -> Option<f32> {
-    inputs.get(key).map(|p| as_float(&p.value))
+    inputs.get(key).map(as_float)
 }
 
 fn compute_normalized_weighted_average(
@@ -1802,7 +1714,7 @@ fn build_float_outputs(
     pairs: impl IntoIterator<Item = (String, f32)>,
 ) -> Result<(), String> {
     for (k, v) in pairs {
-        outputs.set_port(&k, PortValue::new(vocab::float(v)))?;
+        outputs.set(&k, vocab::float(v))?;
     }
     Ok(())
 }
@@ -1892,9 +1804,9 @@ fn eval_blend_weighted_average(
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
-    let sum = as_float(&input_or_default(inputs, "total_weighted_sum").value);
-    let total_weight = as_float(&input_or_default(inputs, "total_weight").value);
-    let max_w = as_float(&input_or_default(inputs, "max_effective_weight").value);
+    let sum = as_float(input_or_default(inputs, "total_weighted_sum"));
+    let total_weight = as_float(input_or_default(inputs, "total_weight"));
+    let max_w = as_float(input_or_default(inputs, "max_effective_weight"));
     let fallback = float_port_opt(inputs, "fallback");
 
     if let Some(avg) = compute_normalized_weighted_average(sum, total_weight, max_w) {
@@ -1913,8 +1825,8 @@ fn eval_blend_weighted_average(
 /// - "total_weight"
 /// - optional "fallback"
 fn eval_blend_additive(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
-    let sum = as_float(&input_or_default(inputs, "total_weighted_sum").value);
-    let total_weight = as_float(&input_or_default(inputs, "total_weight").value);
+    let sum = as_float(input_or_default(inputs, "total_weighted_sum"));
+    let total_weight = as_float(input_or_default(inputs, "total_weight"));
     let fallback = float_port_opt(inputs, "fallback");
 
     if total_weight.is_finite() && total_weight > 0.0 {
@@ -1963,9 +1875,9 @@ fn eval_blend_weighted_overlay(
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
-    let sum = as_float(&input_or_default(inputs, "total_weighted_sum").value);
-    let max_w = as_float(&input_or_default(inputs, "max_effective_weight").value);
-    let base = as_float(&input_or_default(inputs, "base").value);
+    let sum = as_float(input_or_default(inputs, "total_weighted_sum"));
+    let max_w = as_float(input_or_default(inputs, "max_effective_weight"));
+    let base = as_float(input_or_default(inputs, "base"));
 
     if !max_w.is_finite() {
         return build_float_outputs(outputs, vec![("out".to_string(), f32::NAN)]);
@@ -1980,10 +1892,10 @@ fn eval_blend_weighted_average_overlay(
     inputs: &InputSlots,
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
-    let sum = as_float(&input_or_default(inputs, "total_weighted_sum").value);
-    let total_weight = as_float(&input_or_default(inputs, "total_weight").value);
-    let max_w = as_float(&input_or_default(inputs, "max_effective_weight").value);
-    let base = as_float(&input_or_default(inputs, "base").value);
+    let sum = as_float(input_or_default(inputs, "total_weighted_sum"));
+    let total_weight = as_float(input_or_default(inputs, "total_weight"));
+    let max_w = as_float(input_or_default(inputs, "max_effective_weight"));
+    let base = as_float(input_or_default(inputs, "base"));
 
     if let Some(avg) = compute_normalized_weighted_average(sum, total_weight, max_w) {
         build_float_outputs(outputs, vec![("out".to_string(), base + avg)])
@@ -2058,8 +1970,8 @@ fn eval_case(
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     // Collect selector and optional default
-    let selector = inputs.get("selector").map(|p| p.value.clone());
-    let default = inputs.get("default").map(|p| p.value.clone());
+    let selector = inputs.get("selector").cloned();
+    let default = inputs.get("default").cloned();
 
     // Gather variadic case inputs in order (`operand_*`).
     let case_ports = collect_operand_ports(inputs);
@@ -2071,7 +1983,7 @@ fn eval_case(
             for (i, port) in case_ports.iter().enumerate() {
                 if let Some(label) = labels.get(i) {
                     if sel_s == label {
-                        return single_output(outputs, port.value.clone());
+                        return single_output(outputs, (*port).clone());
                     }
                 }
             }
@@ -2081,9 +1993,9 @@ fn eval_case(
                 if params.case_labels.is_some() {
                     // labels provided — compare selector to label string if possible
                     if let Some(label) = labels.get(i) {
-                        if let Some(port_text) = vocab::as_text(&port.value) {
+                        if let Some(port_text) = vocab::as_text(port) {
                             if port_text == label {
-                                return single_output(outputs, port.value.clone());
+                                return single_output(outputs, (*port).clone());
                             }
                         }
                     }
@@ -2092,7 +2004,7 @@ fn eval_case(
                     if let Some(f) = vocab::as_float(&sel_val) {
                         let idx = f.floor() as usize;
                         if idx == i {
-                            return single_output(outputs, port.value.clone());
+                            return single_output(outputs, (*port).clone());
                         }
                     }
                 }
@@ -2109,12 +2021,12 @@ fn eval_case(
 }
 
 fn eval_inverse_kinematics(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
-    let l1 = as_float(&input_or_default(inputs, "bone1").value);
-    let l2 = as_float(&input_or_default(inputs, "bone2").value);
-    let l3 = as_float(&input_or_default(inputs, "bone3").value);
-    let theta = as_float(&input_or_default(inputs, "theta").value);
-    let x = as_float(&input_or_default(inputs, "x").value);
-    let y = as_float(&input_or_default(inputs, "y").value);
+    let l1 = as_float(input_or_default(inputs, "bone1"));
+    let l2 = as_float(input_or_default(inputs, "bone2"));
+    let l3 = as_float(input_or_default(inputs, "bone3"));
+    let theta = as_float(input_or_default(inputs, "theta"));
+    let x = as_float(input_or_default(inputs, "x"));
+    let y = as_float(input_or_default(inputs, "y"));
 
     let wx = x - l3 * theta.cos();
     let wy = y - l3 * theta.sin();
@@ -2162,7 +2074,7 @@ fn eval_urdf_fk(
     let state = rt.kinematics_state_mut(&spec.id, key)?;
 
     let joints = fetch_joint_vector(
-        &joints_port.value,
+        joints_port,
         state.dofs,
         params.joint_defaults.as_deref(),
         &state.joint_names,
@@ -2177,9 +2089,9 @@ fn eval_urdf_fk(
         scale: [1.0, 1.0, 1.0],
     });
 
-    outputs.set_port("position", PortValue::new(arora_geometry::vec3(pos_arr)))?;
-    outputs.set_port("rotation", PortValue::new(arora_geometry::quat(rot_arr)))?;
-    outputs.set_port("transform", PortValue::new(transform_value))
+    outputs.set("position", arora_geometry::vec3(pos_arr))?;
+    outputs.set("rotation", arora_geometry::quat(rot_arr))?;
+    outputs.set("transform", transform_value)
 }
 
 #[cfg(feature = "urdf_ik")]
@@ -2192,10 +2104,10 @@ fn eval_urdf_position(
 ) -> Result<(), String> {
     let target_pos = {
         let port = input_or_default(inputs, "target_pos");
-        arora_geometry::as_vec3(&port.value).ok_or_else(|| {
+        arora_geometry::as_vec3(port).ok_or_else(|| {
             format!(
                 "UrdfIkPosition input 'target_pos' expects a vec3, received {}",
-                describe(&port.value)
+                describe(port)
             )
         })?
     };
@@ -2219,7 +2131,7 @@ fn eval_urdf_position(
 
     let seed: Option<Vec<f32>> = inputs
         .get("seed")
-        .map(|port| vector_from_value(&port.value, "UrdfIkPosition seed"))
+        .map(|port| vector_from_value(port, "UrdfIkPosition seed"))
         .transpose()?
         .or_else(|| params.seed.clone());
     if let Some(seed) = &seed {
@@ -2262,16 +2174,16 @@ fn eval_urdf_pose(
 ) -> Result<(), String> {
     let target_pos = {
         let port = input_or_default(inputs, "target_pos");
-        arora_geometry::as_vec3(&port.value).ok_or_else(|| {
+        arora_geometry::as_vec3(port).ok_or_else(|| {
             format!(
                 "UrdfIkPose input 'target_pos' expects a vec3, received {}",
-                describe(&port.value)
+                describe(port)
             )
         })?
     };
     let target_rot = {
         let port = input_or_default(inputs, "target_rot");
-        quat_from_value(&port.value, "UrdfIkPose target_rot")?
+        quat_from_value(port, "UrdfIkPose target_rot")?
     };
 
     let urdf_xml = params
@@ -2293,7 +2205,7 @@ fn eval_urdf_pose(
 
     let seed: Option<Vec<f32>> = inputs
         .get("seed")
-        .map(|port| vector_from_value(&port.value, "UrdfIkPose seed"))
+        .map(|port| vector_from_value(port, "UrdfIkPose seed"))
         .transpose()?
         .or_else(|| params.seed.clone());
     if let Some(seed) = &seed {
@@ -2331,7 +2243,7 @@ fn eval_urdf_pose(
 }
 
 fn eval_output(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
-    single_output(outputs, input_or_default(inputs, "in").value)
+    single_output(outputs, input_or_default(inputs, "in").clone())
 }
 
 fn eval_build_record(
@@ -2355,7 +2267,7 @@ fn eval_build_record(
         } else {
             key
         };
-        map.insert(final_key, pv.value.clone());
+        map.insert(final_key, pv.clone());
     }
 
     single_output(outputs, record_from_map(&map))
@@ -2372,7 +2284,7 @@ fn eval_read_record(
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
-    let entries = vocab::as_record(&input.value).unwrap_or_default();
+    let entries = vocab::as_record(input).unwrap_or_default();
     let keys = params.record_keys.as_deref().unwrap_or(&[]);
 
     if let Some(range) = outputs.layout.variadic_range("field") {
@@ -2387,7 +2299,7 @@ fn eval_read_record(
                     .map(|(_, v)| (*v).clone())
                     .unwrap_or(vocab::float(0.0))
             };
-            outputs.set_variadic("field", i, PortValue::new(value))?;
+            outputs.set_variadic("field", i, value)?;
         }
     }
 
@@ -2395,19 +2307,19 @@ fn eval_read_record(
 }
 
 fn eval_switch_record(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
-    let switch_val = as_float(&input_or_default(inputs, "switch").value);
+    let switch_val = as_float(input_or_default(inputs, "switch"));
     let records = inputs.variadic("record");
     if records.is_empty() {
         return single_output(outputs, vocab::record(Vec::<(&str, Value)>::new()));
     }
     let idx = (switch_val.floor() as isize).clamp(0, records.len() as isize - 1) as usize;
-    single_output(outputs, records[idx].value.clone())
+    single_output(outputs, records[idx].clone())
 }
 
 fn eval_merge_record(inputs: &InputSlots, outputs: &mut OutputSlots) -> Result<(), String> {
     let mut merged: HashMap<String, Value> = HashMap::new();
     for pv in inputs.variadic("record") {
-        if let Some(entries) = vocab::as_record(&pv.value) {
+        if let Some(entries) = vocab::as_record(pv) {
             for (k, v) in entries {
                 merged.insert(k.to_string(), v.clone());
             }
@@ -2422,7 +2334,7 @@ fn eval_split_record(
     outputs: &mut OutputSlots,
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
-    let entries = vocab::as_record(&input.value).unwrap_or_default();
+    let entries = vocab::as_record(input).unwrap_or_default();
     let key_set: std::collections::HashSet<&str> = params
         .keys
         .as_deref()
@@ -2442,8 +2354,8 @@ fn eval_split_record(
         }
     }
 
-    outputs.set("included", PortValue::new(vocab::record(included)))?;
-    outputs.set("excluded", PortValue::new(vocab::record(excluded)))?;
+    outputs.set("included", vocab::record(included))?;
+    outputs.set("excluded", vocab::record(excluded))?;
     Ok(())
 }
 
@@ -2453,8 +2365,8 @@ fn eval_math_record(
     op: fn(f32, f32) -> f32,
 ) -> Result<(), String> {
     let input = input_or_default(inputs, "in");
-    let scalar = as_float(&input_or_default(inputs, "value").value);
-    let entries = vocab::as_record(&input.value).unwrap_or_default();
+    let scalar = as_float(input_or_default(inputs, "value"));
+    let entries = vocab::as_record(input).unwrap_or_default();
     let result: Vec<(&str, Value)> = entries
         .into_iter()
         .map(|(k, v)| (k, unary_numeric(v, |x| op(x, scalar))))
@@ -2485,7 +2397,7 @@ fn eval_input_node(
                 staged_input.declared.as_ref(),
                 staged_input.value,
             )?;
-            return keyed_port(outputs, "out", port);
+            return keyed_output(outputs, "out", port);
         }
 
         if let Some(default_value) = params.value.clone() {
@@ -2497,18 +2409,11 @@ fn eval_input_node(
                 None,
                 default_value,
             )?;
-            return keyed_port(outputs, "out", port);
+            return keyed_output(outputs, "out", port);
         }
 
         if is_numeric_like(&target_shape.id) {
-            return keyed_port(
-                outputs,
-                "out",
-                PortValue::with_shape(
-                    null_of_shape_numeric(&target_shape.id),
-                    target_shape.clone(),
-                ),
-            );
+            return keyed_output(outputs, "out", null_of_shape_numeric(&target_shape.id));
         }
 
         return Err(format!(
@@ -2517,15 +2422,8 @@ fn eval_input_node(
         ));
     }
 
-    if let Some(StagedInput {
-        value, declared, ..
-    }) = staged
-    {
-        let mut port = PortValue::new(value);
-        if let Some(shape) = declared {
-            port.set_shape(shape);
-        }
-        return keyed_port(outputs, "out", port);
+    if let Some(StagedInput { value, .. }) = staged {
+        return keyed_output(outputs, "out", value);
     }
 
     if let Some(default_value) = params.value.clone() {
@@ -2545,7 +2443,7 @@ fn align_input_to_declared(
     declared: &Shape,
     staged_shape: Option<&Shape>,
     value: Value,
-) -> Result<PortValue, String> {
+) -> Result<Value, String> {
     if let Some(shape) = staged_shape {
         if shape.id != declared.id && !is_numeric_like(&declared.id) {
             return Err(format!(
@@ -2556,7 +2454,7 @@ fn align_input_to_declared(
     }
 
     if value_matches_shape(&declared.id, &value) {
-        return Ok(PortValue::with_shape(value, declared.clone()));
+        return Ok(value);
     }
 
     if !is_numeric_like(&declared.id) {
@@ -2567,19 +2465,17 @@ fn align_input_to_declared(
     }
 
     if let Some(coerced) = coerce_numeric_to_shape(&declared.id, &value) {
-        return Ok(PortValue::with_shape(coerced, declared.clone()));
+        return Ok(coerced);
     }
 
-    Ok(PortValue::with_shape(
-        null_of_shape_numeric(&declared.id),
-        declared.clone(),
-    ))
+    Ok(null_of_shape_numeric(&declared.id))
 }
 
+/// Check each output a node declares a shape for against that shape.
 fn enforce_output_shapes_slots(
     spec: &NodeSpec,
     layout: &PortLayout,
-    outputs: &mut [PortValue],
+    outputs: &[Value],
 ) -> Result<(), String> {
     if spec.output_shapes.is_empty() {
         return Ok(());
@@ -2592,21 +2488,19 @@ fn enforce_output_shapes_slots(
                 spec.id, key
             )
         })?;
-        let port = outputs.get_mut(slot).ok_or_else(|| {
+        let port = outputs.get(slot).ok_or_else(|| {
             format!(
                 "node '{}' missing declared output '{}' during evaluation",
                 spec.id, key
             )
         })?;
 
-        if !value_matches_shape(&declared.id, &port.value) {
+        if !value_matches_shape(&declared.id, port) {
             return Err(format!(
                 "node '{}' output '{}' does not match declared shape {:?}",
                 spec.id, key, declared.id
             ));
         }
-
-        port.shape = declared.clone();
     }
 
     Ok(())

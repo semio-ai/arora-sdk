@@ -50,7 +50,7 @@ use crate::eval::graph_runtime::{
 };
 use crate::eval::plan::{input_layout, layout_of, signatures, PortLayout, VariadicRange};
 use crate::eval::value_layout::flatten_numeric;
-use crate::eval::{eval_node, GraphRuntime, NodeFunctions, PortValue};
+use crate::eval::{eval_node, GraphRuntime, NodeFunctions};
 use crate::types::{NodeParams, NodeSpec, NodeType, Selector, SelectorSegment};
 
 /// The module's id.
@@ -1397,7 +1397,7 @@ impl NodeGraphModule {
                 .map(|(port, _)| layout.slot(&ports_table[*port]))
                 .collect();
             site.slots.clear();
-            site.slots.resize(layout.slots.len(), PortValue::default());
+            site.slots.resize(layout.slots.len(), Value::F32(0.0));
             site.present.clear();
             site.present.resize(layout.slots.len(), false);
             site.input_layout = Some((port_set, layout));
@@ -1408,7 +1408,7 @@ impl NodeGraphModule {
         let layout = layout.clone();
         for ((_, value), slot) in inputs.drain(..).zip(&site.slot_of) {
             if let Some(slot) = *slot {
-                site.slots[slot] = PortValue::new(value);
+                site.slots[slot] = value;
                 site.present[slot] = true;
             }
         }
@@ -1420,7 +1420,6 @@ impl NodeGraphModule {
         rt.dt = dt;
         rt.node_states.clear();
         rt.spawns.clear();
-        rt.writes.0.clear();
         let spec = &site.spec;
         rt.staged_inputs.clear();
         if let (Some(value), Some(path)) = (staged, &spec.params.path) {
@@ -1464,11 +1463,7 @@ impl NodeGraphModule {
         }
 
         let ret = if site.ports.is_none() {
-            site.out
-                .drain(..)
-                .next()
-                .map(|port| port.value)
-                .unwrap_or(Value::Unit)
+            site.out.drain(..).next().unwrap_or(Value::Unit)
         } else {
             let mut values = site.out.drain(..);
             Value::Structure(Structure {
@@ -1478,7 +1473,7 @@ impl NodeGraphModule {
                     .iter()
                     .map(|field| StructureField {
                         id: *field,
-                        value: Box::new(values.next().map_or(Value::Unit, |port| port.value)),
+                        value: Box::new(values.next().unwrap_or(Value::Unit)),
                     })
                     .collect(),
             })
@@ -1517,9 +1512,9 @@ struct Site {
     input_layout: Option<(PortSet, std::rc::Rc<PortLayout>)>,
     /// The slot of each input its calls pass, in the order they pass them.
     slot_of: Vec<Option<usize>>,
-    slots: Vec<PortValue>,
+    slots: Vec<Value>,
     present: Vec<bool>,
-    out: Vec<PortValue>,
+    out: Vec<Value>,
 }
 
 impl Site {

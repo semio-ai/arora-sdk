@@ -1,9 +1,8 @@
 //! What a node's evaluation reads and writes besides its ports: the clock,
-//! the node's state, the inputs staged for it, and the writes and runs it
-//! makes.
+//! the node's state, the inputs staged for it, and the runs it requests.
 
 use crate::types::NodeId;
-use arora_shape::{Shape, TypedPath, Value, WriteBatch};
+use arora_shape::{Shape, TypedPath, Value};
 use hashbrown::{hash_map::Entry, HashMap};
 use uuid::Uuid;
 
@@ -158,8 +157,6 @@ pub struct GraphRuntime {
     pub t: f32,
     /// Step delta in seconds for the active evaluation.
     pub dt: f32,
-    /// Writes emitted by output/sink nodes during the current evaluation.
-    pub writes: WriteBatch,
     /// Task runs requested by spawn nodes during the current evaluation, in
     /// evaluation order — the host starts them after the evaluation.
     pub spawns: Vec<SpawnRequest>,
@@ -172,16 +169,6 @@ pub struct GraphRuntime {
 }
 
 impl GraphRuntime {
-    /// Clear every node's state, the staged inputs, and the writes and runs
-    /// made.
-    pub fn reset_for_spec(&mut self) {
-        self.writes.0.clear();
-        self.spawns.clear();
-        self.node_states.clear();
-        self.staged_inputs.clear();
-        self.input_epoch = 0;
-    }
-
     /// Advance the staging epoch. Values staged for `epoch + 1` become visible for the
     /// upcoming frame; older entries are dropped so stale data cannot leak through.
     pub fn advance_epoch(&mut self) {
