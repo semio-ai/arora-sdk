@@ -21,9 +21,8 @@ The crate is a default workspace member, so `cargo build` produces the `arora`
 binary: the headless device runner — no HAL-attached display; a head like Vizij
 embeds the library instead. It reads its configuration from the environment
 and serves the open local bridge on `ws://127.0.0.1:9000`. A build with the
-`studio-bridge` feature connects to Semio Studio instead when the device holds
-a saved Studio credential or the run passes `--studio`
-([Semio Studio is opt-in](#semio-studio-is-opt-in)). The front end is the terminal operator UI when the process is attached to a
+`studio-bridge` feature connects to Semio Studio instead when the run passes
+`--studio` ([Semio Studio is opt-in](#semio-studio-is-opt-in)). The front end is the terminal operator UI when the process is attached to a
 terminal (feature `tui`), headless otherwise. In the terminal UI the wheel and
 PgUp/PgDn scroll the log pane, `m` hands the mouse to the terminal to select
 and copy text (and `m` again takes it back), and `q` or Ctrl-C quits. The log
@@ -92,9 +91,9 @@ modules, its device directory's and those its command line names, load with
 `AroraBuilder::with_module_dirs(&device_dir::from_env()?, &dirs)`, records
 included, as the `arora` binary and the robot runners load theirs. A runner
 with a command line of its own flattens `RunnerArgs` into it for `--module`,
-and for `--studio` and `--no-studio` in a `studio-bridge` build, whose
-`studio.choice()` it hands to `AroraBuilder::with_studio`, as the robot runners
-do. The records join the registry `with_registry` gives
+and, under a feature of its own enabling `studio-bridge`, `studio::StudioArgs`
+for `--studio` and `--no-studio`, whose `choice()` it hands to
+`AroraBuilder::with_studio`, as the robot runners do. The records join the registry `with_registry` gives
 when the device is built, whichever of the two calls comes first.
 
 On wasm, build the library with `--no-default-features`: the `native` feature
@@ -155,35 +154,36 @@ the native core nodes and the functions of the modules the device carries.
 
 ### Semio Studio is opt-in
 
-A `studio-bridge` build contacts Semio Studio only when the device holds a
-saved Studio credential, or when the run asks for it, on a terminal or not:
+A `studio-bridge` build contacts Semio Studio only when the run asks for it,
+on a terminal or not:
 
-| the run passes | the device holds a credential | the device |
-|---|---|---|
-| nothing | yes | connects to Studio |
-| nothing | no | serves the open local bridge |
-| `--studio`, or sets `ARORA_STUDIO=1` | either | connects to Studio; a device holding none signs up as a new Studio device and registers |
-| `--no-studio` | either | serves the open local bridge |
+| the run passes | the device |
+|---|---|
+| `--studio`, or sets `ARORA_STUDIO=1` | connects to Studio; a device holding no saved credential signs up as a new Studio device and registers |
+| nothing, or `--no-studio` | serves the open local bridge, whatever it holds |
 
-`--no-studio` wins over `--studio` and `ARORA_STUDIO`, and `--studio` over
-`ARORA_STUDIO`, which is a boolean (`1`, `true`, `yes`, `on`, or their
-opposites); blank counts as unset, and any other value fails the start.
+`--no-studio` wins over `--studio` and `ARORA_STUDIO`, which is how a run
+overrides the variable, and `--studio` wins over `ARORA_STUDIO`, which is a
+boolean (`1`, `true`, `yes`, `on`, or their opposites); blank counts as
+unset, and any other value fails the start.
 
 The credential is the refresh token of the device's Studio account, in its
 device directory's `studio/`. A device holds one once any connection has
-signed it in, and every later run without a flag connects with it, unless
-`--no-studio`; deleting `studio/` makes it a device with none. That
-connection need not have been asked for: a headless run of arora 13.4 or
-earlier connected on its own, and an embedder's `studio::connect` — Vizij's
-`--studio` — keeps its credential in the same per-user `default` device
-unless `DEVICE_LOCAL_ID` names another. A credential that does not read (its
-key missing, the file damaged, an `IDENTITY_FILE` naming nothing) counts as
-none, since connecting with it would sign the device up anew. The run says
-what it decided in one line:
+signed it in, and a run passing `--studio` connects with it; deleting
+`studio/` makes it a device with none. A saved credential does not connect a
+run on its own, because it is not proof of an opt-in: a headless run of arora
+13.4 or earlier signed the device up unasked, and an embedder's
+`studio::connect` — Vizij's `--studio` — keeps its credential in the same
+per-user `default` device unless `DEVICE_LOCAL_ID` names another. A
+credential that does not read (its key missing, the file damaged, an
+`IDENTITY_FILE` naming nothing) counts as none: `--studio` signs the device
+up anew. The run says what it decided in one line, a run that does not ask
+naming what the device holds:
 
 ```text
+Studio: connecting, as --studio asks; a device with no saved credential registers with Semio Studio.
 Studio: no saved credential in <path>; serving the local bridge. Pass --studio to register this device with Semio Studio.
-Studio: connecting with the saved credential in <path>. Pass --no-studio to serve the local bridge instead.
+Studio: serving the local bridge, as the run does not ask for Studio. Pass --studio to connect with the saved credential in <path>.
 ```
 
 The robot runners take the same options. An embedder asks for Studio by
@@ -203,8 +203,8 @@ The chain down to the bridge's code, in a `studio-bridge` build:
    and hands it to `DeviceCredentials::in_dir`. The credentials there are the
    client's; arora writes only `device.json` beside them (below).
 3. A run that does not ask for Studio reads the refresh token there
-   (`DeviceCredentials::refresh_token`), and serves the open local bridge
-   unless it reads.
+   (`DeviceCredentials::refresh_token`) only to say in its log whether the
+   device holds one, and serves the open local bridge whatever it finds.
 4. `studio::connect` passes the `DeviceCredentials` to
    `ZenohDeviceClient::new_with_credentials`, or to
    `new_endpoint_with_credentials` when `STUDIO_BRIDGE_ENDPOINT` names the

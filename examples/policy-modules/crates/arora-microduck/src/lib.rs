@@ -5,8 +5,8 @@
 //! [lockstep](Device::run_for) it is a deterministic, faster-than-real-time
 //! simulation for tests and batch runs; [served](serve) it is a live device
 //! at real time on the standard Arora run — the operator front end, and the
-//! open local bridge, or under the `studio` feature Semio Studio when the
-//! device holds a saved Studio credential or the run asks for it.
+//! open local bridge, or under the `studio` feature Semio Studio when the run
+//! asks for it.
 //!
 //! Only the HAL is simulation-specific: a device for the real robot is this
 //! assembly with the robot's HAL in place of [`MujocoHal`], publishing the
@@ -220,8 +220,8 @@ impl Device {
 /// Serve the device until the process stops, on the standard Arora run: the
 /// simulator paces itself at real time, the runtime steps at the policies'
 /// period, and the bridge is the run's default — the open local bridge on
-/// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio when the
-/// device holds a saved Studio credential or `studio_choice` asks for it (a
+/// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio when
+/// `studio_choice` asks for it (a
 /// device registering is asked for the owner, the device name and the model
 /// family, or they come from `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`).
 pub async fn serve(config: DeviceConfig) -> Result<()> {

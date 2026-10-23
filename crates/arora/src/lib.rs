@@ -1133,8 +1133,7 @@ impl AroraBuilder {
     /// What the run asks of Semio Studio when [`run`](AroraBuilder::run)
     /// fills the default bridge: a runner passes what its command line says
     /// ([`StudioArgs::choice`](studio::StudioArgs::choice)). Default:
-    /// [`Choice::IfSaved`](studio::Choice::IfSaved), Studio only for a device
-    /// holding a saved Studio credential. See
+    /// [`Choice::Local`](studio::Choice::Local), the open local bridge. See
     /// [whether a run connects](studio#whether-a-run-connects).
     #[cfg(feature = "studio-bridge")]
     pub fn with_studio(mut self, choice: studio::Choice) -> Self {
@@ -1149,9 +1148,8 @@ impl AroraBuilder {
     /// HAL, an empty interpreter), and drive the step loop.
     ///
     /// The default bridge is the open local bridge, unless the `studio-bridge`
-    /// feature is on and the run connects to Semio Studio: when the device
-    /// holds a saved Studio credential, or when the run asks for it
-    /// (`with_studio`), as `arora::studio` says. Under the
+    /// feature is on and the run asks for Semio Studio (`with_studio`), as
+    /// `arora::studio` says. Under the
     /// terminal UI, a run that connects asks the operator for the
     /// registration nothing else gives, and serves the open local bridge when
     /// the operator declines.

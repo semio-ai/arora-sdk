@@ -122,11 +122,14 @@ jobs:
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
 
   # The robot runners (arora-ros2, arora-restful, arora-naoqi) build only
-  # with their crates' `runner` feature, and arora's Semio Studio connection
-  # (which decides whether a runner contacts Studio) only with its
-  # `studio-bridge` feature. The test and lint jobs leave both off, so they
-  # would never be compiled. Lint them and run their tests with them whenever
-  # a change reaches one of their crates.
+  # with their crates' `runner` feature, with or without their `studio`
+  # feature (arora's Semio Studio connection, which decides whether a runner
+  # contacts Studio, and builds only with arora's `studio-bridge`). The test
+  # and lint jobs leave all of these off, so they would never be compiled.
+  # Lint the runners and run their tests both ways whenever a change reaches
+  # one of their crates, and test them once mixed: one runner with `studio`
+  # enables arora's `studio-bridge` for all of them, and the others must still
+  # refuse `--studio`.
   runners:
     needs: select
     if: needs.select.outputs.test-arora || needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful || needs.select.outputs.test-arora-hal-naoqi
@@ -137,6 +140,8 @@ jobs:
       # linked runtimes within the runner's disk.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner
+      STUDIO_RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner,arora-hal-ros2/studio,arora-hal-restful/studio,arora-hal-naoqi/studio
+      MIXED_RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner,arora-hal-restful/studio
     steps:
       - uses: actions/checkout@v6
 
@@ -156,6 +161,15 @@ jobs:
 
       - name: Test the robot runners
         run: cargo test $RUNNERS --bins
+
+      - name: Clippy the robot runners with Semio Studio
+        run: cargo clippy $STUDIO_RUNNERS --all-targets -- -D warnings
+
+      - name: Test the robot runners with Semio Studio
+        run: cargo test $STUDIO_RUNNERS --bins
+
+      - name: Test the robot runners with Semio Studio in one of them
+        run: cargo test $MIXED_RUNNERS --bins
 
       - name: Clippy arora's Studio connection
         run: cargo clippy -p arora --features studio-bridge --all-targets -- -D warnings
