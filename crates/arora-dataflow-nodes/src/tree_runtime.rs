@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::eval::shape_helpers::infer_shape;
 use crate::eval::{NodeFunctions, PortValue, SpawnRequest};
-use crate::functions::{encode_params, function_index, is_stateful, state_param, NodeGraphModule};
+use crate::functions::{encode_params, function_index, is_stateful, state_param, DataflowNodes};
 use crate::import::{import_with, ports_of, ImportOptions, ImportedGraph};
 use crate::types::{GraphSpec, NodeId, NodeParams, NodeSpec, NodeType};
 
@@ -64,7 +64,7 @@ pub struct TreeRuntime {
     collect_outputs: bool,
     evaluation: Evaluation,
     store: SimpleDataStore,
-    module: NodeGraphModule,
+    module: DataflowNodes,
     /// The store key of each path an input was staged on.
     keys: hashbrown::HashMap<TypedPath, Key>,
     /// Values staged for the next evaluation, with their declared shapes.
@@ -116,7 +116,7 @@ impl TreeRuntime {
             collect_outputs: true,
             evaluation,
             store: SimpleDataStore::new(),
-            module: NodeGraphModule::new(),
+            module: DataflowNodes::new(),
             keys: hashbrown::HashMap::new(),
             staged: HashMap::new(),
             live: HashMap::new(),

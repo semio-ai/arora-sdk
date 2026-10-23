@@ -1,5 +1,7 @@
-//! The node vocabulary as the functions of one Arora module,
-//! [`MODULE_NAME`].
+//! The node vocabulary as the functions of three Arora modules:
+//! [`DATAFLOW`] holds the general node kinds, [`GEOMETRY`] those building a
+//! geometry type from numbers, and [`KINEMATICS`] the kinematics nodes
+//! ([`module_of`]).
 //!
 //! Each node kind is one function, named by the kind's graph-JSON name
 //! (`add`, `damp`, `urdfikposition`). A node of the graph is one call of it:
@@ -25,13 +27,13 @@
 //! [`param_field`]), so a port is one id whatever function it is a parameter
 //! of. A call is evaluated by its node kind's [per-node code](crate::eval).
 //!
-//! Besides the node kinds the module has [`SELECT`], which applies an edge's
-//! selector, and [`EXTERNAL`], which calls another module's function as an
-//! `externalfunction` node does.
+//! Besides the node kinds, [`DATAFLOW`] has [`SELECT`], which applies an
+//! edge's selector, and [`EXTERNAL`], which calls another module's function
+//! as an `externalfunction` node does.
 //!
-//! [`NodeGraphModule`] runs the functions in-process: [`NodeGraphModule::bridge`]
-//! wraps the device's [`CallBridge`] and answers the calls to this module
-//! itself, passing every other call through.
+//! [`DataflowNodes`] runs the functions in-process: [`DataflowNodes::bridge`]
+//! wraps the device's [`CallBridge`] and answers the calls to the three
+//! modules itself, passing every other call through.
 use std::sync::OnceLock;
 
 use hashbrown::HashMap;
@@ -56,18 +58,60 @@ use crate::params::Params;
 use crate::ports::ports;
 use crate::types::{NodeParams, NodeSpec, NodeType, Selector, SelectorSegment};
 
-/// The module's id.
-pub const MODULE_ID: Uuid = Uuid::from_u128(0x6e6f_6465_2d67_7261_7068_0000_0000_0001);
+/// A module whose functions this crate defines: its id and its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Module {
+    pub id: Uuid,
+    pub name: &'static str,
+}
 
-/// The module's name.
-pub const MODULE_NAME: &str = "@arora/node-graph";
+/// The general node kinds, [`SELECT`] and [`EXTERNAL`].
+pub const DATAFLOW: Module = Module {
+    id: Uuid::from_u128(0x6461_7461_666c_6f77_0000_0000_0000_0001),
+    name: "@arora/dataflow",
+};
+
+/// The node kinds building a geometry type from numbers: `vec3cross`.
+pub const GEOMETRY: Module = Module {
+    id: Uuid::from_u128(0x6765_6f6d_6574_7279_0000_0000_0000_0001),
+    name: "@arora/geometry",
+};
+
+/// The kinematics nodes: `inversekinematics` and the URDF nodes.
+pub const KINEMATICS: Module = Module {
+    id: Uuid::from_u128(0x6b69_6e65_6d61_7469_6373_0000_0000_0001),
+    name: "@arora/kinematics",
+};
+
+/// The three modules.
+pub const MODULES: [Module; 3] = [DATAFLOW, GEOMETRY, KINEMATICS];
+
+/// The module `kind`'s function belongs to.
+pub fn module_of(kind: &NodeType) -> Module {
+    match kind {
+        NodeType::Vec3Cross => GEOMETRY,
+        NodeType::InverseKinematics
+        | NodeType::UrdfIkPosition
+        | NodeType::UrdfIkPose
+        | NodeType::UrdfFk => KINEMATICS,
+        _ => DATAFLOW,
+    }
+}
+
+/// Whether `module` is one of the three modules.
+fn is_own(module: Option<Uuid>) -> bool {
+    module.is_some_and(|module| MODULES.iter().any(|own| own.id == module))
+}
 
 /// How many ports of a variadic group (`operand_0` … `operand_63`) a function
 /// declares.
 pub const VARIADIC_PORTS: usize = 64;
 
+/// An id the three modules share, for `role`: a parameter, a field of the
+/// structure a multi-port node returns, or one of [`DATAFLOW`]'s own
+/// functions.
 fn derived(role: &str) -> Uuid {
-    Uuid::new_v5(&MODULE_ID, role.as_bytes())
+    Uuid::new_v5(&DATAFLOW.id, role.as_bytes())
 }
 
 /// The graph-JSON name of `kind`, the name of its function.
@@ -171,7 +215,12 @@ pub const KINDS: &[NodeType] = &[
 /// The id of the function a node of `kind` calls.
 pub fn function_id(kind: &NodeType) -> Uuid {
     static IDS: OnceLock<HashMap<NodeType, Uuid>> = OnceLock::new();
-    let derive = |kind: &NodeType| derived(&format!("function:{}", kind_name(kind)));
+    let derive = |kind: &NodeType| {
+        Uuid::new_v5(
+            &module_of(kind).id,
+            format!("function:{}", kind_name(kind)).as_bytes(),
+        )
+    };
     IDS.get_or_init(|| {
         KINDS
             .iter()
@@ -648,9 +697,14 @@ fn dynamic() -> FrozenTy {
     })
 }
 
-fn describe(id: Uuid, name: &str, parameters: Vec<(Uuid, String, bool)>) -> ModuleFunction {
+fn describe(
+    module: Module,
+    id: Uuid,
+    name: &str,
+    parameters: Vec<(Uuid, String, bool)>,
+) -> ModuleFunction {
     ModuleFunction {
-        module_id: MODULE_ID,
+        module_id: module.id,
         function_id: id,
         function_name: name.to_string(),
         function: Function {
@@ -694,10 +748,16 @@ pub fn describe_kind(kind: &NodeType) -> ModuleFunction {
     parameters.push((state_param(), "state".into(), true));
     parameters.push((ports_param(), "ports".into(), false));
     parameters.push((output_shapes_param(), "output_shapes".into(), false));
-    describe(function_id(kind), &kind_name(kind), parameters)
+    describe(
+        module_of(kind),
+        function_id(kind),
+        &kind_name(kind),
+        parameters,
+    )
 }
 
-/// The module's functions: one per node kind, [`SELECT`] and [`EXTERNAL`].
+/// The three modules' functions: one per node kind, [`SELECT`] and
+/// [`EXTERNAL`].
 pub fn function_index() -> &'static FunctionIndex {
     static INDEX: OnceLock<FunctionIndex> = OnceLock::new();
     INDEX.get_or_init(|| {
@@ -708,6 +768,7 @@ pub fn function_index() -> &'static FunctionIndex {
         index.insert(
             select_function(),
             describe(
+                DATAFLOW,
                 select_function(),
                 SELECT,
                 vec![
@@ -1166,11 +1227,11 @@ pub(crate) fn decode_state(kind: &NodeType, value: Value) -> Option<NodeRuntimeS
 // The module.
 //====================================================================
 
-/// The functions of [`MODULE_NAME`], run in-process, and what they keep
+/// The functions of the three modules, run in-process, and what they keep
 /// between calls that is no node's state: each URDF chain built, by its
 /// configuration, and the runs `spawn` nodes requested.
 #[derive(Default)]
-pub struct NodeGraphModule {
+pub struct DataflowNodes {
     /// The module each external function belongs to, for `external` and
     /// `taskrun` calls naming no module.
     function_modules: HashMap<Uuid, Uuid>,
@@ -1209,7 +1270,7 @@ type OutputLayout = (PortLayout, Vec<Uuid>);
 /// Where the ids of the callables a [`Bridge`] registers start.
 const CALLABLE_IDS: u64 = 1 << 62;
 
-impl NodeGraphModule {
+impl DataflowNodes {
     /// A module with no function routed to another module.
     pub fn new() -> Self {
         Self::default()
@@ -1296,7 +1357,7 @@ impl NodeGraphModule {
         } else {
             kind_of(function)
                 .cloned()
-                .ok_or_else(|| format!("{MODULE_NAME} has no function {function}"))?
+                .ok_or_else(|| format!("no node kind has the function {function}"))?
         };
         let roles = roles();
         let ports_table = input_ports();
@@ -1758,16 +1819,16 @@ impl NodeFunctions for ModuleFunctions<'_> {
     }
 }
 
-/// A [`CallBridge`] answering [`MODULE_NAME`]'s calls in-process and passing
+/// A [`CallBridge`] answering the three modules' calls in-process and passing
 /// every other call, and the callables, to the bridge it wraps.
 pub struct Bridge<'a> {
-    module: &'a mut NodeGraphModule,
+    module: &'a mut DataflowNodes,
     inner: &'a mut dyn CallBridge,
 }
 
 impl CallBridge for Bridge<'_> {
     fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
-        if call.module_id == Some(MODULE_ID) {
+        if is_own(call.module_id) {
             self.module.call(call, &mut *self.inner)
         } else {
             self.inner.arora_call(call)
@@ -1781,7 +1842,7 @@ impl CallBridge for Bridge<'_> {
         id: Uuid,
         args: &[(Uuid, &Value)],
     ) -> Result<CallResult, CallError> {
-        if module_id == Some(MODULE_ID) {
+        if is_own(module_id) {
             self.module.call_borrowed(id, args, &mut *self.inner)
         } else {
             self.inner.arora_call_borrowed(module_id, id, args)
@@ -1811,5 +1872,34 @@ impl CallBridge for Bridge<'_> {
             Some(callable) => callable.call(self),
             None => self.inner.arora_call_indirect(callable_id),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each node kind's function is described under the module it belongs
+    /// to, as are `select` and `external` under [`DATAFLOW`], and the three
+    /// modules' functions have distinct ids.
+    #[test]
+    fn each_function_is_described_under_its_module() {
+        let index = function_index();
+        for kind in KINDS {
+            let described = &index[&function_id(kind)];
+            assert_eq!(described.module_id, module_of(kind).id, "{kind:?}");
+            assert_eq!(described.function_name, kind_name(kind), "{kind:?}");
+        }
+        assert_eq!(index[&select_function()].module_id, DATAFLOW.id);
+        assert_eq!(index[&external_function()].module_id, DATAFLOW.id);
+        assert_eq!(
+            index.len(),
+            KINDS.len() + 2,
+            "every function has its own id"
+        );
+        assert_eq!(module_of(&NodeType::Vec3Cross), GEOMETRY);
+        assert_eq!(module_of(&NodeType::InverseKinematics), KINEMATICS);
+        assert_eq!(module_of(&NodeType::UrdfFk), KINEMATICS);
+        assert_eq!(module_of(&NodeType::Add), DATAFLOW);
     }
 }

@@ -8,7 +8,7 @@ This directory holds what each node kind computes: the code the module's functio
 |------|----------------|
 | `eval_node.rs` | Dispatches a `Node` (its id, kind and `Params`) to its kind's code, over its input and output slots of `Value`s. |
 | `context.rs` | One call's `Context`: the clock (`t`, `dt`), the node's state (springs, dampers, slews, URDF chains, task runs, spawns) and the runs it requests. |
-| `plan.rs` | A node's input and output port layouts, from its kind's signature in the editor registry ([`schema`](../schema.rs)). |
+| `plan.rs` | A node's input and output port layouts, from its kind's ports ([`ports`](../ports.rs)). |
 | `value_layout.rs` | Flattens a value whose leaves are numbers into a buffer, by its own form, and rebuilds it. |
 | `numeric.rs` / `variadic.rs` | Unary, binary and variadic arithmetic over flattened values, and number readings. |
 | `noise.rs` | The noise nodes' generators. |
@@ -26,9 +26,9 @@ Staging inputs, ordering the nodes and writing the graph's outputs are the tree'
 
 ## Adding a node kind
 
-1. Extend `NodeType` in `types.rs`, and give it its signature in the editor registry (`schema.rs`).
+1. Extend `NodeType` in `types.rs`, and give it its ports in `ports.rs`.
 2. Write its code in `eval_node.rs`, with helpers to keep the dispatch short.
 3. A node that keeps state between calls keeps it in the `Context` (see `Spring`, `Damp`, `Slew`).
-4. Test it on the tree (`tree_tests`).
+4. Describe it in Vizij's editor registry (`schema.rs`), and test it on the tree (`tree_tests`).
 
 URDF code stays behind the `urdf_ik` feature, to keep the default dependencies light.
