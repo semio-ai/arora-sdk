@@ -743,7 +743,27 @@ fn describe_kind_as(kind: &NodeType, name: &str) -> ModuleFunction {
 
 /// The node parameters of `params` that differ from their default, each as
 /// its parameter id and its value: the literal arguments of a node's call.
+/// An `input` node's store path and an `output` node's keyed-batch fields
+/// follow its [`Params`].
 pub fn encode_params(params: &NodeParams) -> Result<Vec<(Uuid, Value)>, String> {
+    let mut encoded = encode(&params.params())?;
+    if let Some(path) = &params.path {
+        encoded.push((param_field("path"), Value::String(path.to_string())));
+    }
+    for (field, id) in [
+        ("key_field", params.key_field),
+        ("value_field", params.value_field),
+    ] {
+        if let Some(id) = id {
+            encoded.push((param_field(field), Value::String(id.to_string())));
+        }
+    }
+    Ok(encoded)
+}
+
+/// The parameters of `params` that differ from their default, each as its
+/// parameter id and its value.
+pub fn encode(params: &Params) -> Result<Vec<(Uuid, Value)>, String> {
     let mut encoded = Vec::new();
     let mut push = |field: &str, value: Value| encoded.push((param_field(field), value));
     let floats = |values: &Vec<f32>| Value::ArrayF32(values.clone());
@@ -836,15 +856,7 @@ pub fn encode_params(params: &NodeParams) -> Result<Vec<(Uuid, Value)>, String> 
             push(field, strings(values));
         }
     }
-    if let Some(path) = &params.path {
-        push("path", Value::String(path.to_string()));
-    }
-    for (field, id) in [
-        ("function", params.function),
-        ("key_field", params.key_field),
-        ("value_field", params.value_field),
-        ("module", params.module),
-    ] {
+    for (field, id) in [("function", params.function), ("module", params.module)] {
         if let Some(id) = id {
             push(field, Value::String(id.to_string()));
         }
