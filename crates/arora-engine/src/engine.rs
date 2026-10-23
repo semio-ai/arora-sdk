@@ -199,6 +199,22 @@ impl Engine {
 
         // We haven't loaded the module yet.
 
+        // Natively, the module compiles first and loads as a compiled one: a
+        // load's time, which its initializer and the guests it calls share,
+        // starts once compilation is done, as the guest's own does. In the
+        // browser a module may load from an instance staged ahead, from no
+        // bytes, and no load is timed.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if !self.executors.contains_key(executor_name) {
+                return Err(LoadModuleError::ExecutorNotFound);
+            }
+            let compiled =
+                CompiledModule::new(module_definition.header, &module_definition.executable)?;
+            return self.load_compiled_module(&compiled);
+        }
+
+        #[allow(unreachable_code)]
         let signatures = Signatures::of(&module_definition.header);
         let limits = self.guest_limits(&module_id);
         // Find the executor for the module.
