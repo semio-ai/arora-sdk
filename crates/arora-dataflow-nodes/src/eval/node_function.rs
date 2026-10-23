@@ -1,13 +1,13 @@
 //! Node-function abstraction for the
-//! [`ExternalFunction`](crate::types::NodeType::ExternalFunction) node.
+//! [`ExternalFunction`](crate::kind::Kind::ExternalFunction) node.
 //!
 //! The graph core knows nothing about how a node-function is resolved or run: an
-//! [`ExternalFunction`](crate::types::NodeType::ExternalFunction) node carries only a stable
+//! [`ExternalFunction`](crate::kind::Kind::ExternalFunction) node carries only a stable
 //! function id (a [`Uuid`]) plus opaque arg-key handles. Evaluating such a node calls out to a
 //! [`NodeFunctions`] host that owns all the domain meaning. Values are always the shared runtime
-//! type [`arora_shape::Value`].
+//! type [`arora_types::value::Value`].
 
-use arora_shape::Value;
+use arora_types::value::Value;
 use hashbrown::HashMap;
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ pub trait NodeFunctions {
     fn call(&mut self, function: Uuid, args: &[(Uuid, Value)]) -> Result<Value, String>;
 
     /// Invoke `function` addressed to `module` with `args` — how a
-    /// [`TaskRun`](crate::types::NodeType::TaskRun) node dispatches its
+    /// [`TaskRun`](crate::kind::Kind::TaskRun) node dispatches its
     /// self-contained call. A host that routes by module honours `module`; the
     /// default ignores it and resolves the function like [`call`](Self::call),
     /// so registry-style hosts need no extra wiring.
@@ -50,7 +50,7 @@ pub trait NodeFunctions {
 
     /// Invoke `function` addressed to `module` and also return the values its
     /// mutable (out) parameters carry after the call, by parameter id — what
-    /// a [`TaskRun`](crate::types::NodeType::TaskRun) node emits on its
+    /// a [`TaskRun`](crate::kind::Kind::TaskRun) node emits on its
     /// `mutated` port. The default reports none, so a host whose functions
     /// have no out parameters needs no extra wiring.
     fn call_module_with_outputs(

@@ -1,7 +1,7 @@
 //! What a node's evaluation reads and writes besides its ports: the clock,
 //! the node's state, and the runs it requests.
 
-use arora_shape::Value;
+use arora_types::value::Value;
 use uuid::Uuid;
 
 #[cfg(feature = "urdf_ik")]
@@ -105,7 +105,7 @@ pub enum NodeRuntimeState {
     Spawn(SpawnState),
 }
 
-/// State of a [`TaskRun`](crate::types::NodeType::TaskRun) node's hosted run.
+/// State of a [`TaskRun`](crate::kind::Kind::TaskRun) node's hosted run.
 #[derive(Debug, Default)]
 pub struct TaskRunState {
     /// The terminal status value the run latched on, once it has ended. A
@@ -118,7 +118,7 @@ pub struct TaskRunState {
     pub outputs: Option<Value>,
 }
 
-/// State of a [`Spawn`](crate::types::NodeType::Spawn) node: the arguments
+/// State of a [`Spawn`](crate::kind::Kind::Spawn) node: the arguments
 /// and the `when` value it last saw, which the next evaluation compares
 /// against to decide whether to spawn.
 #[derive(Debug, Default)]
@@ -127,7 +127,7 @@ pub struct SpawnState {
     pub when: Option<Value>,
 }
 
-/// A task run a [`Spawn`](crate::types::NodeType::Spawn) node requested
+/// A task run a [`Spawn`](crate::kind::Kind::Spawn) node requested
 /// during an evaluation, for the host to start once the evaluation is done:
 /// `function` addressed to `module`, with its call args by parameter id.
 #[derive(Debug, Clone, PartialEq)]

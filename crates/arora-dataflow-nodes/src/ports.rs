@@ -1,9 +1,8 @@
 //! The ports each node kind's function declares: its fixed inputs and
 //! outputs, in order, and its variadic groups. A node's port layouts start
-//! from these, and Vizij's editor registry ([`crate::schema::registry`])
-//! describes the same ports.
+//! from these, and Vizij's editor registry describes the same ports.
 
-use crate::types::NodeType;
+use crate::kind::Kind;
 
 /// A variadic group of ports, `{id}_{N}`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,27 +28,27 @@ pub struct Ports {
 }
 
 /// The ports of a node of `kind`.
-pub fn ports(kind: &NodeType) -> Ports {
+pub fn ports(kind: &Kind) -> Ports {
     match kind {
-        NodeType::Constant => Ports {
+        Kind::Constant => Ports {
             inputs: &[],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Slider => Ports {
+        Kind::Slider => Ports {
             inputs: &[],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::MultiSlider => Ports {
+        Kind::MultiSlider => Ports {
             inputs: &[],
             variadic_inputs: None,
             outputs: &["x", "y", "z"],
             variadic_outputs: None,
         },
-        NodeType::Add => Ports {
+        Kind::Add => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -58,13 +57,13 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Subtract => Ports {
+        Kind::Subtract => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Multiply => Ports {
+        Kind::Multiply => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -73,49 +72,49 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Divide => Ports {
+        Kind::Divide => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Modulo => Ports {
+        Kind::Modulo => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Power => Ports {
+        Kind::Power => Ports {
             inputs: &["base", "exp"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Log => Ports {
+        Kind::Log => Ports {
             inputs: &["value", "base"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Abs => Ports {
+        Kind::Abs => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Sqrt => Ports {
+        Kind::Sqrt => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Sign => Ports {
+        Kind::Sign => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Min => Ports {
+        Kind::Min => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -124,7 +123,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Max => Ports {
+        Kind::Max => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -133,127 +132,127 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Round => Ports {
+        Kind::Round => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Sin => Ports {
+        Kind::Sin => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Cos => Ports {
+        Kind::Cos => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Tan => Ports {
+        Kind::Tan => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Time => Ports {
+        Kind::Time => Ports {
             inputs: &[],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Oscillator => Ports {
+        Kind::Oscillator => Ports {
             inputs: &["frequency", "phase"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Spring => Ports {
+        Kind::Spring => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Damp => Ports {
+        Kind::Damp => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Slew => Ports {
+        Kind::Slew => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::And => Ports {
+        Kind::And => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Or => Ports {
+        Kind::Or => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Xor => Ports {
+        Kind::Xor => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Not => Ports {
+        Kind::Not => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::GreaterThan => Ports {
+        Kind::GreaterThan => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::LessThan => Ports {
+        Kind::LessThan => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Equal => Ports {
+        Kind::Equal => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::NotEqual => Ports {
+        Kind::NotEqual => Ports {
             inputs: &["lhs", "rhs"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::If => Ports {
+        Kind::If => Ports {
             inputs: &["cond", "then", "else"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Clamp => Ports {
+        Kind::Clamp => Ports {
             inputs: &["in", "min", "max"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Remap => Ports {
+        Kind::Remap => Ports {
             inputs: &["in", "in_min", "in_max", "out_min", "out_max"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::CenteredRemap => Ports {
+        Kind::CenteredRemap => Ports {
             inputs: &[
                 "in",
                 "in_low",
@@ -267,73 +266,73 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::PiecewiseRemap => Ports {
+        Kind::PiecewiseRemap => Ports {
             inputs: &["in", "input_breakpoints", "output_breakpoints"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Vec3Cross => Ports {
+        Kind::Vec3Cross => Ports {
             inputs: &["a", "b"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorConstant => Ports {
+        Kind::VectorConstant => Ports {
             inputs: &[],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorAdd => Ports {
+        Kind::VectorAdd => Ports {
             inputs: &["a", "b"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorSubtract => Ports {
+        Kind::VectorSubtract => Ports {
             inputs: &["a", "b"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorMultiply => Ports {
+        Kind::VectorMultiply => Ports {
             inputs: &["a", "b"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorScale => Ports {
+        Kind::VectorScale => Ports {
             inputs: &["scalar", "v"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorNormalize => Ports {
+        Kind::VectorNormalize => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorDot => Ports {
+        Kind::VectorDot => Ports {
             inputs: &["a", "b"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorLength => Ports {
+        Kind::VectorLength => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorIndex => Ports {
+        Kind::VectorIndex => Ports {
             inputs: &["v", "index"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Join => Ports {
+        Kind::Join => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -342,7 +341,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Split => Ports {
+        Kind::Split => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &[],
@@ -351,7 +350,7 @@ pub fn ports(kind: &NodeType) -> Ports {
                 keyed: false,
             }),
         },
-        NodeType::ToVector => Ports {
+        Kind::ToVector => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -360,7 +359,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::FromVector => Ports {
+        Kind::FromVector => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &[],
@@ -369,55 +368,55 @@ pub fn ports(kind: &NodeType) -> Ports {
                 keyed: false,
             }),
         },
-        NodeType::VectorMin => Ports {
+        Kind::VectorMin => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorMax => Ports {
+        Kind::VectorMax => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorMean => Ports {
+        Kind::VectorMean => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorMedian => Ports {
+        Kind::VectorMedian => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::VectorMode => Ports {
+        Kind::VectorMode => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::SimpleNoise => Ports {
+        Kind::SimpleNoise => Ports {
             inputs: &["x", "y"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::PerlinNoise => Ports {
+        Kind::PerlinNoise => Ports {
             inputs: &["x", "y"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::SimplexNoise => Ports {
+        Kind::SimplexNoise => Ports {
             inputs: &["x", "y"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::WeightedSumVector => Ports {
+        Kind::WeightedSumVector => Ports {
             inputs: &["values", "weights", "masks"],
             variadic_inputs: None,
             outputs: &[
@@ -428,7 +427,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             ],
             variadic_outputs: None,
         },
-        NodeType::DefaultBlend => Ports {
+        Kind::DefaultBlend => Ports {
             inputs: &["baseline", "offset", "weights"],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -437,7 +436,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::BlendWeightedAverage => Ports {
+        Kind::BlendWeightedAverage => Ports {
             inputs: &[
                 "total_weighted_sum",
                 "total_weight",
@@ -448,25 +447,25 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::BlendAdditive => Ports {
+        Kind::BlendAdditive => Ports {
             inputs: &["total_weighted_sum", "total_weight", "fallback"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::BlendMultiply => Ports {
+        Kind::BlendMultiply => Ports {
             inputs: &["values", "weights", "masks"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::BlendWeightedOverlay => Ports {
+        Kind::BlendWeightedOverlay => Ports {
             inputs: &["total_weighted_sum", "max_effective_weight", "base"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::BlendWeightedAverageOverlay => Ports {
+        Kind::BlendWeightedAverageOverlay => Ports {
             inputs: &[
                 "total_weighted_sum",
                 "total_weight",
@@ -477,13 +476,13 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::BlendMax => Ports {
+        Kind::BlendMax => Ports {
             inputs: &["values", "weights", "masks", "base"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::Case => Ports {
+        Kind::Case => Ports {
             inputs: &["selector", "default"],
             variadic_inputs: Some(Variadic {
                 id: "operand",
@@ -492,43 +491,31 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::InverseKinematics => Ports {
+        Kind::InverseKinematics => Ports {
             inputs: &["bone1", "bone2", "bone3", "theta", "x", "y"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::UrdfIkPosition => Ports {
+        Kind::UrdfIkPosition => Ports {
             inputs: &["target_pos", "seed"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::UrdfIkPose => Ports {
+        Kind::UrdfIkPose => Ports {
             inputs: &["target_pos", "target_rot", "seed"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::UrdfFk => Ports {
+        Kind::UrdfFk => Ports {
             inputs: &["joints"],
             variadic_inputs: None,
             outputs: &["position", "rotation", "transform"],
             variadic_outputs: None,
         },
-        NodeType::Input => Ports {
-            inputs: &[],
-            variadic_inputs: None,
-            outputs: &["out"],
-            variadic_outputs: None,
-        },
-        NodeType::Output => Ports {
-            inputs: &["in"],
-            variadic_inputs: None,
-            outputs: &["out"],
-            variadic_outputs: None,
-        },
-        NodeType::BuildRecord => Ports {
+        Kind::BuildRecord => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "field",
@@ -537,7 +524,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::ReadRecord => Ports {
+        Kind::ReadRecord => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &[],
@@ -546,7 +533,7 @@ pub fn ports(kind: &NodeType) -> Ports {
                 keyed: true,
             }),
         },
-        NodeType::SwitchRecord => Ports {
+        Kind::SwitchRecord => Ports {
             inputs: &["switch"],
             variadic_inputs: Some(Variadic {
                 id: "record",
@@ -555,7 +542,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::MergeRecord => Ports {
+        Kind::MergeRecord => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "record",
@@ -564,37 +551,37 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::SplitRecord => Ports {
+        Kind::SplitRecord => Ports {
             inputs: &["in"],
             variadic_inputs: None,
             outputs: &["included", "excluded"],
             variadic_outputs: None,
         },
-        NodeType::MathMultRecord => Ports {
+        Kind::MathMultRecord => Ports {
             inputs: &["in", "value"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::MathAddRecord => Ports {
+        Kind::MathAddRecord => Ports {
             inputs: &["in", "value"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::MathDivRecord => Ports {
+        Kind::MathDivRecord => Ports {
             inputs: &["in", "value"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::MathSubRecord => Ports {
+        Kind::MathSubRecord => Ports {
             inputs: &["in", "value"],
             variadic_inputs: None,
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::ExternalFunction => Ports {
+        Kind::ExternalFunction => Ports {
             inputs: &[],
             variadic_inputs: Some(Variadic {
                 id: "args",
@@ -603,7 +590,7 @@ pub fn ports(kind: &NodeType) -> Ports {
             outputs: &["out"],
             variadic_outputs: None,
         },
-        NodeType::TaskRun => Ports {
+        Kind::TaskRun => Ports {
             inputs: &["args"],
             variadic_inputs: None,
             outputs: &["out", "done"],
@@ -612,7 +599,7 @@ pub fn ports(kind: &NodeType) -> Ports {
                 keyed: true,
             }),
         },
-        NodeType::Spawn => Ports {
+        Kind::Spawn => Ports {
             inputs: &["when"],
             variadic_inputs: Some(Variadic {
                 id: "args",

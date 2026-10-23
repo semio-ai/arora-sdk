@@ -2,8 +2,8 @@
 
 use std::cmp::Ordering;
 
-use arora_shape::value as vocab;
-use arora_shape::Value;
+use crate::vocab;
+use arora_types::value::Value;
 
 use super::eval_node::InputSlots;
 use super::numeric::binary_numeric;

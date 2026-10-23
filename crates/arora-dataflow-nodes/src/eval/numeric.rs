@@ -1,7 +1,7 @@
 //! Numeric helper utilities shared across node evaluators.
 
-use arora_shape::value as vocab;
-use arora_shape::Value;
+use crate::vocab;
+use arora_types::value::Value;
 
 use super::value_layout::{align_flattened, flatten_numeric};
 
@@ -140,7 +140,7 @@ mod tests {
     use super::*;
 
     fn pose() -> Value {
-        vocab::transform(vocab::Transform {
+        arora_geometry::transform(arora_geometry::Transform {
             translation: [0.0, 0.0, 0.0],
             rotation: [0.0, 0.0, 0.0, 1.0],
             scale: [1.0, 2.0, 3.0],

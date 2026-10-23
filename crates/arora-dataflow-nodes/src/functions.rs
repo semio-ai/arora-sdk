@@ -19,9 +19,8 @@
 //!   with that port alone, and otherwise a structure holding every port of
 //!   `ports`, each under the field [`output_field`] names, `()` for a port the
 //!   evaluation left unset;
-//! - `node`, the node's id in the graph, names it in an error, and
-//!   `output_shapes`, the JSON of its declared output shapes, has the
-//!   evaluation check them.
+//! - `node`, the node's id in the graph, names it in an error and keys what
+//!   the module keeps for it.
 //!
 //! Parameter ids derive from the role alone ([`input_param`],
 //! [`param_field`]), so a port is one id whatever function it is a parameter
@@ -39,11 +38,11 @@ use std::sync::OnceLock;
 use hashbrown::HashMap;
 
 use arora_behavior::{FunctionIndex, ModuleFunction};
-use arora_shape::{Shape, TypedPath, Value};
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::record::module::frozen::{Function, Parameter};
 use arora_types::record::ty::{FrozenScalar, FrozenTy, PrimitiveKind};
 use arora_types::record::{FrozenReference, Version};
+use arora_types::value::Value;
 use arora_types::value::{Structure, StructureField};
 use uuid::Uuid;
 
@@ -52,11 +51,11 @@ use crate::eval::context::{
 };
 use crate::eval::plan::{input_layout, layout_of, PortLayout, VariadicRange};
 use crate::eval::value_layout::flatten_numeric;
-use crate::eval::vizij;
 use crate::eval::{eval_node, Context, NodeFunctions};
+use crate::kind::Kind;
 use crate::params::Params;
 use crate::ports::ports;
-use crate::types::{NodeParams, NodeSpec, NodeType, Selector, SelectorSegment};
+use crate::select::{Selector, SelectorSegment};
 
 /// A module whose functions this crate defines: its id and its name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,13 +86,12 @@ pub const KINEMATICS: Module = Module {
 pub const MODULES: [Module; 3] = [DATAFLOW, GEOMETRY, KINEMATICS];
 
 /// The module `kind`'s function belongs to.
-pub fn module_of(kind: &NodeType) -> Module {
+pub fn module_of(kind: &Kind) -> Module {
     match kind {
-        NodeType::Vec3Cross => GEOMETRY,
-        NodeType::InverseKinematics
-        | NodeType::UrdfIkPosition
-        | NodeType::UrdfIkPose
-        | NodeType::UrdfFk => KINEMATICS,
+        Kind::Vec3Cross => GEOMETRY,
+        Kind::InverseKinematics | Kind::UrdfIkPosition | Kind::UrdfIkPose | Kind::UrdfFk => {
+            KINEMATICS
+        }
         _ => DATAFLOW,
     }
 }
@@ -115,7 +113,7 @@ fn derived(role: &str) -> Uuid {
 }
 
 /// The graph-JSON name of `kind`, the name of its function.
-pub fn kind_name(kind: &NodeType) -> String {
+pub fn kind_name(kind: &Kind) -> String {
     match serde_json::to_value(kind) {
         Ok(serde_json::Value::String(name)) => name,
         _ => format!("{kind:?}").to_lowercase(),
@@ -123,99 +121,97 @@ pub fn kind_name(kind: &NodeType) -> String {
 }
 
 /// Every node kind, in the order the format lists them.
-pub const KINDS: &[NodeType] = &[
-    NodeType::Constant,
-    NodeType::Slider,
-    NodeType::MultiSlider,
-    NodeType::Add,
-    NodeType::Subtract,
-    NodeType::Multiply,
-    NodeType::Divide,
-    NodeType::Power,
-    NodeType::Log,
-    NodeType::Abs,
-    NodeType::Modulo,
-    NodeType::Sqrt,
-    NodeType::Sign,
-    NodeType::Min,
-    NodeType::Max,
-    NodeType::Round,
-    NodeType::Sin,
-    NodeType::Cos,
-    NodeType::Tan,
-    NodeType::Time,
-    NodeType::Oscillator,
-    NodeType::Spring,
-    NodeType::Damp,
-    NodeType::Slew,
-    NodeType::And,
-    NodeType::Or,
-    NodeType::Not,
-    NodeType::Xor,
-    NodeType::GreaterThan,
-    NodeType::LessThan,
-    NodeType::Equal,
-    NodeType::NotEqual,
-    NodeType::If,
-    NodeType::Case,
-    NodeType::Clamp,
-    NodeType::Remap,
-    NodeType::CenteredRemap,
-    NodeType::PiecewiseRemap,
-    NodeType::Vec3Cross,
-    NodeType::VectorConstant,
-    NodeType::VectorAdd,
-    NodeType::VectorSubtract,
-    NodeType::VectorMultiply,
-    NodeType::VectorScale,
-    NodeType::VectorNormalize,
-    NodeType::VectorDot,
-    NodeType::VectorLength,
-    NodeType::VectorIndex,
-    NodeType::Join,
-    NodeType::Split,
-    NodeType::VectorMin,
-    NodeType::VectorMax,
-    NodeType::VectorMean,
-    NodeType::VectorMedian,
-    NodeType::VectorMode,
-    NodeType::ToVector,
-    NodeType::FromVector,
-    NodeType::SimpleNoise,
-    NodeType::PerlinNoise,
-    NodeType::SimplexNoise,
-    NodeType::WeightedSumVector,
-    NodeType::DefaultBlend,
-    NodeType::BlendWeightedAverage,
-    NodeType::BlendAdditive,
-    NodeType::BlendMultiply,
-    NodeType::BlendWeightedOverlay,
-    NodeType::BlendWeightedAverageOverlay,
-    NodeType::BlendMax,
-    NodeType::InverseKinematics,
-    NodeType::UrdfIkPosition,
-    NodeType::UrdfIkPose,
-    NodeType::UrdfFk,
-    NodeType::BuildRecord,
-    NodeType::ReadRecord,
-    NodeType::SwitchRecord,
-    NodeType::MergeRecord,
-    NodeType::SplitRecord,
-    NodeType::MathMultRecord,
-    NodeType::MathAddRecord,
-    NodeType::MathDivRecord,
-    NodeType::MathSubRecord,
-    NodeType::Input,
-    NodeType::Output,
-    NodeType::ExternalFunction,
-    NodeType::TaskRun,
-    NodeType::Spawn,
+pub const KINDS: &[Kind] = &[
+    Kind::Constant,
+    Kind::Slider,
+    Kind::MultiSlider,
+    Kind::Add,
+    Kind::Subtract,
+    Kind::Multiply,
+    Kind::Divide,
+    Kind::Power,
+    Kind::Log,
+    Kind::Abs,
+    Kind::Modulo,
+    Kind::Sqrt,
+    Kind::Sign,
+    Kind::Min,
+    Kind::Max,
+    Kind::Round,
+    Kind::Sin,
+    Kind::Cos,
+    Kind::Tan,
+    Kind::Time,
+    Kind::Oscillator,
+    Kind::Spring,
+    Kind::Damp,
+    Kind::Slew,
+    Kind::And,
+    Kind::Or,
+    Kind::Not,
+    Kind::Xor,
+    Kind::GreaterThan,
+    Kind::LessThan,
+    Kind::Equal,
+    Kind::NotEqual,
+    Kind::If,
+    Kind::Case,
+    Kind::Clamp,
+    Kind::Remap,
+    Kind::CenteredRemap,
+    Kind::PiecewiseRemap,
+    Kind::Vec3Cross,
+    Kind::VectorConstant,
+    Kind::VectorAdd,
+    Kind::VectorSubtract,
+    Kind::VectorMultiply,
+    Kind::VectorScale,
+    Kind::VectorNormalize,
+    Kind::VectorDot,
+    Kind::VectorLength,
+    Kind::VectorIndex,
+    Kind::Join,
+    Kind::Split,
+    Kind::VectorMin,
+    Kind::VectorMax,
+    Kind::VectorMean,
+    Kind::VectorMedian,
+    Kind::VectorMode,
+    Kind::ToVector,
+    Kind::FromVector,
+    Kind::SimpleNoise,
+    Kind::PerlinNoise,
+    Kind::SimplexNoise,
+    Kind::WeightedSumVector,
+    Kind::DefaultBlend,
+    Kind::BlendWeightedAverage,
+    Kind::BlendAdditive,
+    Kind::BlendMultiply,
+    Kind::BlendWeightedOverlay,
+    Kind::BlendWeightedAverageOverlay,
+    Kind::BlendMax,
+    Kind::InverseKinematics,
+    Kind::UrdfIkPosition,
+    Kind::UrdfIkPose,
+    Kind::UrdfFk,
+    Kind::BuildRecord,
+    Kind::ReadRecord,
+    Kind::SwitchRecord,
+    Kind::MergeRecord,
+    Kind::SplitRecord,
+    Kind::MathMultRecord,
+    Kind::MathAddRecord,
+    Kind::MathDivRecord,
+    Kind::MathSubRecord,
+    Kind::ExternalFunction,
+    Kind::TaskRun,
+    Kind::Spawn,
 ];
 
 /// The id of the function a node of `kind` calls.
-pub fn function_id(kind: &NodeType) -> Uuid {
-    static IDS: OnceLock<HashMap<NodeType, Uuid>> = OnceLock::new();
-    let derive = |kind: &NodeType| {
+pub fn function_id(kind: &Kind) -> Uuid {
+    static IDS: OnceLock<HashMap<Kind, Uuid>> = OnceLock::new();
+    let derive = |kind: &Kind| {
         Uuid::new_v5(
             &module_of(kind).id,
             format!("function:{}", kind_name(kind)).as_bytes(),
@@ -252,7 +248,7 @@ fn in_param() -> Uuid {
     *ID.get_or_init(|| input_param("in"))
 }
 
-/// The id of the node parameter `field` (a [`NodeParams`] field), as a
+/// The id of the node parameter `field` (a [`Params`] field), as a
 /// parameter of any function.
 pub fn param_field(field: &str) -> Uuid {
     static IDS: OnceLock<HashMap<&'static str, Uuid>> = OnceLock::new();
@@ -301,12 +297,6 @@ pub fn dt_param() -> Uuid {
 pub fn ports_param() -> Uuid {
     static ID: OnceLock<Uuid> = OnceLock::new();
     *ID.get_or_init(|| derived("ports"))
-}
-
-/// The parameter holding a node's declared output shapes, as JSON.
-pub fn output_shapes_param() -> Uuid {
-    static ID: OnceLock<Uuid> = OnceLock::new();
-    *ID.get_or_init(|| derived("output_shapes"))
 }
 
 /// The parameter holding the node's id in the graph.
@@ -399,7 +389,7 @@ const FIXED_INPUTS: &[&str] = &[
     "y",
 ];
 
-/// A [`NodeParams`] field: its name and how its value is a [`Value`].
+/// A [`Params`] field: its name and how its value is a [`Value`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FieldKind {
     /// Any value, as it is.
@@ -414,8 +404,6 @@ enum FieldKind {
     OptVecF32,
     /// `Vec<String>`, as `ArrayString`.
     OptVecString,
-    /// A typed path, as its string.
-    OptPath,
     /// A uuid, as its string.
     OptUuid,
     /// Uuids, as `ArrayString`.
@@ -473,11 +461,8 @@ const FIELDS: &[(&str, FieldKind)] = &[
     ("case_labels", FieldKind::OptVecString),
     ("record_keys", FieldKind::OptVecString),
     ("keys", FieldKind::OptString),
-    ("path", FieldKind::OptPath),
     ("function", FieldKind::OptUuid),
     ("param_ids", FieldKind::OptVecUuid),
-    ("key_field", FieldKind::OptUuid),
-    ("value_field", FieldKind::OptUuid),
     ("module", FieldKind::OptUuid),
 ];
 
@@ -491,7 +476,6 @@ enum Role {
     Time,
     Dt,
     Ports,
-    OutputShapes,
     Node,
     Selector,
 }
@@ -511,7 +495,6 @@ fn roles() -> &'static HashMap<Uuid, Role> {
         roles.insert(time_param(), Role::Time);
         roles.insert(dt_param(), Role::Dt);
         roles.insert(ports_param(), Role::Ports);
-        roles.insert(output_shapes_param(), Role::OutputShapes);
         roles.insert(node_param(), Role::Node);
         roles.insert(selector_param(), Role::Selector);
         roles
@@ -519,8 +502,8 @@ fn roles() -> &'static HashMap<Uuid, Role> {
 }
 
 /// The kinds by function id.
-fn kinds() -> &'static HashMap<Uuid, NodeType> {
-    static KINDS_BY_ID: OnceLock<HashMap<Uuid, NodeType>> = OnceLock::new();
+fn kinds() -> &'static HashMap<Uuid, Kind> {
+    static KINDS_BY_ID: OnceLock<HashMap<Uuid, Kind>> = OnceLock::new();
     KINDS_BY_ID.get_or_init(|| {
         KINDS
             .iter()
@@ -530,12 +513,12 @@ fn kinds() -> &'static HashMap<Uuid, NodeType> {
 }
 
 /// The kind whose function is `function`.
-pub fn kind_of(function: Uuid) -> Option<&'static NodeType> {
+pub fn kind_of(function: Uuid) -> Option<&'static Kind> {
     kinds().get(&function)
 }
 
 /// The variadic input group of `kind`, if it has one.
-fn variadic_input(kind: &NodeType) -> Option<&'static str> {
+fn variadic_input(kind: &Kind) -> Option<&'static str> {
     ports(kind).variadic_inputs.map(|group| group.id)
 }
 
@@ -578,7 +561,7 @@ type PortSet = [u64; PORT_SET_BITS / 64];
 
 /// The input ports `kind`'s function declares, in order: its own fixed
 /// ports ([`ports`]), every other fixed port, then its variadic group.
-pub fn declared_inputs(kind: &NodeType) -> Vec<String> {
+pub fn declared_inputs(kind: &Kind) -> Vec<String> {
     let mut ports: Vec<String> = ports(kind)
         .inputs
         .iter()
@@ -596,9 +579,8 @@ pub fn declared_inputs(kind: &NodeType) -> Vec<String> {
 }
 
 /// The input ports `kind`'s function declares, as a set.
-pub fn declares_input(kind: &NodeType, port: &str) -> bool {
-    static DECLARED: OnceLock<HashMap<NodeType, std::collections::HashSet<String>>> =
-        OnceLock::new();
+pub fn declares_input(kind: &Kind, port: &str) -> bool {
+    static DECLARED: OnceLock<HashMap<Kind, std::collections::HashSet<String>>> = OnceLock::new();
     DECLARED
         .get_or_init(|| {
             KINDS
@@ -612,27 +594,27 @@ pub fn declares_input(kind: &NodeType, port: &str) -> bool {
 
 /// Whether a node of `kind` keeps state from one call to the next in its
 /// `state` parameter.
-pub fn is_stateful(kind: &NodeType) -> bool {
+pub fn is_stateful(kind: &Kind) -> bool {
     matches!(
         kind,
-        NodeType::Spring
-            | NodeType::Damp
-            | NodeType::Slew
-            | NodeType::UrdfIkPosition
-            | NodeType::UrdfIkPose
-            | NodeType::TaskRun
-            | NodeType::Spawn
+        Kind::Spring
+            | Kind::Damp
+            | Kind::Slew
+            | Kind::UrdfIkPosition
+            | Kind::UrdfIkPose
+            | Kind::TaskRun
+            | Kind::Spawn
     )
 }
 
 /// Whether a node of `kind` reads the graph's time.
-pub fn reads_time(kind: &NodeType) -> bool {
-    matches!(kind, NodeType::Time | NodeType::Oscillator)
+pub fn reads_time(kind: &Kind) -> bool {
+    matches!(kind, Kind::Time | Kind::Oscillator)
 }
 
 /// Whether a node of `kind` reads the step's duration.
-pub fn reads_dt(kind: &NodeType) -> bool {
-    matches!(kind, NodeType::Spring | NodeType::Damp | NodeType::Slew)
+pub fn reads_dt(kind: &Kind) -> bool {
+    matches!(kind, Kind::Spring | Kind::Damp | Kind::Slew)
 }
 
 /// Where the importer places a graph node on the tree.
@@ -649,8 +631,9 @@ pub enum Placement {
     Ignored,
 }
 
-/// Where the importer places `node`, reading the description `functions`
-/// gives of a function it calls in another module.
+/// Where a tree places a node of `kind` with the parameters `params`,
+/// reading the description `functions` gives of a function it calls in
+/// another module.
 ///
 /// A task run and a spawn are control, ticked at every tick. A call to
 /// another module (`externalfunction`) is ignored when its function returns
@@ -663,11 +646,11 @@ pub enum Placement {
 ///
 /// Every other node is a detached call: the node vocabulary's functions
 /// compute their outputs from their arguments, their state included.
-pub fn placement(node: &NodeSpec, functions: &FunctionIndex) -> Placement {
-    match node.kind {
-        NodeType::TaskRun | NodeType::Spawn => Placement::Attached,
-        NodeType::ExternalFunction => {
-            let Some(described) = node.params.function.and_then(|id| functions.get(&id)) else {
+pub fn placement(kind: &Kind, params: &Params, functions: &FunctionIndex) -> Placement {
+    match kind {
+        Kind::TaskRun | Kind::Spawn => Placement::Attached,
+        Kind::ExternalFunction => {
+            let Some(described) = params.function.and_then(|id| functions.get(&id)) else {
                 return Placement::Attached;
             };
             let function = &described.function;
@@ -697,7 +680,10 @@ fn dynamic() -> FrozenTy {
     })
 }
 
-fn describe(
+/// The description of the function `id` of `module`, named `name`, whose
+/// `parameters` (id, name, whether mutable) take any value, as its return
+/// does.
+pub fn describe(
     module: Module,
     id: Uuid,
     name: &str,
@@ -730,7 +716,7 @@ fn describe(
 }
 
 /// The description of `kind`'s function.
-pub fn describe_kind(kind: &NodeType) -> ModuleFunction {
+pub fn describe_kind(kind: &Kind) -> ModuleFunction {
     // The node first: a call names its site before anything else.
     let mut parameters: Vec<(Uuid, String, bool)> = vec![(node_param(), "node".into(), false)];
     parameters.extend(
@@ -747,7 +733,6 @@ pub fn describe_kind(kind: &NodeType) -> ModuleFunction {
     parameters.push((dt_param(), "dt".into(), false));
     parameters.push((state_param(), "state".into(), true));
     parameters.push((ports_param(), "ports".into(), false));
-    parameters.push((output_shapes_param(), "output_shapes".into(), false));
     describe(
         module_of(kind),
         function_id(kind),
@@ -780,13 +765,13 @@ pub fn function_index() -> &'static FunctionIndex {
         );
         index.insert(
             external_function(),
-            describe_kind_as(&NodeType::ExternalFunction, EXTERNAL),
+            describe_kind_as(&Kind::ExternalFunction, EXTERNAL),
         );
         index
     })
 }
 
-fn describe_kind_as(kind: &NodeType, name: &str) -> ModuleFunction {
+fn describe_kind_as(kind: &Kind, name: &str) -> ModuleFunction {
     let mut described = describe_kind(kind);
     described.function_id = external_function();
     described.function_name = name.to_string();
@@ -796,28 +781,8 @@ fn describe_kind_as(kind: &NodeType, name: &str) -> ModuleFunction {
 // Node parameters as values.
 //====================================================================
 
-/// The node parameters of `params` that differ from their default, each as
-/// its parameter id and its value: the literal arguments of a node's call.
-/// An `input` node's store path and an `output` node's keyed-batch fields
-/// follow its [`Params`].
-pub fn encode_params(params: &NodeParams) -> Result<Vec<(Uuid, Value)>, String> {
-    let mut encoded = encode(&params.params())?;
-    if let Some(path) = &params.path {
-        encoded.push((param_field("path"), Value::String(path.to_string())));
-    }
-    for (field, id) in [
-        ("key_field", params.key_field),
-        ("value_field", params.value_field),
-    ] {
-        if let Some(id) = id {
-            encoded.push((param_field(field), Value::String(id.to_string())));
-        }
-    }
-    Ok(encoded)
-}
-
 /// The parameters of `params` that differ from their default, each as its
-/// parameter id and its value.
+/// parameter id and its value: the literal arguments of a node's call.
 pub fn encode(params: &Params) -> Result<Vec<(Uuid, Value)>, String> {
     let mut encoded = Vec::new();
     let mut push = |field: &str, value: Value| encoded.push((param_field(field), value));
@@ -968,14 +933,8 @@ fn parse_uuid(text: &str) -> Result<Uuid, String> {
     Uuid::parse_str(text).map_err(|e| format!("'{text}' is not a uuid: {e}"))
 }
 
-/// Set the field at `at` of `params`, or of an `input` node's `path`, from
-/// its value. The keyed-batch fields are the tree's, and only checked.
-fn set_field(
-    params: &mut Params,
-    path: &mut Option<TypedPath>,
-    at: usize,
-    value: Value,
-) -> Result<(), String> {
+/// Set the field at `at` of `params` from its value.
+fn set_field(params: &mut Params, at: usize, value: Value) -> Result<(), String> {
     let (field, kind) = FIELDS[at];
     let wrong = || format!("param.{field} does not take {value:?}");
     let f32_of = || as_f32(&value).ok_or_else(wrong);
@@ -1001,7 +960,6 @@ fn set_field(
             params.joint_defaults =
                 Some(serde_json::from_str(&string_of()?).map_err(|e| e.to_string())?)
         }
-        ("path", _) => *path = Some(TypedPath::parse(&string_of()?).map_err(|e| e.to_string())?),
         ("urdf_xml", _) => params.urdf_xml = Some(string_of()?),
         ("root_link", _) => params.root_link = Some(string_of()?),
         ("tip_link", _) => params.tip_link = Some(string_of()?),
@@ -1012,9 +970,6 @@ fn set_field(
         ("case_labels", _) => params.case_labels = Some(as_strings(&value).ok_or_else(wrong)?),
         ("record_keys", _) => params.record_keys = Some(as_strings(&value).ok_or_else(wrong)?),
         ("function", _) => params.function = Some(parse_uuid(&string_of()?)?),
-        ("key_field" | "value_field", _) => {
-            parse_uuid(&string_of()?)?;
-        }
         ("module", _) => params.module = Some(parse_uuid(&string_of()?)?),
         ("param_ids", _) => {
             params.param_ids = Some(
@@ -1171,10 +1126,10 @@ fn encode_state(state: NodeRuntimeState) -> Value {
 
 /// The runtime state `value` encodes for a node of `kind`, `None` for one it
 /// does not encode (a node's first call).
-pub(crate) fn decode_state(kind: &NodeType, value: Value) -> Option<NodeRuntimeState> {
+pub(crate) fn decode_state(kind: &Kind, value: Value) -> Option<NodeRuntimeState> {
     let flat = |value: &Value| flatten_numeric(value);
     match (kind, value) {
-        (NodeType::Spring, Value::ArrayValue(parts)) if parts.len() == 3 => {
+        (Kind::Spring, Value::ArrayValue(parts)) if parts.len() == 3 => {
             let (position, velocity, target) =
                 (flat(&parts[0])?, flat(&parts[1])?, flat(&parts[2])?);
             Some(NodeRuntimeState::Spring(SpringState {
@@ -1184,28 +1139,28 @@ pub(crate) fn decode_state(kind: &NodeType, value: Value) -> Option<NodeRuntimeS
                 target: target.data,
             }))
         }
-        (NodeType::Damp, value) => {
+        (Kind::Damp, value) => {
             let value = flat(&value)?;
             Some(NodeRuntimeState::Damp(DampState {
                 layout: value.layout,
                 value: value.data,
             }))
         }
-        (NodeType::Slew, value) => {
+        (Kind::Slew, value) => {
             let value = flat(&value)?;
             Some(NodeRuntimeState::Slew(SlewState {
                 layout: value.layout,
                 value: value.data,
             }))
         }
-        (NodeType::TaskRun, Value::ArrayValue(parts)) if parts.len() == 2 => {
+        (Kind::TaskRun, Value::ArrayValue(parts)) if parts.len() == 2 => {
             let mut parts = parts.into_iter();
             Some(NodeRuntimeState::TaskRun(TaskRunState {
                 latched: parts.next().and_then(present),
                 outputs: parts.next().and_then(present),
             }))
         }
-        (NodeType::Spawn, Value::ArrayValue(parts)) if parts.len() == 2 => {
+        (Kind::Spawn, Value::ArrayValue(parts)) if parts.len() == 2 => {
             let mut parts = parts.into_iter();
             let args = match parts.next()? {
                 Value::Structure(args) => args
@@ -1351,7 +1306,7 @@ impl DataflowNodes {
         inner: &mut dyn CallBridge,
     ) -> Result<CallResult, String> {
         let kind = if function == external_function() {
-            NodeType::ExternalFunction
+            Kind::ExternalFunction
         } else if function == select_function() {
             return select(args);
         } else {
@@ -1393,7 +1348,7 @@ impl DataflowNodes {
                 return Err(format!("{} has no parameter {id}", kind_name(&kind)));
             };
             match role {
-                Role::Field(_) | Role::Ports | Role::OutputShapes => {
+                Role::Field(_) | Role::Ports => {
                     let same = site
                         .statics
                         .get(statics)
@@ -1429,22 +1384,6 @@ impl DataflowNodes {
         }
         if changed {
             site.prepare(function, &kind, node, &mut self.output_layouts)?;
-        }
-
-        // An input node's value is what the host staged on its path.
-        let staged = if kind == NodeType::Input {
-            let at = inputs
-                .iter()
-                .position(|(port, _)| ports_table[*port] == "in");
-            at.map(|at| inputs.remove(at).1)
-        } else {
-            None
-        };
-        if staged.is_some() {
-            port_set = [0; PORT_SET_BITS / 64];
-            for (port, _) in &inputs {
-                port_set[port / 64] |= 1 << (port % 64);
-            }
         }
 
         // The inputs in the layout the plan gives them. A layout is the one
@@ -1500,10 +1439,7 @@ impl DataflowNodes {
             params: &site.params,
         };
         #[cfg(feature = "urdf_ik")]
-        if matches!(
-            kind,
-            NodeType::UrdfIkPosition | NodeType::UrdfIkPose | NodeType::UrdfFk
-        ) {
+        if matches!(kind, Kind::UrdfIkPosition | Kind::UrdfIkPose | Kind::UrdfFk) {
             if let Some(prepared) =
                 crate::eval::urdfik::prepared_state(&self.chains, node.params, state.as_ref())
             {
@@ -1522,25 +1458,13 @@ impl DataflowNodes {
         out.clear();
         {
             let mut outputs = eval_node::OutputSlots::new(&mut out, &output_layout.0);
-            if kind == NodeType::Input {
-                let value = vizij::input(
-                    node.id,
-                    site.path.as_ref(),
-                    site.output_shapes.get("out"),
-                    staged,
-                    node.params.value.as_ref(),
-                )?;
-                outputs.set("out", value)?;
-            } else {
-                let mut host = ModuleFunctions {
-                    bridge: inner,
-                    function_modules: &self.function_modules,
-                    default_module: self.default_module,
-                };
-                eval_node::eval_node_inner(rt, &node, &inputs, &mut outputs, Some(&mut host))?;
-            }
+            let mut host = ModuleFunctions {
+                bridge: inner,
+                function_modules: &self.function_modules,
+                default_module: self.default_module,
+            };
+            eval_node::eval_node_inner(rt, &node, &inputs, &mut outputs, Some(&mut host))?;
         }
-        vizij::check_declared_shapes(node.id, &site.output_shapes, &output_layout.0, &out)?;
         site.out = out;
         self.spawns.append(&mut rt.spawns);
         #[cfg(feature = "urdf_ik")]
@@ -1586,20 +1510,16 @@ impl DataflowNodes {
 struct Site {
     /// The function its calls name.
     function: Uuid,
-    /// Its static arguments (parameters, ports, declared shapes), in the
-    /// order its calls pass them.
+    /// Its static arguments (parameters, ports), in the order its calls pass
+    /// them.
     statics: Vec<(Uuid, Box<Value>)>,
     /// The graph node: its id, which names it in errors and keys its
     /// state.
     id: String,
     /// The kind of node its calls evaluate.
-    kind: NodeType,
+    kind: Kind,
     /// The node's parameters, decoded from its static arguments.
     params: Params,
-    /// An `input` node's store path, which names it in its errors.
-    path: Option<TypedPath>,
-    /// The node's declared output shapes, checked after each call.
-    output_shapes: hashbrown::HashMap<String, Shape>,
     /// Its output ports, for a node with ports beyond `out`.
     ports: Option<Vec<String>>,
     output_layout: Option<std::rc::Rc<OutputLayout>>,
@@ -1618,10 +1538,8 @@ impl Site {
             function: Uuid::nil(),
             statics: Vec::new(),
             id: node.to_string(),
-            kind: NodeType::Constant,
+            kind: Kind::Constant,
             params: Params::default(),
-            path: None,
-            output_shapes: Default::default(),
             ports: None,
             output_layout: None,
             input_layout: None,
@@ -1637,34 +1555,26 @@ impl Site {
     fn prepare(
         &mut self,
         function: Uuid,
-        kind: &NodeType,
+        kind: &Kind,
         node: &str,
         output_layouts: &mut HashMap<(Uuid, Option<Vec<String>>), std::rc::Rc<OutputLayout>>,
     ) -> Result<(), String> {
         let roles = roles();
         let mut params = Params::default();
-        let mut path = None;
         let mut ports = None;
-        let mut output_shapes = hashbrown::HashMap::new();
         for (id, value) in &self.statics {
             let Some(value) = present((**value).clone()) else {
                 continue;
             };
             match roles.get(id) {
-                Some(Role::Field(at)) => set_field(&mut params, &mut path, *at, value)?,
+                Some(Role::Field(at)) => set_field(&mut params, *at, value)?,
                 Some(Role::Ports) => ports = as_strings(&value),
-                Some(Role::OutputShapes) => {
-                    output_shapes = serde_json::from_str(as_string(&value).unwrap_or("{}"))
-                        .map_err(|e| format!("output_shapes: {e}"))?
-                }
                 _ => {}
             }
         }
         self.id = node.to_string();
         self.kind = kind.clone();
         self.params = params;
-        self.path = path;
-        self.output_shapes = output_shapes;
         self.output_layout = Some(
             output_layouts
                 .entry((function, ports.clone()))
@@ -1686,7 +1596,7 @@ impl Site {
 /// The variadic output groups a node of `kind` with the output ports
 /// `ports` has, each with its range of slots: where its evaluation writes
 /// them.
-fn output_variadics(kind: &NodeType, ports: &[String]) -> Vec<(String, VariadicRange)> {
+fn output_variadics(kind: &Kind, ports: &[String]) -> Vec<(String, VariadicRange)> {
     let Some(group) = crate::ports::ports(kind).variadic_outputs else {
         return Vec::new();
     };
@@ -1733,12 +1643,10 @@ fn select(args: &[(Uuid, &Value)]) -> Result<CallResult, String> {
         Some(selector) => decode_selector(selector)?,
         None => decode_selector(&Value::ArrayValue(Vec::new()))?,
     };
-    let zero = arora_shape::value::float(0.0);
+    let zero = crate::vocab::float(0.0);
     let input = input.unwrap_or(&zero);
-    let shape = crate::eval::shape_helpers::infer_shape_id(input);
-    let (value, _) =
-        crate::eval::shape_helpers::project_by_selector(input, Some(&shape), &selector)
-            .map_err(|error| format!("selector {selector:?} into node '{node}' failed: {error}"))?;
+    let value = crate::select::select(input, &selector)
+        .map_err(|error| format!("selector {selector:?} into node '{node}' failed: {error}"))?;
     Ok(CallResult {
         ret: value,
         mutated: Vec::new(),
@@ -1897,9 +1805,9 @@ mod tests {
             KINDS.len() + 2,
             "every function has its own id"
         );
-        assert_eq!(module_of(&NodeType::Vec3Cross), GEOMETRY);
-        assert_eq!(module_of(&NodeType::InverseKinematics), KINEMATICS);
-        assert_eq!(module_of(&NodeType::UrdfFk), KINEMATICS);
-        assert_eq!(module_of(&NodeType::Add), DATAFLOW);
+        assert_eq!(module_of(&Kind::Vec3Cross), GEOMETRY);
+        assert_eq!(module_of(&Kind::InverseKinematics), KINEMATICS);
+        assert_eq!(module_of(&Kind::UrdfFk), KINEMATICS);
+        assert_eq!(module_of(&Kind::Add), DATAFLOW);
     }
 }

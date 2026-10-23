@@ -2,16 +2,17 @@
 //! computes from its inputs, parameters, clock and state.
 //!
 //! - [`mod@eval_node`] dispatches a node to the code of its
-//!   [`NodeType`](crate::types::NodeType).
+//!   [`Kind`](crate::kind::Kind).
 //! - `context` holds what a node's evaluation reads and writes besides its
 //!   ports: the clock, its state and the runs it requests.
 //! - `plan` lays out each node's ports.
 //! - `value_layout` flattens structured values for numeric operators.
-//! - `shape_helpers` validates declared output shapes and applies selectors.
+//! - `shape_helpers` infers and checks the declared shapes of Vizij's graph format.
 //! - `numeric` and `variadic` provide shared math helpers.
 //! - `urdfik` is gated behind the `urdf_ik` feature and packages the IK solver helpers.
 //! - `vizij` holds what belongs to Vizij's graph format: the `input` node,
-//!   declared output shapes and a keyed batch's writes.
+//!   declared output shapes, a port's value with its shape ([`PortValue`])
+//!   and a keyed batch's writes.
 
 pub(crate) mod context;
 pub mod eval_node;
@@ -28,4 +29,4 @@ pub(crate) mod vizij;
 
 pub use context::{Context, SpawnRequest};
 pub use node_function::{NodeFunction, NodeFunctionRegistry, NodeFunctions};
-pub use value_layout::PortValue;
+pub use vizij::PortValue;

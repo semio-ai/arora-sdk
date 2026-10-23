@@ -11,7 +11,13 @@ use uuid::Uuid;
 use crate::eval::NodeFunctions;
 use crate::functions::{placement, Placement};
 use crate::tree_runtime::{evaluate_with_functions, Evaluation, TreeRuntime};
-use crate::types::GraphSpec;
+use crate::types::{GraphSpec, NodeSpec};
+
+/// Where the importer places `node`, as `functions` describe what it calls.
+fn placed(node: &NodeSpec, functions: &FunctionIndex) -> Placement {
+    let kind = node.kind.kind().expect("a node of the vocabulary");
+    placement(&kind, &node.params.params(), functions)
+}
 
 const FUNCTION: Uuid = Uuid::from_u128(0x2222);
 const PARAMETER: Uuid = Uuid::from_u128(0x3333);
@@ -112,7 +118,7 @@ fn calls(spec: &GraphSpec, functions: &FunctionIndex, inputs: &[f32]) -> Vec<usi
 fn a_call_whose_arguments_repeat_runs_at_every_tick() {
     let spec = graph(&[PARAMETER]);
     let functions = described(&[PARAMETER], PrimitiveKind::F32);
-    assert_eq!(placement(&spec.nodes[1], &functions), Placement::Attached);
+    assert_eq!(placed(&spec.nodes[1], &functions), Placement::Attached);
     assert_eq!(calls(&spec, &functions, &[1.0, 1.0, 1.0, 2.0]), [4, 4]);
 
     let mut rt = TreeRuntime::new(Evaluation::Demanded);
@@ -133,7 +139,7 @@ fn a_call_whose_arguments_repeat_runs_at_every_tick() {
 fn a_call_whose_function_returns_nothing_is_left_out() {
     let spec = graph(&[PARAMETER]);
     let functions = described(&[PARAMETER], PrimitiveKind::Unit);
-    assert_eq!(placement(&spec.nodes[1], &functions), Placement::Ignored);
+    assert_eq!(placed(&spec.nodes[1], &functions), Placement::Ignored);
     assert_eq!(calls(&spec, &functions, &[1.0, 2.0, 3.0]), [0, 0]);
 
     let mut rt = TreeRuntime::default();
@@ -152,7 +158,7 @@ fn a_call_whose_function_returns_nothing_is_left_out() {
 fn a_call_whose_function_takes_no_parameter_runs_at_every_tick() {
     let spec = graph(&[]);
     let functions = described(&[], PrimitiveKind::F32);
-    assert_eq!(placement(&spec.nodes[1], &functions), Placement::Attached);
+    assert_eq!(placed(&spec.nodes[1], &functions), Placement::Attached);
     assert_eq!(calls(&spec, &functions, &[1.0, 1.0, 1.0]), [3, 3]);
 }
 
@@ -160,7 +166,7 @@ fn a_call_whose_function_takes_no_parameter_runs_at_every_tick() {
 fn a_call_no_description_names_runs_at_every_tick() {
     let spec = graph(&[PARAMETER]);
     let functions = FunctionIndex::new();
-    assert_eq!(placement(&spec.nodes[1], &functions), Placement::Attached);
+    assert_eq!(placed(&spec.nodes[1], &functions), Placement::Attached);
     assert_eq!(calls(&spec, &functions, &[1.0, 1.0, 1.0]), [3, 3]);
 }
 
@@ -173,6 +179,6 @@ fn a_task_run_and_a_spawn_run_at_every_tick_whatever_is_described() {
         crate::types::NodeType::Spawn,
     ] {
         node.kind = kind;
-        assert_eq!(placement(&node, &functions), Placement::Attached);
+        assert_eq!(placed(&node, &functions), Placement::Attached);
     }
 }

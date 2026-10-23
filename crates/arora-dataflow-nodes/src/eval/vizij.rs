@@ -1,16 +1,47 @@
-//! What the module's calls do that belongs to Vizij's graph format: an
-//! `input` node fitting what it reads to its declared shape, the check of a
-//! node's declared output shapes, and the writes of a path-less `output`
-//! node's keyed batch.
+//! What belongs to Vizij's graph format: an `input` node fitting what it
+//! reads to its declared shape, the check of a node's declared output
+//! shapes, and the writes of a path-less `output` node's keyed batch. The
+//! functions of [`crate::vizij_functions`] run the first two. A node's port
+//! is reported with its shape ([`PortValue`]).
 
 use arora_shape::{Shape, TypedPath, Value, WriteOp};
-use hashbrown::HashMap;
 use uuid::Uuid;
 
-use super::plan::PortLayout;
 use super::shape_helpers::{
-    coerce_numeric_to_shape, is_numeric_like, null_of_shape_numeric, value_matches_shape,
+    coerce_numeric_to_shape, infer_shape, is_numeric_like, null_of_shape_numeric,
+    value_matches_shape,
 };
+
+/// Evaluated output captured alongside its inferred shape.
+#[derive(Clone, Debug)]
+pub struct PortValue {
+    pub value: Value,
+    pub shape: Shape,
+}
+
+impl PortValue {
+    /// Construct a `PortValue`, inferring the [`Shape`] from the [`Value`].
+    pub fn new(value: Value) -> Self {
+        let shape = infer_shape(&value);
+        PortValue { value, shape }
+    }
+
+    /// Construct a `PortValue` with an explicit [`Shape`], bypassing inference.
+    pub fn with_shape(value: Value, shape: Shape) -> Self {
+        PortValue { value, shape }
+    }
+
+    /// Overwrite the cached [`Shape`] while leaving the [`Value`] untouched.
+    pub fn set_shape(&mut self, shape: Shape) {
+        self.shape = shape;
+    }
+}
+
+impl Default for PortValue {
+    fn default() -> Self {
+        PortValue::new(Value::F32(0.0))
+    }
+}
 
 /// The value an `input` node gives: what its store key holds (`staged`),
 /// else its `default`, fitted to its `declared` shape when it has one.
@@ -69,28 +100,22 @@ fn fit(
         .unwrap_or_else(|| null_of_shape_numeric(&declared.id)))
 }
 
-/// Check each output a node declares a shape for against that shape.
-pub(crate) fn check_declared_shapes(
+/// Check that `value`, node `id`'s port `port`, has the shape `shape` it
+/// declares.
+pub(crate) fn check_shape(
     id: &str,
-    declared: &HashMap<String, Shape>,
-    layout: &PortLayout,
-    outputs: &[Value],
+    port: &str,
+    shape: &Shape,
+    value: &Value,
 ) -> Result<(), String> {
-    for (key, shape) in declared {
-        let value = layout
-            .slot(key)
-            .and_then(|slot| outputs.get(slot))
-            .ok_or_else(|| {
-                format!("node '{id}' missing declared output '{key}' during evaluation")
-            })?;
-        if !value_matches_shape(&shape.id, value) {
-            return Err(format!(
-                "node '{id}' output '{key}' does not match declared shape {:?}",
-                shape.id
-            ));
-        }
+    if value_matches_shape(&shape.id, value) {
+        Ok(())
+    } else {
+        Err(format!(
+            "node '{id}' output '{port}' does not match declared shape {:?}",
+            shape.id
+        ))
     }
-    Ok(())
 }
 
 /// The writes a keyed record batch makes, in batch order: how a
