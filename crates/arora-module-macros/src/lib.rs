@@ -965,10 +965,9 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
           Ok(arora_buffers::serde_uuid::serialize(&arora_types::value::Value::Structure(arora_types::value::Structure { id: ids::FUNCTION, fields })))
         }
 
-        /// The entry point a core-module executor or the native executor
-        /// looks up by name when this module is built as a `wasm32-wasip1`
-        /// guest or a shared library: [`dispatch_buffer`] over the guest's
-        /// linear memory, an error buffer for an error.
+        /// The entry point the native executor looks up by name when this
+        /// module is built as a shared library: [`dispatch_buffer`] over the
+        /// module's memory, an error buffer for an error.
         #[no_mangle]
         pub extern "C" fn #shim_ident(input_addr: usize) -> usize {
           let input = unsafe {

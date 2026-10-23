@@ -47,7 +47,7 @@ use wasm_bindgen_futures::JsFuture;
 use arora_buffers::serde_uuid::serialize as serialize_value;
 use arora_types::module::low::{ExportSymbol, ModuleDefinition};
 
-use super::{js_to_load_err, Prepared, SharedLoaderRc};
+use super::{js_to_load_err, SharedLoaderRc};
 use crate::call::{CallBridge, CallableId};
 use crate::compiled::{Code, CompiledModule};
 use crate::component_layout::{guest_module, provided};
@@ -58,7 +58,7 @@ use crate::load::module_definition_from_parts;
 use crate::module::{guest_error, DispatchError, Module};
 
 /// Loads `wasm-component` modules in the browser. Built on a
-/// [`BrowserExecutor`](super::BrowserExecutor)'s loader, so that modules staged
+/// [`SharedLoader`](super::SharedLoader), so that modules staged
 /// asynchronously through it ([`SharedLoader::prepare`](super::SharedLoader::prepare))
 /// load here too.
 pub struct BrowserComponentExecutor {
@@ -66,8 +66,7 @@ pub struct BrowserComponentExecutor {
 }
 
 impl BrowserComponentExecutor {
-    /// An executor loading the modules `shared` stages, alongside the
-    /// [`BrowserExecutor`](super::BrowserExecutor) it comes from.
+    /// An executor loading the modules `shared` stages.
     pub fn new(shared: SharedLoaderRc) -> Self {
         Self { shared }
     }
@@ -79,15 +78,8 @@ impl BrowserComponentExecutor {
     }
 
     /// The instance staged for `id` by the loader, if there is one.
-    fn staged(&self, id: Uuid) -> Result<Option<PreparedComponent>, LoadModuleError> {
-        match self.shared.prepared.borrow_mut().remove(&id) {
-            None => Ok(None),
-            Some(Prepared::Component(prepared)) => Ok(Some(prepared)),
-            Some(Prepared::Core(_)) => Err(LoadModuleError::Internal(format!(
-                "module {id} was prepared as a core module, but its header names the \
-                 wasm-component executor"
-            ))),
-        }
+    fn staged(&self, id: Uuid) -> Option<PreparedComponent> {
+        self.shared.prepared.borrow_mut().remove(&id)
     }
 }
 
@@ -104,7 +96,7 @@ impl Executor for BrowserComponentExecutor {
         &mut self,
         module_definition: ModuleDefinition,
     ) -> Result<Box<dyn Module>, LoadModuleError> {
-        let prepared = match self.staged(module_definition.header.id)? {
+        let prepared = match self.staged(module_definition.header.id) {
             Some(prepared) => prepared,
             None => instantiate(self.engine()?, &compile(&module_definition.executable)?)?,
         };
@@ -117,7 +109,7 @@ impl Executor for BrowserComponentExecutor {
     ) -> Result<Box<dyn Module>, LoadModuleError> {
         match &module.code {
             Code::BrowserComponent(guest) => {
-                let prepared = match self.staged(module.header.id)? {
+                let prepared = match self.staged(module.header.id) {
                     Some(prepared) => prepared,
                     None => instantiate(self.engine()?, guest)?,
                 };
@@ -126,9 +118,6 @@ impl Executor for BrowserComponentExecutor {
             Code::Executable(executable) => self.load_module(module_definition_from_parts(
                 module.header.clone(),
                 executable.as_ref().into(),
-            )),
-            _ => Err(LoadModuleError::Internal(
-                "BrowserComponentExecutor: the module was compiled for another executor".into(),
             )),
         }
     }

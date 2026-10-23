@@ -253,8 +253,7 @@ impl ComponentExecutor {
         let bindings = Module::instantiate(&mut store, component, &self.linker)
             .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
 
-        // Every function the header declares is one the component serves, as
-        // a core module exports each under its own name.
+        // Every function the header declares is one the component serves.
         let served = bindings
             .call_functions(&mut store)
             .map_err(|e| LoadModuleError::Internal(format!("functions trapped: {e:#}")))?;
@@ -326,9 +325,6 @@ impl Executor for ComponentExecutor {
                 module_definition_from_parts(module.header.clone(), executable.as_ref().into()),
                 limits,
             ),
-            _ => Err(LoadModuleError::Internal(
-                "ComponentExecutor: the module was compiled for another executor".into(),
-            )),
         }
     }
 
@@ -386,8 +382,8 @@ impl AroraModule for ComponentModule {
             }
         };
         match result {
-            // A guest that writes its error as an error buffer, as a core
-            // module does, has it read as its error, as a core module's is.
+            // A guest that writes its error as an error buffer, the form Arora
+            // Buffers give an error, has it read as its error.
             Ok(bytes) => match guest_error(&bytes) {
                 Some(message) => Err(DispatchError::Guest { message }),
                 None => Ok(bytes.into_boxed_slice()),

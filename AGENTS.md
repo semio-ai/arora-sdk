@@ -87,8 +87,7 @@ Key build concepts:
 - C++ modules use CMake, but invoked from Rust `build.rs`
 - Wasm guests, Rust and C++, are components built for `wasm32-wasip2` against
   the `arora:module` world (`crates/arora-engine/wit/arora-module.wit`); their
-  headers name the `wasm-component` executor. The `wasm` executors still load
-  `wasm32-wasip1` core modules built before.
+  headers name the `wasm-component` executor, the one WebAssembly executor.
 - Browser engine uses `wasm32-unknown-unknown`
 
 ## Common Pitfalls and Solutions

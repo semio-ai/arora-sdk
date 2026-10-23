@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [15.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** on arora-engine 7, whose types arora re-exports. A device's
+  engine carries the component and native executors: a guest loads as a
+  component, built for `wasm32-wasip2`. A module directory whose header
+  names `wasm`, a `wasm32-wasip1` core module, is refused, naming the
+  rebuild it needs.
+
 ## [14.1.0] - 2026-10-23
 
 ### Added

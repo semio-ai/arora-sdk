@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "6.1.0"
+version = "7.0.0"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
@@ -62,25 +62,20 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # The text-format assembler for the hand-written guests and components.
 wat = "1"
 
-# Browser-host integration test (tests/browser.rs), wasm32-only. serde_yaml +
-# uuid above supply the header/value types; these add the test harness, the
-# panic hook, and the guest modules the tests load through the browser
-# executors.
+# Browser-host integration test (tests/browser_component.rs), wasm32-only.
+# serde_yaml + uuid above supply the header/value types; these add the test
+# harness, the panic hook, and the guest the test loads through the browser
+# component executor.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 arora-types = { path = "../arora-types", version = "3" }
 wasm-bindgen-test = "0.3"
 console_error_panic_hook = "0.1"
-# test-rust-wasm guest (wasm32-wasip1) that the browser test include_bytes!s;
-# cargo exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
-# `lib = true` also brings the crate in for the test's own target: the header
-# the test loads comes from the module's Rust declaration.
-test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
 # The component guest tests/browser_component.rs include_bytes!s; cargo exposes
 # its path as CARGO_CDYLIB_FILE_TEST_RUST_COMPONENT_test_rust_component.
 test-rust-component = { path = "../../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
 
-# Native-host integration test (tests/native.rs): the same guest built for the
-# host as a cdylib, loaded through NativeExecutor; cargo exposes its path as
+# Native-host integration test (tests/native.rs): the test-rust-wasm guest
+# built for the host as a cdylib, loaded through NativeExecutor; cargo exposes its path as
 # CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", lib = true }

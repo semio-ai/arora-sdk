@@ -5,8 +5,8 @@
 //! the engine and reaching the WASI 0.2 interfaces — the same calls
 //! `tests/tests/component.rs` makes through the native component executor.
 //!
-//! Like `browser.rs`, the file only exists on `wasm32` and runs under
-//! `wasm-bindgen-test` in a browser.
+//! The file only exists on `wasm32` and runs under `wasm-bindgen-test` in a
+//! browser.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -16,7 +16,7 @@ use std::rc::Rc;
 use arora_engine::call::{CallBridge, CallError, Callable, CallableId};
 use arora_engine::compiled::CompiledModule;
 use arora_engine::engine::{Engine, EngineBuilder};
-use arora_engine::executor::browser::{BrowserExecutor, SharedLoaderRc};
+use arora_engine::executor::browser::{BrowserComponentExecutor, SharedLoader, SharedLoaderRc};
 use arora_engine::load::load_module_from_parts;
 use arora_types::module::low::Header;
 use arora_types::value::Value;
@@ -122,14 +122,11 @@ fn id(s: &str) -> Uuid {
     Uuid::parse_str(s).expect("valid uuid")
 }
 
-/// An engine with both browser executors, sharing one loader.
+/// An engine with the browser component executor, and the loader it shares.
 fn engine() -> (Pin<Box<Engine>>, SharedLoaderRc) {
-    let executor = BrowserExecutor::new();
-    let loader = executor.shared();
-    let components = executor.component_executor();
+    let loader = SharedLoader::new();
     let engine = EngineBuilder::new()
-        .add_executor(executor)
-        .add_executor(components)
+        .add_executor(BrowserComponentExecutor::new(loader.clone()))
         .build();
     (engine, loader)
 }
@@ -200,7 +197,7 @@ fn a_component_reaches_the_wasi_interfaces_in_browser() {
 }
 
 /// The asynchronous loader path (`WebAssembly.compile` +
-/// `WebAssembly.instantiate`) stages a component as it stages a core module.
+/// `WebAssembly.instantiate`) stages a component for its load.
 #[wasm_bindgen_test]
 async fn a_component_prepares_asynchronously_then_dispatches() {
     console_error_panic_hook::set_once();
@@ -215,23 +212,19 @@ async fn a_component_prepares_asynchronously_then_dispatches() {
     assert_eq!(&*result, b"prepared");
 }
 
-/// A component staged by the loader is not loaded as a core module.
+/// The loader refuses a core module: no executor loads one.
 #[wasm_bindgen_test]
-async fn a_prepared_component_is_not_loaded_as_a_core_module() {
+async fn the_loader_refuses_a_core_module() {
     console_error_panic_hook::set_once();
-    let (mut engine, loader) = engine();
-    loader
-        .prepare(id(MODULE_ID), COMPONENT.to_vec())
+    let (_engine, loader) = engine();
+    let core = wat::parse_str("(module)").expect("assemble");
+    let error = loader
+        .prepare(id(MODULE_ID), core)
         .await
-        .expect("async prepare");
-    let error = load_module_from_parts(
-        &mut engine,
-        header_with("wasm", &[(ECHO_FN, "echo")]),
-        Box::new([]),
-    )
-    .expect_err("a component staged for the core executor fails to load");
+        .expect_err("a core module is not staged");
+    let error = error.as_string().unwrap_or_default();
     assert!(
-        format!("{error}").contains("prepared as a component"),
+        error.contains("is a core module"),
         "unexpected error: {error}"
     );
 }

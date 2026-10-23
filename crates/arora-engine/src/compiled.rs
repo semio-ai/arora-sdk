@@ -10,11 +10,10 @@ use crate::schema::module::low::Header;
 /// [`Header`] and its executable, in the form the executor the header names
 /// instantiates from.
 ///
-/// - For the WebAssembly executors (`"wasm"`, `"wasm-component"`),
-///   [`new`](Self::new) compiles the executable: natively (the
-///   `wasmtime-host` feature) to a `wasmtime::Module` or a
+/// - For the component executors (`"wasm-component"`), [`new`](Self::new)
+///   compiles the executable: natively (the `wasmtime-host` feature) to a
 ///   `wasmtime::component::Component`, on `wasm32` to a `WebAssembly.Module`
-///   — for a component, of the guest's core module in it. Each engine that
+///   of the guest's core module in it. Each engine that
 ///   loads it creates its own instance — the guest's memory and globals — from
 ///   that compiled code, without compiling again.
 /// - For any other executor (a native library), it holds the executable's
@@ -34,17 +33,10 @@ pub struct CompiledModule {
 /// What an executor instantiates a [`CompiledModule`] from.
 #[derive(Clone)]
 pub(crate) enum Code {
-    /// Compiled by wasmtime, on the process-wide engine the WebAssembly
-    /// executor runs every instance in.
-    #[cfg(all(feature = "wasmtime-host", not(target_arch = "wasm32")))]
-    Wasmtime(wasmtime::Module),
     /// A component compiled by wasmtime, on the process-wide engine the
     /// component executor runs every instance in.
     #[cfg(all(feature = "wasmtime-host", not(target_arch = "wasm32")))]
     Component(wasmtime::component::Component),
-    /// Compiled by the browser's `WebAssembly` runtime.
-    #[cfg(target_arch = "wasm32")]
-    Browser(js_sys::WebAssembly::Module),
     /// A component's guest core module, compiled by the browser's
     /// `WebAssembly` runtime.
     #[cfg(target_arch = "wasm32")]
@@ -56,16 +48,15 @@ pub(crate) enum Code {
 impl CompiledModule {
     /// Compile `executable` for the executor `header` names.
     ///
-    /// A `"wasm"` or `"wasm-component"` module is compiled here, when this
-    /// build carries an executor for it. Natively, an executable that is not
-    /// valid WebAssembly, or a core module that exceeds what the `wasm`
-    /// executor's pooling allocator holds per instance (one memory, one
-    /// table), fails with [`LoadModuleError::MalformedExecutable`]; on
-    /// `wasm32`, one that does not
-    /// compile — or a component the browser executor does not run, see
-    /// [`BrowserComponentExecutor`](crate::executor::browser::BrowserComponentExecutor)
-    /// — fails with [`LoadModuleError::Internal`] carrying the reason. Any other module keeps its bytes, which its executor reads
-    /// when the module is loaded. Whether the executable exports what the
+    /// A `"wasm-component"` module is compiled here, when this build carries
+    /// an executor for it. Natively, an executable that is not a valid
+    /// component fails with [`LoadModuleError::MalformedExecutable`]; on
+    /// `wasm32`, one that does not compile, or a component the browser
+    /// executor does not run (see
+    /// [`BrowserComponentExecutor`](crate::executor::browser::BrowserComponentExecutor)),
+    /// fails with [`LoadModuleError::Internal`] carrying the reason. Any other
+    /// module keeps its bytes, which its executor reads when the module is
+    /// loaded. Whether the executable exports what the
     /// header declares is checked when the module is loaded, as for a
     /// [`ModuleDefinition`](crate::schema::module::low::ModuleDefinition).
     ///
@@ -73,7 +64,6 @@ impl CompiledModule {
     /// synchronous compilation on the main thread applies (8 MB in Chrome).
     pub fn new(header: Header, executable: &[u8]) -> Result<Self, LoadModuleError> {
         let code = match header.executor.name.as_str() {
-            WASM_EXECUTOR => compile_wasm(executable)?,
             COMPONENT_EXECUTOR => compile_component(executable)?,
             _ => Code::Executable(executable.into()),
         };
@@ -94,10 +84,6 @@ impl fmt::Debug for CompiledModule {
     }
 }
 
-/// The name the WebAssembly executors (wasmtime natively, the browser's on
-/// `wasm32`) register under.
-const WASM_EXECUTOR: &str = "wasm";
-
 /// The name the component executors register under.
 const COMPONENT_EXECUTOR: &str = "wasm-component";
 
@@ -115,23 +101,6 @@ fn compile_component(executable: &[u8]) -> Result<Code, LoadModuleError> {
 /// registered under `"wasm-component"`.
 #[cfg(not(any(feature = "wasmtime-host", target_arch = "wasm32")))]
 fn compile_component(executable: &[u8]) -> Result<Code, LoadModuleError> {
-    Ok(Code::Executable(executable.into()))
-}
-
-#[cfg(all(feature = "wasmtime-host", not(target_arch = "wasm32")))]
-fn compile_wasm(executable: &[u8]) -> Result<Code, LoadModuleError> {
-    crate::executor::wasm::compile(executable).map(Code::Wasmtime)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn compile_wasm(executable: &[u8]) -> Result<Code, LoadModuleError> {
-    crate::executor::browser::compile(executable).map(Code::Browser)
-}
-
-/// No WebAssembly executor in this build: the bytes are kept, and an executor
-/// registered under `"wasm"` receives them as it receives a module definition.
-#[cfg(not(any(feature = "wasmtime-host", target_arch = "wasm32")))]
-fn compile_wasm(executable: &[u8]) -> Result<Code, LoadModuleError> {
     Ok(Code::Executable(executable.into()))
 }
 

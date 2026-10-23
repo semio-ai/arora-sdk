@@ -63,7 +63,7 @@ arora-sdk/
 │   ├── modules/cpp            example C++ module → a module directory
 │   └── policy-modules         control policies as modules (own workspace)
 ├── .cargo/config.toml    unstable flags + i686-musl cross linker (NAO runner)
-├── rust-toolchain.toml   pins nightly + wasm32-wasip1/p2
+├── rust-toolchain.toml   pins nightly + wasm32-wasip2
 ├── Cargo.toml            workspace root
 └── .github/workflows/    CI
 ```
@@ -84,10 +84,8 @@ graph TB
         end
         subgraph executors["Executor trait"]
             native_exec["NativeExecutor\nlibloading · host only\nfeature: native-host"]
-            wasm_exec["WebAssemblyExecutor\nwasmtime + WASI · host only\nfeature: wasmtime-host"]
             component_exec["ComponentExecutor\nwasmtime component + WASI p2 · host only\nfeature: wasmtime-host"]
             browser_component_exec["BrowserComponentExecutor\njs-sys WebAssembly + canonical-ABI WASI 0.2\ncfg(target_arch = wasm32)"]
-            browser_exec["BrowserExecutor\njs-sys WebAssembly + WASI stubs\ncfg(target_arch = wasm32)"]
         end
     end
 
@@ -182,13 +180,12 @@ loop:
 The engine library (`crates/arora-engine`) is dual-target:
 
 - On native (`cfg(not(target_arch = "wasm32"))`), it compiles `executor::native`
-  (libloading), `executor::component` (wasmtime component model against
-  `wit/arora-module.wit`) and `executor::wasm` (wasmtime core modules). All
-  are gated by Cargo features (`native-host`, `wasmtime-host`), both
-  default-on.
+  (libloading) and `executor::component` (wasmtime component model against
+  `wit/arora-module.wit`), gated by Cargo features (`native-host`,
+  `wasmtime-host`), both default-on.
 - On `wasm32-*`, it compiles `executor::browser` instead — the component
-  executor and the core-module one — and accepts `--no-default-features` to
-  drop the host-only deps.
+  executor and the loader that stages components compiled asynchronously —
+  and accepts `--no-default-features` to drop the host-only deps.
 
 `arora::load::*` exposes header-yaml + bytes → `ModuleDefinition` helpers used
 by both `arora-cli` (host) and `arora-web` (browser).
@@ -301,9 +298,8 @@ for instantiation. `BrowserComponentExecutor` runs a component as it is
 published: it instantiates the component's guest core module and gives it,
 in the canonical ABI's form, the `host` interface and the WASI 0.2 imports
 the native component executor links (standard output and error to the
-console, randomness from `crypto.getRandomValues`, …). `BrowserExecutor`
-ships WASI preview 1 stubs for `wasm32-wasip1` core modules. Neither needs a
-guest re-compiled for `unknown-unknown`.
+console, randomness from `crypto.getRandomValues`, …). It needs no guest
+re-compiled for `unknown-unknown`.
 
 Demo + headless-Firefox test under `crates/arora-web/www/` and
 `crates/arora-web/tests/`.

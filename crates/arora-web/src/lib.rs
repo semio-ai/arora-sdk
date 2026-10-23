@@ -32,7 +32,7 @@ use std::rc::Rc;
 use arora_engine::{
     call::{CallBridge, Callable, CallableId},
     engine::EngineBuilder,
-    executor::browser::{BrowserExecutor, SharedLoaderRc},
+    executor::browser::{BrowserComponentExecutor, SharedLoader, SharedLoaderRc},
     load::load_module_from_parts,
 };
 use arora_types::module::low::Header;
@@ -1128,12 +1128,9 @@ impl Engine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Engine {
         install_panic_hook();
-        let executor = BrowserExecutor::new();
-        let loader = executor.shared();
-        let components = executor.component_executor();
+        let loader = SharedLoader::new();
         let inner = EngineBuilder::new()
-            .add_executor(executor)
-            .add_executor(components)
+            .add_executor(BrowserComponentExecutor::new(loader.clone()))
             .build();
         Engine {
             inner,
@@ -1499,12 +1496,9 @@ impl BehaviorTreeRunner {
     #[wasm_bindgen(constructor)]
     pub fn new() -> BehaviorTreeRunner {
         install_panic_hook();
-        let executor = BrowserExecutor::new();
-        let loader = executor.shared();
-        let components = executor.component_executor();
+        let loader = SharedLoader::new();
         let inner = EngineBuilder::new()
-            .add_executor(executor)
-            .add_executor(components)
+            .add_executor(BrowserComponentExecutor::new(loader.clone()))
             .build();
         BehaviorTreeRunner {
             inner,

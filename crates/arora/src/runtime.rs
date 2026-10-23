@@ -1343,7 +1343,7 @@ author: ""
 description: ~
 license: ""
 version: {{ major: 1, minor: 0, patch: 0 }}
-executor: {{ name: wasm, min_version: ~, max_version: ~ }}
+executor: {{ name: wasm-component, min_version: ~, max_version: ~ }}
 imports: []
 executable_mime: ""
 exports:
@@ -1355,16 +1355,8 @@ exports:
 "#
         ))
         .unwrap();
-        let guest = format!(
-            r#"(module
-                (memory (export "memory") 1)
-                (func (export "arora_buffer_alloc") (param i32) (result i32) i32.const 1024)
-                (func (export "arora_buffer_free") (param i32))
-                (func (export "arora_function_{f}") (param i32) (result i32)
-                    (loop $forever (br $forever))
-                    i32.const 0))"#,
-            f = spin.to_string().replace('-', "_"),
-        );
+        let guest =
+            crate::test_components::component(&[(spin, crate::test_components::Answer::Spin)]);
         let answers = Rc::new(std::cell::RefCell::new(Vec::new()));
         // The module's own budget, 100 ms, outlasts the step's 20 ms period.
         let limits = |ms| crate::GuestLimits {
@@ -1382,8 +1374,7 @@ exports:
             .with_module_limits(module, limits(100))
             .build()
             .expect("arora builds");
-        let compiled =
-            arora_engine::compiled::CompiledModule::new(header, guest.as_bytes()).unwrap();
+        let compiled = arora_engine::compiled::CompiledModule::new(header, &guest).unwrap();
         arora.load_module(&compiled).unwrap();
         let _ = tokio::time::timeout(
             Duration::from_millis(300),
@@ -1403,10 +1394,7 @@ exports:
         assert!(budget <= 20.0, "{overran}");
         for refused in &answers[1..] {
             let refused = refused.as_ref().unwrap_err();
-            assert!(
-                refused.contains("overran its budget in an earlier call"),
-                "{refused}"
-            );
+            assert!(refused.contains("trapped in an earlier call"), "{refused}");
         }
         drop(answers);
 

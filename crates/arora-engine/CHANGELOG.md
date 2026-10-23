@@ -4,6 +4,25 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.0] - 2026-10-23
+
+### Removed
+
+- **Breaking:** the executors of `wasm32-wasip1` core modules, whose headers
+  name `wasm`: `executor::wasm::WebAssemblyExecutor` natively and
+  `executor::browser::BrowserExecutor` in the browser. A component, a guest
+  built for `wasm32-wasip2` whose header names `wasm-component`, is the one
+  form a WebAssembly guest loads in. A header naming `wasm` finds no
+  executor; `CompiledModule::new` keeps its bytes, as for any executor it
+  does not compile for.
+
+### Changed
+
+- **Breaking:** the browser's asynchronous loader stands alone:
+  `SharedLoader::new()` makes one, and `BrowserComponentExecutor::new` takes
+  it. `SharedLoader::prepare` stages components only, and refuses a core
+  module, saying so.
+
 ## [6.1.0] - 2026-10-23
 
 ### Added

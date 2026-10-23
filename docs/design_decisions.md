@@ -134,14 +134,13 @@ is what a module registry can hold and every host can run.
   guest that does sees none, on either host. Data crosses as
   Arora Buffers in `list<u8>`, through the canonical ABI, so no guest
   allocator protocol is part of the contract. A guest's error is the
-  `err` of `dispatch`; an error buffer in its `ok`, as a core module writes
-  its errors, is read as its error too.
+  `err` of `dispatch`; an error buffer in its `ok`, the form Arora Buffers
+  give an error, is read as its error too.
 - A component that traps is entered no more. wasmtime refuses to re-enter a
   component instance after a trap, since the trap may have left its state
   half-written, and the browser executor holds a trapped component to the
   same rule: every later call fails, naming the trap, until the module is
-  reloaded, which instantiates it afresh. A core module, by contrast, is
-  called again with whatever state the trap left.
+  reloaded, which instantiates it afresh.
 - `wasip2` is Tier 2 in rustc, and WASI SDK 33 links components with
   `wasm-component-ld`. Rust guests export through `arora_module::artifact!`,
   C++ guests through `arora-cpp-component` (see the C++ section below).
@@ -163,11 +162,12 @@ is what a module registry can hold and every host can run.
   adopted yet because wasmtime's `p3` module is explicitly experimental,
   `wasm32-wasip3` is Tier 3 in rustc, and browsers lack a transpilation
   path (jco async needs JSPI, absent from Firefox).
-- The `wasm` executors still load `wasm32-wasip1` core modules, so a guest
-  built in that form before — Vizij's published animation module — runs
-  unchanged. Apart from the `wasm32-wasip1` build of test-rust-wasm that the
-  engine's browser test loads through that path, no guest here is built in
-  it.
+- A component is the one form a WebAssembly guest loads in. A
+  `wasm32-wasip1` core module, whose header names `wasm`, has no executor: a
+  second ABI to host on both runtimes doubles the surface every guest-facing
+  rule (argument checks, limits, traps) must hold on, for guests that rebuild
+  for `wasm32-wasip2` with no change to their source. A device refuses a
+  module directory naming `wasm`, saying so.
 - The world's package version, `arora:module@0.2.0`, is what a component is
   built against; a host provides that version's `host` interface, and a
   component built against another does not load.
@@ -237,32 +237,28 @@ robot is opt-in and not run in CI. See
 
 ### Five executors, one engine
 
-The engine (`crates/arora-engine`) exposes five `Executor` implementations and
+The engine (`crates/arora-engine`) exposes three `Executor` implementations and
 selects between them by the `executor.name` in a module's header:
 
 | Executor                                     | Name             | Module location        | Cfg                                | Default feature |
 | -------------------------------------------- | ---------------- | ---------------------- | ---------------------------------- | --------------- |
 | `executor::native`                           | `native`         | `native.rs`            | `cfg(not(target_arch = "wasm32"))` | `native-host`   |
 | `executor::component`                        | `wasm-component` | `component/mod.rs`     | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
-| `executor::wasm` (wasmtime)                  | `wasm`           | `wasm/mod.rs`          | `cfg(not(target_arch = "wasm32"))` | `wasmtime-host` |
 | `executor::browser::BrowserComponentExecutor`| `wasm-component` | `browser/component.rs` | `cfg(target_arch = "wasm32")`      | always-on on wasm32 |
-| `executor::browser::BrowserExecutor`         | `wasm`           | `browser/mod.rs`       | `cfg(target_arch = "wasm32")`      | always-on on wasm32 |
 
 `native` uses `libloading` to dlopen host cdylibs. `component` uses
 `wasmtime::component` against the `arora:module` WIT world plus
 `wasmtime-wasi` p2, with wasmtime's concurrency support off: the world
 declares no async function, stream or future, so a component that uses the
-component model's concurrency ABI is refused at compilation. `wasm` uses
-`wasmtime` core modules with the core-module malloc/dispatch ABI. The browser
-executors use `js_sys::WebAssembly::{Module, Instance, Memory}`:
-`BrowserComponentExecutor` instantiates a component's guest core module and
-implements, in the canonical ABI's form, the `host` interface and the WASI
-0.2 interfaces the native executor links (standard output and error to the
-console, random bytes from `crypto.getRandomValues`, clocks from
-`performance.now()` and `Date.now()`, every pollable ready); `BrowserExecutor`
-implements WASI preview 1 stubs for core modules (`proc_exit`, `fd_write`,
-`random_get`, …). The two share a loader, so `prepare` stages either kind
-asynchronously.
+component model's concurrency ABI is refused at compilation.
+`BrowserComponentExecutor` uses `js_sys::WebAssembly::{Module, Instance,
+Memory}`: it instantiates a component's guest core module and implements, in
+the canonical ABI's form, the `host` interface and the WASI 0.2 interfaces
+the native executor links (standard output and error to the console, random
+bytes from `crypto.getRandomValues`, clocks from `performance.now()` and
+`Date.now()`, every pollable ready). Its `SharedLoader` stages a component
+compiled asynchronously, for one above the browser's limit on synchronous
+compilation.
 
 `wasmtime`, `wasmtime-wasi`, `libloading`, and `tempfile` are gated behind
 the `wasmtime-host` and `native-host` features (both default-on for native
@@ -273,25 +269,18 @@ over.
 
 Compiled code is shareable on both WebAssembly hosts, and only an instance
 holds a guest's state: a `WebAssembly.Module` instantiates any number of
-times, and a `wasmtime::Module` instantiates in any store of the engine that
-compiled it. So `CompiledModule` holds the compiled code, and an engine's
+times, and a `wasmtime::component::Component` instantiates in any store of
+the engine that compiled it. So `CompiledModule` holds the compiled code, and an engine's
 `load_compiled_module` creates an instance of it; a device builder that loads
 one into N devices compiles once, not N times. Loading a module from its bytes
 is the same path with the compilation in front.
 
-Natively, every `WebAssemblyExecutor` in a process shares one wasmtime engine,
-and every `ComponentExecutor` another, each created on first use, rather than
-one each: a module compiled for one engine
-cannot be instantiated in another, so per-executor engines would rule out
-sharing. Each instance keeps its own `Store`, so guests share no state. The
-core-module engine's pooling allocator is process-wide with it: it reserves
-address space for all its slots when the engine is created, so one engine per
-device would bound the devices a process holds by its address space, and one
-engine bounds instead the core-module instances running at once — 1000 on
-64-bit targets, 100 on 32-bit, wasmtime's defaults. The component engine
-allocates its instances on demand, reserving address space per live instance:
-a second pool would reserve, when it is created, as much again as the first.
-A guest's memory and the time of each call are bounded per store
+Natively, every `ComponentExecutor` in a process shares one wasmtime engine,
+created on first use, rather than one each: a component compiled for one
+engine cannot be instantiated in another, so per-executor engines would rule
+out sharing. Each instance keeps its own `Store`, so guests share no state.
+The engine allocates its instances on demand, reserving address space per live
+instance. A guest's memory and the time of each call are bounded per store
 (`arora_engine::limits`).
 
 ### `arora-web` is a separate crate
