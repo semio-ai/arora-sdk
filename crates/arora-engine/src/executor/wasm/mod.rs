@@ -922,8 +922,8 @@ exports:
         engine.reload_module(&compiled).expect("reloads");
         engine.set_guest_limits(module, GuestLimits::default());
         let step = Duration::from_millis(30);
-        engine.set_step_budget(Some(step));
         let started = Instant::now();
+        engine.set_step_budget(Some(step));
         let overran = engine.dispatch(&module, &spin, &[]).unwrap_err();
         let took = started.elapsed();
         engine.set_step_budget(None);
@@ -1188,8 +1188,8 @@ exports:
                     ..GuestLimits::default()
                 },
             );
-            engine.set_step_budget(Some(step));
             let started = Instant::now();
+            engine.set_step_budget(Some(step));
             let overran = engine.dispatch(&module, &spin, &[]).unwrap_err();
             let took = started.elapsed();
             engine.set_step_budget(None);

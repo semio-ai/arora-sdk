@@ -6,13 +6,23 @@ All notable changes to `arora`. The format follows
 
 ## [14.1.0] - 2026-10-23
 
+### Added
+
+- `AroraBuilder::with_guest_limits` and `with_module_limits` set what guest
+  modules may spend, for all or for one: the time of a call outside a step
+  and the memory of an instance (`GuestLimits`, re-exported).
+  `Arora::set_guest_limits` changes one module's later, from its next call
+  for its budget and from its next load or reload for its memory.
+
 ### Changed
 
 - `Arora::run` bounds the guest calls of each step by its period, through
   arora-engine 6.1's `Engine::set_step_budget`: a guest call still running
   when the period ends is interrupted, its call fails, and its module refuses
-  its calls until it is reloaded. The device keeps stepping. A guest's linear
-  memories are capped at 256 MiB each.
+  its calls until it is reloaded. The device keeps stepping. A call made in a
+  step whose time is used up is not made, and its module serves the next
+  step. A guest's linear memories are capped at 256 MiB each, unless the
+  device's limits say otherwise.
 
 ## [14.0.0] - 2026-10-23
 

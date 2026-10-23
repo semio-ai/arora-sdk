@@ -452,27 +452,34 @@ impl Engine {
             // call's deadline, or its caller's if earlier: its own budget,
             // counted anew, would extend the call under way. A tighter
             // deadline holds for this call only; the call under way gets its
-            // own back when this one returns.
-            // A module's call under way, not its load: a module reloading
-            // runs its new instance's initializer, and one it calls under its
-            // id is the old instance, which no call is under way in.
+            // own back when this one returns. A load is not a call under way
+            // in the module it loads: a module reloading runs its new
+            // instance's initializer, and one it calls under its id is the
+            // old instance.
             let under_way = self
                 .guest_calls
                 .iter()
                 .rev()
                 .find(|call| call.module == *module_id && !call.loading)
                 .map(|call| (call.deadline, call.budget));
-            let (deadline, budget, restore) = match under_way {
-                None => {
-                    module.module.set_call_deadline(deadline, budget);
-                    (deadline, budget, None)
-                }
+            let (deadline, budget, restore, set) = match under_way {
+                None => (deadline, budget, None, true),
                 Some((outer, outer_budget)) if deadline < outer => {
-                    module.module.set_call_deadline(deadline, budget);
-                    (deadline, budget, Some((outer, outer_budget)))
+                    (deadline, budget, Some((outer, outer_budget)), true)
                 }
-                Some((outer, outer_budget)) => (outer, outer_budget, None),
+                Some((outer, outer_budget)) => (outer, outer_budget, None, false),
             };
+            // A call with no time left is not made: entering the guest, it
+            // would be interrupted at once, and refuse its calls from then on,
+            // for a deadline another call used up.
+            if deadline <= std::time::Instant::now() {
+                return Err(DispatchError::Trap {
+                    message: crate::limits::no_time_left(module_id, function_id),
+                });
+            }
+            if set {
+                module.module.set_call_deadline(deadline, budget);
+            }
             self.guest_calls.push(GuestCall {
                 module: *module_id,
                 deadline,

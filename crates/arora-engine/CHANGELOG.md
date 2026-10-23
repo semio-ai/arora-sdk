@@ -15,8 +15,11 @@ All notable changes to `arora-engine`. The format follows
     a module's `GuestLimits::call_budget` tightens it; a guest's call to
     another ends by its caller's deadline. A call still running at its
     deadline is interrupted at the first epoch tick past it, a millisecond
-    apart, never before, and fails with `DispatchError::Trap`, naming the module, the function and the
-    budget; the module refuses its calls until it is reloaded.
+    apart, never before, and fails with `DispatchError::Trap`, naming the
+    module, the function and the budget; the module refuses its calls until
+    it is reloaded. A call with no time left before its deadline is not
+    made: it fails with `DispatchError::Trap` saying so, and its module,
+    never entered, serves its later calls.
   - **Memory.** Each linear memory of an instance holds at most
     `GuestLimits::memory` bytes, `DEFAULT_MEMORY` (256 MiB) by default: a
     `memory.grow` past it returns -1 to the guest.

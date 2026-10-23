@@ -20,6 +20,11 @@
 //! 16.7 ms. Loading a module (its `_initialize`, a component's `functions`)
 //! runs under [`DEFAULT_CALL_BUDGET`].
 //!
+//! A call with no time left before its deadline is not made: it fails
+//! with [`DispatchError::Trap`], and its module, never entered, serves its
+//! later calls, rather than refusing them for a deadline another call used
+//! up.
+//!
 //! A guest's call to another guest ends by its caller's deadline, a guest
 //! loading counting as a call to its callees. A module called back while its
 //! call is under way ends by that call's deadline, or its caller's if
@@ -121,6 +126,16 @@ pub(crate) fn tick(engine: &wasmtime::Engine) {
             }
         })
         .expect("spawn the epoch thread");
+}
+
+/// The message of a call not made because no time was left before its
+/// deadline: the step's guest calls, or its caller, used it up.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn no_time_left(module: &uuid::Uuid, function: &uuid::Uuid) -> String {
+    format!(
+        "the call to {function} of module {module} was not made: no time was left before its \
+         deadline, and the module was not entered"
+    )
 }
 
 /// The message of a call interrupted at its deadline.

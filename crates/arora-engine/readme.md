@@ -126,11 +126,13 @@ linear memory is capped ([`limits`](src/limits.rs)):
   caller's deadline, and a module called back while its call is under way
   ends by that call's deadline, or its caller's if earlier.
   A call still running at its deadline is interrupted at the first epoch
-  tick past it, a millisecond apart, never before: it fails with `DispatchError::Trap`, naming the
-  module, the function and the budget. The module then refuses its calls
-  until it is reloaded, since the interrupted call can have left its state
-  half updated. A caller whose callee ran past the caller's deadline is
-  interrupted once the call returns.
+  tick past it, a millisecond apart, never before: it fails with
+  `DispatchError::Trap`, naming the module, the function and the budget. The
+  module then refuses its calls until it is reloaded, since the interrupted
+  call can have left its state half updated. A caller whose callee ran past
+  the caller's deadline is interrupted once the call returns. A call with no
+  time left before its deadline is not made, and its module, never entered,
+  serves its later calls.
 - **Memory.** Each linear memory of a guest's instance holds at most
   `GuestLimits::memory` bytes, 256 MiB by default. A core module has one; a
   component can hold several, each under the cap. A `memory.grow` past it

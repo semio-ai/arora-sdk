@@ -1302,12 +1302,14 @@ mod tests {
 
     /// A behavior calling `function` of `module` each tick, keeping what each
     /// call answered.
+    #[cfg(feature = "native")]
     struct CallEachTick {
         module: uuid::Uuid,
         function: uuid::Uuid,
         answers: Rc<std::cell::RefCell<Vec<Result<(), String>>>>,
     }
 
+    #[cfg(feature = "native")]
     impl BehaviorInterpreter for CallEachTick {
         fn tick(
             &mut self,
@@ -1326,6 +1328,7 @@ mod tests {
     /// A guest call that would loop forever is interrupted when its step's
     /// period ends, and the device keeps stepping: the module refuses the
     /// calls of the steps after it.
+    #[cfg(feature = "native")]
     #[tokio::test]
     async fn a_guest_call_overrunning_its_step_is_interrupted_and_the_device_keeps_stepping() {
         let (module, spin) = (
@@ -1363,14 +1366,22 @@ exports:
             f = spin.to_string().replace('-', "_"),
         );
         let answers = Rc::new(std::cell::RefCell::new(Vec::new()));
-        let mut arora = build_with(
-            Box::new(FakeBridge::new()),
-            Box::new(CallEachTick {
+        // The module's own budget, 100 ms, outlasts the step's 20 ms period.
+        let limits = |ms| crate::GuestLimits {
+            call_budget: Some(Duration::from_millis(ms)),
+            ..Default::default()
+        };
+        let mut arora = Arora::builder()
+            .with_hal(Box::new(FakeHal::new()))
+            .with_bridge(Box::new(FakeBridge::new()))
+            .with_behavior_interpreter(Box::new(CallEachTick {
                 module,
                 function: spin,
                 answers: answers.clone(),
-            }),
-        );
+            }))
+            .with_module_limits(module, limits(100))
+            .build()
+            .expect("arora builds");
         let compiled =
             arora_engine::compiled::CompiledModule::new(header, guest.as_bytes()).unwrap();
         arora.load_module(&compiled).unwrap();
@@ -1400,20 +1411,21 @@ exports:
         drop(answers);
 
         // Once the run is over, no step bounds a call: reloaded, the module's
-        // call gets its own budget.
-        arora.reload_module(&compiled).unwrap();
-        arora.engine.set_guest_limits(
-            module,
-            arora_engine::limits::GuestLimits {
-                call_budget: Some(Duration::from_millis(100)),
-                ..Default::default()
-            },
-        );
-        let overran = arora.engine.dispatch(&module, &spin, &[]).unwrap_err();
-        assert!(
-            overran.to_string().contains("overran its budget of 100 ms"),
-            "{overran}"
-        );
+        // call gets its own budget, as the builder set it, then as the device
+        // sets it.
+        for (set, ms) in [(false, 100), (true, 50)] {
+            if set {
+                arora.set_guest_limits(module, limits(ms));
+            }
+            arora.reload_module(&compiled).unwrap();
+            let overran = arora.engine.dispatch(&module, &spin, &[]).unwrap_err();
+            assert!(
+                overran
+                    .to_string()
+                    .contains(&format!("overran its budget of {ms} ms")),
+                "{overran}"
+            );
+        }
     }
 
     /// `run` paces the step at the requested period: over a fixed wall-clock

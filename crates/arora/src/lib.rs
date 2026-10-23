@@ -90,6 +90,9 @@ use arora_engine::engine::{
 use arora_engine::executor::{
     component::ComponentExecutor, native::NativeExecutor, wasm::WebAssemblyExecutor,
 };
+/// Re-exported so an embedder can set what a guest module may spend
+/// ([`AroraBuilder::with_guest_limits`], [`Arora::set_guest_limits`]).
+pub use arora_engine::limits::GuestLimits;
 /// Re-exported so an embedder can assemble a host-side module — a set of
 /// in-process functions under a module id — and inject it with
 /// [`AroraBuilder::with_host_module`].
@@ -229,6 +232,13 @@ impl Arora {
     /// device is `Arora::builder().build()`.
     pub fn builder() -> AroraBuilder {
         AroraBuilder::default()
+    }
+
+    /// Set what the guest module `module` may spend, in place of the device's
+    /// [`GuestLimits`] ([`AroraBuilder::with_guest_limits`]): its budget holds
+    /// from its next call, its memory cap from its next load or reload.
+    pub fn set_guest_limits(&mut self, module: Uuid, limits: GuestLimits) {
+        self.engine.set_guest_limits(module, limits);
     }
 
     /// Borrow the device's blackboard, e.g. to read results between direct
@@ -777,6 +787,8 @@ pub struct AroraBuilder {
     #[cfg(feature = "native")]
     module_dir_records: LocalRegistry,
     host_modules: Vec<HostModule>,
+    guest_limits: GuestLimits,
+    module_limits: Vec<(Uuid, GuestLimits)>,
     groot: Option<String>,
     #[cfg(feature = "native")]
     step_period: Option<std::time::Duration>,
@@ -1079,6 +1091,24 @@ impl AroraBuilder {
         self
     }
 
+    /// What every guest module may spend, unless
+    /// [`with_module_limits`](Self::with_module_limits) sets its own: the time
+    /// of a call outside a step, and its instance's memory
+    /// ([`arora_engine::limits`]). Default [`GuestLimits::default`]: one
+    /// second, 256 MiB. A step's guest calls end by the step's period whatever
+    /// the budget.
+    pub fn with_guest_limits(mut self, limits: GuestLimits) -> Self {
+        self.guest_limits = limits;
+        self
+    }
+
+    /// What the guest module `module` may spend, in place of
+    /// [`with_guest_limits`](Self::with_guest_limits)'.
+    pub fn with_module_limits(mut self, module: Uuid, limits: GuestLimits) -> Self {
+        self.module_limits.push((module, limits));
+        self
+    }
+
     /// The target time between steps for [`run`](AroraBuilder::run); default
     /// [`Arora::DEFAULT_STEP_PERIOD`]. A device whose behavior runs at a fixed
     /// control rate — a control policy sampled at 50 Hz — steps at that rate.
@@ -1178,7 +1208,10 @@ impl AroraBuilder {
     /// synchronous: there is nothing to spawn — the HAL and bridges own any
     /// async internally, behind their stream/push seams.
     pub fn build(self) -> Result<Arora> {
-        let mut engine = build_engine()?;
+        let mut engine = build_engine(self.guest_limits)?;
+        for (module, limits) in &self.module_limits {
+            engine.set_guest_limits(*module, *limits);
+        }
 
         // The device's method index — what `DescribeMethods` serves. Both the
         // loaded guest modules and the host modules fold their functions in.
@@ -1716,8 +1749,9 @@ fn freeze_exports<'a>(
 /// and core modules on the browser's `WebAssembly` runtime on wasm, or on
 /// wasmtime, with the native (dynamic library) host, otherwise.
 #[cfg(feature = "native")]
-fn build_engine() -> Result<PinnedEngine> {
+fn build_engine(limits: GuestLimits) -> Result<PinnedEngine> {
     Ok(EngineBuilder::new()
+        .with_guest_limits(limits)
         .add_executor(
             ComponentExecutor::new()
                 .map_err(|e| anyhow::anyhow!("failed to create the component executor: {e}"))?,
@@ -1731,11 +1765,12 @@ fn build_engine() -> Result<PinnedEngine> {
 }
 
 #[cfg(all(not(feature = "native"), target_arch = "wasm32"))]
-fn build_engine() -> Result<PinnedEngine> {
+fn build_engine(limits: GuestLimits) -> Result<PinnedEngine> {
     use arora_engine::executor::browser::BrowserExecutor;
     let executor = BrowserExecutor::new();
     let components = executor.component_executor();
     Ok(EngineBuilder::new()
+        .with_guest_limits(limits)
         .add_executor(executor)
         .add_executor(components)
         .build())
@@ -1748,8 +1783,8 @@ fn build_engine() -> Result<PinnedEngine> {
 /// including the 32-bit Android ABIs, where wasmtime has no backend. Loading
 /// a guest module on it fails at load, loudly.
 #[cfg(all(not(feature = "native"), not(target_arch = "wasm32")))]
-fn build_engine() -> Result<PinnedEngine> {
-    Ok(EngineBuilder::new().build())
+fn build_engine(limits: GuestLimits) -> Result<PinnedEngine> {
+    Ok(EngineBuilder::new().with_guest_limits(limits).build())
 }
 
 /// Loading a guest wasm module through the builder and dispatching it. Needs

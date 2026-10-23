@@ -587,8 +587,8 @@ fn a_component_call_ends_by_the_earlier_of_the_step_and_its_module_s_budget() {
                 ..GuestLimits::default()
             },
         );
-        engine.set_step_budget(Some(step));
         let started = Instant::now();
+        engine.set_step_budget(Some(step));
         let overran = engine.dispatch(&module, &spin, &[]).unwrap_err();
         let took = started.elapsed();
         engine.set_step_budget(None);
@@ -784,4 +784,33 @@ fn a_reload_s_initializer_calling_the_old_instance_ends_by_the_load_s_budget() {
         took < DEFAULT_CALL_BUDGET + Duration::from_millis(500),
         "{took:?}"
     );
+}
+
+/// A call made once the step's time is used up is not made: the module is not
+/// entered, and serves the calls of the next step. `a` uses up the step;
+/// `b`, called after it in the same step, is refused and stays usable.
+#[test]
+fn a_call_with_no_time_left_in_the_step_is_not_made() {
+    use std::time::Duration;
+    const B_ID: &str = "8a14c6e0-5f3b-4d92-b7e8-2c06d9f1a3e5";
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    load_module_from_parts(&mut engine, header_as(B_ID, "b"), guest_bytes()).unwrap();
+    let (a, b, spin, echo): (Uuid, Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        B_ID.parse().unwrap(),
+        SPIN_FN.parse().unwrap(),
+        ECHO_FN.parse().unwrap(),
+    );
+    engine.set_step_budget(Some(Duration::from_millis(30)));
+    engine.dispatch(&a, &spin, &[]).unwrap_err();
+    let refused = engine.dispatch(&b, &spin, &[]).unwrap_err();
+    engine.set_step_budget(None);
+    assert!(
+        format!("{refused}").contains("was not made: no time was left"),
+        "{refused}"
+    );
+    assert!(engine.dispatch(&b, &echo, &[]).is_ok());
 }
