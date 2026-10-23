@@ -4,6 +4,14 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.2.0] - 2026-10-23
+
+### Added
+
+- `value_end(buffer, at)`: where the value starting at a byte of a buffer
+  ends, walked as `well_formed` walks it, decoding nothing, so code can step
+  over a value it reads only the type of.
+
 ## [3.1.0] - 2026-10-23
 
 ### Added

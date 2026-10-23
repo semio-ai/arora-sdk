@@ -225,6 +225,22 @@ fn without_its_record_a_record_typed_export_dispatches_but_is_not_described() {
         Reading::try_from(called.ret).expect("a Reading").quadrant,
         Quadrant::First
     );
+    // The device's engine checks a call against the header: an angle of
+    // another type than its parameter's is refused before the guest reads it.
+    let refused = arora
+        .call(Call {
+            module_id: Some(Module::id()),
+            id: declared::ids::reading::FUNCTION,
+            args: vec![StructureField {
+                id: declared::ids::reading::ANGLE,
+                value: Box::new(Value::String("north".into())),
+            }],
+        })
+        .expect_err("an angle that is not an f32 is refused");
+    assert!(
+        matches!(&refused, CallError::Generic { message } if message.contains("of 'reading'")),
+        "{refused:?}"
+    );
 
     let caller = arora.caller();
     let graph_type = arora_behavior_tree::behavior::graph_type();

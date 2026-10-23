@@ -91,17 +91,26 @@ naming a parameter the function does not declare, or carrying a value not of
 its parameter's type, fails the call with `DispatchError::Argument`
 (`CallError::Generic` through `arora_call`), and the guest never reads it. This
 holds for every guest, whatever built it, and for calls between guests, which
-reach the engine's `dispatch` too. A guest's own decoding stays its own for what
-the engine leaves to it:
+reach the engine's `dispatch` too. Without it, a C++ guest reads a value of
+another type as absent and answers as if it had not been given.
 
-- an argument that is not an Arora Buffer, or not a structure;
-- a parameter the call leaves out, which a guest takes as absent;
-- the fields of a record-typed argument, which is checked by its record's id,
-  the one thing a header names of it.
+The check reads each argument's type tags where they lie in its buffer and
+decodes nothing, so an argument costs the host no memory beyond its buffer.
+What passes, in the forms callers send:
 
-A present optional argument may be passed as an option or as its element, and
-an array as its typed array or as a generic array whose elements are each of
-the element type: every guest reads both forms.
+- `unit` for any parameter: callers pass it for an argument they leave unset,
+  and a guest reads it as absent;
+- any value for a parameter of a dynamic value type (`KEY_VALUE_ID`,
+  `ARRAY_VALUE_ID`), which a guest takes as a `Value`;
+- a present optional argument as an option or as its element;
+- an array as its typed array, or as a generic array whose every element is of
+  the element type. A Rust guest generated from a `module.yaml` reads a generic
+  array of records; a `#[module]` guest refuses a generic array, and a C++
+  guest reads one as absent.
+
+Left to the guest: an argument that is not an Arora Buffer or not a structure,
+a parameter the call leaves out, and the fields of a record-typed argument,
+which is checked by its record's id, the one thing a header names of it.
 
 ### Call Mechanism
 

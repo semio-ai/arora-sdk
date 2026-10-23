@@ -280,6 +280,38 @@ fn component_that_traps_refuses_calls_until_it_is_reloaded() {
     );
 }
 
+/// A component loaded compiled ahead, as a device loads one, or reloaded, has
+/// its calls' arguments checked against its header as one loaded from its
+/// bytes does.
+#[test]
+fn a_compiled_or_reloaded_component_s_arguments_are_checked() {
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    let compiled = arora_engine::compiled::CompiledModule::new(header(), &guest_bytes()).unwrap();
+    let echo: Uuid = ECHO_FN.parse().unwrap();
+    let call = || arora_types::call::Call {
+        module_id: Some(MODULE_ID.parse().unwrap()),
+        id: echo,
+        args: vec![arora_types::value::StructureField {
+            id: echo,
+            value: Box::new(Value::String("not a u64".into())),
+        }],
+    };
+    let refused = |engine: &mut std::pin::Pin<Box<arora_engine::engine::Engine>>| {
+        let error = engine.arora_call(call()).unwrap_err();
+        assert!(
+            matches!(&error, arora_engine::call::CallError::Generic { message }
+                if message.contains("of 'echo'")),
+            "{error:?}"
+        );
+    };
+    engine.load_compiled_module(&compiled).unwrap();
+    refused(&mut engine);
+    engine.reload_module(&compiled).unwrap();
+    refused(&mut engine);
+}
+
 /// A guest calls a function of a module — here its own — through
 /// `host.dispatch`.
 #[test]

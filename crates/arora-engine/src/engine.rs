@@ -312,10 +312,11 @@ impl Engine {
     ///
     /// A call to a guest module whose arguments name a parameter the function
     /// does not declare, or carry a value not of its parameter's type, fails
-    /// with [`DispatchError::Argument`] and reaches no guest. A record-typed
-    /// argument is checked by its record's id. Left to the guest: an `arg`
-    /// that is not an Arora Buffer or not a structure, a function the header
-    /// does not declare, and a parameter the call leaves out.
+    /// with [`DispatchError::Argument`] and reaches no guest. `unit` passes for
+    /// any parameter, as callers pass it for an unset argument, and a record-
+    /// typed argument is checked by its record's id. Left to the guest: an
+    /// `arg` that is not an Arora Buffer or not a structure, a function the
+    /// header does not declare, and a parameter the call leaves out.
     pub fn dispatch(
         &mut self,
         module_id: &Uuid,

@@ -288,6 +288,16 @@ fn a_cpp_component_is_never_given_an_argument_of_another_type() {
         })
         .expect("a call after the refusals");
     assert_eq!(result.ret, Value::Option(Some(Box::new(Value::U32(42)))));
+    // `unit` is what callers pass for an argument they leave unset: it
+    // reaches the guest, which reads it as absent.
+    let unset = engine
+        .arora_call(Call {
+            module_id: Some(module),
+            id: test_optional,
+            args: vec![field(OPTIONAL, Value::Unit)],
+        })
+        .expect("an unset argument reaches the guest");
+    assert_eq!(unset.ret, Value::Option(None));
 }
 
 /// The Arora Buffer of `value`, cut `by` bytes short, its size prefix counting

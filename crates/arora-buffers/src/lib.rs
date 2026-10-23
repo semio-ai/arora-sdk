@@ -20,7 +20,7 @@ pub mod writer;
 
 pub use format::*;
 pub use reader::*;
-pub use well_formed::well_formed;
+pub use well_formed::{value_end, well_formed};
 pub use writer::*;
 
 /// Migration alias: `serde_uuid` was the old name of the generic `Value` codec,

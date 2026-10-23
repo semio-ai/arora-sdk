@@ -20,7 +20,7 @@ native-host = ["dep:libloading", "dep:tempfile"]
 
 [dependencies]
 anyhow = "1"
-arora-buffers = { path = "../arora-buffers", version = "3" }
+arora-buffers = { path = "../arora-buffers", version = "3.2" }
 arora-types = { path = "../arora-types", version = "3" }
 async-trait = "0.1"
 bytes = "1"
