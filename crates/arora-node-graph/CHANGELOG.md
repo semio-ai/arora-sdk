@@ -78,6 +78,10 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
 - `GraphRuntime` is `eval::Context`: one call's clock, its node's state and
   the runs it requests. It stages no inputs: the module hands an `input` node
   the value its key holds.
+- Each node kind's ports are the module's own (`ports::ports`): its fixed
+  inputs and outputs and its variadic groups. A node's layouts start from
+  them, where they read Vizij's editor registry; a test holds the registry
+  to them.
 - What a call does for Vizij's graph format moves to `eval::vizij`: an
   `input` node fitting its value to its declared shape, the check of a
   node's declared output shapes, and the writes of a path-less `output`

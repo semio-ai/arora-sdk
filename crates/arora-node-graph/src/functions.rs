@@ -48,11 +48,12 @@ use uuid::Uuid;
 use crate::eval::context::{
     DampState, NodeRuntimeState, SlewState, SpawnRequest, SpawnState, SpringState, TaskRunState,
 };
-use crate::eval::plan::{input_layout, layout_of, signatures, PortLayout, VariadicRange};
+use crate::eval::plan::{input_layout, layout_of, PortLayout, VariadicRange};
 use crate::eval::value_layout::flatten_numeric;
 use crate::eval::vizij;
 use crate::eval::{eval_node, Context, NodeFunctions};
 use crate::params::Params;
+use crate::ports::ports;
 use crate::types::{NodeParams, NodeSpec, NodeType, Selector, SelectorSegment};
 
 /// The module's id.
@@ -486,10 +487,7 @@ pub fn kind_of(function: Uuid) -> Option<&'static NodeType> {
 
 /// The variadic input group of `kind`, if it has one.
 fn variadic_input(kind: &NodeType) -> Option<&'static str> {
-    signatures()
-        .get(kind)
-        .and_then(|signature| signature.variadic_inputs.as_ref())
-        .map(|group| group.id)
+    ports(kind).variadic_inputs.map(|group| group.id)
 }
 
 /// The ports of a variadic group a function declares: the bare group name,
@@ -504,9 +502,10 @@ fn input_ports() -> &'static [String] {
     static PORTS: OnceLock<Vec<String>> = OnceLock::new();
     PORTS.get_or_init(|| {
         let mut ports: Vec<String> = FIXED_INPUTS.iter().map(|port| port.to_string()).collect();
-        for signature in signatures().values() {
-            ports.extend(signature.inputs.iter().map(|port| port.id.to_string()));
-            if let Some(group) = &signature.variadic_inputs {
+        for kind in KINDS {
+            let declared = crate::ports::ports(kind);
+            ports.extend(declared.inputs.iter().map(|port| port.to_string()));
+            if let Some(group) = declared.variadic_inputs {
                 ports.extend(variadic_ports(group.id));
             }
         }
@@ -528,19 +527,14 @@ const PORT_SET_BITS: usize = 1024;
 /// passes, which decides its input layout.
 type PortSet = [u64; PORT_SET_BITS / 64];
 
-/// The input ports `kind`'s function declares, in order: its signature's
-/// ports, every other fixed port, then its variadic group.
+/// The input ports `kind`'s function declares, in order: its own fixed
+/// ports ([`ports`]), every other fixed port, then its variadic group.
 pub fn declared_inputs(kind: &NodeType) -> Vec<String> {
-    let mut ports: Vec<String> = signatures()
-        .get(kind)
-        .map(|signature| {
-            signature
-                .inputs
-                .iter()
-                .map(|port| port.id.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut ports: Vec<String> = ports(kind)
+        .inputs
+        .iter()
+        .map(|port| port.to_string())
+        .collect();
     for port in FIXED_INPUTS {
         if !ports.iter().any(|known| known == port) {
             ports.push(port.to_string());
@@ -1632,10 +1626,7 @@ impl Site {
 /// `ports` has, each with its range of slots: where its evaluation writes
 /// them.
 fn output_variadics(kind: &NodeType, ports: &[String]) -> Vec<(String, VariadicRange)> {
-    let Some(group) = signatures()
-        .get(kind)
-        .and_then(|signature| signature.variadic_outputs.as_ref())
-    else {
+    let Some(group) = crate::ports::ports(kind).variadic_outputs else {
         return Vec::new();
     };
     let id = group.id;

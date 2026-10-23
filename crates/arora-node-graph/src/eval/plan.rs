@@ -1,6 +1,6 @@
 //! The port layouts of a node: its inputs and outputs, in slot order.
 
-use crate::schema::{registry, NodeSignature};
+use crate::ports::{ports, Ports};
 use crate::types::{InputConnection, NodeSpec, NodeType};
 use hashbrown::{HashMap, HashSet};
 
@@ -45,21 +45,15 @@ impl PortLayout {
     }
 }
 
-fn build_input_layout(
-    _node: &NodeSpec,
-    signature: Option<&NodeSignature>,
-    connections: &HashMap<String, InputConnection>,
-) -> PortLayout {
+fn build_input_layout(ports: Ports, connections: &HashMap<String, InputConnection>) -> PortLayout {
     let mut layout = PortLayout::default();
 
-    // Fixed inputs from the signature come first to keep indices stable.
-    if let Some(sig) = signature {
-        for port in &sig.inputs {
-            layout.insert_slot(port.id.to_string());
-        }
+    // Fixed inputs come first to keep indices stable.
+    for port in ports.inputs {
+        layout.insert_slot(port.to_string());
     }
 
-    let variadic_id = signature.and_then(|sig| sig.variadic_inputs.as_ref().map(|v| v.id));
+    let variadic_id = ports.variadic_inputs.map(|v| v.id);
     let mut variadic_keys: Vec<(String, Option<usize>)> = Vec::new();
 
     for key in connections.keys() {
@@ -93,17 +87,11 @@ fn build_input_layout(
     layout
 }
 
-fn build_output_layout(
-    node: &NodeSpec,
-    signature: Option<&NodeSignature>,
-    referenced: &HashSet<String>,
-) -> PortLayout {
+fn build_output_layout(node: &NodeSpec, ports: Ports, referenced: &HashSet<String>) -> PortLayout {
     let mut layout = PortLayout::default();
 
-    if let Some(sig) = signature {
-        for port in &sig.outputs {
-            layout.insert_slot(port.id.to_string());
-        }
+    for port in ports.outputs {
+        layout.insert_slot(port.to_string());
     }
 
     // Respect any explicit output_shapes hints.
@@ -111,8 +99,8 @@ fn build_output_layout(
         layout.insert_slot(key.clone());
     }
 
-    if let Some(sig) = signature {
-        if let Some(var_out) = &sig.variadic_outputs {
+    {
+        if let Some(var_out) = &ports.variadic_outputs {
             let var_id = var_out.id;
 
             // Detect canonical {id}_{N} references via parse_variadic_key.
@@ -194,24 +182,9 @@ fn build_output_layout(
     layout
 }
 
-fn signature_map() -> HashMap<NodeType, NodeSignature> {
-    registry()
-        .nodes
-        .into_iter()
-        .map(|sig| (sig.type_id.clone(), sig))
-        .collect()
-}
-
-/// The registry's signatures by node kind, built once.
-pub(crate) fn signatures() -> &'static HashMap<NodeType, NodeSignature> {
-    static SIGNATURES: std::sync::OnceLock<HashMap<NodeType, NodeSignature>> =
-        std::sync::OnceLock::new();
-    SIGNATURES.get_or_init(signature_map)
-}
-
 /// The input layout a node of `kind` gets when the inputs `names` are wired:
-/// the layout the plan builds for it, its signature's fixed inputs first and
-/// its variadic group in key order.
+/// its kind's fixed inputs first, then the other ports wired, then its
+/// variadic group in key order.
 pub(crate) fn input_layout<'a>(
     kind: &NodeType,
     names: impl IntoIterator<Item = &'a str>,
@@ -220,21 +193,14 @@ pub(crate) fn input_layout<'a>(
         .into_iter()
         .map(|name| (name.to_string(), InputConnection::default()))
         .collect();
-    let placeholder = NodeSpec {
-        id: String::new(),
-        kind: kind.clone(),
-        params: Default::default(),
-        output_shapes: Default::default(),
-        input_defaults: Default::default(),
-    };
-    build_input_layout(&placeholder, signatures().get(kind), &connections)
+    build_input_layout(ports(kind), &connections)
 }
 
-/// The output layout the plan builds for `node`, whose ports `referenced`
-/// are read by an edge: its signature's outputs, its declared output shapes,
-/// its variadic outputs and every referenced port.
+/// The output layout of `node`, whose ports `referenced` are read by an edge:
+/// its kind's outputs, its declared output shapes, its variadic outputs and
+/// every referenced port.
 pub(crate) fn output_layout(node: &NodeSpec, referenced: &HashSet<String>) -> PortLayout {
-    build_output_layout(node, signatures().get(&node.kind), referenced)
+    build_output_layout(node, ports(&node.kind), referenced)
 }
 
 /// A port layout of exactly `names`, in order, with the variadic groups
