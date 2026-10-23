@@ -117,13 +117,13 @@ reloaded on a running device is still indexed from its header (4.3).
 
 | Concern | Overlapping components | Owner | Why |
 |---|---|---|---|
-| What a published thing is | Records (`arora-types`); Studio v2 assets and `arora-index`'s `AssetType` / `ResolvedRef` | Records | A record is already versioned, frozen and referenced by id and version; a module record is what a declaration and the authoring pipeline produce. Release metadata — content hashes, deprecation (`yanked`), the scoped name — attaches to a record version instead of forming a second vocabulary. |
+| What a published thing is | Records (`arora-types`); Studio v2 assets and `arora-index`'s `AssetType` / `ResolvedRef` | Records | A record is already versioned, frozen and referenced by id and version; a module record is what a declaration and the authoring pipeline produce. Release metadata — content hashes, deprecation, the scoped name — attaches to a record version instead of forming a second vocabulary. |
 | Holding records in a process | `arora-registry`'s `LocalRegistry`; the `feat/type-registry` `Registry`; `arora-index`'s `resolved.json` | `arora-registry` | One registry for authoring (tag, freeze) and for devices (exact lookup). A record carries its name, so the `records.json` index is not needed. `ty::low::TypeRegistry` stays on the header vocabulary's axis ([design note](design_decisions.md#two-type-vocabularies-two-axes)). |
-| Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through a **registry source** trait in `arora-registry`, one implementation per backend | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. For now the store's only backend is Studio's, and its source lives in studio-bridge's client. `arora-index`'s selection, verification and sealing become that source's implementation. |
+| Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through the `RegistrySource` trait in `arora-registry`, one implementation per backend (3.3) | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. `arora-index`'s selection, verification and sealing work over any source; the Studio source lives in studio-bridge. |
 | Connecting to Studio, credentials | `arora-index`'s `FIREBASE_*` configuration and `TokenSource`; studio-bridge's client | studio-bridge's client | Arora works without Studio. The bridge client already holds the Studio connection and the device's credentials. |
 | The device's cache directory | `arora-index`'s `<device dir>/assets/`; the Studio Bridge client's directory; `<device dir>/modules/` | One cache, in the device directory, shared with the bridge client | Two cache roots for one device drift. Operator-installed `modules/` stays a separate, unverified input. |
 | Publishing | semio-cli (semio-db); Studio's web publishing | The store's backend | Records are published where they are read, and the backend decides at publication who owns a scope (2.2). semio-cli publishes to semio-db, which is deprecated. |
-| Release selection | `arora-registry`'s `resolve_tag`; `arora-index`; Studio's `resolveDependency` | `arora-registry`'s resolution, with the source supplying versions and metadata | One rule for a range: the newest tagged, non-yanked version that satisfies it. A source that mirrors Studio maps deprecation to `yanked`. |
+| Release selection | `arora-registry`'s `resolve_tag`; `arora-index`; Studio's `resolveDependency` | `arora-index`'s resolver, with the source supplying releases and metadata | One rule for a range: the newest non-deprecated version that satisfies it and has the requested artifact, as Studio's `resolveDependency`. |
 
 ---
 
@@ -316,35 +316,99 @@ its frozen content:
 - the content hash of each artifact, by key: for a module, the header and one
   executable per executor (`wasm`, then native targets); the module record's
   `executable` id becomes this map;
-- `yanked`, per tag, which keeps a version out of range selection (1.3);
+- `deprecated`, which keeps a version out of range selection (1.3) and is
+  the only part of a release that changes after publication;
 - the scoped name a source publishes it under, when it has one.
 
 A module's published form is therefore its module record, its header and
 executables as artifacts of that record version, and the type records it
 depends on as records of their own.
 
+**A release is immutable.** A published thing has a stable id, the record's
+UUID, which survives renames and transfers between scopes. Each version of
+that id is published once: the pair (id, version) names exactly one frozen
+record and one set of artifact hashes, forever. New content is a new
+version. A release can be deprecated, never edited, replaced or unpublished.
+
 ### 3.3 Registry sources
 
+One trait serves every backend and every kind, records and plain assets
+alike:
+
 ```rust
+/// A registry: the releases of a package, and the bytes of their artifacts.
+/// It maps its protocol onto `SourceError`; only `Network` permits falling
+/// back to a pin, and only a definitive `NotFound` clears one.
 #[async_trait]
-pub trait RegistrySource {
-    /// The versions of a record, with their metadata.
-    async fn versions(&self, selector: &Selector) -> Result<Vec<TaggedVersion>, SourceError>;
-    /// A frozen record at an exact version.
-    async fn record(&self, id: Uuid, version: &Version) -> Result<Record, SourceError>;
-    /// An artifact of a record version, verified against its hash.
-    async fn artifact(&self, id: Uuid, version: &Version, key: &str) -> Result<Bytes, SourceError>;
+pub trait RegistrySource: Send + Sync {
+    /// Every release of a package, in listing order, which breaks ties in
+    /// selection. A name is resolved through aliases to the package's id.
+    async fn releases(
+        &self,
+        package: &PackageRef,
+        kind: &Kind,
+        limits: Limits,
+    ) -> Result<Vec<Release>, SourceError>;
+    /// One artifact of a release, by key. The caller verifies the bytes
+    /// against the release's hash before it uses or caches them.
+    async fn artifact(
+        &self,
+        release: &Release,
+        key: &str,
+        limits: Limits,
+    ) -> Result<Vec<u8>, SourceError>;
+}
+
+pub enum PackageRef {
+    Name(ScopedName), // `@scope/name`, as people type it
+    Id(Uuid),         // what records and pins hold
+}
+
+pub struct Release {
+    pub id: Uuid,                 // the package: stable across renames and transfers
+    pub version: Version,         // unique per id
+    pub scoped_name: ScopedName,  // the package's current name
+    pub kind: Kind,               // an open string: model, face, animation, module, behavior, configuration…
+    pub artifacts: BTreeMap<String, Artifact>, // key → SHA-256 and size
+    pub deprecated: bool,
+    pub private: bool,
+    pub family: Option<String>,
+    pub locator: String,          // opaque to everyone but the source that made it
 }
 ```
 
+- **A record travels as an artifact.** A release of a record kind (module,
+  structure, enumeration, behavior, configuration) carries its frozen record
+  under the artifact key `record`, beside its other artifacts: a module's
+  `header` and one executable per executor. The record is then content-hashed
+  and verified like every other artifact, and a source needs no record-shaped
+  call. A model, a face or an animation has no `record` artifact.
+- **The resolver verifies, and only the resolver.** `arora-index`'s resolver
+  selects a release (Studio's rules: the newest non-deprecated version in
+  range that has the requested artifact), checks the pinned hash before a
+  download, verifies the bytes, caches them by hash, and falls back to the
+  last pin only on a `Network` error. A source transports; it is never
+  trusted with the check.
+- **A pin holds the id.** A pin is the package id, the exact version, the
+  artifact key and its hash, with the scoped name it was requested under.
+  Two pins with one id and version and different hashes are a corrupt source,
+  refused as `Malformed`.
+- **Credentials are not in the trait.** A source is constructed with what it
+  needs to authenticate, as the device or as a person, from a credential
+  provider. No call passes a token.
 - **A device's registry is a `LocalRegistry` in front of a source**, the
   shape `RemoteCachedRegistry` has today. It persists under the device
   directory (records in the `records/` layout, artifacts by content hash), in
   the directory the bridge client already uses, not a second cache root.
-- **Implementations:** record directories (local, no network); Studio's
-  backend, in studio-bridge's client, with its connection, credentials,
-  private-artifact sealing and offline fallback — what `arora-index`
-  implements today; Studio's page, backed by its own store client.
+- **Implementations:** a local directory (`DirSource`, no network); a static
+  host over HTTPS; Studio's backend, in studio-bridge, over its connection and
+  credentials — what studio-bridge's `StudioSource` implements today; Studio's
+  page, backed by its own store client.
+- **Where it lives.** The trait and its types (`RegistrySource`, `Release`,
+  `PackageRef`, `Kind`, `SourceError`) are in `arora-registry`, which already
+  builds for `wasm32` in `arora-web`, so Studio's page uses the same types.
+  `arora-index` is the client over it: resolver, cache, sealing, `DirSource`
+  and the build helper.
 - **semio-db is not a backend.** It is deprecated, so the design is not
   shaped by its structure — its account-rooted tree, its naming rules. Its
   record vocabulary, semio-record, is reused by a newer store client.
@@ -572,8 +636,7 @@ with native modules changes them, by restarting.
   chunks (`apply-configuration`, `describe-configuration`): a
   `studio-bridge-msgs` major, then majors of `arora-studio-bridge-client` and
   `studio-bridge-studio-client`, then `arora` re-pins the device client. The
-  Studio registry source ships in the same device client. A release in two
-  repos.
+  Studio registry source ships with studio-bridge. A release in two repos.
 - **The router** grants the new chunks to the claimant, compiled with the
   other grants.
 - **Negotiation.** A device that answers the new operations announces
@@ -640,26 +703,31 @@ records and artifacts through its own source, as itself.
 
 ## 5. How this composes with `arora-index`
 
-`arora-index` implements what a Studio registry source needs: Studio's
-selection rules, hash verification, sealing private artifacts, a pin used only
-on a network error, and a definitive "no" that clears it. In the shape of
-this proposal:
+`arora-index` ([#360](https://github.com/semio-ai/arora-sdk/pull/360)) is
+the client over `RegistrySource` (3.3), and the Studio source
+([studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109)) is
+one implementation of it. Converging on the one trait changes them as
+follows:
 
-- **Its resolution and fetching become the Studio source**, behind the
-  registry source trait, in studio-bridge's client beside the connection and
-  credentials it already holds; arora-sdk keeps no Firestore or Storage code.
-- **Its vocabulary maps onto records** (3.4): a `ResolvedRef` is a record
-  version with its metadata, `resolved.json` is the device registry's cache,
-  and an asset type is a record kind.
-- **What the source needs to serve configurations:**
-  1. several artifacts per record version, each with its own hash, fetched by
-     key;
-  2. an exact pin (version and hash) checked before download;
-  3. the record and metadata types buildable for `wasm32` without the
-     transport, so Studio's page uses the same types;
-  4. an extensible set of kinds, so a new kind is not a breaking change.
-- **Build pins** (`build::models()`) are a source used at build time; they
-  stay a build-script helper over the same trait.
+| Today | Converged |
+|---|---|
+| `arora_index::Source` with `releases(scoped_name, kind)` and `fetch(release, key)` | `arora_registry::RegistrySource` with `releases(package, kind)` and `artifact(release, key)` |
+| `Release` and `ResolvedRef` keyed by scoped name, no id | `Release` and the pin carry the package id; the scoped name is how it was requested |
+| `release_id`, the source's opaque id | `locator`, still opaque |
+| `SourceOptions` | `Limits`, the same fields |
+| `TokenSource` in `arora-index` | Leaves the trait: a source is built with its credentials (3.3) |
+| `asset type` | `Kind`, an open string; a record kind is checked by `type_of` |
+| `resolved.json` | The device registry's cache of pins |
+
+What stays as it is: selection, hash verification, the cache and its sealed
+private blobs, the fallback policy, `SourceError`'s categories, `DirSource`
+and the build helper. What the source must serve configurations:
+
+1. several artifacts per release, each with its own hash, fetched by key;
+2. an exact pin (id, version and hash) checked before download;
+3. the types buildable for `wasm32` without the transport, so Studio's page
+   uses them;
+4. an extensible set of kinds, so a new kind is not a breaking change.
 
 ---
 
@@ -701,10 +769,6 @@ Each stage lands on its own.
 
 ## 7. Open questions
 
-- **Record identity across sources.** Records are referenced by UUID and
-  version; Studio identifies an asset by scoped name and release. Is the
-  scoped name a `Selector::Path` over the same UUID identity in every source
-  (proposed)?
 - **Models, animations and faces as records.** The same registry would hold
   them as record kinds; this proposal needs only modules, types, behaviors and
   configurations.
@@ -745,6 +809,32 @@ Arora works without Studio. The source trait lets a device fill its registry
 from local directories or any backend of the store alike; Studio's backend,
 the only one for now, keeps its connection, credentials and cache in
 studio-bridge's client, which owns them already.
+
+### One registry source for every kind
+
+Models, faces, animations, modules, behaviors and configurations reach a
+device and a client by one trait, `RegistrySource`, with two calls: list a
+package's releases, fetch one artifact. A frozen record is the artifact
+`record`, so it is hashed and verified like any other bytes, and a backend
+that stores files (a directory, a static host, Studio's Storage) serves
+records without a record-shaped endpoint. Two traits, one for assets and one
+for records, would put two caches, two pins and two fallback policies on one
+device.
+
+### A release is immutable
+
+A package keeps one id for its life, through renames and transfers, and each
+of its versions is published once. A pin, a configuration and a frozen record
+reference that pair, so the bytes behind it must never change: a fix is a new
+version, and a bad release is deprecated, never edited or removed.
+Deprecation is the one field that changes, because it only steers selection
+and never changes what a pin fetches.
+
+### The resolver verifies, not the source
+
+A source is a transport, and some are third-party adapters. Verifying every
+artifact against its hash in the resolver, before it is used or cached, keeps
+the check in one place that every source passes through.
 
 ### A device does not serve records
 
@@ -849,6 +939,15 @@ make the result the same whoever sent the request, and let it restart offline.
   references, a Studio resolver as a crate of its own). It duplicates records
   and their registry, and puts Studio's protocol in a runtime that works
   without Studio.
+- **A `record` call on the source, beside `versions` and `artifact`.** It
+  needs every backend to serve records as such, and leaves the record out of
+  the hash check its artifacts get.
+- **Identity by scoped name and version alone.** A name changes with a
+  rename or a transfer, so a pin by name breaks where a pin by id holds; the
+  name stays the way a person asks for a package.
+- **The trait in `arora-index`.** `arora-registry` is where a device's
+  `LocalRegistry` sits in front of a source, and it already builds for
+  `wasm32`; `arora-index` depends on it, not the reverse.
 - **Load, reload and unload as remote operations.** See "One remote surface".
 - **Replacing the whole engine on every apply.** It drops the state of
   modules the configuration did not change.
