@@ -23,8 +23,9 @@ let module = HostModule::from_exports(
 // engine.register_module(module.id(), Box::new(module));
 ```
 
-The `cdylib` is a `wasm32-wasip1` guest. Load its wasm bytes with
-`animation::header(executor)`, naming the `wasm` executor. Each loaded guest
+The `cdylib` built for `wasm32-wasip2` is a component of the `arora:module`
+world. Load its wasm bytes with `animation::header(executor)`, naming the
+`wasm-component` executor. Each loaded guest
 has its own state in its wasm instance. The guest entry points delegate to
 the same contract methods as a host registration. Hosts should register
 `exports(state)` so devices in one process each own their animation state.
@@ -159,9 +160,9 @@ time, or `Option(None)` for booleans and strings.
 Use the workspace's pinned nightly toolchain:
 
 ```sh
-cargo build -p arora-animation-module --target wasm32-wasip1 --release
+cargo build -p arora-animation-module --target wasm32-wasip2 --release
 cargo run -p arora-animation-module --features module-dir --example module_dir -- \
-    <dir> target/wasm32-wasip1/release/arora_animation_module.wasm
+    <dir> target/wasm32-wasip2/release/arora_animation_module.wasm
 cargo test -p arora-animation-module
 cargo test -p arora-integration-tests --test animation
 cargo clippy -p arora-animation-module --all-targets -- -D warnings
@@ -182,7 +183,7 @@ feature's `module_dir::write`, or the `module_dir` example):
 
 ```text
 <dir>/
-├── header.json            the declared header, for the wasm executor
+├── header.json            the declared header, for the component executor
 ├── animation.wasm         the guest
 └── records/               the module's record and the records of the types
                            its functions name, in arora-registry's layout

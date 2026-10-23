@@ -470,7 +470,7 @@ fn usage() -> (u64, u64, u64) {
 fn measure() {
     const WASM: &[u8] = include_bytes!(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm"));
     let header = test_rust_wasm::test_rust_wasm::header(low::Executor {
-        name: "wasm".to_string(),
+        name: "wasm-component".to_string(),
         min_version: None,
         max_version: None,
     });

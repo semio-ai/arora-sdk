@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! <dir>/
-//! ├── header.json            the declared header, for the wasm executor
+//! ├── header.json            the declared header, for the component executor
 //! ├── animation.wasm         the guest
 //! └── records/               the module's record and the records of the
 //!                            types its functions name, in arora-registry's
@@ -27,10 +27,10 @@ use crate::animation;
 /// The guest's file name in a module directory.
 pub const GUEST_FILE: &str = "animation.wasm";
 
-/// The header the guest is loaded with, for the wasm executor.
+/// The header the guest is loaded with, for the component executor.
 pub fn guest_header() -> Header {
     animation::header(Executor {
-        name: "wasm".to_string(),
+        name: "wasm-component".to_string(),
         min_version: None,
         max_version: None,
     })
@@ -48,7 +48,7 @@ pub fn records() -> LocalRegistry {
 }
 
 /// Write the module directory `dir`: its `header.json`, its `records/`, and,
-/// when `guest` is given, the guest compiled for `wasm32-wasip1` as
+/// when `guest` is given, the guest compiled for `wasm32-wasip2` as
 /// [`GUEST_FILE`]. `records/` is written afresh.
 pub fn write(dir: &Path, guest: Option<&Path>) -> io::Result<()> {
     std::fs::create_dir_all(dir)?;

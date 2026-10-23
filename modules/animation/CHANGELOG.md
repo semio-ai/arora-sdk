@@ -4,7 +4,17 @@ All notable changes to `arora-animation-module`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] - unreleased
+## [2.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** the guest is a `wasm32-wasip2` component of the
+  `arora:module` world (`arora_module::artifact!`), and the header
+  `module_dir` writes names the `wasm-component` executor; a host loads it
+  with arora-engine 5.5's component executors. The module, its functions and
+  its records are unchanged. Requires arora-module 2.3.
+
+## [1.0.0] - 2026-10-22
 
 ### Added
 

@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "13.6.0"
+version = "13.7.0"
 edition = "2021"
 description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree core nodes and the Semio backend."
 license = "Apache-2.0"
@@ -64,7 +64,7 @@ studio-bridge = [
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
-arora-engine = { path = "../arora-engine", version = "5.3", default-features = false }
+arora-engine = { path = "../arora-engine", version = "5.5", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.1" }
 arora-behavior = { path = "../arora-behavior", version = "9.4" }
 # 3.8: `PrimitiveKind::from_id`, to check a module record against its header.
@@ -139,13 +139,13 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["time", "test-util"] }
 # Parse the test module's low-level header YAML in the with_module load test.
 serde_yaml = "0.9"
-# The test-rust-wasm guest (built for wasm32-wasip1 as a cdylib artifact
-# dependency): its `.wasm` bytes back the `with_module` load test. Cargo exposes
-# the bytes as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm. `lib = true`
-# also brings the crate in for the test's own target: the header the engine
-# loads it with comes from the module's Rust declaration. Built automatically
-# by `cargo test` (the wasm32-wasip1 target is pinned in rust-toolchain.toml).
-test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+# The test-rust-wasm guest (built for wasm32-wasip2 as a cdylib artifact
+# dependency: a component): its `.wasm` bytes back the guest-loading tests.
+# Cargo exposes the bytes as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
+# `lib = true` also brings the crate in for the test's own target: the header
+# the engine loads it with comes from the module's Rust declaration. Built
+# automatically by `cargo test` (the target is pinned in rust-toolchain.toml).
+test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip2", lib = true }
 
 # The reload tests lay out their guests' result buffers.
 arora-buffers = { path = "../arora-buffers", version = "3" }

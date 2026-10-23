@@ -5,8 +5,8 @@
 //! <module directory>/
 //! ├── header.json      the module's low-level Header, as JSON
 //! ├── <artifact>       the one file with the executor's extension: `.wasm`
-//! │                    for `wasm`, the platform's dynamic library (`.so`,
-//! │                    `.dylib`, `.dll`) for `native`
+//! │                    for `wasm-component` and `wasm`, the platform's
+//! │                    dynamic library (`.so`, `.dylib`, `.dll`) for `native`
 //! └── records/         optional: the module's record and the records it
 //!                      depends on, in arora-registry's layout
 //!                      (`module/<id>@<version>.yaml`, `structure/…`,
@@ -240,10 +240,11 @@ fn read_files(dir: &Path) -> Result<ModuleFiles> {
 /// artifact here to look for.
 fn artifact_extension(executor: &str) -> Result<&'static str> {
     match executor {
-        "wasm" => Ok("wasm"),
+        "wasm-component" | "wasm" => Ok("wasm"),
         "native" => Ok(std::env::consts::DLL_EXTENSION),
         other => bail!(
-            "the header names executor '{other}', which this device does not run (wasm, native)"
+            "the header names executor '{other}', which this device does not run \
+             (wasm-component, wasm, native)"
         ),
     }
 }
@@ -287,8 +288,8 @@ fn list(dir: &Path) -> io::Result<Vec<PathBuf>> {
 
 /// Reading module directories, loading what they hold through the builder, and
 /// dispatching it. `test-rust-wasm` is the guest: its header comes from its
-/// Rust declaration, its `.wasm` from the `wasm32-wasip1` cdylib artifact
-/// dependency Cargo builds.
+/// Rust declaration, its `.wasm` from the `wasm32-wasip2` cdylib artifact
+/// dependency Cargo builds, a component.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,7 +344,7 @@ mod tests {
     #[test]
     fn the_device_directory_s_modules_load_and_dispatch() {
         let device_dir = scratch("loads");
-        let header = header("wasm");
+        let header = header("wasm-component");
         let module_id = header.id;
         module_dir(
             &device_dir,
@@ -397,7 +398,7 @@ mod tests {
         module_dir(
             &device_dir,
             "sinus",
-            &json(&header("wasm")),
+            &json(&header("wasm-component")),
             &[
                 ("m.wasm", WASM),
                 ("._m.wasm", b"AppleDouble"),
@@ -441,7 +442,7 @@ mod tests {
     #[test]
     fn the_artifact_is_the_one_file_with_the_executor_s_extension() {
         let device_dir = scratch("artifacts");
-        let header = json(&header("wasm"));
+        let header = json(&header("wasm-component"));
         module_dir(
             &device_dir,
             "bare",
@@ -504,7 +505,7 @@ mod tests {
     #[test]
     fn one_module_in_two_directories_is_refused() {
         let device_dir = scratch("twins");
-        let header = json(&header("wasm"));
+        let header = json(&header("wasm-component"));
         let first = module_dir(&device_dir, "first", &header, &[("m.wasm", WASM)]);
         let second = module_dir(&device_dir, "second", &header, &[("m.wasm", WASM)]);
         let error = in_device_dir(&device_dir).expect_err("a module in two directories is refused");
@@ -525,7 +526,7 @@ mod tests {
     #[test]
     fn modules_read_in_name_order() {
         let device_dir = scratch("order");
-        let base = header("wasm");
+        let base = header("wasm-component");
         for (name, id) in [("b", 2u128), ("a", 1), ("c", 3)] {
             let mut header = base.clone();
             header.id = Uuid::from_u128(id);

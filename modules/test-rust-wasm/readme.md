@@ -77,7 +77,7 @@ It is also automatically built via the parent project (Arora engine),
 via CMake targets that include the build for the host,
 the build into WASM, and the tests.
 The resulting `.wasm` executable should be found under
-`<this_dir>/target/wasm32-wasip1/<debug_or_release>/test_rust_wasm.wasm`.
+`<this_dir>/target/wasm32-wasip2/<debug_or_release>/test_rust_wasm.wasm`.
 
 ## Run
 

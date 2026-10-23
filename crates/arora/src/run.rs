@@ -85,7 +85,8 @@ use crate::Arora;
                   device DEVICE_LOCAL_ID names (`default` when unset) — then each --module \
                   directory. A module directory holds header.json (the module's header) \
                   beside its artifact, the one file with the extension the header's executor \
-                  names: .wasm for wasm, the platform's dynamic library for native — and \
+                  names: .wasm for wasm-component and wasm, the platform's dynamic library \
+                  for native — and \
                   optionally records/, the module's record and the records it depends on, \
                   which describe every function it exports. Entries whose name starts with \
                   `.` (OS metadata) are ignored. A module that cannot be loaded, or whose \
@@ -119,7 +120,7 @@ pub struct DeviceCli {
 /// What `--module` says in a runner's help.
 #[cfg(feature = "native")]
 const MODULE_HELP: &str = "A module directory to load besides the device directory's: \
-                           header.json beside the one .wasm (executor wasm) or dynamic library \
+                           header.json beside the one .wasm (executor wasm-component or wasm) or dynamic library \
                            (executor native), and optionally records/. Repeatable.";
 
 /// The options every device runner takes besides its own, as a clap helper to

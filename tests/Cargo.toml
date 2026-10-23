@@ -36,7 +36,11 @@ uuid = "1"
 # The declared guest, host-side: its header is what the engine loads it with,
 # and its type records what arora-cli freezes that header against.
 test-rust-wasm = { path = "../modules/test-rust-wasm" }
-arora-animation-module = { path = "../modules/animation", version = "1", features = ["module-dir"] }
+arora-animation-module = { path = "../modules/animation", version = "2", features = ["module-dir"] }
+# The behavior-tree node guest's status and tick ids, as its calls carry them.
+arora-behavior = { path = "../crates/arora-behavior" }
+arora-behavior-tree-types = { path = "../crates/arora-behavior-tree-types" }
+serde_json = "1"
 # A device loading the animation guest from its module directory.
 arora = { path = "../crates/arora" }
 arora-registry = { path = "../crates/arora-registry" }
@@ -45,13 +49,13 @@ futures = "0.3"
 wasmparser = "0.262"
 
 [build-dependencies]
-arora-animation-module = { path = "../modules/animation", artifact = "cdylib", target = "wasm32-wasip1" }
+arora-animation-module = { path = "../modules/animation", artifact = "cdylib", target = "wasm32-wasip2" }
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
-test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1" }
+test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip2" }
 test-rust-component = { path = "../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
 # The test-only behavior-tree node module. Nothing in the default build depends
 # on it now that the basic control nodes are native in arora-behavior-tree, so
 # building it here (its build.rs emits the crate's `arora_generated` bindings)
 # keeps `cargo fmt --check`/clippy happy and the artifact available to tests.
-test-behavior-tree-nodes = { path = "../modules/test-behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip1" }
+test-behavior-tree-nodes = { path = "../modules/test-behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip2" }
 

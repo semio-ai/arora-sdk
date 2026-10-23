@@ -3,6 +3,10 @@
 #[allow(clippy::all, dead_code)]
 mod arora_generated;
 
+// Built for wasm32-wasip2, the guest is a component serving the generated
+// exports.
+arora_module::artifact!(arora_generated::export);
+
 use crate::arora_generated::arora::arora_dispatch_indirect;
 use arora_behavior::Status;
 use arora_behavior_tree_types::TickId;

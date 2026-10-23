@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "10.3.0"
+version = "10.4.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 # package` (publish verification) without pulling the browser host into a host
 # link.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-arora-engine = { path = "../arora-engine", version = "5", default-features = false }
+arora-engine = { path = "../arora-engine", version = "5.5", default-features = false }
 arora-types = { path = "../arora-types", version = "3" }
 # The opinionated runtime (no default features → the browser engine host, a
 # Tokio-free synchronous runtime). A downstream device pulls the seam crates
@@ -55,8 +55,8 @@ arora-hal = { path = "../arora-hal", version = "4.3" }
 # The store a test makes fail, over the simple store.
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.2" }
 serde_yaml = "0.9"
-# test-rust-wasm guest (wasm32-wasip1) the browser test include_bytes!s; cargo
+# test-rust-wasm guest (wasm32-wasip2) the browser test include_bytes!s; cargo
 # exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
 # `lib = true` also brings the crate itself in, for the test's own target: the
 # header the test loads comes from the module's Rust declaration.
-test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip1", lib = true }
+test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip2", lib = true }
