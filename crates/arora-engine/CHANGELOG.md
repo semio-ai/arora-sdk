@@ -20,9 +20,14 @@ All notable changes to `arora-engine`. The format follows
   reactor guest's `_initialize` once, as natively. A component
   importing anything else fails to load, naming the import.
 - `component_layout`: the layout of a component an Arora host runs
-  (`guest_module`), which the browser executor applies and refuses any other
-  — more than one guest core module, a nested component — at compilation;
-  and the interfaces every host provides (`HOST_INTERFACES`, `provided`).
+  (`guest_module`), and the interfaces every host provides
+  (`HOST_INTERFACES`, `provided`). The browser executor refuses any other
+  component at compilation: one with more than one guest core module or a
+  nested component, one importing anything but those interfaces, and one
+  whose exports are not the world's `functions` and `dispatch` with the
+  world's types, each lifting its guest module's export of that name as the
+  browser calls it, so that a component the browser runs is one the native
+  executor runs alike.
 - `SharedLoader::prepare` stages a component as it stages a core module, by
   the executable's preamble.
 - On `wasm32`, `CompiledModule::new` compiles a `wasm-component` module: the
@@ -37,9 +42,10 @@ All notable changes to `arora-engine`. The format follows
   against the world at 0.1.0 does not load. No component was published
   against 0.1.0.
 - **For guests:** `ComponentExecutor` links only the interfaces
-  `HOST_INTERFACES` names: a component importing `wasi:filesystem` or
-  `wasi:sockets` no longer loads (5.4 linked all of WASI 0.2, with no
-  directory preopened).
+  `HOST_INTERFACES` names: a component importing `wasi:sockets` no longer
+  loads (5.4 linked all of WASI 0.2). `wasi:filesystem` is linked with no
+  directory preopened, as 5.4 did, and the browser executor provides the
+  same.
 - A component that traps runs no more calls: each later call fails, naming
   the trap, until the module is reloaded. wasmtime enters a component
   instance no more after a trap, and the browser executor holds a component

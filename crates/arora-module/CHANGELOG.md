@@ -18,8 +18,11 @@ All notable changes to `arora-module`. The format follows
   engine.
 - Code generated against the core-module ABI (arora-module-rust's) built for
   `wasm32-wasip2` makes its engine calls, `arora_dispatch` and
-  `arora_dispatch_indirect`, through the `host` interface.
-- Requires arora-module-macros 3.1.
+  `arora_dispatch_indirect`, through the `host` interface. The result each
+  returns stays valid until the next call, which frees it, so a guest holds
+  one result however many calls it makes; a result that is not an Arora
+  Buffer comes back as an error buffer.
+- Requires arora-module-macros 3.1 and arora-buffers 3.1.
 
 ## [2.2.0] - 2026-10-18
 

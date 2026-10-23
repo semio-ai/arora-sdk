@@ -3,15 +3,18 @@
 //! The browser's `WebAssembly` runtime instantiates core modules, not
 //! components. This executor instantiates the guest's own core module alone —
 //! [`component_layout`](crate::component_layout) finds it, and refuses a
-//! component laid out otherwise — and gives it, directly, the canonical-ABI
-//! form of each function it imports. It calls the guest's `_initialize` when
-//! the component has an initializer, as the component would, then the guest's
-//! `functions` and `dispatch` exports through their canonical-ABI form.
+//! component laid out otherwise, or whose imports, exports and their wiring
+//! the guest module alone does not stand for — and gives it, directly, the
+//! canonical-ABI form of each function it imports. It calls the guest's
+//! `_initialize` when the component has an initializer, as the component
+//! would, then the guest's `functions` and `dispatch` exports through their
+//! canonical-ABI form.
 //!
 //! The guest may import the `arora:module/host` interface and the WASI 0.2
 //! interfaces the native component executor links: `wasi:cli` (environment,
-//! exit, standard streams, terminals), `wasi:io`, `wasi:clocks` and
-//! `wasi:random`. Each behaves as it does in a browser tab:
+//! exit, standard streams, terminals), `wasi:io`, `wasi:clocks`,
+//! `wasi:random` and `wasi:filesystem`. Each behaves as it does in a browser
+//! tab:
 //!
 //! - standard output and error go to the console, a line at a time; standard
 //!   input is closed; no stream is a terminal; there are no environment
@@ -20,7 +23,10 @@
 //!   once;
 //! - the monotonic clock is `performance.now()`, the wall clock `Date.now()`,
 //!   and random bytes come from `crypto.getRandomValues`;
-//! - `exit` stops the call that made it, as a trap.
+//! - `exit` stops the call that made it, as a trap;
+//! - the filesystem has no directory, as natively: `get-directories` returns
+//!   none, so no descriptor exists, and a call on one traps, as natively a call
+//!   on an unknown handle does.
 //!
 //! A guest importing anything else fails to load, naming the import
 //! ([`provided`](crate::component_layout::provided)). A component that traps
@@ -863,6 +869,33 @@ impl Imports {
             ("wasi:random/random", "get-random-u64")
             | ("wasi:random/insecure", "get-insecure-random-u64") => {
                 self.keep(Closure::<dyn Fn() -> i64>::new(|| random_u64() as i64))
+            }
+            // A filesystem with no directory in it.
+            ("wasi:filesystem/preopens", "get-directories") => {
+                self.keep(Closure::<dyn Fn(i32)>::new(move |ret| {
+                    host.guest()
+                        .store_list(ret as u32, 4, &[], 0)
+                        .unwrap_or_else(|e| trap(e));
+                }))
+            }
+            // `option<error-code>`: none, as no error this host gives out is
+            // the filesystem's.
+            ("wasi:filesystem/types", "filesystem-error-code") => {
+                self.keep(Closure::<dyn Fn(i32, i32)>::new(move |_error, ret| {
+                    host.guest()
+                        .write(ret as u32, &[0])
+                        .unwrap_or_else(|e| trap(e));
+                }))
+            }
+            // Every other function takes a descriptor or a directory stream,
+            // of which none exists.
+            ("wasi:filesystem/types", name) => {
+                let name = name.to_string();
+                self.keep(Closure::<dyn Fn()>::new(move || {
+                    trap(format!(
+                        "{name}: the host preopens no directory, so no descriptor exists"
+                    ))
+                }))
             }
             ("wasi:random/insecure-seed", "insecure-seed") => {
                 // `tuple<u64, u64>`.

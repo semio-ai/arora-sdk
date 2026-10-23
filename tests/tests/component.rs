@@ -36,6 +36,7 @@ insecure-random-bytes=3
 environment=0
 arguments=0
 initial-cwd=None
+preopened-directories=0
 stdout-writable=true
 stdout-flushes=true
 stdout-writes-zeroes=true
@@ -291,6 +292,19 @@ fn component_calls_through_host_dispatch() {
 /// module's functions only.
 #[test]
 fn component_serves_only_the_functions_its_header_declares() {
+    let (mut engine, module) = test_rust_wasm_engine();
+
+    // compass's `bearing`, which the same artifact serves under compass's id.
+    let bearing: Uuid = "c4396a6b-600e-480e-adcd-7dd091a41a99".parse().unwrap();
+    assert!(matches!(
+        engine.dispatch(&module, &bearing, &[]),
+        Err(arora_engine::module::DispatchError::FunctionNotFound { id }) if id == bearing
+    ));
+}
+
+/// An engine with test-rust-wasm — two modules declared with `#[module]`, one
+/// artifact — loaded under its `test_rust_wasm` module's header, and that id.
+fn test_rust_wasm_engine() -> (std::pin::Pin<Box<arora_engine::engine::Engine>>, Uuid) {
     let mut engine = EngineBuilder::new()
         .add_executor(ComponentExecutor::new().unwrap())
         .build();
@@ -302,11 +316,41 @@ fn component_serves_only_the_functions_its_header_declares() {
     let module = header.id;
     let artifact = std::fs::read(env!("CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm")).unwrap();
     load_module_from_parts(&mut engine, header, artifact.into()).unwrap();
+    (engine, module)
+}
 
-    // compass's `bearing`, which the same artifact serves under compass's id.
-    let bearing: Uuid = "c4396a6b-600e-480e-adcd-7dd091a41a99".parse().unwrap();
-    assert!(matches!(
-        engine.dispatch(&module, &bearing, &[]),
-        Err(arora_engine::module::DispatchError::FunctionNotFound { id }) if id == bearing
-    ));
+/// An argument that is not an Arora Buffer — short, or a value cut short — is
+/// a `#[module]`-declared guest's error, not a trap: it answers the next call.
+#[test]
+fn a_declared_component_refuses_an_argument_that_is_not_an_arora_buffer() {
+    use arora_types::value::{Structure, StructureField};
+    let (mut engine, module) = test_rust_wasm_engine();
+    let cos: Uuid = "c13757cb-2311-4c93-abcc-cb12d6cbb859".parse().unwrap();
+    let angle = StructureField {
+        id: "6c2a157c-4235-47b0-bff3-1eeef3e5747d".parse().unwrap(),
+        value: Box::new(Value::F32(0.0)),
+    };
+    let whole = arora_buffers::serde_uuid::serialize(&Value::Structure(Structure {
+        id: cos,
+        fields: vec![angle.clone()],
+    }));
+    let mut cut = whole[..whole.len() - 2].to_vec();
+    let len = cut.len() as u32;
+    cut[..4].copy_from_slice(&len.to_le_bytes());
+    for arg in [&[][..], &[9, 0, 0, 0], &cut] {
+        let error = engine.dispatch(&module, &cos, arg).unwrap_err();
+        assert!(
+            matches!(&error, arora_engine::module::DispatchError::Guest { message }
+                if message.contains("not an Arora Buffer")),
+            "{arg:?}: {error:?}"
+        );
+    }
+    let result = engine
+        .arora_call(arora_types::call::Call {
+            module_id: Some(module),
+            id: cos,
+            args: vec![angle],
+        })
+        .expect("a call after the refusals");
+    assert_eq!(result.ret, Value::F32(1.0));
 }

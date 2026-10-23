@@ -94,20 +94,32 @@ fn a_sequence_ticks_its_children_through_the_host() {
 }
 
 /// A call the generated code refuses — an argument that is not an Arora
-/// Buffer, a parameter the function does not have — fails as the guest's
-/// error, and the module goes on answering calls.
+/// Buffer, short or cut short, a parameter the function does not have — fails
+/// as the guest's error, and the module goes on answering calls.
 #[test]
 fn a_generated_export_s_refusal_is_the_guest_s_error() {
     let mut engine = engine();
     let module = header().id;
     let succeed: Uuid = SUCCEED.parse().unwrap();
 
-    let refused = engine.dispatch(&module, &succeed, &[1, 2]).unwrap_err();
-    assert!(
-        matches!(&refused, arora_engine::module::DispatchError::Guest { message }
-            if message.contains("not an Arora Buffer")),
-        "{refused:?}"
+    let truncated = cut_short(
+        &Value::Structure(arora_types::value::Structure {
+            id: succeed,
+            fields: vec![StructureField {
+                id: SEQ_CHILDREN.parse().unwrap(),
+                value: Box::new(Value::String("a value cut short".into())),
+            }],
+        }),
+        5,
     );
+    for arg in [&[1, 2][..], &truncated] {
+        let refused = engine.dispatch(&module, &succeed, arg).unwrap_err();
+        assert!(
+            matches!(&refused, arora_engine::module::DispatchError::Guest { message }
+                if message.contains("not an Arora Buffer")),
+            "{arg:?}: {refused:?}"
+        );
+    }
     let extra = StructureField {
         id: SEQ_CHILDREN.parse().unwrap(),
         value: Box::new(Value::U32(1)),
@@ -120,4 +132,14 @@ fn a_generated_export_s_refusal_is_the_guest_s_error() {
 
     let result = engine.arora_call(call(SUCCEED, vec![])).unwrap();
     assert_eq!(result.ret, Value::from(Status::Success));
+}
+
+/// The Arora Buffer of `value`, cut `by` bytes short, its size prefix counting
+/// what is left: a prefix that holds, and a value that does not.
+fn cut_short(value: &Value, by: usize) -> Vec<u8> {
+    let whole = arora_buffers::serde_uuid::serialize(value);
+    let mut cut = whole[..whole.len() - by].to_vec();
+    let len = cut.len() as u32;
+    cut[..4].copy_from_slice(&len.to_le_bytes());
+    cut
 }

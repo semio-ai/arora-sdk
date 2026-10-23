@@ -13,7 +13,9 @@ All notable changes to `arora-module-macros`. The format follows
   `arora_function_<id>` entry point calls; and each module's
   `function_ids()` and `dispatch_buffer(method, arg)`, which
   `arora_module::artifact!` serves a component's `functions` and `dispatch`
-  from.
+  from. An argument that is not an Arora Buffer
+  (`arora_buffers::well_formed`) is the call's error, not a panic: a
+  component's panic is a trap, after which it runs no more calls.
 
 ## [3.0.0] - 2026-10-18
 

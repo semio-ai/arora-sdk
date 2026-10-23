@@ -1197,16 +1197,17 @@ async fn generate_module_source(
             #(#served_ids => #served_calls,)*
             _ => return ::std::option::Option::None,
           };
-        // The argument is the buffer its size prefix counts.
-        let size = arg.get(..4).map(|size| u32::from_le_bytes([size[0], size[1], size[2], size[3]]) as usize);
-        match size {
-          ::std::option::Option::Some(size) if (4..=arg.len()).contains(&size) => {
-            ::std::option::Option::Some(call(&arg[..size]))
+        // The argument is the buffer its size prefix counts, which the
+        // decoders panic on when it is not one.
+        ::std::option::Option::Some(match ::arora_buffers::well_formed(arg) {
+          ::std::result::Result::Ok(()) => {
+            let size = u32::from_le_bytes([arg[0], arg[1], arg[2], arg[3]]) as usize;
+            call(&arg[..size])
           }
-          _ => ::std::option::Option::Some(::std::result::Result::Err(
-            "the argument is not an Arora Buffer".to_string(),
-          )),
-        }
+          ::std::result::Result::Err(why) => ::std::result::Result::Err(
+            ::std::format!("the argument is not an Arora Buffer: {why}"),
+          ),
+        })
       }
     };
 

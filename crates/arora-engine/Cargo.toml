@@ -30,6 +30,10 @@ rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
+# Reads a component's layer (`component_layout`), which the browser checks
+# before it runs the guest module: the parser alone, without the validator,
+# which would ship ~0.9 MB more to the browser. 0.261 is wasmtime 50's.
+wasmparser = { version = "0.261", default-features = false, features = ["std", "component-model"] }
 
 # Native-only optional deps. Disabled when targeting wasm32 (browser host).
 libloading = { version = "0.9", optional = true }

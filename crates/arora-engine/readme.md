@@ -17,8 +17,9 @@ wrapper is [`arora-web`](https://github.com/semio-ai/arora-sdk)):
   `arora:module` world ([`wit/arora-module.wit`](wit/arora-module.wit)), as
   Rust and C++ build one for `wasm32-wasip2`. It exports `functions` and
   `dispatch`, and may import the world's `host` interface and the WASI 0.2
-  interfaces `wasi:cli`, `wasi:io`, `wasi:clocks` and `wasi:random` — no
-  filesystem, no sockets ([`component_layout`](src/component_layout.rs)).
+  interfaces `wasi:cli`, `wasi:io`, `wasi:clocks`, `wasi:random` and
+  `wasi:filesystem`, with no directory preopened — no sockets
+  ([`component_layout`](src/component_layout.rs)).
   Hosted by [`component::ComponentExecutor`](src/executor/component/mod.rs)
   and [`browser::BrowserComponentExecutor`](src/executor/browser/component.rs),
   which a `BrowserExecutor`'s `component_executor()` gives. A component that

@@ -73,14 +73,45 @@ pub mod __rt {
     #[cfg(all(target_arch = "wasm32", target_os = "wasi", target_env = "p2"))]
     pub use wit_bindgen;
 
+    /// Hold the result of a call the guest made through the host, for the code
+    /// that made it: the address of a size-prefixed buffer holding the result,
+    /// or an error buffer holding the host's error, or one saying the result is
+    /// not an Arora Buffer when it is not one
+    /// ([`well_formed`](arora_buffers::well_formed)), as the code reading it
+    /// panics on one that is not.
+    ///
+    /// The buffer stays valid until the next call, which frees it, so a guest
+    /// holds one result however many calls it makes. Code reads a result
+    /// before it calls again: on a core module, the engine writes each result
+    /// into a buffer the guest's arora-buffers pool hands out again.
+    pub fn keep_result(result: Result<Vec<u8>, String>) -> usize {
+        use std::cell::RefCell;
+        thread_local! {
+            static LATEST: RefCell<Box<[u8]>> = RefCell::new(Box::default());
+        }
+        let error = |message: &str| {
+            let mut writer = arora_buffers::BufferWriter::new();
+            writer.add_error(message);
+            writer.finalize()
+        };
+        let buffer = match result {
+            Ok(buffer) if arora_buffers::well_formed(&buffer).is_ok() => buffer.into_boxed_slice(),
+            Ok(_) => error("the result is not an Arora Buffer"),
+            Err(message) => error(&message),
+        };
+        let address = buffer.as_ptr() as usize;
+        LATEST.with(|latest| *latest.borrow_mut() = buffer);
+        address
+    }
+
     /// The engine calls a core module imports (`env.arora_dispatch`,
     /// `env.arora_dispatch_indirect`), made through the `host` interface, for
     /// code written against the core-module ABI — arora-module-rust's — built
-    /// as a component. Each takes and returns the addresses of size-prefixed
-    /// buffers and leaks the one it returns, as the engine's imports do; an
-    /// error the host returns comes back as an error buffer.
+    /// as a component. Each takes the addresses of size-prefixed buffers and
+    /// returns that of the one [`keep_result`] holds.
     #[cfg(all(target_arch = "wasm32", target_os = "wasi", target_env = "p2"))]
     pub mod engine {
+        use super::keep_result;
         use crate::component::arora::module::host;
         use crate::component::Id;
 
@@ -103,18 +134,6 @@ pub mod __rt {
             }
         }
 
-        fn leak(result: Result<Vec<u8>, String>) -> usize {
-            let buffer = match result {
-                Ok(buffer) => buffer.into_boxed_slice(),
-                Err(message) => {
-                    let mut writer = arora_buffers::BufferWriter::new();
-                    writer.add_error(&message);
-                    writer.finalize()
-                }
-            };
-            Box::leak(buffer).as_ptr() as usize
-        }
-
         /// Call the function `method_id` of the module `module_id` with the
         /// argument buffer at `arg`.
         ///
@@ -129,7 +148,7 @@ pub mod __rt {
         ) -> usize {
             let (module, method, arg) =
                 unsafe { (id_at(module_id), id_at(method_id), buffer_at(arg)) };
-            leak(host::dispatch(module, method, arg))
+            keep_result(host::dispatch(module, method, arg))
         }
 
         /// Call the callable `callable_id` registered with the engine.
@@ -139,7 +158,7 @@ pub mod __rt {
         /// None beyond the core-module ABI's: the function is `unsafe` as the
         /// import it stands for is.
         pub unsafe extern "C" fn arora_dispatch_indirect(callable_id: u64) -> usize {
-            leak(host::dispatch_indirect(callable_id))
+            keep_result(host::dispatch_indirect(callable_id))
         }
     }
 }

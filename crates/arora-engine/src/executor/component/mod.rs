@@ -11,9 +11,12 @@
 //!
 //! A component may import the WASI 0.2 interfaces an ordinary program's
 //! runtime reaches for — `wasi:cli` (environment, exit, standard streams,
-//! terminals), `wasi:io`, `wasi:clocks` and `wasi:random` — and no other: no
-//! filesystem, no sockets ([`HOST_INTERFACES`](crate::component_layout::HOST_INTERFACES)).
-//! A component importing another fails to instantiate.
+//! terminals), `wasi:io`, `wasi:clocks`, `wasi:random` and `wasi:filesystem`,
+//! with no directory preopened, so a guest sees no file — and no other: no
+//! sockets ([`HOST_INTERFACES`](crate::component_layout::HOST_INTERFACES)).
+//! A C or C++ guest's libc reaches the filesystem's interfaces whenever it
+//! links its file descriptors' code, as a debug build of the Rust libraries it
+//! links does. A component importing another interface fails to instantiate.
 //!
 //! A component that traps — a Rust guest's panic, a C++ guest's failed
 //! `assert` — is entered no more: every later call fails with the trap it
@@ -161,11 +164,13 @@ impl HasData for HasIo {
 
 /// Link the WASI 0.2 interfaces a component may import (see the module
 /// documentation), as `wasmtime_wasi::p2::add_to_linker_sync` links them, the
-/// filesystem and the sockets left out.
+/// sockets left out. The filesystem holds no directory: the context preopens
+/// none.
 fn add_wasi_to_linker(linker: &mut Linker<HostState>) -> wasmtime::Result<()> {
     use wasmtime_wasi::cli::{WasiCli, WasiCliView};
     use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
-    use wasmtime_wasi::p2::bindings::{cli, clocks, io, random, sync};
+    use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
+    use wasmtime_wasi::p2::bindings::{cli, clocks, filesystem, io, random, sync};
     use wasmtime_wasi::random::WasiRandom;
 
     let l = linker;
@@ -174,6 +179,8 @@ fn add_wasi_to_linker(linker: &mut Linker<HostState>) -> wasmtime::Result<()> {
     sync::io::streams::add_to_linker::<_, HasIo>(l, |t| t.ctx().table)?;
     clocks::wall_clock::add_to_linker::<_, WasiClocks>(l, HostState::clocks)?;
     clocks::monotonic_clock::add_to_linker::<_, WasiClocks>(l, HostState::clocks)?;
+    filesystem::preopens::add_to_linker::<_, WasiFilesystem>(l, HostState::filesystem)?;
+    sync::filesystem::types::add_to_linker::<_, WasiFilesystem>(l, HostState::filesystem)?;
     random::random::add_to_linker::<_, WasiRandom>(l, |t| t.ctx().ctx.random())?;
     random::insecure::add_to_linker::<_, WasiRandom>(l, |t| t.ctx().ctx.random())?;
     random::insecure_seed::add_to_linker::<_, WasiRandom>(l, |t| t.ctx().ctx.random())?;

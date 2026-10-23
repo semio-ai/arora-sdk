@@ -120,7 +120,7 @@ export!(Component);
 
 #[cfg(target_os = "wasi")]
 mod wasi {
-    use wasip2::{cli, clocks, io, random};
+    use wasip2::{cli, clocks, filesystem, io, random};
 
     /// What the WASI interfaces return. Everything here holds on any host
     /// that runs a guest without arguments or an environment.
@@ -177,6 +177,10 @@ mod wasi {
         line(
             "initial-cwd",
             format!("{:?}", cli::environment::initial_cwd()),
+        );
+        line(
+            "preopened-directories",
+            filesystem::preopens::get_directories().len().to_string(),
         );
 
         let stdout = cli::stdout::get_stdout();

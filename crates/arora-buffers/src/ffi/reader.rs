@@ -374,3 +374,15 @@ pub extern "C" fn arora_buffer_reader_get_map_field_key(
         key.as_ptr()
     }
 }
+
+/// Whether the `length` bytes at `buffer` hold the Arora Buffer they start
+/// with ([`well_formed`](crate::well_formed)): what a guest checks its
+/// caller's argument with before reading it. A null `buffer` holds none.
+#[no_mangle]
+pub extern "C" fn arora_buffer_well_formed(buffer: *const u8, length: usize) -> bool {
+    if buffer.is_null() {
+        return false;
+    }
+    let buffer = unsafe { std::slice::from_raw_parts(buffer, length) };
+    crate::well_formed(buffer).is_ok()
+}

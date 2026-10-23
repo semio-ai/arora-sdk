@@ -210,8 +210,8 @@ fn call_tick_function(tick_id: &TickId) -> Status {
             .try_into()
             .expect("input is too small");
     let input_size = u32::from_le_bytes(*input_size_bytes) as usize;
-    let input =
-        unsafe { std::slice::from_raw_parts(result_buffer_ptr, BUFFER_SIZE_SIZE + input_size) };
+    // The size prefix counts itself.
+    let input = unsafe { std::slice::from_raw_parts(result_buffer_ptr, input_size) };
     let mut reader = BufferReader::new(input);
     Status::try_from(arora_buffers::froto_value::deserialize_from_reader(
         &mut reader,

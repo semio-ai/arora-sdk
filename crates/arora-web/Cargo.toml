@@ -25,8 +25,9 @@ arora-types = { path = "../arora-types", version = "3" }
 # list_keys, describe_methods), and `Arora`/`AroraBuilder` as this crate's
 # surface carries them. 13.1: `AroraBuilder::with_registry`. 13.2:
 # `list_keys` and `Arora::describe_methods`, which the read-only operations
-# answer from without a step.
-arora = { path = "../arora", version = "13.2", default-features = false }
+# answer from without a step. 13.7: the browser's component executor
+# registered, which a `wasm-component` guest loads through.
+arora = { path = "../arora", version = "13.7", default-features = false }
 # 2.1: the records `withRecords` loads, in arora-registry's layout.
 arora-registry = { path = "../arora-registry", version = "2.1" }
 # 6.1: the shapes a client reads keys and methods in, and a run handle's

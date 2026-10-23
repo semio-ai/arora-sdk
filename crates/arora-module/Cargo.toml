@@ -16,7 +16,9 @@ arora-module-macros = { path = "../arora-module-macros", version = "3.1" }
 arora-types = { path = "../arora-types", version = "3.8" }
 # The artifact entry points the macros emit speak the engine's buffer wire
 # format; a host-linked module never calls into it.
-arora-buffers = { path = "../arora-buffers", version = "3" }
+# 3.1: `well_formed`, which a component's calls check an argument and a
+# result with.
+arora-buffers = { path = "../arora-buffers", version = "3.1" }
 
 # The `arora:module` world's guest bindings, for a module built as a
 # `wasm32-wasip2` component.

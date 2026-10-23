@@ -946,6 +946,11 @@ fn expand_export(f: &mut ItemFn, attr: TokenStream2) -> syn::Result<TokenStream2
         /// wire format the engine speaks. A component's `dispatch` and a core
         /// module's or shared library's entry point both call it.
         pub fn dispatch_buffer(input: &[u8]) -> ::std::result::Result<::std::boxed::Box<[u8]>, ::std::string::String> {
+          // The decoder panics on a buffer that is not one, and the caller's
+          // may not be.
+          if let Err(why) = arora_buffers::well_formed(input) {
+            return Err(format!("the argument is not an Arora Buffer: {why}"));
+          }
           let arora_types::value::Value::Structure(structure) = arora_buffers::serde_uuid::deserialize(input) else {
             return Err("argument buffer is not a structure".to_string());
           };

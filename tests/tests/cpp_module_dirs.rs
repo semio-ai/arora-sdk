@@ -183,7 +183,23 @@ fn a_cpp_component_refuses_an_argument_that_is_not_an_arora_buffer() {
     use arora_engine::call::CallBridge;
     let (mut engine, module) = test_cpp_engine();
     let test_optional = id("a24fd5ab-baf8-4f44-af41-053a54b3fa81");
-    for arg in [&[][..], &[0xff, 0xff, 0, 0, 0x0b], &[2, 0, 0, 0]] {
+    let argument = StructureField {
+        id: id("b3ec8dd2-2df1-43ae-bf2d-0a567c998243"),
+        value: Box::new(Value::U32(41)),
+    };
+    let truncated = cut_short(
+        &Value::Structure(Structure {
+            id: test_optional,
+            fields: vec![argument.clone()],
+        }),
+        3,
+    );
+    for arg in [
+        &[][..],
+        &[0xff, 0xff, 0, 0, 0x0b],
+        &[2, 0, 0, 0],
+        &truncated,
+    ] {
         let error = engine.dispatch(&module, &test_optional, arg).unwrap_err();
         assert!(
             matches!(&error, arora_engine::module::DispatchError::Guest { message }
@@ -195,10 +211,7 @@ fn a_cpp_component_refuses_an_argument_that_is_not_an_arora_buffer() {
         .arora_call(Call {
             module_id: Some(module),
             id: test_optional,
-            args: vec![StructureField {
-                id: id("b3ec8dd2-2df1-43ae-bf2d-0a567c998243"),
-                value: Box::new(Value::U32(41)),
-            }],
+            args: vec![argument],
         })
         .expect("a call after the refusals");
     assert_eq!(
@@ -206,4 +219,14 @@ fn a_cpp_component_refuses_an_argument_that_is_not_an_arora_buffer() {
         Value::Option(Some(Box::new(Value::U32(42)))),
         "test_optional increments its argument"
     );
+}
+
+/// The Arora Buffer of `value`, cut `by` bytes short, its size prefix counting
+/// what is left: a prefix that holds, and a value that does not.
+fn cut_short(value: &Value, by: usize) -> Vec<u8> {
+    let whole = arora_buffers::serde_uuid::serialize(value);
+    let mut cut = whole[..whole.len() - by].to_vec();
+    let len = cut.len() as u32;
+    cut[..4].copy_from_slice(&len.to_le_bytes());
+    cut
 }

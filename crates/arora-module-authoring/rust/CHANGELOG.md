@@ -15,7 +15,10 @@ All notable changes to `arora-module-rust`. The format follows
   which, with `function_ids()`, `arora_module::artifact!` serves a
   component's `functions` and `dispatch` from: a crate built for
   `wasm32-wasip2` with `arora_module::artifact!(arora_generated::export)` at
-  its root is a component.
+  its root is a component. An argument that is not an Arora Buffer
+  (`arora_buffers::well_formed`, arora-buffers 3.1) is the call's error. An
+  argument of another type than a parameter's still panics, which a
+  component's trap makes final until it is reloaded.
 - Built for `wasm32-wasip2`, the generated `arora_dispatch` and
   `arora_dispatch_indirect` call the engine through the `arora:module`
   world's `host` interface (arora-module 2.3), so the crate depends on

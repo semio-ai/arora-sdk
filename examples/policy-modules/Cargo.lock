@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "13.6.0"
+version = "13.7.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "5.4.0"
+version = "5.5.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
@@ -313,6 +313,7 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasmparser 0.261.0",
  "wasmtime",
  "wasmtime-wasi",
  "web-sys",
@@ -368,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "arora-buffers",
  "arora-module-macros",
@@ -378,7 +379,7 @@ dependencies = [
 
 [[package]]
 name = "arora-module-macros"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "arora-types",
  "proc-macro2",

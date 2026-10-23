@@ -55,6 +55,7 @@ insecure-random-bytes=3
 environment=0
 arguments=0
 initial-cwd=None
+preopened-directories=0
 stdout-writable=true
 stdout-flushes=true
 stdout-writes-zeroes=true
@@ -286,6 +287,49 @@ fn a_component_missing_a_declared_function_fails_to_load() {
     );
 }
 
+/// A component of the `arora:module` world in WebAssembly text: the core
+/// module `guest` (named `$guest`), and its `functions` and `dispatch` lifted
+/// as `wit-component` lifts them, with `more` — imports, modules — beside it.
+fn world_component(guest: &str, more: &str) -> String {
+    format!(
+        r#"(component
+            (type $types (instance
+                (type (record (field "hi" u64) (field "lo" u64)))
+                (export "id" (type (eq 0)))))
+            (import "arora:module/types@0.2.0" (instance $types (type $types)))
+            (alias export $types "id" (type $id))
+            {more}
+            {guest}
+            (core instance $main (instantiate $guest))
+            (alias core export $main "memory" (core memory $memory))
+            (alias core export $main "cabi_realloc" (core func $realloc))
+            (type $ids (list $id))
+            (type $functions (func (result $ids)))
+            (func $functions (type $functions)
+                (canon lift (core func $main "functions") (memory $memory)))
+            (export "functions" (func $functions))
+            (type $bytes (list u8))
+            (type $result (result $bytes (error string)))
+            (type $dispatch (func (param "method" $id) (param "arg" $bytes) (result $result)))
+            (func $dispatch (type $dispatch)
+                (canon lift (core func $main "dispatch") (memory $memory) (realloc $realloc)))
+            (export "dispatch" (func $dispatch)))"#
+    )
+}
+
+/// A guest module exporting what the world's lifts call, and importing
+/// `imports`.
+fn guest(imports: &str) -> String {
+    format!(
+        r#"(core module $guest
+            {imports}
+            (memory (export "memory") 1)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 8)
+            (func (export "functions") (result i32) i32.const 0)
+            (func (export "dispatch") (param i64 i64 i32 i32) (result i32) i32.const 0))"#
+    )
+}
+
 /// The error loading `component` (WebAssembly text) under the guest's header.
 fn load_error(component: &str) -> String {
     let (mut engine, _) = engine();
@@ -295,20 +339,78 @@ fn load_error(component: &str) -> String {
     format!("{error}")
 }
 
+/// A component importing an interface the hosts do not provide is refused,
+/// as the native executor's linker refuses it.
 #[wasm_bindgen_test]
 fn a_component_importing_what_the_browser_does_not_provide_is_refused() {
     console_error_panic_hook::set_once();
-    let error = load_error(
-        r#"(component
-            (core module
-                (import "wasi:filesystem/preopens@0.2.0" "get-directories" (func (param i32)))
-                (memory (export "memory") 1)
-                (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 8)
-                (func (export "functions") (result i32) i32.const 0)
-                (func (export "dispatch") (param i64 i64 i32 i32) (result i32) i32.const 0)))"#,
-    );
+    let error = load_error(&world_component(
+        &guest(""),
+        r#"(import "wasi:sockets/tcp@0.2.0" (instance))"#,
+    ));
     assert!(
-        error.contains("'get-directories' from 'wasi:filesystem/preopens@0.2.0'"),
+        error.contains("imports wasi:sockets/tcp@0.2.0, which is not an interface"),
+        "unexpected error: {error}"
+    );
+}
+
+/// A guest module importing a function the browser does not implement fails
+/// to load, naming it, whatever the component wires to it.
+#[wasm_bindgen_test]
+fn a_guest_module_importing_what_the_browser_does_not_provide_fails_to_load() {
+    console_error_panic_hook::set_once();
+    let error = load_error(&world_component(
+        &guest(
+            r#"(import "wasi:sockets/network@0.2.0" "[resource-drop]network" (func (param i32)))"#,
+        ),
+        "",
+    ));
+    assert!(
+        error.contains("'[resource-drop]network' from 'wasi:sockets/network@0.2.0'"),
+        "unexpected error: {error}"
+    );
+}
+
+/// The filesystem has no directory, so no descriptor exists: a call on one
+/// traps, as natively a call on an unknown handle does.
+#[wasm_bindgen_test]
+fn a_call_on_a_descriptor_traps_in_browser() {
+    console_error_panic_hook::set_once();
+    let function = "00000000-0000-0000-0000-000000000003";
+    let (mut engine, _) = engine();
+    let guest = r#"(core module $guest
+        (import "wasi:filesystem/types@0.2.0" "[method]descriptor.stat" (func $stat (param i32 i32)))
+        (memory (export "memory") 1)
+        (data (i32.const 1024) "\00\00\00\00\00\00\00\00\03\00\00\00\00\00\00\00")
+        (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 4096)
+        (func (export "functions") (result i32)
+            (i32.store (i32.const 2048) (i32.const 1024))
+            (i32.store (i32.const 2052) (i32.const 1))
+            (i32.const 2048))
+        (func (export "dispatch") (param i64 i64 i32 i32) (result i32)
+            (call $stat (i32.const 0) (i32.const 3072))
+            (i32.const 2048)))"#;
+    let bytes = wat::parse_str(world_component(guest, "")).expect("assemble the component");
+    load_module_from_parts(
+        &mut engine,
+        header_with("wasm-component", &[(function, "f")]),
+        bytes.into(),
+    )
+    .expect("load");
+    let error = dispatch(&mut engine, function, &[]).unwrap_err();
+    assert!(error.contains("no descriptor exists"), "{error}");
+}
+
+/// A component that does not export the world's `functions` is refused,
+/// as the native executor refuses it.
+#[wasm_bindgen_test]
+fn a_component_without_the_world_s_exports_is_refused() {
+    console_error_panic_hook::set_once();
+    let component =
+        world_component(&guest(""), "").replace(r#"(export "functions" (func $functions))"#, "");
+    let error = load_error(&component);
+    assert!(
+        error.contains("where the world exports functions and dispatch"),
         "unexpected error: {error}"
     );
 }
@@ -337,36 +439,38 @@ fn a_component_nesting_a_component_is_refused() {
     );
 }
 
-/// A reactor guest component: the guest's `_initialize` adds one to a count
-/// its one function returns, and `wit-component`'s initializer — a module whose
-/// start function calls the import it is given — calls `_initialize`.
-const REACTOR: &str = r#"(component
-    (core module
-        (memory (export "memory") 1)
-        (global $count (mut i32) (i32.const 0))
-        (global $heap (mut i32) (i32.const 4096))
-        (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32)
-            (local $at i32)
-            (local.set $at (global.get $heap))
-            (global.set $heap (i32.add (global.get $heap) (local.get 3)))
-            (local.get $at))
-        (func (export "_initialize")
-            (global.set $count (i32.add (global.get $count) (i32.const 1))))
-        ;; The id of the one function: { hi: 0, lo: 3 }.
-        (data (i32.const 1024) "\00\00\00\00\00\00\00\00\03\00\00\00\00\00\00\00")
-        (func (export "functions") (result i32)
-            (i32.store (i32.const 2048) (i32.const 1024))
-            (i32.store (i32.const 2052) (i32.const 1))
-            (i32.const 2048))
-        (func (export "dispatch") (param i64 i64 i32 i32) (result i32)
-            (i32.store8 (i32.const 3072) (global.get $count))
-            (i32.store8 (i32.const 2048) (i32.const 0))
-            (i32.store (i32.const 2052) (i32.const 3072))
-            (i32.store (i32.const 2056) (i32.const 1))
-            (i32.const 2048)))
-    (core module
-        (import "" "" (func $initialize))
-        (start $initialize)))"#;
+/// A reactor guest: its `_initialize` adds one to a count its one function
+/// returns. Its component holds `wit-component`'s initializer
+/// ([`INITIALIZER`]), which calls `_initialize`.
+const REACTOR: &str = r#"(core module $guest
+    (memory (export "memory") 1)
+    (global $count (mut i32) (i32.const 0))
+    (global $heap (mut i32) (i32.const 4096))
+    (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32)
+        (local $at i32)
+        (local.set $at (global.get $heap))
+        (global.set $heap (i32.add (global.get $heap) (local.get 3)))
+        (local.get $at))
+    (func (export "_initialize")
+        (global.set $count (i32.add (global.get $count) (i32.const 1))))
+    ;; The id of the one function: { hi: 0, lo: 3 }.
+    (data (i32.const 1024) "\00\00\00\00\00\00\00\00\03\00\00\00\00\00\00\00")
+    (func (export "functions") (result i32)
+        (i32.store (i32.const 2048) (i32.const 1024))
+        (i32.store (i32.const 2052) (i32.const 1))
+        (i32.const 2048))
+    (func (export "dispatch") (param i64 i64 i32 i32) (result i32)
+        (i32.store8 (i32.const 3072) (global.get $count))
+        (i32.store8 (i32.const 2048) (i32.const 0))
+        (i32.store (i32.const 2052) (i32.const 3072))
+        (i32.store (i32.const 2056) (i32.const 1))
+        (i32.const 2048)))"#;
+
+/// `wit-component`'s initializer: a module whose start function calls the
+/// import it is given.
+const INITIALIZER: &str = r#"(core module
+    (import "" "" (func $initialize))
+    (start $initialize))"#;
 
 /// A reactor component's `_initialize` runs once, when it loads, before its
 /// first call — not again before each call.
@@ -375,7 +479,8 @@ fn a_reactor_component_is_initialized_once_when_it_loads_in_browser() {
     console_error_panic_hook::set_once();
     let count = "00000000-0000-0000-0000-000000000003";
     let (mut engine, _) = engine();
-    let bytes = wat::parse_str(REACTOR).expect("assemble the component");
+    let bytes =
+        wat::parse_str(world_component(REACTOR, INITIALIZER)).expect("assemble the component");
     load_module_from_parts(
         &mut engine,
         header_with("wasm-component", &[(count, "count")]),
@@ -470,29 +575,28 @@ fn a_component_calls_through_host_dispatch_in_browser() {
     assert_eq!(&*result, b"through the host");
 }
 
-/// A component whose `err` is not UTF-8 traps, as wasmtime's lift does.
-const NOT_UTF_8: &str = r#"(component
-    (core module
-        (memory (export "memory") 1)
-        (data (i32.const 1024) "\00\00\00\00\00\00\00\00\03\00\00\00\00\00\00\00")
-        (data (i32.const 3072) "\ff\fe")
-        (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 4096)
-        (func (export "functions") (result i32)
-            (i32.store (i32.const 2048) (i32.const 1024))
-            (i32.store (i32.const 2052) (i32.const 1))
-            (i32.const 2048))
-        (func (export "dispatch") (param i64 i64 i32 i32) (result i32)
-            (i32.store8 (i32.const 2048) (i32.const 1))
-            (i32.store (i32.const 2052) (i32.const 3072))
-            (i32.store (i32.const 2056) (i32.const 2))
-            (i32.const 2048))))"#;
+/// A guest whose `err` is not UTF-8, which traps, as wasmtime's lift does.
+const NOT_UTF_8: &str = r#"(core module $guest
+    (memory (export "memory") 1)
+    (data (i32.const 1024) "\00\00\00\00\00\00\00\00\03\00\00\00\00\00\00\00")
+    (data (i32.const 3072) "\ff\fe")
+    (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 4096)
+    (func (export "functions") (result i32)
+        (i32.store (i32.const 2048) (i32.const 1024))
+        (i32.store (i32.const 2052) (i32.const 1))
+        (i32.const 2048))
+    (func (export "dispatch") (param i64 i64 i32 i32) (result i32)
+        (i32.store8 (i32.const 2048) (i32.const 1))
+        (i32.store (i32.const 2052) (i32.const 3072))
+        (i32.store (i32.const 2056) (i32.const 2))
+        (i32.const 2048)))"#;
 
 #[wasm_bindgen_test]
 fn a_component_s_error_that_is_not_utf_8_traps_in_browser() {
     console_error_panic_hook::set_once();
     let function = "00000000-0000-0000-0000-000000000003";
     let (mut engine, _) = engine();
-    let bytes = wat::parse_str(NOT_UTF_8).expect("assemble the component");
+    let bytes = wat::parse_str(world_component(NOT_UTF_8, "")).expect("assemble the component");
     load_module_from_parts(
         &mut engine,
         header_with("wasm-component", &[(function, "f")]),
