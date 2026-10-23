@@ -1,9 +1,9 @@
 //! Node graphs on Arora's behavior tree.
 //!
 //! This crate defines the graph schema, the node registry metadata and topology helpers, the
-//! node vocabulary as the functions of an Arora module ([`functions`]), the importer from a graph
-//! to a behavior tree ([`import`]), and [`TreeRuntime`](tree_runtime::TreeRuntime), which runs a
-//! graph on the tree.
+//! node vocabulary as the functions of Arora modules ([`functions`]), Vizij's graph format's own
+//! functions ([`vizij_functions`]), the importer from a graph to a behavior tree ([`import`]), and
+//! [`TreeRuntime`](tree_runtime::TreeRuntime), which runs a graph on the tree.
 
 pub mod eval;
 pub mod functions;

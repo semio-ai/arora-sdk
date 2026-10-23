@@ -10,10 +10,13 @@ as the detached nodes of an `arora-behavior-tree`
   `inversekinematics` and the URDF nodes. `DataflowNodes` answers their calls
   in-process through a bridge over the device's. A
   function runs its node kind's per-node code (`eval`) over values, its
-  parameters (`params::Params`), the clock and its state. What a call does
-  that belongs to Vizij's graph format (an `input` node fitting its value to
-  its declared shape, the check of declared output shapes) is apart, in
-  `eval::vizij`;
+  parameters (`params::Params`), the clock and its state. A node's kind is a
+  `kind::Kind`;
+- **Vizij's graph format's own functions** (`vizij_functions`), the module
+  `@vizij/graph`: `input`, reading a store key and fitting its value to the
+  node's declared shape, `output`, checking its value against its own, and
+  `check`, the check of a node's declared output shapes. The graph JSON's
+  node kinds (`types::NodeType`) are the vocabulary's and these two;
 - **the importer** (`import`): a graph translated node for node into a tree
   and its detached nodes, as `BehaviorTree::try_from_groot_xml` reads a Groot
   file;
@@ -51,9 +54,10 @@ How a graph translates:
 | a node parameter | a literal argument, `param.<field>` |
 | hidden state (`spring`, `damp`, `slew`, IK) | the mutable parameter `state`, as a value: a smoother's buffers in its input's shape, an IK node's joints and last solve |
 | `time`, `oscillator`, the smoothers' step | the parameters `t` and `dt`, read from the variables `ImportOptions` names (`arora/time` and `arora/dt` by default) |
-| an `input` node | a read of the store key its path names |
-| an `output` node with a path | a sink: its return value bound to the store key of its path, written after the tree ticks; the later-listed writer of a key wins |
+| an `input` node | a call to `@vizij/graph`'s `input`, reading the store key its path names and fitting its value to its declared shape |
+| an `output` node with a path | a call to `@vizij/graph`'s `output`, checking its value against its declared shape; a sink: its return value bound to the store key of its path, written after the tree ticks; the later-listed writer of a key wins |
 | an `output` node with no path (a keyed batch) | listed in `ImportedGraph::keyed_outputs`, for its host to apply |
+| a node's declared output shapes | a call to `@vizij/graph`'s `check` after it, which its readers read in its place; an `input` or `output` node checks its own `out`, and one declaring the shape of another port is refused |
 | `taskrun`, `spawn` | leaves under the root `PARALLEL`, ticked at every tick, as they act at each evaluation |
 | `externalfunction` | placed by its function's description (`placement`): left out when the function returns nothing and writes nothing back; otherwise a leaf ticked at every tick, as Vizij calls it, since a module's function may keep state its arguments do not show (the animation module's `step(dt)`) |
 
@@ -69,7 +73,9 @@ How it evaluates:
 - **Inputs.** A value staged with `TreeRuntime::set_input` is seen by the
   next evaluation alone; an input staged nothing reads its default.
 - **Shapes.** Ports carry values; a port's shape is its declared output
-  shape, the shape staged with an input, or the one its value infers.
+  shape, the shape staged with an input, or the one its value infers. A
+  node's declared output shapes are checked where it is read: a value that
+  does not fit fails the evaluation, as a device runs it or an editor.
 - **Variadic ports.** A function declares `VARIADIC_PORTS` (64) ports of its
   kind's variadic group; the importer refuses a graph wiring one past them.
 - **Edits.** A node's parameter value is set in place on the loaded tree
@@ -144,7 +150,7 @@ Disable defaults with `--no-default-features` if you want a minimal build.
 - Edges can include selectors composed of field/index segments.
 - Field selectors pick a record's field, a transform's part (`translation` or `position`, `rotation`, `scale`) or an enumeration's payload (`["state", "translation"]`). Index selectors pick an element of a numeric vector, an item of a sequence, or a structure's field in declaration order, whatever the structure's type (`["translation", 1]`).
 - Example: `{"selector": ["translation", 1]}` on a `Transform` output lifts the Y component; chaining `["record_field", 2, "nested_field"]` is also supported.
-- Selector evaluation respects shapes; invalid paths throw descriptive errors (“selector index 5 out of bounds for vec3”) instead of guessing. Catch these errors during development to keep graph definitions deterministic.
+- A selection reads the value alone (`select::select`). An invalid path fails with a descriptive error (“selector index 5 out of bounds for vec3”) instead of guessing. Catch these errors during development to keep graph definitions deterministic.
 
 ### Shapes & Values
 

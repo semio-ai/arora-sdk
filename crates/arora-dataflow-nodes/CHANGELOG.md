@@ -80,16 +80,32 @@ published from [vizij-rs](https://github.com/vizij-ai/vizij-rs) as
   store path and the keyed-batch fields (`NodeParams::params`), and
   `RoundMode` moves to `params`, re-exported from `types`.
 - `GraphRuntime` is `eval::Context`: one call's clock, its node's state and
-  the runs it requests. It stages no inputs: the module hands an `input` node
-  the value its key holds.
+  the runs it requests. It stages no inputs: an `input` node's call takes
+  the value its key holds as an argument.
+- `Kind` is the vocabulary's node kinds, one function each; `NodeType`, the
+  graph JSON's, is those and `input` and `output` (`NodeType::kind`). The
+  per-node code, `ports::ports`, `placement` and the function index take a
+  `Kind`.
 - Each node kind's ports are the module's own (`ports::ports`): its fixed
   inputs and outputs and its variadic groups. A node's layouts start from
   them, where they read Vizij's editor registry; a test holds the registry
   to them.
-- What a call does for Vizij's graph format moves to `eval::vizij`: an
-  `input` node fitting its value to its declared shape, the check of a
-  node's declared output shapes, and the writes of a path-less `output`
-  node's keyed batch.
+- Vizij's graph format's own functions are the module `@vizij/graph`'s
+  (`vizij_functions`), apart from the vocabulary's: `input`, which reads its
+  store key and fits the value to the node's declared shape, `output`, which
+  checks its value against its own, and `check`, the check of a node's
+  declared output shapes. The importer places a `check` after each other
+  node that declares shapes, and its readers read it in the node's place,
+  so a value that does not fit fails a demanded evaluation as it fails one
+  of every node. `TreeRuntime` answers the module's calls beside the
+  vocabulary's. An `input` or `output` node declaring the shape of a port
+  other than `out` is refused at import, where its evaluation failed.
+- Selectors are the `select` module's (`Selector` and `SelectorSegment`,
+  re-exported from `types`), which selects on the value alone. A failed
+  selection names what it selected in by its geometry type or its form.
+  `PortValue`, a port's value with its shape, is the graph format's
+  (`eval::vizij`), as are the writes of a path-less `output` node's keyed
+  batch.
 
 ### Removed
 
