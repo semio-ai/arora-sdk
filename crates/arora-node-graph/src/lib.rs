@@ -9,6 +9,7 @@ pub mod eval;
 pub mod functions;
 pub mod import;
 pub mod params;
+pub mod ports;
 pub mod schema;
 pub mod task;
 pub mod topo;

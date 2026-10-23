@@ -503,9 +503,8 @@ fn port_read(
 /// function declares.
 fn is_variadic_past_the_last(kind: &NodeType, port: &str) -> bool {
     let (group, index) = crate::eval::variadic::parse_variadic_key(port);
-    let declared_group = crate::eval::plan::signatures()
-        .get(kind)
-        .and_then(|signature| signature.variadic_inputs.as_ref())
+    let declared_group = crate::ports::ports(kind)
+        .variadic_inputs
         .map(|variadic| variadic.id);
     declared_group == Some(group) && index.is_some_and(|index| index >= VARIADIC_PORTS)
 }
