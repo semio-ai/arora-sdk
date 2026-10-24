@@ -299,7 +299,7 @@ function sampleKeys(keys, tau) {
   for (let i = 1; i < keys.length; i++) if (tau <= keys[i][0]) return lerp(keys[i - 1][1], keys[i][1], smooth((tau - keys[i - 1][0]) / (keys[i][0] - keys[i - 1][0])));
   return keys[keys.length - 1][1];
 }
-const DT = 1 / 30, RUN_END = 39.6;
+const DT = 1 / 30, RUN_END = 39.6, EYE_HALF_LIFE = 0.08;
 const CHANNELS = ['head/yaw', 'head/pitch', 'eyes/x', 'eyes/y', 'eyes/lid', 'mouth/open', 'mouth/stretch', 'mouth/corners', 'arm/raise'];
 const POSTURES = {
   neutral:   { pitch: 0,    arm: 0,   lid: 1,   open: 0,  stretch: 0,   corners: 0 },
@@ -501,7 +501,7 @@ class Sim {
     this.conv = { state: 'idle', sub: '', from: 'idle', subBefore: '', run: null, vadOnAt: 0, vadOff: false, words: undefined, prevUtterance: '' };
     this.att = { state: 'nobody', since: 0, from: 'present' };
     this.emotions = []; this.think = { w: 0, enteredAt: -10 };
-    this.gesture = null; this.head = { yaw: 0, pitch: 0 }; this.target = { x: 0, y: 0 }; this.lastTarget = { x: 0, y: 0 };
+    this.gesture = null; this.head = { yaw: 0, pitch: 0 }; this.eyeGaze = { x: 0, y: 0 }; this.target = { x: 0, y: 0 }; this.lastTarget = { x: 0, y: 0 };
     this.player = null; this.speechW = 0; this.judge = null; this.judges = 0; this.resets = 0; this.roundAfterReset = null;
     this.items = { 0: null }; this.itemCount = 0;
     this.prevHead = null; this.vadPrev = false; this.lastSeg = null; this.stateRec = null; this.attRec = null;
@@ -788,6 +788,10 @@ class Sim {
     };
     this.head.yaw += (tg.x - this.head.yaw) * k;
     this.head.pitch += (tg.y * 0.6 - this.head.pitch) * k;
+    // The eyes follow the target too, about three times faster than the head: they lead, without popping.
+    const ke = 1 - Math.pow(2, -DT / EYE_HALF_LIFE);
+    this.eyeGaze.x += (tg.x - this.eyeGaze.x) * ke;
+    this.eyeGaze.y += (tg.y - this.eyeGaze.y) * ke;
     const thinking = (C.state === 'thinking' && C.sub === 'pondering') || C.state === 'judging';
     this.think.w = clamp(this.think.w + (thinking ? 1 : -1) * DT / 0.3, 0, 1);
     const base = this.blendedPosture(t), p = {};
@@ -797,7 +801,7 @@ class Sim {
     const eyeHead = this.flags.staleEyes && this.prevHead ? this.prevHead : { yaw, pitch };
     const since = t - this.think.enteredAt;
     const glance = since >= 0 && since <= 1.2 ? 0.3 * Math.min(smooth(since / 0.2), smooth((1.2 - since) / 0.2)) : 0;
-    const eyesX = clamp((tg.x - eyeHead.yaw) * 1.6, -1, 1), eyesY = clamp((tg.y - eyeHead.pitch) * 1.6 + glance, -1, 1);
+    const eyesX = clamp((this.eyeGaze.x - eyeHead.yaw) * 1.6, -1, 1), eyesY = clamp((this.eyeGaze.y - eyeHead.pitch) * 1.6 + glance, -1, 1);
     const it = this.player, playing = !!it && !it.paused;
     this.speechW = clamp(this.speechW + (playing ? 1 : -1) * DT / 0.08, 0, 1);
     let vis = VISEMES.rest, word = -1;
@@ -822,7 +826,7 @@ class Sim {
       att: this.att.state, emotions: this.emotions.map((e) => [e.name, this.weight(e, t)]).filter((x) => x[1] > 0.005),
       think: this.think.w, glance, gesture: this.gesture ? this.gesture.name : '',
       user: seg ? (seg.text || '(coughs)') : '', robot: it ? { text: it.text, word, kind: it.kind, paused: it.paused, words: it.words } : null,
-      target: { x: tg.x, y: tg.y }, speechW: w, vis, keys,
+      target: { x: tg.x, y: tg.y }, eyeGaze: { x: this.eyeGaze.x, y: this.eyeGaze.y }, speechW: w, vis, keys,
     };
   }
   recording() {
@@ -863,13 +867,15 @@ function score(rec) {
   items.push({ ok: !lost.length, title: 'No reply lost to a cut-in', detail: lost.length ? lost.map((s) => `${quote(s.text)} cut at ${s.end.toFixed(1)} s`).join('\n') : 'every paused sentence came back', at: lost.length ? lost[0].end : null });
   const confirmed = rec.events.filter((e) => e.kind === 'asr' && e.cutIn).length;
   items.push({ ok: rec.judges === confirmed, title: 'One judge per confirmed cut-in', detail: `${rec.judges} judged of ${confirmed} cut-ins with words` });
-  let gaze = { err: 0, t: null };
+  let gaze = { err: 0, t: null }, pop = { d: 0, t: null };
   for (const f of rec.frames) if (f.att === 'engaged') {
-    const ex = Math.abs(f.c[2] - clamp((f.target.x - f.c[0]) * 1.6, -1, 1));
-    const ey = Math.abs(f.c[3] - clamp((f.target.y - f.c[1]) * 1.6 + f.glance, -1, 1));
+    const ex = Math.abs(f.c[2] - clamp((f.eyeGaze.x - f.c[0]) * 1.6, -1, 1));
+    const ey = Math.abs(f.c[3] - clamp((f.eyeGaze.y - f.c[1]) * 1.6 + f.glance, -1, 1));
     if (Math.max(ex, ey) > gaze.err) gaze = { err: Math.max(ex, ey), t: f.t };
   }
+  for (let i = 1; i < rec.frames.length; i++) for (const k of [2, 3]) { const d = Math.abs(rec.frames[i].c[k] - rec.frames[i - 1].c[k]); if (d > pop.d) pop = { d, t: rec.frames[i].t }; }
   items.push({ ok: gaze.err < 0.01, title: 'Eyes stay locked as the head moves', detail: `largest eye error ${gaze.err.toFixed(3)}`, at: gaze.err >= 0.01 ? gaze.t : null });
+  items.push({ ok: pop.d < 0.45, title: 'Eyes move, never pop', detail: `largest eye move in one tick ${pop.d.toFixed(2)} of the screen’s half-width`, at: pop.t });
   let fall = { d: 0, t: null }, snap = { d: 0, t: null, what: '' };
   const named = (f, n) => f.emotions.filter((x) => x[0] === n).reduce((s, x) => s + x[1], 0);
   for (let i = 1; i < rec.frames.length; i++) {
@@ -902,7 +908,7 @@ const MOTION_GROUPS = [
   ['gaze', 'Gaze', 'the target: a wander, the person, a glance away, held while lost'],
   ['posture', 'Posture', 'the blended emotions, with the thinking expression over them'],
   ['head', 'Head', 'follows the target, with the posture’s pitch and the idle sway'],
-  ['eyes', 'Eyes', 'the target minus this tick’s head, and the thinking glance up'],
+  ['eyes', 'Eyes', 'the target, followed three times faster than the head, minus this tick’s head, and the thinking glance up'],
   ['lid', 'Lid', 'the posture’s lid times the blink clip'],
   ['mouth', 'Mouth', 'the posture, with the viseme at the playhead blended over it'],
   ['arm', 'Arm', 'the posture and the idle sway, overridden by the wave clip'],
@@ -961,11 +967,13 @@ const MOTION = [
   fn('head', 'idle_osc_p', 'Oscillator', ['@t'], { frequency: 0.25, phase: 0 }),
   fn('head', 'idle_p', 'Multiply', ['@idle_osc_p', 0.03]),
   fn('head', 'head_pitch', 'Add', ['@pitch_follow', '@p_pitch', '@idle_p']),
-  fn('eyes', 'dx', 'Subtract', ['@target_x', '@head_yaw']),
+  fn('eyes', 'eye_tx', 'Damp', ['@target_x'], { half_life: EYE_HALF_LIFE, initial: 0 }),
+  fn('eyes', 'eye_ty', 'Damp', ['@target_y'], { half_life: EYE_HALF_LIFE, initial: 0 }),
+  fn('eyes', 'dx', 'Subtract', ['@eye_tx', '@head_yaw']),
   fn('eyes', 'dx_g', 'Multiply', ['@dx', 1.6]),
   fn('eyes', 'eyes_x', 'Clamp', ['@dx_g', -1, 1]),
   fn('eyes', 'glance_up', 'ThinkGlance', ['@t', '@think_since'], {}, '@pip/motion'),
-  fn('eyes', 'dy', 'Subtract', ['@target_y', '@head_pitch']),
+  fn('eyes', 'dy', 'Subtract', ['@eye_ty', '@head_pitch']),
   fn('eyes', 'dy_g', 'Multiply', ['@dy', 1.6]),
   fn('eyes', 'dy_up', 'Add', ['@dy_g', '@glance_up']),
   fn('eyes', 'eyes_y', 'Clamp', ['@dy_up', -1, 1]),
@@ -1196,7 +1204,7 @@ function designRecording(design, base) {
     for (const key in m) m[key] = (out.m[key] || 0) + (cm[key] || 0);
     m.native = Math.max(0, m.visits - m.module - m.detachedEval);
     const v = out.val;
-    frames.push({ ...f, c: out.c, posture: POSE_KEYS.map((key) => v.get(`p_${key}`)), target: { x: v.get('target_x'), y: v.get('target_y') }, glance: v.get('glance_up') });
+    frames.push({ ...f, c: out.c, posture: POSE_KEYS.map((key) => v.get(`p_${key}`)), target: { x: v.get('target_x'), y: v.get('target_y') }, eyeGaze: { x: v.get('eye_tx'), y: v.get('eye_ty') }, glance: v.get('glance_up') });
     cost.push({ m, us: modeledUs(m) });
     acts.push(out.act);
   }

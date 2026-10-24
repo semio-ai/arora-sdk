@@ -166,10 +166,13 @@ nine channels:
 - **Gaze target:** chosen by the attention state (§3.2).
 - **Head:** follows the target with damping (half-life 0.25 s), plus the idle
   clip's sway and the posture's pitch. The head moves freely while it tracks.
-- **Eyes:** the target minus *this tick's* head, clamped to the screen, plus
-  the thinking glance up. The eyes lead because the head lags, and they stay
-  locked on the person whatever moves the head. Eyes that read the previous
-  tick's head show the head's motion as gaze error.
+- **Eyes:** follow the target about three times faster than the head
+  (half-life 0.08 s against 0.25 s). The screen position is that followed
+  target minus *this tick's* head, clamped to the screen, plus the thinking
+  glance up. The eyes lead because the head is slower, and they never jump:
+  a new target takes them about 0.3 s. They stay locked on the person
+  whatever moves the head. Eyes that read the previous tick's head show the
+  head's motion as gaze error.
 - **Posture:** the blended emotions (§3.3), with the thinking expression over
   them.
 - **Mouth:** the posture, with lipsync over it. The speech weight eases in and
@@ -183,6 +186,8 @@ Holds and fades:
 
 | What | Timing |
 |---|---|
+| Head following the target | half-life 0.25 s |
+| Eyes following the target | half-life 0.08 s |
 | Face lost | the last target held for 1.5 s, then the wander |
 | Glance away, while present | 0.8 s |
 | Thinking glance up, eyes only | 1.2 s |
@@ -365,6 +370,7 @@ Beside each design's calls, visits, checks and modeled µs per tick:
 - **Resume.** A resumed sentence continues from its paused playhead.
 - **Lipsync.** The mouth's lag behind the playhead, in ms.
 - **Gaze lock.** The eyes' error on the person while the head moves.
+- **Eye pops.** The largest eye move in one tick.
 - **Emotion timing.** Each trigger at its time (§3.3), and no earlier emotion
   fading out before its peak.
 - **Snaps.** The largest jump in one tick on any channel.
@@ -404,7 +410,7 @@ download it and open it in a browser.
 ## 10. How each design holds it
 
 All five run one definition. The statechart is a tree and the reply run a
-task run. The motion graph is 75 calls of `@arora/dataflow` (`damp`, `slew`,
+task run. The motion graph is 77 calls of `@arora/dataflow` (`damp`, `slew`,
 `oscillator`, `if`, `read_record`, `blend_weighted_average`…) and of four
 example modules (`@pip/motion`, `@pip/expression`, `@pip/lipsync`,
 `@arora/animation`). It reads 13 store keys and publishes the nine channels.
@@ -428,7 +434,7 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 
 | Design | Motion graph | When the motion sees the statechart | Prompt | Split into |
 |---|---|---|---|---|
-| #396 detached nodes (as #407 runs it) | 75 detached calls, pulled at their first read and cached by their arguments; sinks publish after the tree | The same tick | A detached node, run when its arguments change | Subtrees for the conversation and attention, a task run for the reply, detached nodes grouped by part |
+| #396 detached nodes (as #407 runs it) | 77 detached calls, pulled at their first read and cached by their arguments; sinks publish after the tree | The same tick | A detached node, run when its arguments change | Subtrees for the conversation and attention, a task run for the reply, detached nodes grouped by part |
 | #409 full tree nodes | The same, each call also a full tree node | The same tick | The same | #396's file |
 | #404 incremental tree | One node-graph shape per group, `PARALLEL[ leaf …, RUNNING ]`, leaves on change and bound to keys, after the statechart | The same tick | A leaf on change | One shape per group under the root `PARALLEL` |
 | #405 macros, placed | One macro per group, placed at the root in a `WITH` before the tree | A tick late | A macro placed before llm | One macro per group, authored and placed |
@@ -442,13 +448,13 @@ What the bench shows over the whole run:
 - **#405 and #257** produce them a tick late wherever the statechart drives
   them. The mouth runs 33 ms behind the audio, under the 45 ms people notice,
   and the eyes jump a tick late when a face appears.
-- **Modeled cost.** About 100 µs a tick for #396, #409, #404 and #405. The
+- **Modeled cost.** About 105 µs a tick for #396, #409, #404 and #405. The
   motion graph moves at every tick (the clock, the smoothing, the blinks), so
-  caching saves about half of its 75 calls. #257 averages 447 µs a tick: it
+  caching saves about half of its 77 calls. #257 averages 451 µs a tick: it
   caches nothing, and rebuilds the prompt at every tick the llm is polled,
   168 two-millisecond builds against 7. With a cache on the prompt alone it
-  averages 176 µs. The rest of the gap is its eager motion graph: 76 calls a
-  tick against 40.
+  averages 180 µs. The rest of the gap is its eager motion graph: 78 calls a
+  tick against 42.
 - **No design fails a check.** They differ in where the statechart's writes
   land in the tick, and in what runs again when nothing changed.
 
