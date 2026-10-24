@@ -341,4 +341,107 @@ mod tests {
         assert!(error.to_string().contains("neither"), "{error}");
         fs::remove_dir_all(&root).unwrap();
     }
+
+    /// The variable handing the process
+    /// [`credentials_resolve_in_the_device_directory_given_as_on_android`]
+    /// starts the device directory it passes explicitly.
+    #[cfg(unix)]
+    const ANDROID_CASE_DIR: &str = "ARORA_TEST_ANDROID_CASE_DIR";
+
+    /// The Android case: the executable's directory is not writable, there is
+    /// no home directory, and the working directory is `/`, so nothing the
+    /// host gives places a device directory. The test runs itself again as
+    /// such a process — its executable hard-linked into a read-only
+    /// directory, `HOME` unset, `/` its working directory — where the
+    /// credentials a connection hands the client resolve in the device
+    /// directory it is given (`connect_in_device_dir`) and in the one
+    /// `DEVICE_DIR` names (`connect`), and keep what is saved in them.
+    #[cfg(unix)]
+    #[test]
+    fn credentials_resolve_in_the_device_directory_given_as_on_android() {
+        match std::env::var_os(ANDROID_CASE_DIR) {
+            Some(given) => resolve_as_on_android(Path::new(&given)),
+            None => run_as_on_android(),
+        }
+    }
+
+    /// Starts this test again as a process in the Android case, and checks
+    /// what it saved.
+    #[cfg(unix)]
+    fn run_as_on_android() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = scratch("android");
+        let given = root.join("given");
+        let named = root.join("named");
+        // Beside the executable, so that it hard-links into it.
+        let exe = std::env::current_exe().unwrap();
+        let bin = exe
+            .parent()
+            .unwrap()
+            .join(format!("arora-android-case-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&bin);
+        fs::create_dir_all(&bin).unwrap();
+        let linked = bin.join(exe.file_name().unwrap());
+        fs::hard_link(&exe, &linked).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let test = concat!(
+            module_path!(),
+            "::credentials_resolve_in_the_device_directory_given_as_on_android"
+        );
+        let output = std::process::Command::new(&linked)
+            .args([test.strip_prefix("arora::").unwrap(), "--exact"])
+            .env(ANDROID_CASE_DIR, &given)
+            .env("DEVICE_DIR", &named)
+            .env_remove("HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("DEVICE_LOCAL_ID")
+            .env_remove("IDENTITY_FILE")
+            .current_dir("/")
+            .output()
+            .unwrap();
+
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let left: Vec<_> = fs::read_dir(&bin)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        fs::remove_dir_all(&bin).unwrap();
+        assert!(
+            output.status.success(),
+            "the Android-case process failed:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            left,
+            [exe.file_name().unwrap().to_os_string()],
+            "nothing is written beside the executable"
+        );
+        assert_eq!(token_of(&given), Some("given".to_string()));
+        assert_eq!(token_of(&named), Some("named".to_string()));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// In the Android-case process: the credentials of the device directory
+    /// `given`, and those of the environment, resolve where they are told and
+    /// keep a token.
+    #[cfg(unix)]
+    fn resolve_as_on_android(given: &Path) {
+        assert!(std::env::var_os("HOME").is_none(), "HOME is unset");
+        assert_eq!(std::env::current_dir().unwrap(), Path::new("/"));
+
+        let explicit = in_device_dir(given).unwrap();
+        assert_eq!(explicit.path(), given.join(STUDIO_DIR));
+        explicit.save_refresh_token("given").unwrap();
+
+        let named = PathBuf::from(std::env::var_os("DEVICE_DIR").unwrap());
+        let from_environment = from_env().unwrap();
+        assert_eq!(from_environment.path(), named.join(STUDIO_DIR));
+        from_environment.save_refresh_token("named").unwrap();
+
+        assert_eq!(token_of(given), Some("given".to_string()));
+        assert_eq!(token_of(&named), Some("named".to_string()));
+    }
 }

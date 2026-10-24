@@ -194,7 +194,11 @@ The chain down to the bridge's code, in a `studio-bridge` build:
    `device_dir::of(<DEVICE_LOCAL_ID, or default>)`. The per-user directory
    needs a home: a container whose user has no passwd entry sets `DEVICE_DIR`.
    An embedder whose platform gives it a data directory (Android, a Tauri app)
-   passes its own to `studio::connect_with_device_dir`.
+   passes its own to `studio::connect_with_device_dir`, or to
+   `studio::connect_in_device_dir` with the HAL's description and an operator
+   naming the device and showing its enrollment codes. Nothing else is then
+   looked up, so this works where the executable's directory is read-only and
+   there is no home, as on Android.
 2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
    and hands it to `DeviceCredentials::in_dir`. The credentials there are the
    client's; arora writes nothing there.
