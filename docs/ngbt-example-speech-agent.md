@@ -395,7 +395,7 @@ download it and open it in a browser.
   sides: the conversation, attention and reply run, or one of the seven motion
   groups. Each is drawn as a graph, as a live outline, or as its stored form.
   Nodes show what ran this tick, what answered from its cache, and each tree
-  node's status.
+  node's status. A node can be dragged to untangle a graph, with a reset per part.
 - **Every design at a glance.** The whole run's numbers for all five designs.
 - **The assets.** Every asset of §6, with the live ones following the left
   side: the postures showing, the prompts built, the memory written.

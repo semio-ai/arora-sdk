@@ -198,6 +198,12 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .view pre span.cached::after { content: "   cached"; color: var(--faint); }
 .view pre span.dim { color: var(--faint); }
 .graph text { font-family: var(--f-mono); }
+.g-node { cursor: grab; touch-action: none; }
+.graph.dragging, .graph.dragging .g-node { cursor: grabbing; }
+.graph { user-select: none; -webkit-user-select: none; }
+.rep-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rep-head h3 { margin-bottom: 0; }
+.rep-head button { min-height: 26px; padding: 2px 9px; font-size: 12px; }
 .g-node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
 .g-node .k { font-size: 9.5px; fill: var(--muted); }
 .g-node .l { font: 600 11.5px var(--f-body); fill: var(--ink); }
@@ -1601,13 +1607,14 @@ function mount(key, costOnly = false) {
   t.append(el('h2', { class: 'trace-title' }, impl.name, el('span', { class: 'sub', text: `${side.label} side` })));
   side.transcript = el('ol', { class: 'transcript' });
   side.repTitle = el('h3'); side.repNote = el('p', { class: 'rep-note' }); side.view = el('div', { class: 'view' });
+  side.resetLayout = el('button', { type: 'button', hidden: true, onclick: () => { moved.delete(`${side.rec.impl.id}|${S.part}`); buildRep(side); render(); } }, 'Reset layout');
   side.costBox = el('div', { class: 'svgbox' }); side.costStats = el('div', { class: 'cost-stats' }); side.costLegend = el('div', { class: 'legend' });
   side.stripBox = el('div', { class: 'svgbox' }); side.stripLegend = el('div', { class: 'legend' });
   side.plotsBox = el('div'); side.values = el('div', { class: 'values' });
   side.scoreList = el('ul', { class: 'score' });
   t.append(
     el('section', { class: 'block' }, el('h3', { text: 'What it said' }), side.transcript),
-    el('section', { class: 'block' }, side.repTitle, side.view, side.repNote),
+    el('section', { class: 'block' }, el('div', { class: 'rep-head' }, side.repTitle, side.resetLayout), side.view, side.repNote),
     el('section', { class: 'block' }, el('h3', { text: 'Cost of each tick' }), side.costBox, side.costLegend, side.costStats),
     el('section', { class: 'block' }, el('h3', { text: 'Services' }), side.stripBox, side.stripLegend),
     el('section', { class: 'block' }, el('h3', { text: 'Channels' }), side.plotsBox, side.values),
@@ -1649,8 +1656,9 @@ function buildRep(side) {
   side.repNote.textContent = repNote(design, part, tab);
   side.repKey = `${side.rec.impl.id}|${part}|${tab}`;
   side.repLines = null; side.gnodes = null;
-  if (tab === 'graph') buildGraph(side, design, part);
+  if (tab === 'graph') { buildGraph(side, design, part); side.repNote.textContent += ' Drag a node to move it; with a node focused, the arrow keys move it.'; }
   else {
+    side.resetLayout.hidden = true;
     const motion = PARTS.find((p) => p.id === part).motion;
     const lines = tab === 'outline' && !motion ? treeLines(TREES[part]).map((l) => ({ text: l.text, id: l.uid })) : storedLines(design, part);
     const pre = el('pre');
@@ -1713,24 +1721,78 @@ function layoutTree(model) {
   const width = Math.max(...[...byId.values()].map((n) => n.x + n.w)) + 12;
   return { nodes: [...byId.values()], width, height: top + row * (36 + gapY) + 8 };
 }
+// Where a viewer dragged nodes to, by implementation and part: kept while the page is open.
+const moved = new Map();
+let dragging = false;
 function buildGraph(side, design, part) {
   const model = graphModel(design, part), lay = model.kind === 'dag' ? layoutDag(model) : layoutTree(model);
+  const memoKey = `${side.rec.impl.id}|${part}`, memo = moved.get(memoKey);
+  if (memo) for (const n of lay.nodes) { const p = memo.get(String(n.id)); if (p) { n.x = p.x; n.y = p.y; } }
+  side.resetLayout.hidden = !memo;
   const at = new Map(lay.nodes.map((n) => [n.id, n]));
-  const svg = sv('svg', { class: 'graph', width: lay.width, height: lay.height, viewBox: `0 0 ${lay.width} ${lay.height}`, role: 'img', 'aria-label': `${partLabel(part)} as ${design ? design.name : 'the reference'} holds it` });
-  const inner = lay.nodes.filter((n) => !n.port);
-  if (inner.length) {
-    const x0 = Math.min(...inner.map((n) => n.x)) - 6, y0 = Math.min(...inner.map((n) => n.y)) - 18, x1 = Math.max(...inner.map((n) => n.x + n.w)) + 6, y1 = Math.max(...inner.map((n) => n.y + n.h)) + 6;
-    const g = sv('g', { class: 'g-box' }); g.append(sv('rect', { x: x0, y: Math.max(2, y0), width: x1 - x0, height: y1 - Math.max(2, y0), rx: 8 }), sv('text', { x: x0 + 6, y: Math.max(2, y0) + 12 }, model.box));
-    svg.append(g);
-  }
-  for (const e of model.edges) {
+  const svg = sv('svg', { class: 'graph', role: 'img', 'aria-label': `${partLabel(part)} as ${design ? design.name : 'the reference'} holds it` });
+  const boxRect = sv('rect', { rx: 8 }), boxText = sv('text', {}, model.box), box = sv('g', { class: 'g-box' });
+  box.append(boxRect, boxText); svg.append(box);
+  const edges = model.edges.map((e) => {
+    const path = sv('path', { class: `g-edge${e.data ? ' data' : ''}` }); svg.append(path);
+    const label = e.label ? sv('text', { class: 'g-edge-label', 'text-anchor': e.data ? 'middle' : 'end' }, e.label) : null;
+    if (label) svg.append(label);
+    return { e, path, label };
+  });
+  const placeEdge = ({ e, path, label }) => {
     const a = at.get(e.from), b = at.get(e.to);
-    let d;
-    if (e.data) { const x1 = a.x, y1 = a.y + a.h / 2, x2 = b.x + b.w, y2 = b.y + b.h / 2; d = `M${x1} ${y1} C${x1 - 20} ${y1} ${x2 + 20} ${y2} ${x2} ${y2}`; }
-    else { const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mx = (x1 + x2) / 2; d = `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`; }
-    svg.append(sv('path', { class: `g-edge${e.data ? ' data' : ''}`, d }));
-    if (e.label) { const lx = e.data ? (a.x + b.x + b.w) / 2 : b.x - 4, ly = e.data ? a.y - 2 : b.y + b.h / 2 - 4; svg.append(sv('text', { class: 'g-edge-label', x: lx, y: ly, 'text-anchor': e.data ? 'middle' : 'end' }, e.label)); }
-  }
+    if (e.data) {
+      const x1 = a.x, y1 = a.y + a.h / 2, x2 = b.x + b.w, y2 = b.y + b.h / 2;
+      path.setAttribute('d', `M${x1} ${y1} C${x1 - 20} ${y1} ${x2 + 20} ${y2} ${x2} ${y2}`);
+      if (label) { label.setAttribute('x', (x1 + x2) / 2); label.setAttribute('y', Math.min(y1, y2) - 6); }
+    } else {
+      const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mx = (x1 + x2) / 2;
+      path.setAttribute('d', `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`);
+      if (label) { label.setAttribute('x', x2 - 4); label.setAttribute('y', y2 - 4); }
+    }
+  };
+  const placeBox = () => {
+    const inner = lay.nodes.filter((n) => !n.port);
+    box.style.display = inner.length ? '' : 'none';
+    if (!inner.length) return;
+    const x0 = Math.min(...inner.map((n) => n.x)) - 6, y0 = Math.min(...inner.map((n) => n.y)) - 18, x1 = Math.max(...inner.map((n) => n.x + n.w)) + 6, y1 = Math.max(...inner.map((n) => n.y + n.h)) + 6;
+    boxRect.setAttribute('x', x0); boxRect.setAttribute('y', y0); boxRect.setAttribute('width', x1 - x0); boxRect.setAttribute('height', y1 - y0);
+    boxText.setAttribute('x', x0 + 6); boxText.setAttribute('y', y0 + 12);
+  };
+  // Fit the drawing to its nodes; up to 1.6 times the panel's width it scales down, beyond that it scrolls.
+  const fit = () => {
+    const xs = lay.nodes.flatMap((n) => [n.x, n.x + n.w]), ys = lay.nodes.flatMap((n) => [n.y, n.y + n.h]);
+    const minX = Math.min(...xs) - 12, minY = Math.min(...ys) - 26, w = Math.max(...xs) - minX + 12, h = Math.max(...ys) - minY + 10;
+    svg.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
+    const room = Math.max(240, (side.view.getBoundingClientRect().width || side.trace.getBoundingClientRect().width || 600) - 4);
+    const scale = w > room && room / w >= 0.62 ? room / w : 1;
+    svg.setAttribute('width', Math.round(w * scale)); svg.setAttribute('height', Math.round(h * scale));
+  };
+  const move = (n, g, x, y) => {
+    n.x = x; n.y = y; g.setAttribute('transform', `translate(${x} ${y})`);
+    for (const edge of edges) if (edge.e.from === n.id || edge.e.to === n.id) placeEdge(edge);
+    placeBox();
+  };
+  const remember = (n) => {
+    if (!moved.has(memoKey)) moved.set(memoKey, new Map());
+    moved.get(memoKey).set(String(n.id), { x: n.x, y: n.y });
+    side.resetLayout.hidden = false;
+  };
+  const toSvg = (ev) => { const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); };
+  const startDrag = (ev, n, g) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault(); hideTip(); dragging = true; svg.classList.add('dragging');
+    try { g.setPointerCapture(ev.pointerId); } catch (_) { /* a pointer the browser does not track */ }
+    const p0 = toSvg(ev), x0 = n.x, y0 = n.y;
+    const onMove = (e2) => { const p = toSvg(e2); move(n, g, x0 + p.x - p0.x, y0 + p.y - p0.y); };
+    const onUp = () => {
+      g.removeEventListener('pointermove', onMove); g.removeEventListener('pointerup', onUp); g.removeEventListener('pointercancel', onUp);
+      dragging = false; svg.classList.remove('dragging');
+      if (n.x !== x0 || n.y !== y0) { remember(n); fit(); }
+    };
+    g.addEventListener('pointermove', onMove); g.addEventListener('pointerup', onUp); g.addEventListener('pointercancel', onUp);
+  };
+  edges.forEach(placeEdge); placeBox();
   side.gnodes = new Map();
   for (const n of lay.nodes) {
     const g = sv('g', { class: `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}`, transform: `translate(${n.x} ${n.y})`, tabindex: 0 });
@@ -1742,14 +1804,19 @@ function buildGraph(side, design, part) {
       const id = n.ref || n.id, mn = MOTION.find((x) => x.id === id);
       return mn ? `<b>${escapeHtml(mn.id)}</b><br>${escapeHtml(mn.group === 'inputs' ? `{${mn.key}}` : `${mn.module} · ${mn.kind}`)}${mn.group !== 'inputs' ? `<br>${escapeHtml(mn.args.map((x) => (typeof x === 'string' ? x : String(+x.toFixed(4)))).join(', '))}` : ''}` : escapeHtml(n.label);
     };
-    const show = (ev) => showTip(describe(), ev);
-    g.addEventListener('pointerenter', show); g.addEventListener('pointermove', show); g.addEventListener('pointerleave', hideTip);
+    const show = (ev) => { if (!dragging) showTip(describe(), ev); };
+    g.addEventListener('pointerenter', show); g.addEventListener('pointermove', show); g.addEventListener('pointerleave', () => { if (!dragging) hideTip(); });
     g.addEventListener('focus', () => { const b = g.getBoundingClientRect(); showTip(describe(), { clientX: b.right, clientY: b.top }); }); g.addEventListener('blur', hideTip);
+    g.addEventListener('pointerdown', (ev) => startDrag(ev, n, g));
+    g.addEventListener('keydown', (ev) => {
+      const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+      if (!d) return;
+      ev.preventDefault(); const step = ev.shiftKey ? 2 : 12;
+      move(n, g, n.x + d[0] * step, n.y + d[1] * step); remember(n); fit();
+    });
     svg.append(g); side.gnodes.set(n.id, { g, n, badge: g.querySelector('.badge-s') });
   }
-  // Fit a graph up to 1.6 times the panel's width; scroll a bigger one at its own size.
-  const room = Math.max(240, (side.view.getBoundingClientRect().width || side.trace.getBoundingClientRect().width || 600) - 4);
-  if (lay.width > room && room / lay.width >= 0.62) { svg.setAttribute('width', room); svg.setAttribute('height', Math.round(lay.height * room / lay.width)); }
+  fit();
   side.view.replaceChildren(svg);
 }
 function liveRep(side, i) {
