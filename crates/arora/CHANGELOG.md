@@ -14,6 +14,15 @@ All notable changes to `arora`. The format follows
   each code. The terminal UI shows the code in its prompt line, with Studio's
   page approving it when the Studio client knows Studio's web address
   (`STUDIO_URL`, else the one baked into it).
+- `studio::connect_in_device_dir(device_dir, description, operator)`: the
+  connection of `connect_with_operator_and_description`, or with no operator
+  of `connect_with_description`, in the device directory given rather than
+  the one the environment names, as `connect_with_device_dir` takes it. An
+  Android app passes the data directory its platform gives it at run time and
+  its own operator, which names the device and shows the codes it enrolls by.
+  Nothing on Android places one otherwise: its executable's directory is
+  read-only, it has no home, and its working directory is `/`. `DEVICE_DIR`
+  remains the process-wide equivalent.
 
 ### Changed
 

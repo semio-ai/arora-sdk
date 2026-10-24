@@ -116,7 +116,10 @@
 //!     device's Studio session and the key encrypting it, and its bridge key
 //!     and certificate) in the directory's `studio/` subdirectory.
 //!   - `DEVICE_DIR` — the device directory itself, replacing the per-user
-//!     path. An embedder passes it to [`connect_with_device_dir`] instead.
+//!     path, which nothing else then looks up: a platform with no per-user
+//!     data directory, such as Android, sets it. An embedder passes the
+//!     directory to [`connect_with_device_dir`] or [`connect_in_device_dir`]
+//!     instead.
 //!   - `IDENTITY_FILE` — deprecated: the identity it names migrates to
 //!     `<IDENTITY_FILE>_dir`, which the run uses as its device directory.
 //!   - `DEVICE_NAME` — the name a device enrolls with; `MODEL_FAMILY`,
@@ -458,10 +461,27 @@ pub async fn connect_with_description(description: &HalDescription) -> Result<Bo
 /// of a local id. The directories are created if missing, and the
 /// credentials when the device enrolls.
 pub async fn connect_with_device_dir(device_dir: &Path) -> Result<Box<dyn Bridge>> {
+    connect_in_device_dir(device_dir, &HalDescription::default(), None).await
+}
+
+/// The connection of [`connect_with_operator_and_description`] — or, with no
+/// `operator`, of [`connect_with_description`] — with `device_dir` as the
+/// device directory, as [`connect_with_device_dir`] takes it. Nothing else is
+/// looked up to place the device's Studio credentials: an Android app passes
+/// the directory its platform gives it at run time
+/// (`AndroidApp::internal_data_path()`), where the executable's directory is
+/// not writable, there is no home directory, and the working directory is
+/// `/`, and its own `operator` to name the device and show the codes it
+/// enrolls by.
+pub async fn connect_in_device_dir(
+    device_dir: &Path,
+    description: &HalDescription,
+    operator: Option<&dyn Operator>,
+) -> Result<Box<dyn Bridge>> {
     connect_device(
         credentials::in_device_dir(device_dir)?,
-        &HalDescription::default(),
-        None,
+        description,
+        operator,
     )
     .await
 }
@@ -480,6 +500,11 @@ const _: () = {
         send(&connect());
         send(&connect_with_description(description));
         send(&connect_with_device_dir(device_dir));
+        send(&connect_in_device_dir(
+            device_dir,
+            description,
+            Some(operator),
+        ));
         send(&connect_with_operator(operator));
         send(&connect_with_operator_and_description(
             operator,
