@@ -1146,9 +1146,9 @@ const DESIGNS = [
   { id: 'macro', short: '#405', name: '#405 macros, placed', strategy: 'macro', lag: 1,
     note: 'Authored as #396’s file, each motion group a macro. Every group publishes a sink, so the loader anchors it at the root: WITH[ groups …, tree ]. Clean groups answer from their cache. They run before the tree, so they read what the tree wrote last tick: what the statechart drives arrives a tick late.' },
   { id: 'control', short: '#257', name: '#257 BT in NG', strategy: 'control', lag: 1,
-    note: 'Vizij graphs: the conversation, attention and reply run as control nodes ticking actions, the motion as eager nodes that run at every tick with nothing cached. A state the control writes reaches the motion through the store at the next tick. The prompt is a lazy node under the llm action, so it runs at every tick the action is polled.' },
-  { id: 'control-cache', short: '#257+', name: '#257 BT in NG, prompt cached', strategy: 'control', lag: 1, promptCache: true,
-    note: '#257 as it stands, with #396’s argument cache added to one node, the prompt, as its pull request suggests. Everything else is #257: eager motion, control a tick ahead. It shows how much of #257’s cost is that one node.' },
+    note: 'Vizij graphs: the conversation, attention and reply run as control nodes ticking actions, the motion as eager nodes that run at every tick with nothing cached. A state the control writes reaches the motion through the store at the next tick. The prompt is a lazy node under the llm action, cached by its arguments as in every design, though #257 has no cache yet.' },
+  { id: 'control-cached', short: '#257 cached', name: '#257 BT in NG, all cached', strategy: 'control', lag: 1, cached: true,
+    note: '#257 with #396’s argument cache on every node: a node whose inputs did not change keeps its output, so its readers find theirs unchanged too, though each node still checks its inputs at every tick. The control nodes and their timing stay #257’s: what the control writes reaches the motion a tick late.' },
 ];
 const COST_US = { fullNode: 0.02258660410253709, hostWrite: 0.07207905131266586, tick: 0.08054631507819726, native: 0.02942999195571001, module: 0.13278202941423906, storeWrite: 0.06509534618334416, detachedCheck: 0.009512341457231909, detachedPublish: 0.03262927691013938, detachedCall: 0.1405157081974673, cacheCheck: 0.0051276265604468345, storeObserve: 0.008794477399395248, versionWrite: 0.03825155565970652 };
 const blankMetrics = () => ({ tick: 0, calls: 0, visits: 0, compares: 0, writes: 0, module: 0, native: 0, detachedEval: 0, detachedCall: 0, detachedCheck: 0, detachedPublish: 0, cacheCheck: 0, storeObserve: 0, versionWrite: 0, storeWrite: 0, fullNode: 0, hostWrite: 0, prompt: 0, poll: 0 });
@@ -1162,8 +1162,8 @@ const INITIAL_KEYS = { att: 'nobody', attSince: 0, conv: 'idle', sub: '', thinkS
 for (const n of ORDER) { n.idx = INDEX.get(n.id); n.from = n.args.map((x) => (typeof x === 'string' && x[0] === '@' ? INDEX.get(x.slice(1)) : -1)); n.readers = READERS.get(n.id).length; }
 const SINK_IDX = SINKS.map(([, id]) => INDEX.get(id));
 class MotionGraphRun {
-  constructor(strategy, items) {
-    this.s = strategy; this.items = items; this.prevOut = null;
+  constructor(strategy, items, cached = false) {
+    this.s = strategy; this.items = items; this.cached = cached; this.prevOut = null;
     this.v = new Array(ORDER.length); this.st = ORDER.map(() => ({})); this.last = new Array(ORDER.length).fill(null);
     this.val = { get: (id) => this.v[INDEX.get(id)] };
   }
@@ -1183,8 +1183,8 @@ class MotionGraphRun {
       for (let i = 0; i < k; i++) args[i] = n.from[i] < 0 ? n.args[i] : vals[n.from[i]];
       const st = this.st[n.idx], full = n.stateful ? [...args, st.v] : args, prev = this.last[n.idx];
       let run;
-      if (S === 'control') { run = true; m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; }
-      else if (S === 'compute' || S === 'full') {
+      if (S === 'control' && !this.cached) { run = true; m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; }
+      else if (S === 'compute' || S === 'full' || S === 'control') {
         m.visits++; m.detachedEval++; run = !prev;
         if (prev) for (let i = 0; i < full.length; i++) { m.compares++; m.detachedCheck++; if (!same(prev[i], full[i])) { run = true; break; } }
         if (run) { m.calls++; m.detachedCall++; if (S === 'full') m.fullNode++; }
@@ -1211,6 +1211,7 @@ class MotionGraphRun {
       if (S === 'compute' || S === 'full') { m.detachedPublish++; m.writes++; }
       else if (S === 'inc') { if (changed) { m.storeWrite++; m.writes++; } }
       else if (S === 'macro') { if (changed) { m.visits++; m.storeWrite++; m.writes++; } }
+      else if (this.cached) { m.visits++; m.compares++; m.detachedCheck++; if (changed) { m.storeWrite++; m.writes++; } }
       else { m.visits++; m.storeWrite++; m.writes++; }
     });
     this.prevOut = c;
@@ -1238,18 +1239,18 @@ function pollInto(m, S, leaf) {
   m.visits++; m.calls++; m.module++; m.poll++;
   for (const r of POLL_READS[leaf]) if (r !== '@prompt') readInto(m, S, r);
 }
-// The prompt, read by the llm at every poll. Cached, it compares its eight arguments and builds only when one
-// changed; eager (#257 as it stands), it reads them and builds again at every poll.
-function promptInto(m, S, cached, changed) {
+// The prompt, read by the llm at every poll. Every design caches it, a basic measure: it compares its eight
+// arguments, the nodes among them read first, and builds only when one changed.
+function promptInto(m, S, changed) {
   if (S === 'inc' || S === 'macro') { m.cacheCheck++; if (changed) { m.visits++; m.calls++; m.module++; m.prompt++; } return; }
   m.visits++; m.detachedEval++;
   for (const a of PROMPT_ARGS) if (a[0] === '@') readInto(m, S, a);
-  if (cached && !changed) { m.compares += PROMPT_ARGS.length; m.detachedCheck += PROMPT_ARGS.length; return; }
-  if (cached) { m.compares++; m.detachedCheck++; } else for (const a of PROMPT_ARGS) if (a[0] === '{') readInto(m, S, a);
-  m.calls++; m.detachedCall++; m.prompt++;
+  if (!changed) { m.compares += PROMPT_ARGS.length; m.detachedCheck += PROMPT_ARGS.length; return; }
+  m.compares++; m.detachedCheck++; m.calls++; m.detachedCall++; m.prompt++;
   if (S === 'full') m.fullNode++;
 }
-const promptCached = (design) => !(design.strategy === 'control' && !design.promptCache);
+// How a design reads the nodes under a poll: #257 runs them again, unless every node has a cache.
+const readRule = (design) => (design.strategy === 'control' && design.cached ? 'compute' : design.strategy);
 // The ticks a call is in flight, from the tick it starts to the last before it ends.
 function laneTicks(r, n) { const i0 = Math.max(0, Math.ceil(r.t0 / DT - 1e-6)); return [i0, r.lane === 'remember' ? i0 : Math.min(n - 1, Math.ceil(r.t1 / DT - 1e-6) - 1)]; }
 function laneIndex(rec) {
@@ -1279,7 +1280,7 @@ function controlContext(base) {
 }
 // What the statechart, the polls and the prompt cost a design at one tick.
 function controlWork(design, f, prevKeys, ctx, i) {
-  const S = design.strategy, sc = blankMetrics(), polls = blankMetrics(), prompt = blankMetrics();
+  const S = design.strategy, R = readRule(design), sc = blankMetrics(), polls = blankMetrics(), prompt = blankMetrics();
   const laneOn = (lane) => ctx.laneAt[i].has(`${f.runId}:${lane}`);
   // The root, and the nodes its tick reaches in the conversation, the attention and the reply run. A conversation
   // action reached is a poll; the reply run's leaves are polled while their calls are in flight.
@@ -1287,14 +1288,14 @@ function controlWork(design, f, prevKeys, ctx, i) {
   for (const part of ['conversation', 'attention', 'reply']) {
     for (const [uid, s] of treeStatus(part, f, laneOn)) {
       const n = TREE_NODE.get(uid);
-      if (n.k === 'action') { if (part === 'conversation' && s === 'R') pollInto(polls, S, n.fn.split('.').pop()); continue; }
+      if (n.k === 'action') { if (part === 'conversation' && s === 'R') pollInto(polls, R, n.fn.split('.').pop()); continue; }
       sc.visits++;
       if (n.k === 'check') sc.compares++;
     }
   }
-  for (const lane of SERVICES) if (laneOn(lane)) pollInto(polls, S, lane);
-  if (laneOn('judge') && f.conv !== 'judging') pollInto(polls, S, 'judge');   // its follow-ups, after the verdict
-  if (laneOn('llm')) promptInto(prompt, S, promptCached(design), ctx.prompt[i].changed);
+  for (const lane of SERVICES) if (laneOn(lane)) pollInto(polls, R, lane);
+  if (laneOn('judge') && f.conv !== 'judging') pollInto(polls, R, 'judge');   // its follow-ups, after the verdict
+  if (laneOn('llm')) promptInto(prompt, R, ctx.prompt[i].changed);
   const changed = prevKeys ? CONTROL_KEYS.filter((k) => !same(prevKeys[k], f.keys[k])).length : CONTROL_KEYS.length;
   sc.storeWrite += changed; sc.writes += changed;
   if (S === 'inc' || S === 'macro') { sc.storeObserve += 6; sc.compares += 6; }
@@ -1302,7 +1303,7 @@ function controlWork(design, f, prevKeys, ctx, i) {
 }
 const workOf = (m) => ({ ticks: m.visits, execs: m.calls, checks: m.compares + m.cacheCheck });
 function designRecording(design, base) {
-  const run = new MotionGraphRun(design.strategy, base.items), ctx = controlContext(base);
+  const run = new MotionGraphRun(design.strategy, base.items, !!design.cached), ctx = controlContext(base);
   const frames = [], cost = [], acts = [];
   let prevKeys = null;
   for (let i = 0; i < base.frames.length; i++) {
@@ -1325,8 +1326,8 @@ function designRecording(design, base) {
 function llmSecond(design) {
   const n = Math.round(1 / DT);
   if (!design) return { ticks: n, execs: 0, checks: n, builds: 0, us: 0 };
-  const m = blankMetrics(), S = design.strategy;
-  pollInto(m, S, 'llm'); promptInto(m, S, promptCached(design), false);
+  const m = blankMetrics(), R = readRule(design);
+  pollInto(m, R, 'llm'); promptInto(m, R, false);
   for (const k in m) m[k] *= n;
   m.native = Math.max(0, m.visits - m.module - m.detachedEval);
   return { ...workOf(m), builds: m.prompt, us: modeledUs(m) };
@@ -1497,11 +1498,11 @@ function storedLines(design, part) {
       push('  ⋯   the statechart, the tree’s body');
       for (const n of sinks) push(`Copy({.${n.id}} → {${SINK_OF.get(n.id)}})`, n.id);
     } else {
-      push(`graph motion/${part} · eager: every node runs at every tick, in data order; nothing is cached`);
+      push(design.cached ? `graph motion/${part} · every node with an argument cache: it runs when an input changed, and keeps its output otherwise` : `graph motion/${part} · eager: every node runs at every tick, in data order; nothing is cached`);
       push('nodes');
       const ext = new Set(); for (const n of nodes) for (const r of refsOf(n)) if (NODE.get(r).group !== part) ext.add(r);
       for (const r of ext) { const n = NODE.get(r); push(`  ${r.padEnd(13)} ${n.group === 'inputs' ? `input        path: ${n.key}` : `input        path: motion/${n.group}/${n.id}   (written by motion/${n.group})`}`, r); }
-      for (const n of nodes) push(`  ${n.id.padEnd(13)} ${fname(n).padEnd(28)} ${paramText(n).join(', ')}   eager`, n.id);
+      for (const n of nodes) push(`  ${n.id.padEnd(13)} ${fname(n).padEnd(28)} ${paramText(n).join(', ')}   ${design.cached ? 'cached' : 'eager'}`, n.id);
       for (const n of sinks) push(`  ${(n.id + '_out').padEnd(13)} output       path: ${SINK_OF.get(n.id)}`, n.id);
       push('edges');
       for (const n of nodes) refsOf(n).forEach((r) => push(`  ${r} → ${n.id}`, n.id));
@@ -1516,7 +1517,7 @@ function storedLines(design, part) {
     const kinds = { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'control: repeat', foreach: 'control: for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'constant', action: 'action' };
     const walk = (n) => { push(`  ${String(n.uid).padStart(3)} ${kinds[n.k].padEnd(18)} ${n.k === 'action' ? `function: ${n.fn}` : n.k === 'check' ? `reads: ${n.key}` : n.k === 'set' ? `path: ${n.key}` : n.k === 'running' ? 'value: Running' : ''}   ${n.label}   ${n.k === 'action' || n.k === 'check' ? 'lazy' : ''}`, n.uid); n.children.forEach(walk); };
     walk(tree);
-    if (part === 'reply') push(`  prompt ${'@pip/agent.prompt'.padEnd(18)} ${design.promptCache ? 'lazy, with an argument cache: read by llm, it runs when its arguments change' : 'lazy: read by llm, it runs at every tick llm is ticked'}`, 'prompt');
+    if (part === 'reply') push(`  prompt ${'@pip/agent.prompt'.padEnd(18)} lazy, with an argument cache: read by llm, it runs when its arguments change`, 'prompt');
     push('edges');
     const edges = (n) => n.children.forEach((c, k) => { push(`  ${c.uid} → ${n.uid}.child_${k}`, c.uid); edges(c); });
     edges(tree);
@@ -1559,7 +1560,7 @@ function graphModel(design, part) {
       }
     }
     for (const n of groupSinks(part)) { nodes.push({ id: `sink:${n.id}`, kind: S === 'macro' ? 'Copy' : S === 'control' ? 'output' : S === 'inc' ? 'bound key' : 'sink', label: `{${SINK_OF.get(n.id)}}`, port: true, ref: n.id, out: true }); edges.push({ from: n.id, to: `sink:${n.id}` }); }
-    const box = S === 'inc' ? `PARALLEL ◇ node graph: ${part} · with RUNNING last` : S === 'macro' ? `WITH at the root ▸ PARALLEL #${part}` : S === 'control' ? `graph motion/${part} · eager` : S === 'compute' || S === 'full' ? 'detached: held by no node' : 'plain functions';
+    const box = S === 'inc' ? `PARALLEL ◇ node graph: ${part} · with RUNNING last` : S === 'macro' ? `WITH at the root ▸ PARALLEL #${part}` : S === 'control' ? `graph motion/${part} · ${design.cached ? 'cached' : 'eager'}` : S === 'compute' || S === 'full' ? 'detached: held by no node' : 'plain functions';
     return { kind: 'dag', nodes: [...ext.values(), ...nodes], edges, box };
   }
   const nodes = [], edges = [];
@@ -1573,10 +1574,9 @@ function graphModel(design, part) {
   walk(TREES[part], null, 0);
   if (part === 'reply') {
     const llm = nodes.find((x) => x.tree && x.tree.prompt);
-    const cached = !(S === 'control' && !design.promptCache);
-    const kind = S === 'inc' ? 'leaf, on change' : S === 'macro' ? 'macro, placed' : S === 'control' ? (cached ? 'lazy node, cached' : 'lazy node') : S === 'reference' ? 'function' : 'detached node';
+    const kind = S === 'inc' ? 'leaf, on change' : S === 'macro' ? 'macro, placed' : S === 'control' ? 'lazy node, cached' : S === 'reference' ? 'function' : 'detached node';
     nodes.push({ id: 'prompt', kind, label: 'prompt', port: false, data: true, attach: llm.id });
-    edges.push({ from: 'prompt', to: llm.id, data: true, label: cached ? 'on change' : 'runs every tick' });
+    edges.push({ from: 'prompt', to: llm.id, data: true, label: S === 'reference' ? 'once per call' : 'on change' });
   }
   return { kind: 'tree', nodes, edges, box: S === 'control' ? `graph ${part}` : part === 'reply' ? 'task run' : 'subtree' };
 }
@@ -1750,7 +1750,7 @@ function repNote(design, part, tab) {
   const motion = MOTION_GROUPS.find(([g]) => g === part);
   if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} as plain functions: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.';
   if (tab === 'graph') {
-    if (motion) return { compute: 'Each node is a detached call: dashed when cached this tick, outlined when it ran. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape polled. Dashed: answered from its cache.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body.', control: 'Eager nodes: every one runs at every tick.' }[design.strategy];
+    if (motion) return { compute: 'Each node is a detached call: dashed when cached this tick, outlined when it ran. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape polled. Dashed: answered from its cache.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body.', control: design.cached ? 'Each node with an argument cache: dashed when it kept its output this tick, outlined when it ran.' : 'Eager nodes: every one runs at every tick.' }[design.strategy];
     return design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs. Green succeeded, red failed, blue is Running this tick.' : 'The tree as it ticks: green succeeded, red failed, blue is Running; faded nodes were not reached this tick.';
   }
   return tab === 'outline' ? 'Each line marked with what it did this tick.' : 'The text a person edits, or the file the loader reads, for this part.';

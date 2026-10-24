@@ -412,7 +412,8 @@ download it and open it in a browser.
 - **The implementations.** The reference, the spec as plain code, which
   every design is checked against; a naive foil that drops the reply on any
   cut-in, replaces emotions and reads the previous tick's head, for the
-  scorecard to catch; and the five designs of §10.
+  scorecard to catch; and the five designs of §10, with #257 also run with a
+  cache on every node.
 - **Not there yet:** live controls (a face toggle and slider, buttons for the
   lines and the cough), and a Rust replay of the run, as for the Quori
   workloads.
@@ -448,8 +449,13 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 | #409 full tree nodes | The same, each call also a full tree node | The same tick | The same | #396's file |
 | #404 incremental tree | One node-graph shape per group, `PARALLEL[ leaf …, RUNNING ]`, leaves on change and bound to keys, after the statechart | The same tick | A leaf on change | One shape per group under the root `PARALLEL` |
 | #405 macros, placed | One macro per group, placed at the root in a `WITH` before the tree | A tick late | A macro placed before llm | One macro per group, authored and placed |
-| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion eager | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, rebuilt at every tick llm is polled | One graph per region and per group, joined by keys |
-| #257, prompt cached | #257, with #396's argument cache on the prompt alone, as #257's pull request suggests | A tick late | A lazy node with a cache, rebuilt when its arguments change | #257's graphs |
+| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion eager, run at every tick with nothing cached | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, run when its arguments change | One graph per region and per group, joined by keys |
+| #257, all cached | #257, with #396's argument cache on every node | A tick late | The same | #257's graphs |
+
+Every design caches the prompt by its arguments, as a basic measure. #257's
+pull request has no cache yet ("all calls (no cache yet)"); it was closed on
+21 October in favor of #396. The bench gives #257 the prompt's cache, and its
+variant a cache on every node, to show what the design costs with one.
 
 ### How the work is counted
 
@@ -459,8 +465,8 @@ what the leaf depends on. So a second of waiting on the llm is 100 polls of
 its leaf, and each poll reads the prompt. The prompt reads eight arguments,
 two of them nodes (the emotion and the round). On a design that answers from
 its caches, that second is 400 node ticks, 100 executions (the polls) and
-1,000 checks. On #257, which rebuilds the prompt at every poll, it is 400 node
-ticks, 400 executions and 100 prompt builds.
+1,000 checks. On #257, whose emotion and round nodes run again at every poll,
+it is 400 node ticks, 300 executions and 1,000 checks.
 
 - **The reference** counts with tracer calls in its own code:
   - Each region it steps (the conversation, the attention, the emotions) is a
@@ -504,8 +510,8 @@ ticks, 400 executions and 100 prompt builds.
   | #409 full tree nodes | 95 | 95 | 42 | 121 | 400 · 100 · 1,000 | 7 |
   | #404 incremental tree | 95 | 73 | 42 | 177 | 100 · 100 · 100 | 7 |
   | #405 macros, placed | 95 | 72 | 42 | 177 | 100 · 100 · 100 | 7 |
-  | #257 BT in NG | 451 | 117 | 79 | 6 | 400 · 400 · 600 | 560 |
-  | #257, prompt cached | 171 | 117 | 78 | 7 | 400 · 300 · 1,000 | 7 |
+  | #257 BT in NG | 171 | 117 | 78 | 7 | 400 · 300 · 1,000 | 7 |
+  | #257, all cached | 95 | 117 | 42 | 130 | 400 · 100 · 1,000 | 7 |
 
 - **The motion graph moves at every tick:** the clock, the smoothing, the
   blinks. The reference runs 59 of its 77 functions a tick, skipping the
@@ -515,15 +521,16 @@ ticks, 400 executions and 100 prompt builds.
 - **The prompt.** The reference builds it once per llm call, four times. A
   design's llm leaf reads its prompt at every poll, so the prompt is rebuilt
   when an argument changes mid-call. The dominant emotion changed three times
-  during run 2's second round, for 7 builds. #257 rebuilds it at every poll:
-  560 builds, 1.1 s of work, and most of its 451 µs. With the prompt cached it
-  costs 171 µs, and the rest of the gap is its eager motion graph.
+  during run 2's second round, for 7 builds. Without its cache, #257 would
+  rebuild it at every poll: 560 builds, 1.1 s of work, and 451 µs a tick
+  instead of 171.
+- **#257's gap is its eager motion graph.** It runs all 77 functions at every
+  tick, against 42. With a cache on every node it runs 42, and costs what #396
+  costs; its input and output nodes add node ticks and checks.
 - **Polling is cheap at these rates.** The reads under a poll cost
-  nanoseconds each, so a second of waiting costs the four tree designs 14 to
-  23 µs. The exceptions are reads that run something. #257 runs the emotion
-  and the round again at every poll: 451 µs for each second of waiting, even
-  with the prompt cached. Without the cache, the prompt costs 200 ms for each
-  second of waiting.
+  nanoseconds each, so a second of waiting costs a cached design 14 to 23 µs.
+  The exception is a read that runs something: #257 runs the emotion and the
+  round again at every poll, 451 µs for each second of waiting.
 - **The reference is not the cheapest at 2 µs a call.** At every tick it runs
   each motion function its branches need, changed or not, where the cached
   designs skip the unchanged ones. With calls of a few nanoseconds, the order
@@ -550,14 +557,11 @@ The speech pipeline is the part with the most room to grow. Left for later:
 1. **The async proposals of §10.** Each pull request's author to confirm or
    replace theirs: the reply run as a task run gated by `{reply/held}`, its
    stages as module-call leaves, and the prompt as a node.
-2. **#257 with caching beyond the prompt.** The bench models a cache on the
-   prompt alone (§10). Caching the motion graph too would bring #257 near
-   #396; should it be a variant as well?
-3. **Control timing in #257.** Only the motion's lag is modeled. Statechart
+2. **Control timing in #257.** Only the motion's lag is modeled. Statechart
    transitions that cross ticks through latched state are not.
-4. **A Rust replay of the run,** as for the Quori workloads, to replace the
+3. **A Rust replay of the run,** as for the Quori workloads, to replace the
    modeled costs with measured ones.
-5. **Latching a waiting leaf's arguments.** A leaf that reads its arguments
+4. **Latching a waiting leaf's arguments.** A leaf that reads its arguments
    at every poll rebuilds the prompt mid-call when one changes, three times in
    this run (§10). Should a leaf latch its arguments when its call starts, as
    the reference does?
