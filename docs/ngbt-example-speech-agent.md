@@ -433,6 +433,7 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 | #404 incremental tree | One node-graph shape per group, `PARALLEL[ leaf …, RUNNING ]`, leaves on change and bound to keys, after the statechart | The same tick | A leaf on change | One shape per group under the root `PARALLEL` |
 | #405 macros, placed | One macro per group, placed at the root in a `WITH` before the tree | A tick late | A macro placed before llm | One macro per group, authored and placed |
 | #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion eager | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, rebuilt at every tick llm is polled | One graph per region and per group, joined by keys |
+| #257, prompt cached | #257, with #396's argument cache on the prompt alone, as #257's pull request suggests | A tick late | A lazy node with a cache, rebuilt when its arguments change | #257's graphs |
 
 What the bench shows over the whole run:
 
@@ -445,7 +446,9 @@ What the bench shows over the whole run:
   motion graph moves at every tick (the clock, the smoothing, the blinks), so
   caching saves about half of its 75 calls. #257 averages 447 µs a tick: it
   caches nothing, and rebuilds the prompt at every tick the llm is polled,
-  168 two-millisecond builds against 7.
+  168 two-millisecond builds against 7. With a cache on the prompt alone it
+  averages 176 µs. The rest of the gap is its eager motion graph: 76 calls a
+  tick against 40.
 - **No design fails a check.** They differ in where the statechart's writes
   land in the tick, and in what runs again when nothing changed.
 
@@ -468,8 +471,9 @@ The speech pipeline is the part with the most room to grow. Left for later:
 1. **The async proposals of §10.** Each pull request's author to confirm or
    replace theirs: the reply run as a task run gated by `{reply/held}`, its
    stages as module-call leaves, and the prompt as a node.
-2. **#257 with a cache on the prompt.** Its pull request notes that #396's
-   cache could be added per node. Should the bench model that as a variant?
+2. **#257 with caching beyond the prompt.** The bench models a cache on the
+   prompt alone (§10). Caching the motion graph too would bring #257 near
+   #396; should it be a variant as well?
 3. **Control timing in #257.** Only the motion's lag is modeled. Statechart
    transitions that cross ticks through latched state are not.
 4. **A Rust replay of the run,** as for the Quori workloads, to replace the

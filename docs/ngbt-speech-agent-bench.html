@@ -1079,6 +1079,8 @@ const DESIGNS = [
     note: 'Authored as #396’s file, each motion group a macro. Every group publishes a sink, so the loader anchors it at the root: WITH[ groups …, tree ]. Clean groups answer from their cache. They run before the tree, so they read what the tree wrote last tick: what the statechart drives arrives a tick late.' },
   { id: 'control', short: '#257', name: '#257 BT in NG', strategy: 'control', lag: 1,
     note: 'Vizij graphs: the conversation, attention and reply run as control nodes ticking actions, the motion as eager nodes that run at every tick with nothing cached. A state the control writes reaches the motion through the store at the next tick. The prompt is a lazy node under the llm action, so it runs at every tick the action is polled.' },
+  { id: 'control-cache', short: '#257+', name: '#257 BT in NG, prompt cached', strategy: 'control', lag: 1, promptCache: true,
+    note: '#257 as it stands, with #396’s argument cache added to one node, the prompt, as its pull request suggests. Everything else is #257: eager motion, control a tick ahead. It shows how much of #257’s cost is that one node.' },
 ];
 const COST_US = { fullNode: 0.02258660410253709, hostWrite: 0.07207905131266586, tick: 0.08054631507819726, native: 0.02942999195571001, module: 0.13278202941423906, storeWrite: 0.06509534618334416, detachedCheck: 0.009512341457231909, detachedPublish: 0.03262927691013938, detachedCall: 0.1405157081974673, cacheCheck: 0.0051276265604468345, storeObserve: 0.008794477399395248, versionWrite: 0.03825155565970652 };
 const CALL_US = 2, PROMPT_US = 2000;
@@ -1157,8 +1159,8 @@ function controlContext(base) {
   }
   return { active, alive, prompt };
 }
-function controlCost(S, f, prevKeys, ctx, i) {
-  const m = blankMetrics();
+function controlCost(design, f, prevKeys, ctx, i) {
+  const S = design.strategy === 'control' && design.promptCache ? 'control-cache' : design.strategy, m = blankMetrics();
   const conv = { listening: [3, 1], judging: [5, 1], speaking: [10, 1], thinking: [12, 1] }[f.conv] || [7, 0];
   m.visits += 2 + conv[0] + 1 + (f.att === 'present' || f.att === 'engaged' ? 3 : 5);
   let polls = conv[1];
@@ -1173,6 +1175,7 @@ function controlCost(S, f, prevKeys, ctx, i) {
       if (pr.changed) { m.compares++; m.detachedCheck++; m.calls++; m.detachedCall++; m.prompt++; if (S === 'full') m.fullNode++; }
       else { m.compares += 8; m.detachedCheck += 8; }
     } else if (S === 'inc' || S === 'macro') { m.cacheCheck++; if (pr.changed) { m.visits++; m.calls++; m.module++; m.prompt++; } }
+    else if (S === 'control-cache') { m.visits++; m.detachedEval++; if (pr.changed) { m.compares++; m.detachedCheck++; m.calls++; m.detachedCall++; m.prompt++; } else { m.compares += 8; m.detachedCheck += 8; } }
     else { m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; m.prompt++; }
   }
   const changed = prevKeys ? CONTROL_KEYS.filter((k) => !same(prevKeys[k], f.keys[k])).length : CONTROL_KEYS.length;
@@ -1187,7 +1190,7 @@ function designRecording(design, base) {
   for (let i = 0; i < base.frames.length; i++) {
     const f = base.frames[i], k = design.lag ? (i >= design.lag ? base.frames[i - design.lag].keys : INITIAL_KEYS) : f.keys, face = faceAt(f.t);
     const input = { 'face/x': face.x, 'face/y': face.y, 'attention/state': k.att, 'attention/since': k.attSince, 'conversation/state': k.conv, 'conversation/sub': k.sub, 'thinking/since': k.thinkSince, 'emotion/active': k.active, 'speech/item': k.item, 'speech/playhead': k.playhead, 'speech/playing': k.playing, 'gesture/start': k.gStart };
-    const out = run.tick(input, f.t), cm = controlCost(design.strategy, f, prevKeys, ctx, i);
+    const out = run.tick(input, f.t), cm = controlCost(design, f, prevKeys, ctx, i);
     prevKeys = f.keys;
     const m = blankMetrics();
     for (const key in m) m[key] = (out.m[key] || 0) + (cm[key] || 0);
@@ -1387,7 +1390,7 @@ function storedLines(design, part) {
     const kinds = { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'control: repeat', foreach: 'control: for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'constant', action: 'action' };
     const walk = (n) => { push(`  ${String(n.uid).padStart(3)} ${kinds[n.k].padEnd(18)} ${n.k === 'action' ? `function: ${n.fn}` : n.k === 'check' ? `reads: ${n.key}` : n.k === 'set' ? `path: ${n.key}` : n.k === 'running' ? 'value: Running' : ''}   ${n.label}   ${n.k === 'action' || n.k === 'check' ? 'lazy' : ''}`, n.uid); n.children.forEach(walk); };
     walk(tree);
-    if (part === 'reply') push(`  prompt ${'@pip/agent.prompt'.padEnd(18)} lazy: read by llm, it runs at every tick llm is ticked`, 'prompt');
+    if (part === 'reply') push(`  prompt ${'@pip/agent.prompt'.padEnd(18)} ${design.promptCache ? 'lazy, with an argument cache: read by llm, it runs when its arguments change' : 'lazy: read by llm, it runs at every tick llm is ticked'}`, 'prompt');
     push('edges');
     const edges = (n) => n.children.forEach((c, k) => { push(`  ${c.uid} → ${n.uid}.child_${k}`, c.uid); edges(c); });
     edges(tree);
@@ -1444,9 +1447,10 @@ function graphModel(design, part) {
   walk(TREES[part], null, 0);
   if (part === 'reply') {
     const llm = nodes.find((x) => x.tree && x.tree.prompt);
-    const kind = S === 'inc' ? 'leaf, on change' : S === 'macro' ? 'macro, placed' : S === 'control' ? 'lazy node' : S === 'reference' ? 'function' : 'detached node';
+    const cached = !(S === 'control' && !design.promptCache);
+    const kind = S === 'inc' ? 'leaf, on change' : S === 'macro' ? 'macro, placed' : S === 'control' ? (cached ? 'lazy node, cached' : 'lazy node') : S === 'reference' ? 'function' : 'detached node';
     nodes.push({ id: 'prompt', kind, label: 'prompt', port: false, data: true, attach: llm.id });
-    edges.push({ from: 'prompt', to: llm.id, data: true, label: S === 'control' ? 'runs every tick' : 'on change' });
+    edges.push({ from: 'prompt', to: llm.id, data: true, label: cached ? 'on change' : 'runs every tick' });
   }
   return { kind: 'tree', nodes, edges, box: S === 'control' ? `graph ${part}` : part === 'reply' ? 'task run' : 'subtree' };
 }
