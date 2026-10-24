@@ -228,6 +228,17 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .cost-stats .k { font-size: 11px; color: var(--muted); }
 .cost-stats .v { font: 600 14px var(--f-mono); font-variant-numeric: tabular-nums; }
 .cost-stats .a { font: 11px var(--f-mono); color: var(--faint); }
+.cost-stats .wide { grid-column: span 2; }
+.cost-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; margin-bottom: 6px; }
+.cost-head h3 { margin: 0; }
+.seg.small button { min-height: 26px; padding: 2px 8px; font-size: 12px; }
+.work { border-collapse: collapse; width: 100%; margin-top: 10px; font: 11.5px var(--f-mono); font-variant-numeric: tabular-nums; }
+.work caption { text-align: left; font: 500 12px var(--f-body); color: var(--ink); padding-bottom: 4px; }
+.work th, .work td { padding: 3px 8px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.work th { font: 500 11px var(--f-body); color: var(--muted); }
+.work th:first-child, .work td:first-child { text-align: left; font-family: var(--f-body); }
+.work tr.all td { font-weight: 600; border-bottom: 0; }
+.tip .sub { color: var(--muted); font: 11px var(--f-mono); margin: 0 0 3px 16px; }
 @media (max-width: 760px) {
   .tabs { display: flex; }
   .traces { grid-template-columns: minmax(0, 1fr); }
@@ -253,7 +264,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 <div class="page">
   <header>
     <h1>Speech agent bench</h1>
-    <p class="lede">Pip, a desktop robot, talks with Sam through one scripted 40-second world: a cut-in while it thinks, one while it speaks, a cough, a face that drops out and leaves. Pick an implementation for each side and play them in lockstep. The five <b>designs</b> from the NGBT spectrum each run the same definition by their own rules; <b>Reference</b> is the spec as plain code, and <b>Naive foil</b> breaks three rules on purpose. Below the robots, see how each design holds every part, and what each tick costs it.</p>
+    <p class="lede">Pip, a desktop robot, talks with Sam through one scripted 40-second world: a cut-in while it thinks, one while it speaks, a cough, a face that drops out and leaves. Pick an implementation for each side and play them in lockstep. The five <b>designs</b> from the NGBT spectrum each run the same definition by their own rules; <b>Reference</b> is the spec as plain code, and <b>Naive foil</b> breaks three rules on purpose. Below the robots, see how each design holds every part, and what each tick of the 100 Hz clock costs it.</p>
   </header>
 
   <section class="transport-band" aria-label="Playback">
@@ -305,7 +316,16 @@ function sampleKeys(keys, tau) {
   for (let i = 1; i < keys.length; i++) if (tau <= keys[i][0]) return lerp(keys[i - 1][1], keys[i][1], smooth((tau - keys[i - 1][0]) / (keys[i][0] - keys[i - 1][0])));
   return keys[keys.length - 1][1];
 }
-const DT = 1 / 30, RUN_END = 39.6, EYE_HALF_LIFE = 0.08;
+// A real sync system: one base clock at 100 Hz. Async work is a leaf polled at every tick.
+const DT = 1 / 100, RUN_END = 39.6, EYE_HALF_LIFE = 0.08;
+// Work, by area: node ticks (what a tick steps through), executions (what runs) and checks (what it compares or reads to decide).
+const AREAS = [['statechart', 'statechart'], ['polls', 'async polls'], ['prompt', 'prompt'], ['motion', 'motion graph']];
+const blankWork = () => Object.fromEntries(AREAS.map(([a]) => [a, { ticks: 0, execs: 0, checks: 0 }]));
+function workTotals(w) { const all = { ticks: 0, execs: 0, checks: 0 }; for (const [a] of AREAS) for (const k in all) all[k] += w[a][k]; return all; }
+// The work a call does, by the bench's convention: 2 µs, and 2 ms for a prompt build.
+const CALL_US = 2, PROMPT_US = 2000;
+// Plain code pays for its own work only: no executor stands between its steps.
+function plainCost(w) { const all = workTotals(w), builds = w.prompt.execs; return { w, all, builds, us: (all.execs - builds) * CALL_US + builds * PROMPT_US }; }
 const CHANNELS = ['head/yaw', 'head/pitch', 'eyes/x', 'eyes/y', 'eyes/lid', 'mouth/open', 'mouth/stretch', 'mouth/corners', 'arm/raise'];
 const POSTURES = {
   neutral:   { pitch: 0,    arm: 0,   lid: 1,   open: 0,  stretch: 0,   corners: 0 },
@@ -429,6 +449,9 @@ class Run {
   at(when, kind, rec, data) { this.pending.push({ when, kind, rec, data }); }
   order() { return [...this.sentences, ...this.follow]; }
   step(t) {
+    // A poll of each service call in flight: a tick, and a check of whether it is done.
+    const calls = new Set(this.pending.map((p) => p.rec)).size;
+    this.sim.tr('polls', calls, 0, calls);
     for (;;) {
       this.pending.sort((a, b) => a.when - b.when);
       const p = this.pending[0];
@@ -439,6 +462,7 @@ class Run {
   }
   complete({ when, kind, data }) {
     const sim = this.sim;
+    sim.tr('polls', 0, 1);   // the call is done: its result runs
     if (kind === 'rag') this.docs = MOCK.rag();
     else if (kind === 'recall') this.memories = MOCK.recall(sim.memory);
     else if (kind === 'toolcall') {
@@ -465,6 +489,7 @@ class Run {
     const sim = this.sim;
     this.llmRounds++;
     const prompt = fill(TURN_TEMPLATE, { persona: PERSONA, tools: TOOLS.map((x) => x.name).join(', '), emotion: sim.dominantEmotion(when), memories: this.memories.join(' '), docs: this.facts(), round: sim.roundText(), utterance: this.utterance });
+    sim.tr('prompt', 1, 1);   // built once, when the call starts
     this.prompts.push({ at: when, text: prompt, kind: `prompt ${this.llmRounds}` });
     sim.lane('prompt', this.id, when, when + LATENCY.prompt, `prompt ${this.llmRounds}`);
     const out = MOCK.llm(prompt, this.utterance, this.toolResults);
@@ -510,11 +535,14 @@ class Sim {
     this.gesture = null; this.head = { yaw: 0, pitch: 0 }; this.eyeGaze = { x: 0, y: 0 }; this.target = { x: 0, y: 0 }; this.lastTarget = { x: 0, y: 0 };
     this.player = null; this.speechW = 0; this.judge = null; this.judges = 0; this.resets = 0; this.roundAfterReset = null;
     this.items = { 0: null }; this.itemCount = 0;
+    this.work = null; this.costs = [];
     this.prevHead = null; this.vadPrev = false; this.lastSeg = null; this.stateRec = null; this.attRec = null;
     this.setConv(0, 'idle');
     this.setAtt(0, 'nobody');
   }
   log(t, kind, text, extra = {}) { this.events.push({ t, kind, text, ...extra }); }
+  // The tracer: counts what this tick steps through, runs and checks, by area.
+  tr(area, ticks, execs = 0, checks = 0) { if (!this.work) return; const w = this.work[area]; w.ticks += ticks; w.execs += execs; w.checks += checks; }
   lane(lane, run, t0, t1, label, outcome = 'done') { const r = { lane, run, t0, t1, label, outcome }; this.lanes.push(r); return r; }
   roundText() { return this.round.map((r) => `${r.who}: ${r.text}`).join(' ') || '(nothing yet)'; }
 
@@ -612,12 +640,15 @@ class Sim {
   stepJudge(t) {
     const J = this.judge;
     if (!J) return;
+    this.tr('polls', 1, 0, 1);   // the judge in flight: is its verdict, or are its follow-ups, in?
     if (!J.verdictDone && t >= J.t0 + LATENCY.verdict - 1e-9) {
+      this.tr('polls', 0, 1);
       J.verdictDone = true; J.rec.label = J.out.verdict; this.log(t, 'verdict', J.out.verdict);
       if (J.out.verdict === 'continue') { this.handBack(t); if (!J.out.follow.length) this.judge = null; }
       else { this.judge = null; this.invalidate(t, J); }
     }
     if (this.judge === J && J.verdictDone && t >= J.t0 + LATENCY.followUps - 1e-9) {
+      this.tr('polls', 0, 1);
       this.judge = null;
       if (!J.run.dropped) J.run.addFollowUps(J.out.follow, t);
     }
@@ -680,6 +711,7 @@ class Sim {
   stepPlayer(t) {
     const it = this.player;
     if (!it || it.paused) return;
+    this.tr('polls', 1, 0, 1);   // the player: the playhead moves on; has it reached the end?
     it.playhead += DT;
     if (it.playhead >= it.length - 1e-9) {
       it.seg.t1 = t; it.log.end = t; it.log.outcome = 'finished'; this.player = null;
@@ -688,6 +720,7 @@ class Sim {
     }
     const C = this.conv;
     if (it.kind === 'sentence' && C.state === 'speaking' && C.run) {
+      this.tr('polls', 0, 0, 1);   // the next sentence's emotion, 0.6 s before this one ends
       const next = C.run.order().find((s) => !s.played);
       if (next && next.ready !== undefined && next.emotion && !next.applied && it.length - it.playhead <= 0.6 + 1e-9) this.applyEmotion(next, t, C.run);
     }
@@ -696,6 +729,7 @@ class Sim {
     const C = this.conv, run = C.run;
     if (!run || run.held || run.dropped || this.player) return;
     if (C.state !== 'thinking' && C.state !== 'speaking') return;
+    this.tr('polls', 1, 0, 1);   // await: is the next sentence's audio ready?
     const next = run.order().find((s) => !s.played);
     if (next && next.ready !== undefined) { if (C.state === 'thinking') this.setConv(t, 'speaking'); this.startItem(t, this.sentenceItem(next)); }
     else if (!next && C.state === 'speaking' && run.llmDone && !(this.judge && this.judge.run === run)) this.replyEnded(t);
@@ -710,6 +744,7 @@ class Sim {
   }
   stepAttention(t, face) {
     const A = this.att, talking = this.conv.state !== 'idle';
+    this.tr('statechart', 1, 0, A.state === 'lost' ? 3 : 2);   // the attention region: its state and the face, and the 1.5 s cooldown while lost
     if (A.state === 'nobody') { if (face.visible) this.setAtt(t, talking ? 'engaged' : 'present'); }
     else if (A.state === 'present') { if (!face.visible) this.enterLost(t); else if (talking) this.setAtt(t, 'engaged'); }
     else if (A.state === 'engaged') { if (!face.visible) this.enterLost(t); else if (!talking) this.setAtt(t, 'present'); }
@@ -717,13 +752,15 @@ class Sim {
       if (face.visible) { this.setAtt(t, talking ? 'engaged' : 'present'); this.trigger('surprised', t, 'attention'); }
       else if (t - A.since >= 1.5 - 1e-9) { this.setAtt(t, 'nobody'); this.reset(t); }
     }
+    // The gaze target: the motion graph's gaze group, as plain code that computes only the branch it takes.
     let tg;
-    if (A.state === 'nobody') tg = { x: 0.45 * Math.sin(0.37 * t + 0.5), y: 0.1 * Math.sin(0.23 * t) };
-    else if (A.state === 'lost') tg = this.lastTarget;
+    if (A.state === 'nobody') { tg = { x: 0.45 * Math.sin(0.37 * t + 0.5), y: 0.1 * Math.sin(0.23 * t) }; this.tr('motion', 6, 6, 1); }   // the wander, held as the target
+    else if (A.state === 'lost') { tg = this.lastTarget; this.tr('motion', 2, 2, 2); }   // the target, held
     else {
       tg = { x: face.x, y: face.y };
       const k = t - A.since - 3.5;
       if (A.state === 'present' && k >= 0 && k % 4 < 0.8) tg = { x: face.x + (face.x > 0 ? -0.55 : 0.55), y: face.y - 0.12 };
+      this.tr('motion', 15, 15, 2);   // the person, and the glance away on its timer
     }
     this.target = tg;
     if (A.state !== 'lost') this.lastTarget = tg;
@@ -750,6 +787,7 @@ class Sim {
     this.log(t, 'emotion', `${name} · ${source}`);
   }
   stepEmotions(t) {
+    this.tr('statechart', 1, 0, this.emotions.length);   // the emotions: has each one's hold, or fade, ended?
     for (const e of this.emotions) if (e.fadeStart === null && t >= e.t0 + 5.6 - 1e-9) Object.assign(e, { fadeStart: e.t0 + 5.6, fadeLen: 5, fadeFrom: 1 });
     this.emotions = this.emotions.filter((e) => e.fadeStart === null || t < e.fadeStart + e.fadeLen);
   }
@@ -769,12 +807,17 @@ class Sim {
 
   // ---- one tick -----------------------------------------------------------------
   tick(t) {
+    this.work = blankWork();
     const seg = SCRIPT.user.find((u) => t >= u.from - 1e-9 && t < u.to - 1e-9) || null;
     const vad = !!seg, face = faceAt(t), C = this.conv;
+    this.tr('statechart', 1, 0, 4);   // the conversation region: voice starts, voice ends, listening, a reply to move on
     if (vad && !this.vadPrev) this.onVadOn(t);
     if (!vad && this.vadPrev) this.onVadOff(t, this.lastSeg);
     this.vadPrev = vad; if (seg) this.lastSeg = seg;
-    if (C.state === 'listening' && C.vadOff && C.words === undefined && t - C.vadOnAt >= 1.5 - 1e-9) this.falseAlarm(t);
+    if (C.state === 'listening') {
+      this.tr('polls', 1, 0, C.vadOff ? 2 : 1);   // listen: words yet, and after the voice, 1.5 s without them?
+      if (C.vadOff && C.words === undefined && t - C.vadOnAt >= 1.5 - 1e-9) this.falseAlarm(t);
+    }
     for (const run of this.runs) if (!run.dropped) run.step(t);
     this.stepJudge(t);
     this.stepPlayer(t);
@@ -782,6 +825,7 @@ class Sim {
     this.stepAttention(t, face);
     this.stepEmotions(t);
     this.frames.push(this.motion(t, seg));
+    this.costs.push(plainCost(this.work));
   }
   motion(t, seg) {
     const C = this.conv, tg = this.target, k = 1 - Math.pow(2, -DT / 0.25);
@@ -802,13 +846,17 @@ class Sim {
     this.think.w = clamp(this.think.w + (thinking ? 1 : -1) * DT / 0.3, 0, 1);
     const base = this.blendedPosture(t), p = {};
     for (const key of POSE_KEYS) p[key] = lerp(base[key], POSTURES.thinking[key], smooth(this.think.w));
+    this.tr('motion', 17, 17);   // posture: the envelopes and their blend, the thinking expression over them, six values read out
     const idleP = 0.03 * Math.sin(2 * Math.PI * t / 4), idleA = 0.05 * Math.sin(2 * Math.PI * t / 4 + 1);
     const yaw = this.head.yaw, pitch = this.head.pitch + p.pitch + idleP;
+    this.tr('motion', 6, 6);   // head: two followers, the idle sway, the pitch
     const eyeHead = this.flags.staleEyes && this.prevHead ? this.prevHead : { yaw, pitch };
     const since = t - this.think.enteredAt;
     const glance = since >= 0 && since <= 1.2 ? 0.3 * Math.min(smooth(since / 0.2), smooth((1.2 - since) / 0.2)) : 0;
     const eyesX = clamp((this.eyeGaze.x - eyeHead.yaw) * 1.6, -1, 1), eyesY = clamp((this.eyeGaze.y - eyeHead.pitch) * 1.6 + glance, -1, 1);
+    this.tr('motion', 10, 10);   // eyes: two fast followers less this tick's head, scaled and clamped, and the glance up
     const it = this.player, playing = !!it && !it.paused;
+    this.tr('motion', it ? 12 : 8, it ? 12 : 8, 1);   // mouth: the speech weight and three blends, and with audio, the viseme at its playhead
     this.speechW = clamp(this.speechW + (playing ? 1 : -1) * DT / 0.08, 0, 1);
     let vis = VISEMES.rest, word = -1;
     if (it) {
@@ -819,12 +867,14 @@ class Sim {
       word = sg.word >= 0 ? sg.word : (tr[i + 1] ? tr[i + 1].word : -1);
     }
     const w = smooth(this.speechW);
-    let arm = p.arm + idleA;
+    let arm = p.arm + idleA, waving = false;
     if (this.gesture) {
       const tau = t - this.gesture.t0;
       if (tau > CLIPS.wave.length) this.gesture = null;
-      else arm = lerp(arm, sampleKeys(CLIPS.wave.keys, tau), Math.min(smooth(tau / .2), smooth((CLIPS.wave.length - tau) / .3)));
+      else { arm = lerp(arm, sampleKeys(CLIPS.wave.keys, tau), Math.min(smooth(tau / .2), smooth((CLIPS.wave.length - tau) / .3))); waving = true; }
     }
+    this.tr('motion', waving ? 7 : 3, waving ? 7 : 3, 1);   // arm: the idle sway over the posture, and while it plays, the wave over both
+    this.tr('motion', 2, 2);   // lid: the blink clip times the posture's lid
     const c = [yaw, pitch, eyesX, eyesY, p.lid * this.blinkAt(t), lerp(p.open, vis.open, w), lerp(p.stretch, vis.stretch, w), clamp(p.corners + w * vis.corners, -1, 1), arm];
     this.prevHead = { yaw, pitch };
     return {
@@ -838,7 +888,7 @@ class Sim {
   recording() {
     return {
       frames: this.frames, lanes: this.lanes, events: this.events, spoken: this.spoken, triggers: this.triggers, violations: this.violations,
-      judges: this.judges, resets: this.resets, roundAfterReset: this.roundAfterReset, memoryLog: this.memoryLog, items: this.items,
+      judges: this.judges, resets: this.resets, roundAfterReset: this.roundAfterReset, memoryLog: this.memoryLog, items: this.items, cost: this.costs,
       runs: this.runs.map((r) => ({ id: r.id, utterance: r.utterance, prompts: r.prompts, dropped: r.dropped, toolCalls: r.toolCalls, llmRounds: r.llmRounds })),
     };
   }
@@ -898,6 +948,10 @@ function score(rec) {
   const dropped = rec.lanes.filter((r) => r.outcome === 'dropped' && r.run && !/^(audio|state|attention)$/.test(r.lane));
   const secs = dropped.reduce((s, r) => s + (r.t1 - r.t0), 0);
   items.push({ ok: null, title: 'Work dropped with its run', detail: dropped.length ? `${secs.toFixed(1)} s of service time: ${dropped.map((r) => `${r.lane} ${(r.t1 - r.t0).toFixed(1)} s`).join(', ')}` : 'none' });
+  if (rec.cost) {
+    const avg = rec.cost.reduce((s, c) => s + c.us, 0) / rec.cost.length, peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
+    items.push({ ok: null, title: 'Modeled cost', detail: `${avg.toFixed(0)} µs a tick on average, ${peak.us.toFixed(0)} µs at ${rec.frames[peak.i].t.toFixed(2)} s`, at: rec.frames[peak.i].t });
+  }
   return items;
 }
 </script>
@@ -1097,42 +1151,51 @@ const DESIGNS = [
     note: '#257 as it stands, with #396’s argument cache added to one node, the prompt, as its pull request suggests. Everything else is #257: eager motion, control a tick ahead. It shows how much of #257’s cost is that one node.' },
 ];
 const COST_US = { fullNode: 0.02258660410253709, hostWrite: 0.07207905131266586, tick: 0.08054631507819726, native: 0.02942999195571001, module: 0.13278202941423906, storeWrite: 0.06509534618334416, detachedCheck: 0.009512341457231909, detachedPublish: 0.03262927691013938, detachedCall: 0.1405157081974673, cacheCheck: 0.0051276265604468345, storeObserve: 0.008794477399395248, versionWrite: 0.03825155565970652 };
-const CALL_US = 2, PROMPT_US = 2000;
-const blankMetrics = () => ({ tick: 0, calls: 0, visits: 0, compares: 0, writes: 0, module: 0, native: 0, detachedEval: 0, detachedCall: 0, detachedCheck: 0, detachedPublish: 0, cacheCheck: 0, storeObserve: 0, versionWrite: 0, storeWrite: 0, fullNode: 0, hostWrite: 0, prompt: 0 });
-function modeledUs(m) { let us = 0; for (const k in COST_US) us += (m[k] || 0) * COST_US[k]; return us + (m.calls - m.prompt) * CALL_US + m.prompt * PROMPT_US; }
+const blankMetrics = () => ({ tick: 0, calls: 0, visits: 0, compares: 0, writes: 0, module: 0, native: 0, detachedEval: 0, detachedCall: 0, detachedCheck: 0, detachedPublish: 0, cacheCheck: 0, storeObserve: 0, versionWrite: 0, storeWrite: 0, fullNode: 0, hostWrite: 0, prompt: 0, poll: 0 });
+const METRIC_KEYS = Object.keys(blankMetrics());
+// A call does CALL_US of work and a prompt build PROMPT_US; a poll that answers Running does none, and pays only its module call.
+function modeledUs(m) { let us = 0; for (const k in COST_US) us += (m[k] || 0) * COST_US[k]; return us + (m.calls - m.prompt - m.poll) * CALL_US + m.prompt * PROMPT_US; }
 const CONTROL_KEYS = ['att', 'attSince', 'conv', 'sub', 'thinkSince', 'active', 'item', 'playhead', 'playing', 'gStart'];
 const INITIAL_KEYS = { att: 'nobody', attSince: 0, conv: 'idle', sub: '', thinkSince: -10, active: [], item: 0, playhead: 0, playing: false, gStart: null };
 
+// Each node's place in data order, and where each of its arguments comes from: a node's place, or -1 for a literal.
+for (const n of ORDER) { n.idx = INDEX.get(n.id); n.from = n.args.map((x) => (typeof x === 'string' && x[0] === '@' ? INDEX.get(x.slice(1)) : -1)); n.readers = READERS.get(n.id).length; }
+const SINK_IDX = SINKS.map(([, id]) => INDEX.get(id));
 class MotionGraphRun {
-  constructor(strategy, items) { this.s = strategy; this.items = items; this.val = new Map(); this.state = new Map(); this.last = new Map(); this.prevOut = null; }
+  constructor(strategy, items) {
+    this.s = strategy; this.items = items; this.prevOut = null;
+    this.v = new Array(ORDER.length); this.st = ORDER.map(() => ({})); this.last = new Array(ORDER.length).fill(null);
+    this.val = { get: (id) => this.v[INDEX.get(id)] };
+  }
   tick(input, t) {
-    const S = this.s, m = blankMetrics(), act = new Uint8Array(ORDER.length), inc = S === 'inc' || S === 'macro';
+    const S = this.s, m = blankMetrics(), act = new Uint8Array(ORDER.length), inc = S === 'inc' || S === 'macro', vals = this.v;
     m.tick = 1; m.hostWrite = 2;
     for (const n of SOURCES) {
-      const v = n.kind === 'Time' ? t : input[n.key], changed = !same(this.val.get(n.id), v);
-      this.val.set(n.id, v);
+      const v = n.kind === 'Time' ? t : input[n.key], changed = !same(vals[n.idx], v);
+      vals[n.idx] = v;
       if (inc) { m.storeObserve++; m.compares++; if (changed) m.versionWrite++; }
       if (S === 'control') m.visits++;
-      act[INDEX.get(n.id)] = changed ? 1 : 2;
+      act[n.idx] = changed ? 1 : 2;
     }
     const ran = new Set();
     for (const n of FUNCS) {
-      const args = n.args.map((x) => (typeof x === 'string' && x[0] === '@' ? this.val.get(x.slice(1)) : x));
-      let st = this.state.get(n.id); if (!st) { st = {}; this.state.set(n.id, st); }
-      const full = n.stateful ? [...args, st.v] : args, prev = this.last.get(n.id);
+      const k = n.from.length, args = new Array(k);
+      for (let i = 0; i < k; i++) args[i] = n.from[i] < 0 ? n.args[i] : vals[n.from[i]];
+      const st = this.st[n.idx], full = n.stateful ? [...args, st.v] : args, prev = this.last[n.idx];
       let run;
       if (S === 'control') { run = true; m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; }
       else if (S === 'compute' || S === 'full') {
         m.visits++; m.detachedEval++; run = !prev;
         if (prev) for (let i = 0; i < full.length; i++) { m.compares++; m.detachedCheck++; if (!same(prev[i], full[i])) { run = true; break; } }
         if (run) { m.calls++; m.detachedCall++; if (S === 'full') m.fullNode++; }
-      } else run = !prev || full.some((v, i) => !same(prev[i], v));
+      } else if (!prev) run = true;
+      else { run = false; for (let i = 0; i < full.length; i++) if (!same(prev[i], full[i])) { run = true; break; } }
       if (run) {
-        const v = FN[n.kind](args, n.params, st, t, this.items), changed = !same(this.val.get(n.id), v);
-        this.val.set(n.id, v); this.last.set(n.id, full.slice()); ran.add(n.id);
-        if (inc) { m.visits++; m.calls++; m.module++; m.compares++; if (changed) { m.versionWrite++; m.compares += READERS.get(n.id).length; } }
+        const v = FN[n.kind](args, n.params, st, t, this.items);
+        if (inc) { m.visits++; m.calls++; m.module++; m.compares++; if (!same(vals[n.idx], v)) { m.versionWrite++; m.compares += n.readers; } }
+        vals[n.idx] = v; this.last[n.idx] = full; ran.add(n.id);
       }
-      act[INDEX.get(n.id)] = run ? 1 : 2;
+      act[n.idx] = run ? 1 : 2;
     }
     if (S === 'inc') for (const [g] of MOTION_GROUPS) { m.visits += 2; m.cacheCheck += GROUP_FUNCS.get(g).length; }
     if (S === 'macro') {
@@ -1142,7 +1205,7 @@ class MotionGraphRun {
         if (GROUP_FUNCS.get(g).some((n) => ran.has(n.id))) { m.visits++; m.cacheCheck += GROUP_FUNCS.get(g).length; }
       }
     }
-    const c = SINKS.map(([, id]) => this.val.get(id));
+    const c = SINK_IDX.map((k) => vals[k]);
     c.forEach((v, i) => {
       const changed = !this.prevOut || !same(this.prevOut[i], v);
       if (S === 'compute' || S === 'full') { m.detachedPublish++; m.writes++; }
@@ -1155,15 +1218,56 @@ class MotionGraphRun {
   }
 }
 
-// What the statechart, its async leaves and the prompt cost a design at each tick.
+// ---- the async side: every wait is a leaf polled at the base clock ---------------------------
+// A poll is a module call that answers Running until its work is done, and it reads its arguments again at
+// every poll. What each leaf reads: {store keys}, @nodes and literals. A node read is a tick: a cache hit
+// that checks its arguments (detached), one version check (versioned cells), or a run (eager).
+const POLL_READS = { listen: ['{vad}', '{asr/words}'], judge: ['@round', '@said', '{asr/words}'], play: ['{reply/next}'], await: ['{reply/run}'], rag: ['{reply/utterance}'], recall: ['{reply/utterance}'], llm: ['@prompt'], tool: ['{reply/tool_call}'], tts: ['{reply/sentence}'], filler: [] };
+const NODE_READS = { emotion: ['{emotion/active}'], round: ['{conversation/round}'], said: ['{speech/spoken}'] };
+const SERVICES = ['rag', 'recall', 'llm', 'tool', 'tts', 'filler'];
+function readInto(m, S, r) {
+  if (r[0] === '{') { m.storeObserve++; m.compares++; return; }
+  if (r[0] !== '@') return;
+  const args = NODE_READS[r.slice(1)];
+  if (S === 'inc' || S === 'macro') { m.cacheCheck++; return; }
+  m.visits++; m.detachedEval++;
+  if (S === 'control') { m.calls++; m.detachedCall++; for (const a of args) readInto(m, S, a); }
+  else { m.compares += args.length; m.detachedCheck += args.length; }
+}
+function pollInto(m, S, leaf) {
+  m.visits++; m.calls++; m.module++; m.poll++;
+  for (const r of POLL_READS[leaf]) if (r !== '@prompt') readInto(m, S, r);
+}
+// The prompt, read by the llm at every poll. Cached, it compares its eight arguments and builds only when one
+// changed; eager (#257 as it stands), it reads them and builds again at every poll.
+function promptInto(m, S, cached, changed) {
+  if (S === 'inc' || S === 'macro') { m.cacheCheck++; if (changed) { m.visits++; m.calls++; m.module++; m.prompt++; } return; }
+  m.visits++; m.detachedEval++;
+  for (const a of PROMPT_ARGS) if (a[0] === '@') readInto(m, S, a);
+  if (cached && !changed) { m.compares += PROMPT_ARGS.length; m.detachedCheck += PROMPT_ARGS.length; return; }
+  if (cached) { m.compares++; m.detachedCheck++; } else for (const a of PROMPT_ARGS) if (a[0] === '{') readInto(m, S, a);
+  m.calls++; m.detachedCall++; m.prompt++;
+  if (S === 'full') m.fullNode++;
+}
+const promptCached = (design) => !(design.strategy === 'control' && !design.promptCache);
+// The ticks a call is in flight, from the tick it starts to the last before it ends.
+function laneTicks(r, n) { const i0 = Math.max(0, Math.ceil(r.t0 / DT - 1e-6)); return [i0, r.lane === 'remember' ? i0 : Math.min(n - 1, Math.ceil(r.t1 / DT - 1e-6) - 1)]; }
+function laneIndex(rec) {
+  const n = rec.frames.length, at = Array.from({ length: n }, () => new Set());
+  for (const r of rec.lanes) {
+    if (!r.run || !/^(rag|recall|llm|tool|tts|judge|filler|remember)$/.test(r.lane)) continue;
+    const [i0, i1] = laneTicks(r, n);
+    for (let i = i0; i <= i1; i++) at[i].add(`${r.run}:${r.lane}`);
+  }
+  return at;
+}
 function controlContext(base) {
-  const n = base.frames.length, active = Array.from({ length: n }, () => []), alive = new Uint8Array(n), prompt = new Array(n).fill(null);
-  const llmRound = new Map();
+  const n = base.frames.length, laneAt = base.laneAt || laneIndex(base), prompt = new Array(n).fill(null), llmRound = new Map();
   for (const r of base.lanes) {
-    if (!/^(rag|recall|llm|tool|tts)$/.test(r.lane) || !r.run) continue;
-    const round = r.lane === 'llm' ? (llmRound.set(r.run, (llmRound.get(r.run) || 0) + 1), llmRound.get(r.run)) : 0;
-    const i0 = Math.max(0, Math.ceil(r.t0 / DT - 1e-6)), i1 = Math.min(n - 1, Math.ceil(r.t1 / DT - 1e-6) - 1);
-    for (let i = i0; i <= i1; i++) { active[i].push(r.lane); alive[i] = 1; if (r.lane === 'llm') prompt[i] = { run: r.run, round }; }
+    if (r.lane !== 'llm' || !r.run) continue;
+    llmRound.set(r.run, (llmRound.get(r.run) || 0) + 1);
+    const round = llmRound.get(r.run), [i0, i1] = laneTicks(r, n);
+    for (let i = i0; i <= i1; i++) prompt[i] = { run: r.run, round };
   }
   let sig = '';
   for (let i = 0; i < n; i++) {
@@ -1171,32 +1275,32 @@ function controlContext(base) {
     const f = base.frames[i], top = f.emotions.slice().sort((a, b) => b[1] - a[1])[0], s = `${prompt[i].run}:${prompt[i].round}:${top ? top[0] : 'neutral'}`;
     prompt[i].changed = s !== sig; sig = s;
   }
-  return { active, alive, prompt };
+  return { laneAt, prompt };
 }
-function controlCost(design, f, prevKeys, ctx, i) {
-  const S = design.strategy === 'control' && design.promptCache ? 'control-cache' : design.strategy, m = blankMetrics();
-  const conv = { listening: [3, 1], judging: [5, 1], speaking: [10, 1], thinking: [12, 1] }[f.conv] || [7, 0];
-  m.visits += 2 + conv[0] + 1 + (f.att === 'present' || f.att === 'engaged' ? 3 : 5);
-  let polls = conv[1];
-  const lanes = ctx.active[i];
-  if (ctx.alive[i]) m.visits++;
-  m.visits += lanes.length; polls += lanes.length;
-  m.calls += polls; m.module += polls;
-  const pr = ctx.prompt[i];
-  if (pr) {
-    if (S === 'compute' || S === 'full') {
-      m.visits++; m.detachedEval++;
-      if (pr.changed) { m.compares++; m.detachedCheck++; m.calls++; m.detachedCall++; m.prompt++; if (S === 'full') m.fullNode++; }
-      else { m.compares += 8; m.detachedCheck += 8; }
-    } else if (S === 'inc' || S === 'macro') { m.cacheCheck++; if (pr.changed) { m.visits++; m.calls++; m.module++; m.prompt++; } }
-    else if (S === 'control-cache') { m.visits++; m.detachedEval++; if (pr.changed) { m.compares++; m.detachedCheck++; m.calls++; m.detachedCall++; m.prompt++; } else { m.compares += 8; m.detachedCheck += 8; } }
-    else { m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; m.prompt++; }
+// What the statechart, the polls and the prompt cost a design at one tick.
+function controlWork(design, f, prevKeys, ctx, i) {
+  const S = design.strategy, sc = blankMetrics(), polls = blankMetrics(), prompt = blankMetrics();
+  const laneOn = (lane) => ctx.laneAt[i].has(`${f.runId}:${lane}`);
+  // The root, and the nodes its tick reaches in the conversation, the attention and the reply run. A conversation
+  // action reached is a poll; the reply run's leaves are polled while their calls are in flight.
+  sc.visits++;
+  for (const part of ['conversation', 'attention', 'reply']) {
+    for (const [uid, s] of treeStatus(part, f, laneOn)) {
+      const n = TREE_NODE.get(uid);
+      if (n.k === 'action') { if (part === 'conversation' && s === 'R') pollInto(polls, S, n.fn.split('.').pop()); continue; }
+      sc.visits++;
+      if (n.k === 'check') sc.compares++;
+    }
   }
+  for (const lane of SERVICES) if (laneOn(lane)) pollInto(polls, S, lane);
+  if (laneOn('judge') && f.conv !== 'judging') pollInto(polls, S, 'judge');   // its follow-ups, after the verdict
+  if (laneOn('llm')) promptInto(prompt, S, promptCached(design), ctx.prompt[i].changed);
   const changed = prevKeys ? CONTROL_KEYS.filter((k) => !same(prevKeys[k], f.keys[k])).length : CONTROL_KEYS.length;
-  m.storeWrite += changed; m.writes += changed;
-  if (S === 'inc' || S === 'macro') { m.storeObserve += 6; m.compares += 6; }
-  return m;
+  sc.storeWrite += changed; sc.writes += changed;
+  if (S === 'inc' || S === 'macro') { sc.storeObserve += 6; sc.compares += 6; }
+  return { statechart: sc, polls, prompt };
 }
+const workOf = (m) => ({ ticks: m.visits, execs: m.calls, checks: m.compares + m.cacheCheck });
 function designRecording(design, base) {
   const run = new MotionGraphRun(design.strategy, base.items), ctx = controlContext(base);
   const frames = [], cost = [], acts = [];
@@ -1204,17 +1308,28 @@ function designRecording(design, base) {
   for (let i = 0; i < base.frames.length; i++) {
     const f = base.frames[i], k = design.lag ? (i >= design.lag ? base.frames[i - design.lag].keys : INITIAL_KEYS) : f.keys, face = faceAt(f.t);
     const input = { 'face/x': face.x, 'face/y': face.y, 'attention/state': k.att, 'attention/since': k.attSince, 'conversation/state': k.conv, 'conversation/sub': k.sub, 'thinking/since': k.thinkSince, 'emotion/active': k.active, 'speech/item': k.item, 'speech/playhead': k.playhead, 'speech/playing': k.playing, 'gesture/start': k.gStart };
-    const out = run.tick(input, f.t), cm = controlCost(design, f, prevKeys, ctx, i);
+    const out = run.tick(input, f.t), areas = { ...controlWork(design, f, prevKeys, ctx, i), motion: out.m };
     prevKeys = f.keys;
-    const m = blankMetrics();
-    for (const key in m) m[key] = (out.m[key] || 0) + (cm[key] || 0);
+    const m = blankMetrics(), w = {};
+    for (const [a] of AREAS) { const am = areas[a]; w[a] = workOf(am); for (const key of METRIC_KEYS) m[key] += am[key]; }
     m.native = Math.max(0, m.visits - m.module - m.detachedEval);
     const v = out.val;
     frames.push({ ...f, c: out.c, posture: POSE_KEYS.map((key) => v.get(`p_${key}`)), target: { x: v.get('target_x'), y: v.get('target_y') }, eyeGaze: { x: v.get('eye_tx'), y: v.get('eye_ty') }, glance: v.get('glance_up') });
-    cost.push({ m, us: modeledUs(m) });
+    cost.push({ w, all: workTotals(w), builds: m.prompt, m, us: modeledUs(m) });
     acts.push(out.act);
   }
   return { ...base, frames, cost, acts, design };
+}
+// One second waiting on the llm: a poll at every tick, each reading the prompt, unchanged. Plain code checks
+// whether its call is done; a design polls the leaf and reads what it depends on.
+function llmSecond(design) {
+  const n = Math.round(1 / DT);
+  if (!design) return { ticks: n, execs: 0, checks: n, builds: 0, us: 0 };
+  const m = blankMetrics(), S = design.strategy;
+  pollInto(m, S, 'llm'); promptInto(m, S, promptCached(design), false);
+  for (const k in m) m[k] *= n;
+  m.native = Math.max(0, m.visits - m.module - m.detachedEval);
+  return { ...workOf(m), builds: m.prompt, us: modeledUs(m) };
 }
 function bestLag(rec, ref, channel, during) {
   let best = { k: 0, err: Infinity };
@@ -1234,8 +1349,6 @@ function designScore(rec, ref) {
     { ok: null, title: 'Against the reference', detail: diff < 1e-9 ? 'the same nine channels at every tick' : `largest difference ${diff.toFixed(3)}; what the statechart drives arrives ${rec.design.lag} tick late`, at: diff < 1e-9 ? null : at },
     { ok: ms <= 45, title: 'Mouth on the audio', detail: ms ? `${ms} ms behind the playhead, under the 45 ms people notice` : 'on the playhead at every tick' },
   );
-  const total = rec.cost.reduce((s, c) => s + c.us, 0) / rec.cost.length, peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
-  items.push({ ok: null, title: 'Modeled cost', detail: `${total.toFixed(0)} µs a tick on average, ${peak.us.toFixed(0)} µs at ${rec.frames[peak.i].t.toFixed(1)} s`, at: rec.frames[peak.i].t });
   return items;
 }
 
@@ -1299,9 +1412,8 @@ const TREES = {
 };
 const PROMPT_ARGS = ['persona', 'tools', '@emotion', '{reply/memories}', '{reply/docs}', '{reply/tool_results}', '@round', '{reply/utterance}'];
 let treeIds = 0;
-(function number(n) { n.uid = ++treeIds; n.children.forEach(number); })(TREES.conversation);
-(function number(n) { n.uid = ++treeIds; n.children.forEach(number); })(TREES.attention);
-(function number(n) { n.uid = ++treeIds; n.children.forEach(number); })(TREES.reply);
+const TREE_NODE = new Map();
+for (const root of [TREES.conversation, TREES.attention, TREES.reply]) (function number(n) { n.uid = ++treeIds; TREE_NODE.set(n.uid, n); n.children.forEach(number); })(root);
 // One tick of a part: each node's status, or none when the tick does not reach it.
 function treeStatus(part, f, laneOn) {
   const out = new Map();
@@ -1472,7 +1584,7 @@ const PARTS = [
   { id: 'conversation', label: 'Conversation' }, { id: 'attention', label: 'Attention' }, { id: 'reply', label: 'Reply run' },
   ...MOTION_GROUPS.map(([id, label]) => ({ id, label, motion: true })),
 ];
-if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS };
+if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext };
 </script>
 
 <script>
@@ -1492,7 +1604,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const sv = (tag, attrs = {}, text) => { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
 
 const IMPLS = [
-  { id: 'reference', name: 'Reference', note: 'The spec as plain code: an explicit state machine, plain motion functions and a scheduler over the mock services. Every design is checked against it.', flags: {} },
+  { id: 'reference', name: 'Reference', note: 'The spec as plain code: an explicit state machine, plain motion functions and a scheduler that polls the mock services at each tick. Every design is checked against it, and tracer calls count its work the way the designs count theirs.', flags: {} },
   { id: 'foil', name: 'Naive foil', note: 'Drops the reply on any cut-in, replaces emotions instead of blending them, and reads the previous tick’s head for the eyes: three broken rules for the scorecard to catch.', flags: { halts: true, replaceEmotion: true, staleEyes: true } },
   ...DESIGNS.map((d) => ({ id: d.id, name: d.name, note: d.note, design: d })),
 ];
@@ -1509,15 +1621,6 @@ const runColor = (id) => (id >= 1 && id <= 3 ? `var(--run-${id})` : 'var(--run-x
 const TABS = [['graph', 'Graph'], ['outline', 'As it runs'], ['stored', 'Stored form']];
 
 const cache = new Map();
-function laneIndex(rec) {
-  const n = rec.frames.length, at = Array.from({ length: n }, () => new Set());
-  for (const r of rec.lanes) {
-    if (!r.run || !/^(rag|recall|llm|tool|tts|filler|remember)$/.test(r.lane)) continue;
-    const i0 = Math.max(0, Math.ceil(r.t0 / DT - 1e-6)), i1 = r.lane === 'remember' ? i0 : Math.min(n - 1, Math.ceil(r.t1 / DT - 1e-6) - 1);
-    for (let i = i0; i <= i1; i++) at[i].add(`${r.run}:${r.lane}`);
-  }
-  return at;
-}
 function recordingFor(id) {
   if (!cache.has(id)) {
     const impl = IMPLS.find((x) => x.id === id);
@@ -1529,7 +1632,7 @@ function recordingFor(id) {
   }
   return cache.get(id);
 }
-const S = { T: 16.6, playing: false, speed: 1, loop: true, pick: { a: 'compute', b: 'control' }, ghost: { a: true, b: true }, tab: 'graph', part: 'mouth' };
+const S = { T: 16.6, playing: false, speed: 1, loop: true, pick: { a: 'compute', b: 'control' }, ghost: { a: true, b: true }, tab: 'graph', part: 'mouth', measure: 'us' };
 const sides = {};
 const tip = document.getElementById('tip');
 const frameAt = (T) => clamp(Math.round(T / DT), 0, N - 1);
@@ -1609,13 +1712,15 @@ function mount(key, costOnly = false) {
   side.repTitle = el('h3'); side.repNote = el('p', { class: 'rep-note' }); side.view = el('div', { class: 'view' });
   side.resetLayout = el('button', { type: 'button', hidden: true, onclick: () => { moved.delete(`${side.rec.impl.id}|${S.part}`); buildRep(side); render(); } }, 'Reset layout');
   side.costBox = el('div', { class: 'svgbox' }); side.costStats = el('div', { class: 'cost-stats' }); side.costLegend = el('div', { class: 'legend' });
+  side.measureSeg = el('div', { class: 'seg small', role: 'group', 'aria-label': 'What the chart shows' }, MEASURES.map(([k, label]) => el('button', { type: 'button', 'data-k': k, onclick: () => { S.measure = k; for (const s of Object.values(sides)) if (s.rec) buildCost(s); render(); } }, label)));
+  side.workTable = el('table', { class: 'work' }); buildWorkTable(side);
   side.stripBox = el('div', { class: 'svgbox' }); side.stripLegend = el('div', { class: 'legend' });
   side.plotsBox = el('div'); side.values = el('div', { class: 'values' });
   side.scoreList = el('ul', { class: 'score' });
   t.append(
     el('section', { class: 'block' }, el('h3', { text: 'What it said' }), side.transcript),
     el('section', { class: 'block' }, el('div', { class: 'rep-head' }, side.repTitle, side.resetLayout), side.view, side.repNote),
-    el('section', { class: 'block' }, el('h3', { text: 'Cost of each tick' }), side.costBox, side.costLegend, side.costStats),
+    el('section', { class: 'block' }, el('div', { class: 'cost-head' }, el('h3', { text: 'Cost of each tick' }), side.measureSeg), side.costBox, side.costLegend, side.workTable, side.costStats),
     el('section', { class: 'block' }, el('h3', { text: 'Services' }), side.stripBox, side.stripLegend),
     el('section', { class: 'block' }, el('h3', { text: 'Channels' }), side.plotsBox, side.values),
     el('section', { class: 'block' }, el('h3', { text: 'Scorecard' }), side.scoreList),
@@ -1829,7 +1934,7 @@ function liveRep(side, i) {
     for (const { g, n, badge } of side.gnodes.values()) {
       let cls = '';
       if (n.tree) { const s = statuses.get(n.tree.uid); cls = s ? `st-${s}` : 'st-none'; if (badge) badge.textContent = s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
-      else if (n.data) cls = rec.cost && rec.cost[i].m.prompt ? 'ran' : laneOn('llm') ? 'cached' : 'st-none';
+      else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'cached' : 'st-none';
       else if (motion) cls = motionClass(n.ref || n.id);
       g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}`);
     }
@@ -1840,7 +1945,7 @@ function liveRep(side, i) {
       if (id !== undefined && id !== null) {
         if (motion) cls = motionClass(id);
         else if (typeof id === 'number') { const s = statuses.get(id); cls = s ? `st-${s}` : 'dim'; }
-        else if (id === 'prompt') cls = rec.cost && rec.cost[i].m.prompt ? 'ran' : '';
+        else if (id === 'prompt') cls = rec.cost[i].builds ? 'ran' : '';
       }
       span.className = cls;
     }
@@ -1848,48 +1953,81 @@ function liveRep(side, i) {
 }
 
 // ---- the cost of each tick -----------------------------------------------------------
-function buildCost(side) {
-  const rec = side.rec;
-  if (!rec.cost) {
-    side.costBox.replaceChildren(el('p', { class: 'planned', text: 'Plain code: there is no executor to model. Pick a design to see what each tick costs on it.' }));
-    side.costStats.replaceChildren(); side.costLegend.replaceChildren(); side.costNow = null; return;
+// Every implementation counts its work at each tick of the 100 Hz clock: node ticks, executions and checks,
+// by area. The designs' microseconds are modeled from their operations; plain code's are its own work only.
+const MEASURES = [['us', 'µs'], ['ticks', 'node ticks'], ['execs', 'executions'], ['checks', 'checks']];
+const HZ = Math.round(1 / DT);
+const measureOf = (c, k) => (k === 'us' ? c.us : c.all[k]);
+const num = (x) => (x >= 1e4 ? `${(x / 1000).toFixed(0)}k` : x >= 1000 ? `${(x / 1000).toFixed(1)}k` : x >= 100 || Number.isInteger(x) ? x.toFixed(0) : x.toFixed(1));
+const usText = (us) => (us >= 1e4 ? `${(us / 1000).toFixed(0)} ms` : us >= 1000 ? `${(us / 1000).toFixed(1)} ms` : `${us.toFixed(0)} µs`);
+const niceMax = (v) => { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; };
+const summaries = new WeakMap();
+function costSummary(rec) {
+  if (!summaries.has(rec)) {
+    const n = rec.cost.length, avg = (f) => rec.cost.reduce((s, c) => s + f(c), 0) / n;
+    const peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
+    summaries.set(rec, { us: avg((c) => c.us), ticks: avg((c) => c.all.ticks), execs: avg((c) => c.all.execs), checks: avg((c) => c.all.checks), peak, builds: rec.cost.reduce((s, c) => s + c.builds, 0), llm: llmSecond(rec.design || null) });
   }
+  return summaries.get(rec);
+}
+const workLine = (c) => `${c.all.ticks} node ticks · ${c.all.execs} executions · ${c.all.checks} checks${c.builds ? ' · a prompt build' : ''}`;
+function buildCost(side) {
+  const rec = side.rec, key = S.measure, log = key === 'us', label = MEASURES.find(([k]) => k === key)[1];
+  side.measureSeg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === key)));
   const W = widthOf(side.costBox), H = 132, left = 44, right = 8, top = 8, bottom = 18, pw = W - left - right, ph = H - top - bottom;
-  const peer = other(side) && other(side).rec && other(side).rec.cost && other(side).rec !== rec ? other(side).rec : null;
-  const hi = Math.max(3000, ...rec.cost.map((c) => c.us), ...(peer ? peer.cost.map((c) => c.us) : [])), lo = 10;
-  const x = (t) => left + (t / RUN_END) * pw, y = (us) => top + (1 - (Math.log10(clamp(us, lo, hi)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * ph;
-  const svg = sv('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Modeled microseconds of each tick on ${rec.impl.name}` });
-  for (const v of [10, 100, 1000]) { svg.append(sv('line', { class: 'grid', x1: left, x2: left + pw, y1: y(v), y2: y(v) })); svg.append(sv('text', { x: left - 4, y: y(v) + 3, 'text-anchor': 'end' }, v >= 1000 ? `${v / 1000} ms` : `${v} µs`)); }
+  const peer = other(side) && other(side).rec && other(side).rec !== rec ? other(side).rec : null;
+  let hi = 0;
+  for (const r of peer ? [rec, peer] : [rec]) for (const c of r.cost) hi = Math.max(hi, measureOf(c, key));
+  let y, grid;
+  if (log) { hi = Math.max(3000, hi); const lo = 10, L = (v) => Math.log10(clamp(v, lo, hi)); y = (v) => top + (1 - (L(v) - L(lo)) / (L(hi) - L(lo))) * ph; grid = [10, 100, 1000].map((v) => [v, usText(v)]); }
+  else { hi = niceMax(hi); y = (v) => top + (1 - v / hi) * ph; grid = [0, hi / 2, hi].map((v) => [v, num(v)]); }
+  const x = (t) => left + (t / RUN_END) * pw;
+  const svg = sv('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${log ? 'Modeled microseconds' : label} of each tick on ${rec.impl.name}` });
+  for (const [v, text] of grid) { svg.append(sv('line', { class: v === 0 ? 'axis' : 'grid', x1: left, x2: left + pw, y1: y(v), y2: y(v) })); svg.append(sv('text', { x: left - 4, y: y(v) + 3, 'text-anchor': 'end' }, text)); }
   for (let s = 0; s <= RUN_END; s += 10) svg.append(sv('text', { x: x(s), y: H - 4, 'text-anchor': s === 0 ? 'start' : 'middle' }, `${s} s`));
-  const path = (list) => list.map((c, i) => `${i ? 'L' : 'M'}${x(i * DT).toFixed(1)} ${y(c.us).toFixed(1)}`).join('');
+  const path = (list) => list.map((c, i) => `${i ? 'L' : 'M'}${x(i * DT).toFixed(1)} ${y(measureOf(c, key)).toFixed(1)}`).join('');
   if (peer) { const p = sv('path', { d: path(peer.cost), fill: 'none', 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }); p.style.stroke = 'var(--faint)'; svg.append(p); }
   const main = sv('path', { d: path(rec.cost), fill: 'none', 'stroke-width': 1.6, 'stroke-linejoin': 'round' }); main.style.stroke = 'var(--run-1)'; svg.append(main);
   side.costNow = sv('line', { class: 'now', x1: left, x2: left, y1: top, y2: top + ph }); svg.append(side.costNow); side.costX = x;
   const hit = sv('rect', { x: left, y: 0, width: pw, height: H, fill: 'transparent' }); svg.append(hit);
   const hover = sv('line', { class: 'hover', x1: left, x2: left, y1: top, y2: top + ph, visibility: 'hidden' }); svg.append(hover);
   const readout = (ev) => {
-    const b = svg.getBoundingClientRect(), px = (ev.clientX - b.left) * (W / b.width), t = clamp(((px - left) / pw) * RUN_END, 0, RUN_END), i = frameAt(t), c = rec.cost[i];
+    const b = svg.getBoundingClientRect(), px = (ev.clientX - b.left) * (W / b.width), t = clamp(((px - left) / pw) * RUN_END, 0, RUN_END), i = frameAt(t);
     hover.setAttribute('x1', x(i * DT)); hover.setAttribute('x2', x(i * DT)); hover.setAttribute('visibility', 'visible');
-    showTip(`<b>${(i * DT).toFixed(2)} s</b><div class="row"><i style="background:var(--run-1)"></i><b>${c.us.toFixed(0)} µs</b> ${escapeHtml(rec.impl.name)}</div>${peer ? `<div class="row"><i style="background:var(--faint)"></i><b>${peer.cost[i].us.toFixed(0)} µs</b> ${escapeHtml(peer.impl.name)}</div>` : ''}<div>${c.m.calls} calls · ${c.m.visits} visits · ${c.m.compares + c.m.cacheCheck} checks${c.m.prompt ? ` · ${c.m.prompt} prompt build` : ''}</div>`, ev);
+    const row = (r, color) => { const c = r.cost[i]; return `<div class="row"><i style="background:${color}"></i><b>${usText(c.us)}</b> ${escapeHtml(r.impl.name)}</div><div class="sub">${workLine(c)}</div>`; };
+    showTip(`<b>${(i * DT).toFixed(2)} s</b>${row(rec, 'var(--run-1)')}${peer ? row(peer, 'var(--faint)') : ''}`, ev);
   };
   hit.addEventListener('pointermove', readout); hit.addEventListener('pointerenter', readout);
   hit.addEventListener('pointerleave', () => { hover.setAttribute('visibility', 'hidden'); hideTip(); });
   side.costBox.replaceChildren(svg);
-  side.costLegend.replaceChildren(el('span', {}, el('i', { class: 'line', style: 'background:var(--run-1)' }), rec.impl.name), peer ? el('span', {}, el('i', { class: 'line', style: 'background:var(--faint)' }), `${peer.impl.name}, the other side`) : null, el('span', { text: 'log scale; a prompt build is 2 ms of work' }));
-  const avg = (f) => rec.cost.reduce((s, c) => s + f(c), 0) / rec.cost.length;
-  const peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
-  const prompts = rec.cost.reduce((s, c) => s + c.m.prompt, 0);
-  const stat = (k, v, a) => el('div', {}, el('span', { class: 'k', text: k }), el('span', { class: 'v', text: v }), a ? el('span', { class: 'a', text: a }) : null);
-  side.costNow2 = el('span', { class: 'v', text: '' });
+  side.costLegend.replaceChildren(el('span', {}, el('i', { class: 'line', style: 'background:var(--run-1)' }), rec.impl.name), peer ? el('span', {}, el('i', { class: 'line', style: 'background:var(--faint)' }), `${peer.impl.name}, the other side`) : null,
+    el('span', { text: log ? `log scale; ${rec.design ? 'modeled' : 'plain code: its own work only, with no executor'}; a call is 2 µs of work, a prompt build 2 ms` : `${label} in each 10 ms tick` }));
+  const s = costSummary(rec);
+  const stat = (k, v, a, wide) => el('div', { class: wide ? 'wide' : '' }, el('span', { class: 'k', text: k }), el('span', { class: 'v', text: v }), a ? el('span', { class: 'a', text: a }) : null);
   side.costStats.replaceChildren(
-    el('div', {}, el('span', { class: 'k', text: 'this tick' }), side.costNow2, el('span', { class: 'a', text: 'modeled' })),
-    stat('average', `${avg((c) => c.us).toFixed(0)} µs`, 'a tick'),
-    stat('peak', `${peak.us.toFixed(0)} µs`, `at ${rec.frames[peak.i].t.toFixed(1)} s`),
-    stat('calls', avg((c) => c.m.calls).toFixed(1), 'a tick, average'),
-    stat('visits', avg((c) => c.m.visits).toFixed(1), 'a tick, average'),
-    stat('checks', avg((c) => c.m.compares + c.m.cacheCheck).toFixed(1), 'a tick, average'),
-    stat('prompt builds', String(prompts), `${(prompts * PROMPT_US / 1000).toFixed(0)} ms of work in all`),
+    stat('average tick', usText(s.us), `${usText(s.us * HZ)} a second`),
+    stat('peak tick', usText(s.peak.us), `at ${rec.frames[s.peak.i].t.toFixed(2)} s`),
+    stat('node ticks', num(s.ticks), `a tick · ${num(s.ticks * HZ)} a second`),
+    stat('executions', num(s.execs), `a tick · ${num(s.execs * HZ)} a second`),
+    stat('checks', num(s.checks), `a tick · ${num(s.checks * HZ)} a second`),
+    stat('prompt builds', String(s.builds), `${(s.builds * PROMPT_US / 1000).toFixed(0)} ms of work in all`),
+    stat('waiting 1 s on the llm', `${num(s.llm.ticks)} · ${num(s.llm.execs)} · ${num(s.llm.checks)}`, `node ticks · executions · checks · ${usText(s.llm.us)}`, true),
   );
+}
+// This tick's work by area: rebuilt with the side, filled at every frame.
+function buildWorkTable(side) {
+  side.workCaption = el('caption');
+  side.workCells = {};
+  const cells = (k) => (side.workCells[k] = [0, 1, 2].map(() => el('td')));
+  side.workTable.replaceChildren(side.workCaption,
+    el('thead', {}, el('tr', {}, ['this tick', 'node ticks', 'executions', 'checks'].map((h) => el('th', { scope: 'col', text: h })))),
+    el('tbody', {}, AREAS.map(([a, label]) => el('tr', {}, el('td', { text: label }), cells(a))), el('tr', { class: 'all' }, el('td', { text: 'all' }), cells('all'))));
+}
+function renderWork(side, i) {
+  const c = side.rec.cost[i];
+  side.workCaption.textContent = `At ${(i * DT).toFixed(2)} s: ${usText(c.us)}${side.rec.design ? ', modeled' : ', its own work'}`;
+  for (const [a] of AREAS) ['ticks', 'execs', 'checks'].forEach((k, j) => { side.workCells[a][j].textContent = c.w[a][k]; });
+  ['ticks', 'execs', 'checks'].forEach((k, j) => { side.workCells.all[j].textContent = c.all[k]; });
 }
 
 // ---- the services strip -------------------------------------------------------
@@ -2005,7 +2143,7 @@ function renderSide(side, i) {
   for (const [name, w] of f.emotions.slice().sort((a, b) => b[1] - a[1])) chips.push(el('span', { class: 'chip' }, name, el('span', { class: 'w' }, el('i', { style: `width:${Math.round(w * 100)}%` }))));
   if (f.think > 0.02) chips.push(el('span', { class: 'chip' }, 'thinking', el('span', { class: 'w' }, el('i', { style: `width:${Math.round(f.think * 100)}%` }))));
   if (f.gesture) chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'clip' }), f.gesture));
-  if (side.rec.cost) chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'cost' }), `${side.rec.cost[i].us.toFixed(0)} µs`));
+  chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'tick' }), usText(side.rec.cost[i].us)));
   side.chips.replaceChildren(...chips);
   for (const { li, s } of side.rows) {
     const end = s.end ?? RUN_END, paused = s.pauses.some(([a, b]) => f.t >= a && f.t < (b ?? RUN_END));
@@ -2013,7 +2151,8 @@ function renderSide(side, i) {
   }
   const sx = side.stripX(f.t); side.stripNow.setAttribute('x1', sx); side.stripNow.setAttribute('x2', sx);
   const px = side.plotX(f.t); for (const ln of side.plotNow) { ln.setAttribute('x1', px); ln.setAttribute('x2', px); }
-  if (side.costNow) { const cx = side.costX(f.t); side.costNow.setAttribute('x1', cx); side.costNow.setAttribute('x2', cx); side.costNow2.textContent = `${side.rec.cost[i].us.toFixed(0)} µs`; }
+  const cx = side.costX(f.t); side.costNow.setAttribute('x1', cx); side.costNow.setAttribute('x2', cx);
+  renderWork(side, i);
   f.c.forEach((v, j) => { side.valueCells[j].textContent = v.toFixed(2); });
   liveRep(side, i);
 }
@@ -2040,24 +2179,32 @@ function buildRepControls() {
   document.querySelector('.tabs').before(bar);
 }
 
-// ---- every design at a glance -------------------------------------------------------------
+// ---- every implementation at a glance -------------------------------------------------------
 function buildGlance() {
-  const ref = recordingFor('reference');
-  const rows = DESIGNS.map((d) => {
-    const rec = recordingFor(d.id), n = rec.cost.length, avg = (f) => rec.cost.reduce((s, c) => s + f(c), 0) / n;
-    const peak = Math.max(...rec.cost.map((c) => c.us)), prompts = rec.cost.reduce((s, c) => s + c.m.prompt, 0);
-    const fails = rec.score.filter((x) => x.ok === false).length;
-    let diff = 0; rec.frames.forEach((f, i) => f.c.forEach((v, j) => { diff = Math.max(diff, Math.abs(v - ref.frames[i].c[j])); }));
-    return { d, cells: [d.name, diff < 1e-9 ? 'same' : `${d.lag} tick late`, `${avg((c) => c.us).toFixed(0)} µs`, `${peak.toFixed(0)} µs`, avg((c) => c.m.calls).toFixed(1), avg((c) => c.m.visits).toFixed(1), avg((c) => c.m.compares + c.m.cacheCheck).toFixed(1), String(prompts), String(fails)] };
-  });
-  const head = ['design', 'against the reference', 'average tick', 'peak tick', 'calls', 'visits', 'checks', 'prompt builds', 'failed checks'];
-  const tbody = el('tbody', {}, rows.map((r) => (r.tr = el('tr', {}, r.cells.map((c) => el('td', { text: c }))))));
-  const box = el('section', { class: 'glance', 'aria-label': 'Every design at a glance' },
-    el('h2', { text: 'Every design at a glance' }),
-    el('p', { text: 'The whole run, modeled with the NGBT spectrum’s per-operation costs fitted to the Rust benches, plus 2 µs of work a call and 2 ms a prompt build. Calls, visits and checks are averages a tick.' }),
-    el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h) => el('th', { text: h })))), tbody)));
+  const head = ['implementation', 'against the reference', 'average tick', 'peak tick', 'node ticks', 'executions', 'checks', '1 s on the llm', 'its cost', 'prompt builds', 'failed checks'];
+  const rows = IMPLS.map((impl) => ({ impl, tr: el('tr', {}, el('td', { text: impl.name }), head.slice(1).map(() => el('td', { text: '…' }))) }));
+  const box = el('section', { class: 'glance', 'aria-label': 'Every implementation at a glance' },
+    el('h2', { text: 'Every implementation at a glance' }),
+    el('p', { text: `The whole run on a ${HZ} Hz clock, where waiting is polling: every leaf that waits is polled at each tick, and reads what it depends on again. A tick’s node ticks are every node it steps through, polls and what they read included; executions are what runs; checks are what it reads or compares to decide. All three are averages a tick. “1 s on the llm” is one second of that wait: ${HZ} polls, as node ticks · executions · checks, and their cost.` }),
+    el('p', { text: 'The designs’ cost is modeled with the NGBT spectrum’s per-operation rates, fitted to the Rust benches, plus 2 µs of work a call and 2 ms a prompt build; a poll that answers Running pays its module call only. The plain code pays for its own work and nothing else: at every tick it runs each motion function its branches need, changed or not, so at 2 µs a call it costs more than the designs that skip the unchanged ones.' }),
+    el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h) => el('th', { scope: 'col', text: h })))), el('tbody', {}, rows.map((r) => r.tr)))));
   document.querySelector('.traces').after(box);
-  return () => rows.forEach((r) => r.tr.classList.toggle('picked', r.d.id === S.pick.a || r.d.id === S.pick.b));
+  const ref = () => recordingFor('reference');
+  const fillRow = ({ impl, tr }) => {
+    const rec = recordingFor(impl.id), s = costSummary(rec);
+    let against = 'itself';
+    if (impl.id !== 'reference') {
+      let diff = 0; rec.frames.forEach((f, i) => f.c.forEach((v, j) => { diff = Math.max(diff, Math.abs(v - ref().frames[i].c[j])); }));
+      against = !impl.design ? 'its own, broken' : diff < 1e-9 ? 'same' : `${impl.design.lag} tick late`;
+    }
+    const cells = [against, usText(s.us), usText(s.peak.us), num(s.ticks), num(s.execs), num(s.checks), `${num(s.llm.ticks)} · ${num(s.llm.execs)} · ${num(s.llm.checks)}`, usText(s.llm.us), String(s.builds), String(rec.score.filter((x) => x.ok === false).length)];
+    cells.forEach((c, j) => { tr.children[j + 1].textContent = c; });
+  };
+  // One row at a time, after the page has drawn: a design takes a moment to run 40 s at 100 Hz.
+  let k = 0;
+  const next = () => { if (k < rows.length) { fillRow(rows[k++]); setTimeout(next, 0); } };
+  setTimeout(next, 0);
+  return () => rows.forEach((r) => r.tr.classList.toggle('picked', r.impl.id === S.pick.a || r.impl.id === S.pick.b));
 }
 let markGlance = () => {};
 

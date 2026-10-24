@@ -316,8 +316,8 @@ judge 2     continue → {happy} "And yes, there's shade by the lake."
 
 ## 7. Scripted run
 
-About 39 s at 30 Hz, ending as it began, so the example loops. The times are
-rounded; the reference computes them from the TTS rule (§6).
+About 39 s on a 100 Hz clock, ending as it began, so the example loops. The
+times are rounded; the reference computes them from the TTS rule (§6).
 
 1. **0–1.2 s, nobody.** Idle clip, wander, blinks, neutral.
 2. **1.2 s, a face appears.** The eyes lead, the head follows. At 4.7 a glance
@@ -359,8 +359,15 @@ rounded; the reference computes them from the TTS rule (§6).
 
 ## 8. Measures
 
-Beside each design's calls, visits, checks and modeled µs per tick:
-
+- **Work.** At each tick, every implementation counts its node ticks (every
+  node the tick steps through, polls and what they read included), its
+  executions (what runs) and its checks (what it reads or compares to
+  decide). They are split by area: the statechart, the async polls, the prompt
+  and the motion graph. The reference counts its own with tracer calls, and
+  the designs count theirs by their rules (§10). The modeled µs of each tick
+  comes from these counts.
+- **Waiting.** One second waiting on the llm: its 100 polls and what each
+  reads.
 - **Effects.** Per run: one rag and one recall; one prompt per LLM round; one
   tool call; one TTS per sentence. One judge per confirmed interruption. One
   filler line, from run 2.
@@ -390,13 +397,16 @@ download it and open it in a browser.
   the run: a cut-in, the cough, the face lost.
 - **Each side.** The robot, with a dashed ghost of the reference; live
   captions; the states; what it said; the service strip; the channels; the
-  cost of each tick; and the scorecard. A failed check jumps to its moment.
+  cost of each tick, charted as µs, node ticks, executions or checks, with
+  this tick's work by area; and the scorecard. A failed check jumps to its
+  moment.
 - **How each design holds it.** One part at a time, the same part on both
   sides: the conversation, attention and reply run, or one of the seven motion
   groups. Each is drawn as a graph, as a live outline, or as its stored form.
   Nodes show what ran this tick, what answered from its cache, and each tree
   node's status. A node can be dragged to untangle a graph, with a reset per part.
-- **Every design at a glance.** The whole run's numbers for all five designs.
+- **Every implementation at a glance.** The whole run's numbers for the
+  reference, the foil and the designs.
 - **The assets.** Every asset of §6, with the live ones following the left
   side: the postures showing, the prompts built, the memory written.
 - **The implementations.** The reference, the spec as plain code, which
@@ -441,20 +451,83 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 | #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion eager | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, rebuilt at every tick llm is polled | One graph per region and per group, joined by keys |
 | #257, prompt cached | #257, with #396's argument cache on the prompt alone, as #257's pull request suggests | A tick late | A lazy node with a cache, rebuilt when its arguments change | #257's graphs |
 
-What the bench shows over the whole run:
+### How the work is counted
+
+The bench runs on one clock at 100 Hz, and nothing in it is async: a wait is
+a leaf polled at every tick until its work is done. Each poll reads again
+what the leaf depends on. So a second of waiting on the llm is 100 polls of
+its leaf, and each poll reads the prompt. The prompt reads eight arguments,
+two of them nodes (the emotion and the round). On a design that answers from
+its caches, that second is 400 node ticks, 100 executions (the polls) and
+1,000 checks. On #257, which rebuilds the prompt at every poll, it is 400 node
+ticks, 400 executions and 100 prompt builds.
+
+- **The reference** counts with tracer calls in its own code:
+  - Each region it steps (the conversation, the attention, the emotions) is a
+    node tick, and each guard a check.
+  - Each wait is a poll: the service calls in flight, the judge, the player,
+    listening, awaiting the next sentence. A poll is a node tick and a check of
+    whether the wait is over. A call's result runs once, when it is done.
+  - The prompt is built once per call.
+  - The motion is plain code: a node tick and an execution for each function
+    of the motion graph it computes. It skips the branches it does not take:
+    the face when nobody is there, the viseme with no audio, the wave with no
+    gesture.
+- **The designs** count by their rules:
+  - The statechart is the nodes its tick reaches.
+  - A poll is a module call, a node tick and an execution, plus its reads. A
+    store key is a check. A node is a node tick that answers from its cache
+    (detached: a check for each argument; versioned cells: one check) or runs
+    again (eager).
+  - The motion graph follows each design's rule in the table above: detached
+    calls check their arguments, versioned cells their versions, and eager
+    nodes all run.
+- **Modeled µs.** The designs pay the NGBT spectrum's per-operation rates,
+  plus 2 µs of work a call and 2 ms a prompt build. A poll that answers
+  `Running` does no work and pays only its module call. Plain code pays for
+  its own work and nothing else.
+
+### What the bench shows over the whole run
 
 - **#396, #409 and #404** produce the reference's nine channels at every
   tick.
 - **#405 and #257** produce them a tick late wherever the statechart drives
-  them. The mouth runs 33 ms behind the audio, under the 45 ms people notice,
-  and the eyes jump a tick late when a face appears.
-- **Modeled cost.** About 105 µs a tick for #396, #409, #404 and #405. The
-  motion graph moves at every tick (the clock, the smoothing, the blinks), so
-  caching saves about half of its 77 calls. #257 averages 451 µs a tick: it
-  caches nothing, and rebuilds the prompt at every tick the llm is polled,
-  168 two-millisecond builds against 7. With a cache on the prompt alone it
-  averages 180 µs. The rest of the gap is its eager motion graph: 78 calls a
-  tick against 42.
+  them. At 100 Hz the mouth runs 10 ms behind the audio, under the 45 ms
+  people notice, and the eyes move a tick late when a face appears.
+- **Work a tick,** on average, with one second waiting on the llm as node
+  ticks · executions · checks:
+
+  | Implementation | µs | Node ticks | Executions | Checks | 1 s on the llm | Prompt builds |
+  |---|---|---|---|---|---|---|
+  | Reference | 120 | 63 | 59 | 12 | 100 · 0 · 100 | 4 |
+  | #396 detached nodes | 94 | 95 | 42 | 121 | 400 · 100 · 1,000 | 7 |
+  | #409 full tree nodes | 95 | 95 | 42 | 121 | 400 · 100 · 1,000 | 7 |
+  | #404 incremental tree | 95 | 73 | 42 | 177 | 100 · 100 · 100 | 7 |
+  | #405 macros, placed | 95 | 72 | 42 | 177 | 100 · 100 · 100 | 7 |
+  | #257 BT in NG | 451 | 117 | 79 | 6 | 400 · 400 · 600 | 560 |
+  | #257, prompt cached | 171 | 117 | 78 | 7 | 400 · 300 · 1,000 | 7 |
+
+- **The motion graph moves at every tick:** the clock, the smoothing, the
+  blinks. The reference runs 59 of its 77 functions a tick, skipping the
+  branches it does not take. The cached designs run 42 a tick: they also skip
+  the functions whose arguments did not change. The work in a tick is about
+  what it was at 30 Hz, so a second holds 3.3 times as much.
+- **The prompt.** The reference builds it once per llm call, four times. A
+  design's llm leaf reads its prompt at every poll, so the prompt is rebuilt
+  when an argument changes mid-call. The dominant emotion changed three times
+  during run 2's second round, for 7 builds. #257 rebuilds it at every poll:
+  560 builds, 1.1 s of work, and most of its 451 µs. With the prompt cached it
+  costs 171 µs, and the rest of the gap is its eager motion graph.
+- **Polling is cheap at these rates.** The reads under a poll cost
+  nanoseconds each, so a second of waiting costs the four tree designs 14 to
+  23 µs. The exceptions are reads that run something. #257 runs the emotion
+  and the round again at every poll: 451 µs for each second of waiting, even
+  with the prompt cached. Without the cache, the prompt costs 200 ms for each
+  second of waiting.
+- **The reference is not the cheapest at 2 µs a call.** At every tick it runs
+  each motion function its branches need, changed or not, where the cached
+  designs skip the unchanged ones. With calls of a few nanoseconds, the order
+  would flip. The counts do not depend on that rate.
 - **No design fails a check.** They differ in where the statechart's writes
   land in the tick, and in what runs again when nothing changed.
 
@@ -484,3 +557,7 @@ The speech pipeline is the part with the most room to grow. Left for later:
    transitions that cross ticks through latched state are not.
 4. **A Rust replay of the run,** as for the Quori workloads, to replace the
    modeled costs with measured ones.
+5. **Latching a waiting leaf's arguments.** A leaf that reads its arguments
+   at every poll rebuilds the prompt mid-call when one changes, three times in
+   this run (§10). Should a leaf latch its arguments when its call starts, as
+   the reference does?
