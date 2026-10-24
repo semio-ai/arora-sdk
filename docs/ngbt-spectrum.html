@@ -3904,14 +3904,14 @@ function graphLayout(R) {
     const n = M.nodes[id], g = control && E.G.get(id);
     const ports = n ? (OP_SIG[n.op] || (n.op === 'output' ? ['in'] : [])).filter((p) => p in (n.a || {})).map((p) => ({ name: p, from: typeof n.a[p] === 'string' ? n.a[p] : null, lit: typeof n.a[p] === 'string' ? null : fmt(n.a[p]) })) : [...g.refs.map((r) => ({ name: 'in', from: r })), ...g.children.map((r, i) => ({ name: 'child_' + i, from: r, child: true }))];
     const title = id, op = n ? (n.key ? `${n.op} ${n.key}` : n.op) : g.kind;
-    const w = Math.max(180, Math.min(420, Math.max(title.length + 9, op.length + (['calls', 'compute', 'leaves'].includes(R.d.id) ? 16 : 3), ...ports.map((p) => p.name.length + (p.lit?.length || 0) + 3)) * 7.3));
+    const w = Math.max(180, Math.min(420, Math.max(title.length + 9, op.length + (['calls', 'compute', 'compute-full', 'leaves'].includes(R.d.id) ? 16 : 3), ...ports.map((p) => p.name.length + (p.lit?.length || 0) + 3)) * 7.3));
     const out = { id, title, label: `${id}: ${op}`, type: n ? 'data' : 'control', w, h: Math.max(49, 44 + 15 * ports.length), lines: [op], ports,
       handles: ports.map((p, i) => ({ id: 'in:' + i, type: 'target', side: 'Left', y: 45 + i * 15, wired: !!p.from })),
       portLabels: ports.map((p, i) => ({ y: 45 + i * 15, text: p.lit != null ? `${p.name}  ${p.lit}` : p.name })),
       live: () => {
         if (!n) return { status: E.ticked(id) ? E.status.get(id) : null, activity: E.ticked(id) ? 'same' : 'idle', value: E.ticked(id) ? E.status.get(id) : '–', badge: E.lazy?.get(id) ? 'lazy' : '' };
         const a = n.op === 'const' ? 'same' : E.act.get(id) || 'idle', count = E.evals.get(id) || 0;
-        return { activity: a, value: fmt(n.op === 'const' ? n.value : E.val.get(id)), badge: R.d.id === 'calls' && count > 1 ? `×${count} inline` : R.d.id === 'compute' ? a === 'cached' ? 'cache hit' : ['same', 'changed'].includes(a) && !SOURCE.has(n.op) && n.op !== 'output' ? 'called' : '' : R.d.id === 'leaves' && E.leaves.includes(id) ? 'leaf ' + (E.leaves.indexOf(id) + 1) : E.lazy?.get(id) ? 'lazy' : '' };
+        return { activity: a, value: fmt(n.op === 'const' ? n.value : E.val.get(id)), badge: R.d.id === 'calls' && count > 1 ? `×${count} inline` : (R.d.id === 'compute' || R.d.id === 'compute-full') ? a === 'cached' ? 'cache hit' : ['same', 'changed'].includes(a) && !SOURCE.has(n.op) && n.op !== 'output' ? 'called' : '' : R.d.id === 'leaves' && E.leaves.includes(id) ? 'leaf ' + (E.leaves.indexOf(id) + 1) : E.lazy?.get(id) ? 'lazy' : '' };
       } };
     return out;
   });
@@ -4088,7 +4088,7 @@ function treeRows(R) {
     model.loose.filter(live).forEach((id) => pattern(2, null, id));
     row(2, "RUNNING", "fixed", null, "action", "RUNNING", "keeps the graph ticking", { fixedStatus: "R" });
   }
-  if (designId === "compute") {
+  if (designId === "compute" || designId === "compute-full") {
     // The diagram spreads these beside their readers; the text lists them.
     // A sink shows the key its output is bound to.
     const sinks = sinksOf(model), bound = (id) => sinks.has(id) ? `{${sinks.get(id)}} = ` : "";
@@ -4150,7 +4150,7 @@ function treeRows(R) {
   const base = designId === "interp" ? 2 : (designId === "shape" && model.loose.length) || designId === "leaves" ? 1 : 0;
   const walk = (n, d) => {
     if (n.k === "block" && designId === "interp") { row(d, `run_graph(node-graph, 1, ⟨${n.label}⟩)  <em>${n.label}</em>`, "tree", n.id, "action", n.label, `run_graph(node-graph, 1, ⟨${n.label}⟩)`); return; }
-    if (n.k === "block" && designId === "compute" && n === model.tree && sinksOf(model).size) {
+    if (n.k === "block" && (designId === "compute" || designId === "compute-full") && n === model.tree && sinksOf(model).size) {
       row(d, "RUNNING  <em>the tree does nothing: the sinks run beside it</em>", "tree", n.id, "action", "RUNNING", "the tree does nothing: the sinks run beside it");
       return;
     }
@@ -4166,7 +4166,7 @@ function treeRows(R) {
           const ports = viaVar ? [{ name: "in", src: `${scope}:${top}`, text: `{.${top}}` }] : portsOf(top, (x) => named(x) ? `${scope}:${x}` : null, show);
           row(d + 1, `${target} = ${exprShow(model, P.named, id)(id)}`, "data", id, "data", `${target} = ${viaVar ? "output" : model.nodes[top].op}`, "", { leaf: true, ports, out: isOut ? null : `${scope}:${id}` });
         });
-      } else n.outputs.forEach((id) => { const target = `{${model.nodes[id].key}}`, src = model.nodes[id].a.in; row(d + 1, `${target} = ${designId === "compute" ? detachedRef(model, src) : `{.#${src}}`}`, "data", id, "data", target, "write", { leaf: true, ports: [readPort("value", src)] }); });
+      } else n.outputs.forEach((id) => { const target = `{${model.nodes[id].key}}`, src = model.nodes[id].a.in; row(d + 1, `${target} = ${designId === "compute" || designId === "compute-full" ? detachedRef(model, src) : `{.#${src}}`}`, "data", id, "data", target, "write", { leaf: true, ports: [readPort("value", src)] }); });
       row(d + 1, "RUNNING", "fixed", null, "action", "RUNNING", "keeps the block ticking", { fixedStatus: "R" });
       return;
     }
@@ -4525,7 +4525,7 @@ function checkText(design, model, n) {
   if (design === "inc") return `Truthy(${incRead(model, n.node)})`;
   if (design === "interp") return `Truthy({behavior/${n.node}})`;
   if (design === "calls") return `Truthy(${exprShow(model)(n.node)})`;
-  if (design === "compute") return `Truthy(${detachedRef(model, n.node)})`;
+  if (design === "compute" || design === "compute-full") return `Truthy(${detachedRef(model, n.node)})`;
   if (design === "leaves") return `Truthy({.#${n.node}})`;
   return `Truthy({.${n.node}})`;
 }
@@ -4534,13 +4534,13 @@ function setText(design, model, n) {
   if (design === "inc") return incRead(model, n.node);
   if (design === "interp") return `{behavior/${n.node}}`;
   if (design === "calls") return exprShow(model)(n.node);
-  if (design === "compute") return detachedRef(model, n.node);
+  if (design === "compute" || design === "compute-full") return detachedRef(model, n.node);
   if (design === "leaves") return `{.#${n.node}}`;
   return `{.${n.node}}`;
 }
 
 function legend(id, view) {
-  const skipped = (id === "inc" || id === "macro") ? "clean: last result kept, not visited" : id === "compute" ? "cache hit: not called" : id === "shape" && view === "graph" ? "changed? failed: not called" : null;
+  const skipped = (id === "inc" || id === "macro") ? "clean: last result kept, not visited" : id === "compute" || id === "compute-full" ? "cache hit: not called" : id === "shape" && view === "graph" ? "changed? failed: not called" : null;
   const halts = id === "macro" || id === "inc" || id === "shape" || id === "control" || id === "interp";
   return h("div", { class: "legend" },
     [["changed", "ran, value changed"], ["same", "ran, same value"], skipped && ["cached", skipped], ["idle", id === "macro" ? "not pulled this tick" : "not reached this tick"], halts && ["halted", "halted: state dropped"], ["wire", "data link"], id === "interp" && view === "tree" && ["wire via", "through a store key"]].filter(Boolean).map(([c, t]) => h("span", {}, h("i", { class: "sw " + c }), t)),
@@ -4878,6 +4878,7 @@ function viewNote(id) {
     shape: "The dataflow each node graph computes. A dotted border is a pattern whose changed? guard failed: its call did not run.",
     calls: "Dataflow as the calls nest. A node evaluated inline more than once in a tick shows how many times.",
     compute: "Detached nodes as pulled this tick: called when an argument changed, a cache hit otherwise, faded when nothing read them.",
+    "compute-full": "#396's detached nodes, each also a full tree node with a status: called when an argument changed, a cache hit otherwise, faded when nothing read them.",
     leaves: "Graph nodes in the order their leaves run, every tick, ahead of the tree.",
     control: "One Vizij graph: dataflow on the left, control nodes on the right, each child edge dashed into its child_N port. Faded nodes are lazy and were not ticked.",
   }[id];
@@ -5766,7 +5767,7 @@ let DRAWS = [];
 function renderAll() {
   resetLayoutMeaning();
   for (const root of FLOW_ROOTS) root.unmount(); FLOW_ROOTS.clear();
-  BENCH_VIEWS = []; SHOWN_VIEWS = []; WASM_VIEWS = [];
+  BENCH_VIEWS = []; SHOWN_VIEWS = []; WASM_VIEWS = []; WORKLOAD_VIEWS = [];
   renderTabs();
   const main = document.getElementById("main"); main.textContent = "";
   document.querySelector(".wrap").classList.toggle("wide", STATE.tab === "pair");
