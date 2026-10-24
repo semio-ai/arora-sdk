@@ -1,0 +1,2114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Pip, a desktop robot, talks with a person through one scripted world, run by five behavior-tree and node-graph designs side by side. Open this file in a browser; it needs no server.">
+<title>Speech Agent Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,600..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a lab bench. One transport across the top, the two robots side by side on a shared
+   stage, each robot's traces underneath it, the props shelf (assets) last. */
+:root {
+  --bg: #eef0eb; --panel: #fdfdfb; --panel-2: #e6e9e2; --ink: #191c1a; --muted: #555c57; --faint: #858c86;
+  --line: #d3d7cf; --grid: #e6e9e3;
+  --robot: #e3e6e0; --robot-edge: #b4b9b0; --robot-shade: #cfd3cb; --screen: #131b21; --glow: #4fc9df; --ghost: #c2562a;
+  --run-1: #2a78d6; --run-2: #eb6834; --run-3: #1baf7a; --run-x: #8b928c;
+  --good: #0ca30c; --bad: #d03b3b; --good-ink: #1d7a1d; --bad-ink: #b42e2e;
+  --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111315; --panel: #1b1e21; --panel-2: #262a2e; --ink: #e6e9e4; --muted: #a6aea8; --faint: #7a817c;
+  --line: #31363a; --grid: #262a2e;
+  --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
+  --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
+  --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #111315; --panel: #1b1e21; --panel-2: #262a2e; --ink: #e6e9e4; --muted: #a6aea8; --faint: #7a817c;
+  --line: #31363a; --grid: #262a2e;
+  --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
+  --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
+  --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 48px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.page { max-width: 1240px; margin: 0 auto; display: grid; gap: 14px; }
+h1, h2 { font-family: var(--f-display); font-stretch: 112%; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(26px, 4.6vw, 40px); font-weight: 800; line-height: 1.02; letter-spacing: -.01em; }
+h2 { font-size: 17px; font-weight: 700; }
+h3 { margin: 0 0 6px; font: 600 11px var(--f-body); letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.lede { margin: 6px 0 0; color: var(--muted); max-width: 68ch; }
+.lede b { color: var(--ink); font-weight: 600; }
+button, select { font: 500 13px var(--f-body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; cursor: pointer; min-height: 32px; }
+button:hover, select:hover { border-color: var(--faint); }
+button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); min-width: 72px; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+
+/* transport */
+.transport-band { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 8px 6px; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.clock { margin-left: auto; font: 500 13px var(--f-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.timeline svg { display: block; width: 100%; height: 46px; touch-action: none; cursor: pointer; }
+.timeline text { font: 10px var(--f-mono); fill: var(--muted); }
+.timeline .pin { stroke: var(--faint); stroke-width: 1; }
+.timeline .pin-dot { fill: var(--ink); }
+.timeline .axis { stroke: var(--line); stroke-width: 1; }
+.timeline .head { stroke: var(--ink); stroke-width: 2; }
+.timeline .knob { fill: var(--ink); }
+
+/* stage */
+.stage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.side { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; min-width: 0; }
+.side-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; min-width: 0; }
+.side-head select { flex: 1 1 140px; min-width: 0; max-width: 100%; font-weight: 600; }
+.ghost-toggle { font-size: 12px; color: var(--muted); display: inline-flex; gap: 5px; align-items: center; }
+.impl-note { margin: 0; font-size: 12px; color: var(--muted); }
+.robot-box { display: flex; justify-content: center; }
+.robot { width: 100%; max-width: 300px; height: auto; display: block; }
+.r-body { fill: var(--robot); stroke: var(--robot-edge); stroke-width: 2; }
+.r-shade { fill: var(--robot-shade); }
+.r-shadow { fill: var(--ink); opacity: .1; }
+.r-screen { fill: var(--screen); }
+.r-glow { fill: var(--glow); }
+.r-mouth { fill: var(--glow); stroke: var(--glow); stroke-width: 3; stroke-linejoin: round; }
+.r-spark { fill: var(--screen); opacity: .55; }
+.ghost { fill: none; stroke: var(--ghost); stroke-width: 1.6; stroke-dasharray: 5 4; }
+.ghost * { fill: none; stroke: var(--ghost); }
+.captions { display: grid; gap: 4px; min-height: 3.6em; }
+.cap { margin: 0; font-size: 13px; line-height: 1.35; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; }
+.cap .who { font: 500 10.5px/1.9 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cap .said { min-width: 0; overflow-wrap: anywhere; }
+.cap.quiet .said { color: var(--faint); }
+.cap .now { font-weight: 600; text-decoration: underline; text-decoration-color: var(--glow); text-decoration-thickness: 3px; text-underline-offset: 3px; }
+.cap .filler { font-style: italic; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font: 500 11px/1.6 var(--f-mono); padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: var(--panel-2); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.chip .k { color: var(--faint); }
+.chip.held { border-color: var(--ink); background: var(--panel); }
+.chip .w { display: inline-block; width: 26px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.chip .w i { display: block; height: 100%; background: var(--ink); }
+
+/* traces */
+.tabs { display: none; gap: 6px; }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.traces { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.trace { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.trace-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.trace-title .sub { font: 500 12px var(--f-body); color: var(--muted); }
+.block { min-width: 0; }
+.transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.transcript li { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 13px; }
+.transcript li.now { background: var(--panel-2); }
+.transcript .t { font: 12px var(--f-mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+.transcript .what { min-width: 0; }
+.transcript .status { display: block; font-size: 11.5px; color: var(--muted); }
+.transcript .filler { font-style: italic; }
+.transcript li.cut .text { text-decoration: line-through; text-decoration-color: var(--bad); }
+.svgbox { overflow-x: auto; }
+.svgbox svg { display: block; }
+.chart text { font: 10px var(--f-mono); fill: var(--muted); }
+.chart .lane-name { fill: var(--muted); }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--line); stroke-width: 1; }
+.chart .now { stroke: var(--ink); stroke-width: 1.5; }
+.chart .hover { stroke: var(--faint); stroke-width: 1; }
+.chart .seg-label { fill: var(--ink); }
+.chart .mark-x { fill: var(--ink); font-weight: 500; }
+.chart .state-a { fill: var(--panel-2); }
+.chart .state-b { fill: var(--line); }
+.chart .user { fill: var(--faint); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.legend i { width: 12px; height: 8px; border-radius: 2px; display: inline-block; flex: none; }
+.legend i.line { height: 2px; border-radius: 1px; }
+.plot-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 6px 0 2px; }
+.plot-head h4 { margin: 0; font: 600 12px var(--f-body); }
+.values { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 4px; margin-top: 8px; }
+.values div { background: var(--panel-2); border-radius: 6px; padding: 4px 8px; display: flex; justify-content: space-between; gap: 6px; font: 11.5px var(--f-mono); font-variant-numeric: tabular-nums; }
+.values .k { color: var(--muted); }
+.score { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.score li { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px; border-radius: 8px; }
+.score li[data-at] { cursor: pointer; }
+.score li[data-at]:hover { background: var(--panel-2); }
+.badge { font: 600 11px/1.7 var(--f-mono); border-radius: 999px; text-align: center; border: 1px solid; }
+.badge.ok { color: var(--good-ink); border-color: var(--good); }
+.badge.bad { color: var(--bad-ink); border-color: var(--bad); }
+.badge.info { color: var(--muted); border-color: var(--line); }
+.score .title { font-weight: 600; font-size: 13px; }
+.score .detail { display: block; font-size: 12px; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
+.planned { padding: 18px 12px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
+
+/* assets */
+.assets { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 4px; }
+.assets > p { margin: 0 0 6px; color: var(--muted); font-size: 13px; max-width: 72ch; }
+.assets details { border-top: 1px solid var(--line); padding: 8px 0 4px; }
+.assets summary { cursor: pointer; font-weight: 600; font-size: 13.5px; }
+.assets summary .n { font: 400 12px var(--f-mono); color: var(--faint); margin-left: 6px; }
+.assets .body { padding: 8px 0 4px; display: grid; gap: 8px; min-width: 0; }
+.tablebox { overflow-x: auto; }
+.assets table { border-collapse: collapse; font: 12px var(--f-mono); font-variant-numeric: tabular-nums; }
+.assets th, .assets td { padding: 3px 10px 3px 0; text-align: left; white-space: nowrap; }
+.assets th { color: var(--muted); font-weight: 500; }
+.assets tr.live td { font-weight: 600; }
+.assets pre { margin: 0; font: 12px/1.45 var(--f-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2); border-radius: 6px; padding: 8px 10px; }
+.assets ul { margin: 0; padding-left: 18px; font-size: 13px; }
+.assets .future { color: var(--faint); }
+.assets .when { font: 11.5px var(--f-mono); color: var(--faint); margin-right: 6px; }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgb(0 0 0 / .16); padding: 6px 9px; font-size: 12px; max-width: 280px; }
+.tip b { font-weight: 600; }
+.tip .row { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); }
+.tip .row i { width: 10px; height: 2px; display: inline-block; }
+.tip[hidden] { display: none; }
+
+/* the representation of a part: graph, tree or stored form */
+.rep-controls { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 2px; }
+.rep-bar h2 { margin-right: auto; }
+.rep-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; min-height: 30px; padding: 4px 11px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.parts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.parts button { font: 500 11.5px var(--f-mono); padding: 2px 9px; min-height: 26px; border-radius: 999px; }
+.parts button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.parts .gap { width: 10px; }
+.rep-note { margin: 8px 0 0; font-size: 12px; color: var(--muted); max-width: 70ch; }
+.view { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: auto; max-height: 560px; }
+.view pre { margin: 0; padding: 10px 12px; font: 11.5px/1.55 var(--f-mono); white-space: pre; color: var(--ink); }
+.view pre span { display: block; padding: 0 4px; border-radius: 3px; }
+.view pre span.ran, .view pre span.st-R { background: var(--panel-2); }
+.view pre span.st-R::after { content: "   ● Running"; color: var(--run-1); }
+.view pre span.st-S::after { content: "   ✓"; color: var(--good-ink); }
+.view pre span.st-F::after { content: "   ✗"; color: var(--bad-ink); }
+.view pre span.ran::after { content: "   ran"; color: var(--run-1); }
+.view pre span.cached::after { content: "   cached"; color: var(--faint); }
+.view pre span.dim { color: var(--faint); }
+.graph text { font-family: var(--f-mono); }
+.g-node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+.g-node .k { font-size: 9.5px; fill: var(--muted); }
+.g-node .l { font: 600 11.5px var(--f-body); fill: var(--ink); }
+.g-node.port rect { fill: var(--panel-2); stroke: none; }
+.g-node.port .l { font: 500 11px var(--f-mono); }
+.g-node.data rect { stroke-dasharray: 5 3; }
+.g-node.ran rect { fill: var(--panel-2); stroke: var(--run-1); stroke-width: 2; }
+.g-node.cached rect { stroke-dasharray: 3 3; stroke: var(--faint); }
+.g-node.st-R rect { stroke: var(--run-1); stroke-width: 2.2; fill: var(--panel-2); }
+.g-node.st-S rect { stroke: var(--good); stroke-width: 1.6; }
+.g-node.st-F rect { stroke: var(--bad); stroke-width: 1.6; }
+.g-node.st-none { opacity: .45; }
+.g-node .badge-s { font: 600 9.5px var(--f-mono); }
+.g-node.st-R .badge-s { fill: var(--run-1); } .g-node.st-S .badge-s { fill: var(--good-ink); } .g-node.st-F .badge-s { fill: var(--bad-ink); }
+.g-edge { fill: none; stroke: var(--faint); stroke-width: 1.2; }
+.g-edge.data { stroke-dasharray: 4 3; }
+.g-edge-label { font-size: 9px; fill: var(--faint); }
+.g-box rect { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 4; }
+.g-box text { font-size: 10px; fill: var(--muted); }
+.cost-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 4px; margin-top: 8px; }
+.cost-stats div { background: var(--panel-2); border-radius: 6px; padding: 5px 8px; display: grid; gap: 1px; }
+.cost-stats .k { font-size: 11px; color: var(--muted); }
+.cost-stats .v { font: 600 14px var(--f-mono); font-variant-numeric: tabular-nums; }
+.cost-stats .a { font: 11px var(--f-mono); color: var(--faint); }
+@media (max-width: 760px) {
+  .tabs { display: flex; }
+  .traces { grid-template-columns: minmax(0, 1fr); }
+  .traces[data-tab="a"] .trace[data-side="b"], .traces[data-tab="b"] .trace[data-side="a"] { display: none; }
+  .side { padding: 8px; }
+  .cap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .ghost-toggle { font-size: 11px; }
+  .side .impl-note:not(.open) { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+}
+.glance { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+.glance p { margin: 0; color: var(--muted); font-size: 13px; max-width: 72ch; }
+.glance table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.glance th, .glance td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.glance th:first-child, .glance td:first-child { text-align: left; }
+.glance th { font: 500 11.5px var(--f-body); color: var(--muted); }
+.glance td { font-family: var(--f-mono); }
+.glance td:first-child { font-family: var(--f-body); font-weight: 600; }
+.glance tr.picked td { background: var(--panel-2); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header>
+    <h1>Speech agent bench</h1>
+    <p class="lede">Pip, a desktop robot, talks with Sam through one scripted 40-second world: a cut-in while it thinks, one while it speaks, a cough, a face that drops out and leaves. Pick an implementation for each side and play them in lockstep. The five <b>designs</b> from the NGBT spectrum each run the same definition by their own rules; <b>Reference</b> is the spec as plain code, and <b>Naive foil</b> breaks three rules on purpose. Below the robots, see how each design holds every part, and what each tick costs it.</p>
+  </header>
+
+  <section class="transport-band" aria-label="Playback">
+    <div class="transport">
+      <button id="play" class="primary" type="button">Play</button>
+      <button id="restart" type="button" aria-label="Back to the start">Start</button>
+      <button id="back" type="button" aria-label="One tick back">−1</button>
+      <button id="fwd" type="button" aria-label="One tick forward">+1</button>
+      <label class="inline" for="speed">speed <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option></select></label>
+      <label class="inline" for="loop"><input id="loop" type="checkbox" checked> loop</label>
+      <label class="inline" for="jump">jump <select id="jump"></select></label>
+      <span class="clock" id="clock">0.0 s</span>
+    </div>
+    <div class="timeline" id="timeline"></div>
+  </section>
+
+  <section class="stage" aria-label="The two robots">
+    <article class="side" data-side="a"></article>
+    <article class="side" data-side="b"></article>
+  </section>
+
+  <div class="tabs" role="tablist" aria-label="Which side's traces to show">
+    <button type="button" role="tab" id="tab-a" aria-selected="true">Left traces</button>
+    <button type="button" role="tab" id="tab-b" aria-selected="false">Right traces</button>
+  </div>
+  <section class="traces" data-tab="a" aria-label="Traces">
+    <article class="trace" data-side="a"></article>
+    <article class="trace" data-side="b"></article>
+  </section>
+
+  <section class="assets" id="assets" aria-label="Assets">
+    <h2>Assets</h2>
+    <p>The world every implementation runs in: the robot's postures and visemes, its clips, the prompts and tools, what it knows and remembers, the script and the mock replies. Live entries follow the left side.</p>
+  </section>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script id="sim">
+"use strict";
+// ============================================================================
+// The world: assets, script and mock services, shared by every implementation.
+// ============================================================================
+const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
+const smooth = (u) => { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); };
+const lerp = (a, b, u) => a + (b - a) * u;
+const fill = (template, values) => template.replace(/\{(\w+)\}/g, (_, k) => (values[k] ?? ''));
+const quote = (s) => `“${s}”`;
+function sampleKeys(keys, tau) {
+  for (let i = 1; i < keys.length; i++) if (tau <= keys[i][0]) return lerp(keys[i - 1][1], keys[i][1], smooth((tau - keys[i - 1][0]) / (keys[i][0] - keys[i - 1][0])));
+  return keys[keys.length - 1][1];
+}
+const DT = 1 / 30, RUN_END = 39.6;
+const CHANNELS = ['head/yaw', 'head/pitch', 'eyes/x', 'eyes/y', 'eyes/lid', 'mouth/open', 'mouth/stretch', 'mouth/corners', 'arm/raise'];
+const POSTURES = {
+  neutral:   { pitch: 0,    arm: 0,   lid: 1,   open: 0,  stretch: 0,   corners: 0 },
+  happy:     { pitch: .1,   arm: .2,  lid: .85, open: .1, stretch: .4,  corners: .8 },
+  sad:       { pitch: -.25, arm: -.1, lid: .6,  open: 0,  stretch: -.1, corners: -.6 },
+  surprised: { pitch: .15,  arm: .3,  lid: 1.2, open: .5, stretch: -.3, corners: 0 },
+  thinking:  { pitch: .05,  arm: 0,   lid: .9,  open: 0,  stretch: -.2, corners: -.1 },
+};
+const POSE_KEYS = Object.keys(POSTURES.neutral);
+const VISEMES = {
+  rest: { open: .05, stretch: 0,   corners: 0 },
+  MBP:  { open: 0,   stretch: -.2, corners: 0 },
+  AA:   { open: .8,  stretch: .1,  corners: 0 },
+  EE:   { open: .3,  stretch: .8,  corners: .2 },
+  OO:   { open: .4,  stretch: -.6, corners: 0 },
+};
+const CLIPS = {
+  idle:  { length: 4, text: 'loop; adds to pitch ±.03 and arm ±.05' },
+  blink: { length: .16, text: 'multiplies the lid: 1 → .08 → .08 → 1', keys: [[0, 1], [.06, .08], [.1, .08], [.16, 1]] },
+  nod:   { length: .6, text: 'adds to pitch: 0 → -.15 → 0', keys: [[0, 0], [.3, -.15], [.6, 0]] },
+  wave:  { length: 1.5, text: 'overrides the arm, fading in 0.2 s and out 0.3 s: 0 → .9 → .6 → .9 → 0', keys: [[0, 0], [.375, .9], [.75, .6], [1.125, .9], [1.5, 0]] },
+};
+const PERSONA = 'You are Pip, a small table robot. Speak in short sentences. Reply as JSON lines {"say", "emotion": neutral|happy|sad|surprised, "gesture"?: wave|nod}. Call a tool when you need live facts.';
+const TURN_TEMPLATE = '{persona} Tools: {tools}. You feel {emotion}. You remember: {memories} Facts: {docs} So far: {round}. They said: "{utterance}"';
+const JUDGE_TEMPLATE = 'So far: {round}. Facts: {docs} You were saying: {reply}. They just said: "{words}". Answer continue or invalidated; if continue, add sentences that answer them, as JSON lines.';
+const TOOLS = [
+  { name: 'weather', args: 'place, day', kind: 'info', latency: 1 },
+  { name: 'calendar', args: 'day', kind: 'info', latency: 1 },
+  { name: 'set_reminder', args: 'text, when', kind: 'action', latency: .5 },
+];
+const SKILLS = ['wave', 'nod'];
+const KNOWLEDGE = [
+  { id: 'park', text: 'Riverside Park: open 8–20, shade by the lake.' },
+  { id: 'bus', text: 'Bus 12 runs every 20 minutes.' },
+];
+const MEMORY = ['Sam is planning a picnic on Saturday.', 'Sam burns easily.'];
+const FILLERS = ['Let me check.', 'One moment.'];
+const SCRIPT = {
+  faceAppears: 1.2, faceLost: [14, 15], faceLeaves: 28,
+  user: [
+    { from: 5, to: 7, text: 'Will it be nice for our picnic on Saturday?' },
+    { from: 8.6, to: 9.6, text: 'At Riverside Park, I mean.' },
+    { from: 17.2, to: 18.2, text: 'Is there shade?' },
+    { from: 23.8, to: 24.1, text: null },
+  ],
+};
+const LATENCY = { rag: 1, recall: .5, prompt: .002, toolCall: 1, firstSentence: 2, lastSentence: 3, tool: 1, verdict: 1, followUps: 2, tts: 1 };
+const REPLIES = [
+  ['run 1 (place unknown)', 'weather(here, Saturday) → {happy} “Sunny all day, twenty-four degrees!”'],
+  ['run 2 (Riverside)', 'weather(Riverside, Saturday) → {happy} “Sunny at Riverside all day!” · {surprised, wave} “Oh, and you burn easily, so bring a hat!” — needs “UV index 8” and “burns easily” in the prompt, else {neutral} “Have fun!”'],
+  ['a shade question', '{happy} “Yes, there’s shade by the lake.” — needs the park in the facts'],
+  ['judge, words name a place', 'invalidated'],
+  ['judge, words ask about shade', 'continue → {happy} “And yes, there’s shade by the lake.”'],
+];
+
+function faceAt(t) {
+  const visible = t >= SCRIPT.faceAppears && t < SCRIPT.faceLeaves && !(t >= SCRIPT.faceLost[0] && t < SCRIPT.faceLost[1]);
+  const x = t < 12 ? -0.4 + 0.7 * smooth((t - 1.2) / 10.8) : t < 15 ? 0.3 : 0.3 - 0.3 * smooth((t - 15) / 5);
+  return { visible, x, y: 0.06 * Math.sin(t * 0.9) };
+}
+const BLINKS = (() => {
+  const out = []; let t = 2.3, seed = 11;
+  const next = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  while (t < RUN_END) { out.push(t); t += 2 + 3 * next(); }
+  return out;
+})();
+
+// The mock TTS: a viseme a vowel group (a → AA; e, i, y → EE; o, u → OO), 180 ms each; an MBP of
+// 60 ms where m, b or p comes before a vowel group or ends a word; 60 ms rest between words.
+function synthesize(text) {
+  const track = []; let t = 0;
+  const push = (v, d, word) => { track.push({ t, d, v, word }); t += d; };
+  const words = text.match(/[A-Za-z’']+/g) || [];
+  words.forEach((raw, i) => {
+    if (i) push('rest', .06, -1);
+    const w = raw.toLowerCase().replace(/^y/, 'j');
+    const groups = [...w.matchAll(/([^aeiouy]*)([aeiouy]+)/g)];
+    for (const [, cluster, vowels] of groups) {
+      if (/[mbp]/.test(cluster)) push('MBP', .06, i);
+      push(vowels[0] === 'a' ? 'AA' : 'eiy'.includes(vowels[0]) ? 'EE' : 'OO', .18, i);
+    }
+    const tail = w.slice(groups.reduce((n, g) => n + g[0].length, 0));
+    if (/[mbp]/.test(tail)) push('MBP', .06, i);
+  });
+  return { track, length: t, words };
+}
+
+const MOCK = {
+  rag: () => KNOWLEDGE.filter((d) => d.id === 'park').map((d) => d.text),
+  recall: (memory) => memory.slice(),
+  tool: (name, args) => (name === 'weather' ? (args.place === 'Riverside' ? 'Saturday at Riverside: sunny, 24 °C, UV index 8.' : 'Saturday: sunny, 24 °C, UV index 8.') : 'done'),
+  llm(prompt, utterance, toolResults) {
+    const asks = (re) => re.test(utterance), has = (s) => prompt.includes(s);
+    if (!toolResults.length && asks(/saturday/i)) return { tool: { name: 'weather', args: { place: asks(/riverside/i) ? 'Riverside' : 'here', day: 'Saturday' } } };
+    if (asks(/riverside/i) && asks(/saturday/i)) return { sentences: [
+      { say: 'Sunny at Riverside all day!', emotion: 'happy' },
+      has('UV index 8') && has('burns easily') ? { say: 'Oh, and you burn easily, so bring a hat!', emotion: 'surprised', gesture: 'wave' } : { say: 'Have fun!', emotion: 'neutral' },
+    ] };
+    if (asks(/saturday/i)) return { sentences: [{ say: 'Sunny all day, twenty-four degrees!', emotion: 'happy' }] };
+    if (asks(/shade/i)) return { sentences: [has('shade by the lake') ? { say: 'Yes, there’s shade by the lake.', emotion: 'happy' } : { say: 'I’m not sure about shade.', emotion: 'neutral' }] };
+    return { sentences: [{ say: 'Sorry, could you say that again?', emotion: 'neutral' }] };
+  },
+  judge(prompt, words) {
+    if (/riverside/i.test(words)) return { verdict: 'invalidated', follow: [] };
+    if (/shade/i.test(words)) return { verdict: 'continue', follow: [prompt.includes('shade by the lake') ? { say: 'And yes, there’s shade by the lake.', emotion: 'happy' } : { say: 'I’m not sure about shade.', emotion: 'neutral' }] };
+    return { verdict: 'continue', follow: [] };
+  },
+};
+
+// ============================================================================
+// A reply run: the async pipeline of one turn. It computes while held, and its
+// in-flight calls end, marked dropped, when the run is dropped.
+// ============================================================================
+class Run {
+  constructor(sim, id, t, utterance) {
+    Object.assign(this, { sim, id, utterance, held: false, dropped: false, docs: null, memories: null, toolResults: [], prompts: [], llmRounds: 0, toolCalls: 0, llmDone: false, tts: null, fillerOwed: false, toolInFlight: false });
+    this.sentences = []; this.follow = []; this.pending = [];
+    this.at(t + LATENCY.rag, 'rag', sim.lane('rag', id, t, t + LATENCY.rag, 'documents'));
+    this.at(t + LATENCY.recall, 'recall', sim.lane('recall', id, t, t + LATENCY.recall, 'memories'));
+  }
+  at(when, kind, rec, data) { this.pending.push({ when, kind, rec, data }); }
+  order() { return [...this.sentences, ...this.follow]; }
+  step(t) {
+    for (;;) {
+      this.pending.sort((a, b) => a.when - b.when);
+      const p = this.pending[0];
+      if (!p || p.when > t + 1e-9 || this.dropped) break;
+      this.pending.shift();
+      this.complete(p);
+    }
+  }
+  complete({ when, kind, data }) {
+    const sim = this.sim;
+    if (kind === 'rag') this.docs = MOCK.rag();
+    else if (kind === 'recall') this.memories = MOCK.recall(sim.memory);
+    else if (kind === 'toolcall') {
+      this.toolCalls++; this.toolInFlight = true;
+      this.at(when + LATENCY.tool, 'tool', sim.lane('tool', this.id, when, when + LATENCY.tool, `${data.name}(${data.args.place}, ${data.args.day})`), data);
+      if (this.held) this.fillerOwed = true; else sim.filler(this, when);
+    } else if (kind === 'tool') {
+      this.toolInFlight = false; this.fillerOwed = false;
+      this.toolResults.push(MOCK.tool(data.name, data.args));
+      this.callLlm(when);
+    } else if (kind === 'sentence') {
+      data.arrived = when; this.sentences.push(data);
+      if (data.last) this.llmDone = true;
+      sim.onSentence(this, data, when);
+      this.pumpTts(when);
+    } else if (kind === 'tts') {
+      Object.assign(data, synthesize(data.say)); data.ready = when; this.tts = null;
+      this.pumpTts(when);
+    }
+    if ((kind === 'rag' || kind === 'recall') && this.docs && this.memories && !this.llmRounds) this.callLlm(when);
+  }
+  facts() { return [...(this.docs || []), ...this.toolResults].join(' '); }
+  callLlm(when) {
+    const sim = this.sim;
+    this.llmRounds++;
+    const prompt = fill(TURN_TEMPLATE, { persona: PERSONA, tools: TOOLS.map((x) => x.name).join(', '), emotion: sim.dominantEmotion(when), memories: this.memories.join(' '), docs: this.facts(), round: sim.roundText(), utterance: this.utterance });
+    this.prompts.push({ at: when, text: prompt, kind: `prompt ${this.llmRounds}` });
+    sim.lane('prompt', this.id, when, when + LATENCY.prompt, `prompt ${this.llmRounds}`);
+    const out = MOCK.llm(prompt, this.utterance, this.toolResults);
+    if (out.tool) { this.at(when + LATENCY.toolCall, 'toolcall', sim.lane('llm', this.id, when, when + LATENCY.toolCall, 'calls a tool'), out.tool); return; }
+    const n = out.sentences.length, end = when + (n > 1 ? LATENCY.lastSentence : LATENCY.firstSentence);
+    const rec = sim.lane('llm', this.id, when, end, n === 1 ? '1 sentence' : `${n} sentences`);
+    out.sentences.forEach((s, i) => this.at(n > 1 ? when + LATENCY.firstSentence + (LATENCY.lastSentence - LATENCY.firstSentence) * i / (n - 1) : end, 'sentence', rec, { ...s, run: this.id, source: 'llm', last: i === n - 1 }));
+  }
+  addFollowUps(list, when) {
+    for (const s of list) { const f = { ...s, run: this.id, source: 'judge', arrived: when }; this.follow.push(f); this.sim.onSentence(this, f, when); }
+    this.pumpTts(when);
+  }
+  pumpTts(when) {
+    if (this.tts || this.dropped) return;
+    const next = this.order().find((s) => s.ready === undefined && s.ttsStarted === undefined);
+    if (!next) return;
+    next.ttsStarted = when; this.tts = next;
+    this.at(when + LATENCY.tts, 'tts', this.sim.lane('tts', this.id, when, when + LATENCY.tts, quote(next.say)), next);
+  }
+  hold() { this.held = true; }
+  resume(when) { this.held = false; if (this.fillerOwed && this.toolInFlight) { this.fillerOwed = false; this.sim.filler(this, when); } }
+  drop(when) {
+    this.dropped = true;
+    for (const p of this.pending) if (p.rec && p.rec.t1 > when) { p.rec.t1 = when; p.rec.outcome = 'dropped'; }
+    this.pending = [];
+  }
+}
+
+// ============================================================================
+// An implementation of the statechart, the motion graph and the speech player.
+// flags: halts (drop the run on a cut-in), replaceEmotion, staleEyes (the foil).
+// ============================================================================
+class Sim {
+  constructor(flags = {}) {
+    this.flags = flags;
+    this.memory = MEMORY.slice(); this.memoryLog = [];
+    this.round = []; this.runs = []; this.runCount = 0;
+    this.lanes = []; this.events = []; this.frames = []; this.spoken = []; this.triggers = [];
+    this.violations = { stale: 0 };
+    this.conv = { state: 'idle', sub: '', from: 'idle', subBefore: '', run: null, vadOnAt: 0, vadOff: false, words: undefined, prevUtterance: '' };
+    this.att = { state: 'nobody', since: 0, from: 'present' };
+    this.emotions = []; this.think = { w: 0, enteredAt: -10 };
+    this.gesture = null; this.head = { yaw: 0, pitch: 0 }; this.target = { x: 0, y: 0 }; this.lastTarget = { x: 0, y: 0 };
+    this.player = null; this.speechW = 0; this.judge = null; this.judges = 0; this.resets = 0; this.roundAfterReset = null;
+    this.items = { 0: null }; this.itemCount = 0;
+    this.prevHead = null; this.vadPrev = false; this.lastSeg = null; this.stateRec = null; this.attRec = null;
+    this.setConv(0, 'idle');
+    this.setAtt(0, 'nobody');
+  }
+  log(t, kind, text, extra = {}) { this.events.push({ t, kind, text, ...extra }); }
+  lane(lane, run, t0, t1, label, outcome = 'done') { const r = { lane, run, t0, t1, label, outcome }; this.lanes.push(r); return r; }
+  roundText() { return this.round.map((r) => `${r.who}: ${r.text}`).join(' ') || '(nothing yet)'; }
+
+  // ---- conversation -------------------------------------------------------
+  setConv(t, state, sub = '', fresh = true) {
+    const C = this.conv;
+    if (this.stateRec) this.stateRec.t1 = t;
+    C.state = state; C.sub = sub;
+    this.stateRec = this.lane('state', 0, t, RUN_END, sub ? `${state} · ${sub}` : state);
+    if (state === 'thinking' && sub === 'pondering' && fresh) this.think.enteredAt = t;
+  }
+  startRun(t, utterance) {
+    const C = this.conv, run = new Run(this, ++this.runCount, t, utterance);
+    this.runs.push(run); C.run = run;
+    const last = this.round[this.round.length - 1];
+    if (last && last.who === 'Sam' && utterance.startsWith(last.text)) last.text = utterance; else this.round.push({ who: 'Sam', text: utterance });
+    this.setConv(t, 'thinking', 'pondering');
+    this.log(t, 'run', `run ${run.id}: ${quote(utterance)}`, { run: run.id });
+  }
+  dropRun(t, run) { if (run && !run.dropped) { run.drop(t); this.log(t, 'drop', `run ${run.id} dropped`, { run: run.id }); } }
+  onVadOn(t) {
+    const C = this.conv;
+    if (C.state === 'listening') return;
+    let from = C.state;
+    if (C.state === 'judging') { this.dropJudge(t); from = C.from; }
+    else C.subBefore = C.sub;
+    if ((from === 'thinking' || from === 'speaking') && C.run && !C.run.dropped) {
+      if (this.player) { if (this.player.kind === 'filler') this.stopItem(t, 'stopped'); else this.pauseItem(t); }
+      C.prevUtterance = C.run.utterance;
+      if (this.flags.halts) {
+        if (from === 'speaking') this.rememberTurn(t, C.run, true);
+        this.dropRun(t, C.run);
+        if (this.player) this.stopItem(t, 'cut');
+      } else C.run.hold();
+    }
+    C.from = from; C.vadOnAt = t; C.vadOff = false; C.words = undefined;
+    this.setConv(t, 'listening');
+    this.log(t, 'vad', 'voice', { from });
+  }
+  onVadOff(t, seg) {
+    const C = this.conv;
+    if (C.state !== 'listening') return;
+    C.vadOff = true;
+    if (!seg || !seg.text) { this.log(t, 'asr', 'no words'); return; }
+    C.words = seg.text;
+    const live = C.run && !C.run.dropped, cutIn = C.from === 'thinking' || C.from === 'speaking';
+    this.log(t, 'asr', quote(seg.text), { cutIn });
+    if (C.from === 'idle' || !live) this.startRun(t, C.from === 'thinking' && C.prevUtterance ? `${C.prevUtterance} ${seg.text}` : seg.text);
+    else { this.setConv(t, 'judging'); this.startJudge(t, seg.text); }
+  }
+  falseAlarm(t) {
+    const C = this.conv;
+    this.log(t, 'false alarm', 'no words in 1.5 s');
+    if (C.from !== 'idle' && C.run && !C.run.dropped) this.handBack(t);
+    else { C.run = null; this.setConv(t, 'idle'); }
+  }
+  handBack(t) {
+    const C = this.conv, run = C.run;
+    run.resume(t);
+    if (C.from === 'speaking') {
+      this.setConv(t, 'speaking', '', false);
+      if (this.player && this.player.paused) this.resumeItem(t);
+    } else {
+      this.setConv(t, 'thinking', C.subBefore || 'pondering', false);
+      const first = run.order()[0];
+      if (first && first.arrived !== undefined && !first.applied && first.emotion) { this.applyEmotion(first, t, run); this.setConv(t, 'thinking', 'preparing', false); }
+    }
+    this.log(t, 'hand back', `back to ${C.from}`);
+  }
+  onSentence(run, s, at) {
+    const C = this.conv;
+    if (run !== C.run || run.held || run.dropped) return;
+    if (C.state === 'thinking' && s === run.order()[0] && !s.applied && s.emotion) { this.applyEmotion(s, at, run); this.setConv(at, 'thinking', 'preparing'); }
+  }
+  applyEmotion(s, t, run) {
+    if (run.held || run.dropped) this.violations.stale++;
+    this.trigger(s.emotion, t, 'reply'); s.applied = true;
+  }
+  filler(run, t) {
+    const C = this.conv;
+    if (run !== C.run || C.state !== 'thinking' || this.player) return;
+    const text = FILLERS[Math.min(run.toolCalls, FILLERS.length) - 1];
+    this.startItem(t, { kind: 'filler', run: run.id, text, ...synthesize(text) });
+  }
+  startJudge(t, words) {
+    const run = this.conv.run;
+    const said = this.spoken.filter((x) => x.run === run.id && x.kind === 'sentence').map((x) => x.text).join(' ');
+    const prompt = fill(JUDGE_TEMPLATE, { round: this.roundText(), docs: run.facts(), reply: said || '(nothing yet)', words });
+    const out = MOCK.judge(prompt, words);
+    const end = t + (out.verdict === 'continue' && out.follow.length ? LATENCY.followUps : LATENCY.verdict);
+    this.judge = { t0: t, words, out, run, rec: this.lane('judge', run.id, t, end, 'judging'), verdictDone: false };
+    this.judges++;
+    run.prompts.push({ at: t, text: prompt, kind: 'judge' });
+  }
+  stepJudge(t) {
+    const J = this.judge;
+    if (!J) return;
+    if (!J.verdictDone && t >= J.t0 + LATENCY.verdict - 1e-9) {
+      J.verdictDone = true; J.rec.label = J.out.verdict; this.log(t, 'verdict', J.out.verdict);
+      if (J.out.verdict === 'continue') { this.handBack(t); if (!J.out.follow.length) this.judge = null; }
+      else { this.judge = null; this.invalidate(t, J); }
+    }
+    if (this.judge === J && J.verdictDone && t >= J.t0 + LATENCY.followUps - 1e-9) {
+      this.judge = null;
+      if (!J.run.dropped) J.run.addFollowUps(J.out.follow, t);
+    }
+  }
+  dropJudge(t) { const J = this.judge; if (!J) return; J.rec.t1 = t; J.rec.outcome = 'dropped'; this.judge = null; }
+  invalidate(t, J) {
+    const C = this.conv, old = C.run, from = C.from;
+    if (from === 'speaking') this.rememberTurn(t, old, true);
+    this.dropRun(t, old);
+    if (this.player) this.stopItem(t, 'dropped');
+    this.startRun(t, from === 'thinking' ? `${old.utterance} ${J.words}` : J.words);
+  }
+  rememberTurn(t, run, partial) {
+    const said = this.spoken.filter((x) => x.run === run.id && x.kind === 'sentence' && x.outcome !== 'cut').map((x) => x.text).join(' ');
+    const text = `Pip told Sam ${said ? quote(said) : 'nothing yet'}${partial ? ' (interrupted)' : ''}`;
+    this.memory.push(text); this.memoryLog.push({ t, text });
+    this.lane('remember', run.id, t, t, partial ? 'partial turn' : 'turn');
+  }
+  replyEnded(t) {
+    const run = this.conv.run;
+    this.rememberTurn(t, run, false);
+    this.conv.run = null; this.setConv(t, 'idle');
+    this.log(t, 'reply', 'reply ended');
+  }
+  reset(t) {
+    const C = this.conv;
+    if (this.judge) this.dropJudge(t);
+    if (C.run && !C.run.dropped) { if (C.state === 'speaking') this.rememberTurn(t, C.run, true); this.dropRun(t, C.run); }
+    if (this.player) this.stopItem(t, 'stopped');
+    this.round = []; C.run = null; this.resets++; this.roundAfterReset = this.round.length;
+    if (C.state !== 'idle') this.setConv(t, 'idle');
+    this.log(t, 'reset', 'interaction reset');
+  }
+
+  // ---- the speech player ----------------------------------------------------
+  sentenceItem(s) { return { kind: 'sentence', run: s.run, s, text: s.say, track: s.track, length: s.length, words: s.words }; }
+  startItem(t, item) {
+    const run = this.runs.find((r) => r.id === item.run);
+    if (run && (run.held || run.dropped)) this.violations.stale++;
+    Object.assign(item, { playhead: 0, paused: false, uid: ++this.itemCount });
+    this.items[item.uid] = { track: item.track, length: item.length, text: item.text };
+    item.seg = this.lane('audio', item.run, t, t + item.length, item.kind === 'filler' ? `filler ${quote(item.text)}` : quote(item.text));
+    item.log = { t0: t, run: item.run, kind: item.kind, text: item.text, pauses: [], end: null, outcome: 'playing' };
+    this.spoken.push(item.log);
+    this.player = item;
+    if (item.kind === 'filler') this.lane('filler', item.run, t, t + item.length, quote(item.text));
+    if (item.s) {
+      item.s.played = true;
+      if (item.s.emotion && !item.s.applied) this.applyEmotion(item.s, t, run);
+      if (item.s.gesture) this.gesture = { name: item.s.gesture, t0: t };
+    }
+  }
+  pauseItem(t) { const it = this.player; it.paused = true; it.seg.t1 = t; it.seg.outcome = 'paused'; it.log.pauses.push([t, null]); }
+  resumeItem(t) { const it = this.player; it.paused = false; it.seg = this.lane('audio', it.run, t, t + (it.length - it.playhead), quote(it.text)); it.log.pauses[it.log.pauses.length - 1][1] = t; this.log(t, 'resume', quote(it.text)); }
+  stopItem(t, outcome) {
+    const it = this.player;
+    it.seg.t1 = Math.min(it.seg.t1, t); it.seg.outcome = outcome; it.log.end = t; it.log.outcome = outcome; this.player = null;
+    if (it.kind === 'filler') { const f = this.lanes.filter((r) => r.lane === 'filler' && r.run === it.run).pop(); if (f) { f.t1 = t; f.outcome = outcome; } }
+  }
+  stepPlayer(t) {
+    const it = this.player;
+    if (!it || it.paused) return;
+    it.playhead += DT;
+    if (it.playhead >= it.length - 1e-9) {
+      it.seg.t1 = t; it.log.end = t; it.log.outcome = 'finished'; this.player = null;
+      if (it.kind === 'sentence') this.round.push({ who: 'Pip', text: it.text });
+      return;
+    }
+    const C = this.conv;
+    if (it.kind === 'sentence' && C.state === 'speaking' && C.run) {
+      const next = C.run.order().find((s) => !s.played);
+      if (next && next.ready !== undefined && next.emotion && !next.applied && it.length - it.playhead <= 0.6 + 1e-9) this.applyEmotion(next, t, C.run);
+    }
+  }
+  advanceSpeech(t) {
+    const C = this.conv, run = C.run;
+    if (!run || run.held || run.dropped || this.player) return;
+    if (C.state !== 'thinking' && C.state !== 'speaking') return;
+    const next = run.order().find((s) => !s.played);
+    if (next && next.ready !== undefined) { if (C.state === 'thinking') this.setConv(t, 'speaking'); this.startItem(t, this.sentenceItem(next)); }
+    else if (!next && C.state === 'speaking' && run.llmDone && !(this.judge && this.judge.run === run)) this.replyEnded(t);
+  }
+
+  // ---- attention ------------------------------------------------------------
+  setAtt(t, state) {
+    const A = this.att; A.state = state; A.since = t;
+    if (this.attRec) this.attRec.t1 = t;
+    this.attRec = this.lane('attention', 0, t, RUN_END, state);
+    this.log(t, 'attention', state);
+  }
+  stepAttention(t, face) {
+    const A = this.att, talking = this.conv.state !== 'idle';
+    if (A.state === 'nobody') { if (face.visible) this.setAtt(t, talking ? 'engaged' : 'present'); }
+    else if (A.state === 'present') { if (!face.visible) this.enterLost(t); else if (talking) this.setAtt(t, 'engaged'); }
+    else if (A.state === 'engaged') { if (!face.visible) this.enterLost(t); else if (!talking) this.setAtt(t, 'present'); }
+    else if (A.state === 'lost') {
+      if (face.visible) { this.setAtt(t, talking ? 'engaged' : 'present'); this.trigger('surprised', t, 'attention'); }
+      else if (t - A.since >= 1.5 - 1e-9) { this.setAtt(t, 'nobody'); this.reset(t); }
+    }
+    let tg;
+    if (A.state === 'nobody') tg = { x: 0.45 * Math.sin(0.37 * t + 0.5), y: 0.1 * Math.sin(0.23 * t) };
+    else if (A.state === 'lost') tg = this.lastTarget;
+    else {
+      tg = { x: face.x, y: face.y };
+      const k = t - A.since - 3.5;
+      if (A.state === 'present' && k >= 0 && k % 4 < 0.8) tg = { x: face.x + (face.x > 0 ? -0.55 : 0.55), y: face.y - 0.12 };
+    }
+    this.target = tg;
+    if (A.state !== 'lost') this.lastTarget = tg;
+  }
+  enterLost(t) { const from = this.att.state; this.setAtt(t, 'lost'); this.att.from = from; this.trigger('sad', t, 'attention'); }
+
+  // ---- emotions ---------------------------------------------------------------
+  outWeight(e, t) {
+    if (e.fadeStart === null) return 1;
+    if (t <= e.fadeStart) return e.fadeFrom;
+    return e.fadeFrom * (1 - smooth((t - e.fadeStart) / e.fadeLen));
+  }
+  weight(e, t) { return Math.max(0, Math.min(smooth((t - e.t0) / 0.6), this.outWeight(e, t))); }
+  trigger(name, t, source) {
+    if (this.flags.replaceEmotion) this.emotions = [];
+    for (const e of this.emotions) {
+      if (e.fadeStart !== null && e.fadeLen <= 0.6 + 1e-9) continue;   // already pushed out
+      const start = Math.max(t, e.t0 + 0.6);                           // only after its peak
+      const from = e.fadeStart === null ? 1 : this.outWeight(e, start);
+      Object.assign(e, { fadeStart: start, fadeLen: 0.6, fadeFrom: from });
+    }
+    this.emotions.push({ name, t0: t, fadeStart: null, fadeLen: 0, fadeFrom: 1, source });
+    this.triggers.push({ t, name, source });
+    this.log(t, 'emotion', `${name} · ${source}`);
+  }
+  stepEmotions(t) {
+    for (const e of this.emotions) if (e.fadeStart === null && t >= e.t0 + 5.6 - 1e-9) Object.assign(e, { fadeStart: e.t0 + 5.6, fadeLen: 5, fadeFrom: 1 });
+    this.emotions = this.emotions.filter((e) => e.fadeStart === null || t < e.fadeStart + e.fadeLen);
+  }
+  dominantEmotion(t) {
+    let best = 'neutral', w = 0;
+    for (const e of this.emotions) { const x = this.weight(e, t); if (x > w) { w = x; best = e.name; } }
+    return best;
+  }
+  blendedPosture(t) {
+    let sum = 0; const acc = Object.fromEntries(POSE_KEYS.map((k) => [k, 0]));
+    for (const e of this.emotions) { const w = this.weight(e, t); sum += w; for (const k of POSE_KEYS) acc[k] += w * POSTURES[e.name][k]; }
+    const n = Math.max(0, 1 - sum), d = Math.max(1, sum);
+    for (const k of POSE_KEYS) acc[k] = (acc[k] + n * POSTURES.neutral[k]) / d;
+    return acc;
+  }
+  blinkAt(t) { for (const b of BLINKS) if (t >= b && t < b + CLIPS.blink.length) return sampleKeys(CLIPS.blink.keys, t - b); return 1; }
+
+  // ---- one tick -----------------------------------------------------------------
+  tick(t) {
+    const seg = SCRIPT.user.find((u) => t >= u.from - 1e-9 && t < u.to - 1e-9) || null;
+    const vad = !!seg, face = faceAt(t), C = this.conv;
+    if (vad && !this.vadPrev) this.onVadOn(t);
+    if (!vad && this.vadPrev) this.onVadOff(t, this.lastSeg);
+    this.vadPrev = vad; if (seg) this.lastSeg = seg;
+    if (C.state === 'listening' && C.vadOff && C.words === undefined && t - C.vadOnAt >= 1.5 - 1e-9) this.falseAlarm(t);
+    for (const run of this.runs) if (!run.dropped) run.step(t);
+    this.stepJudge(t);
+    this.stepPlayer(t);
+    this.advanceSpeech(t);
+    this.stepAttention(t, face);
+    this.stepEmotions(t);
+    this.frames.push(this.motion(t, seg));
+  }
+  motion(t, seg) {
+    const C = this.conv, tg = this.target, k = 1 - Math.pow(2, -DT / 0.25);
+    // What the statechart and the player hand the motion graph this tick: the keys a design's graph reads.
+    const keys = {
+      att: this.att.state, attSince: this.att.since, conv: C.state, sub: C.sub, thinkSince: this.think.enteredAt,
+      active: this.emotions.map((e) => ({ name: e.name, t0: e.t0, fadeStart: e.fadeStart, fadeLen: e.fadeLen, fadeFrom: e.fadeFrom })),
+      item: this.player ? this.player.uid : 0, playhead: this.player ? this.player.playhead : 0, playing: !!this.player && !this.player.paused,
+      gStart: this.gesture ? this.gesture.t0 : null,
+    };
+    this.head.yaw += (tg.x - this.head.yaw) * k;
+    this.head.pitch += (tg.y * 0.6 - this.head.pitch) * k;
+    const thinking = (C.state === 'thinking' && C.sub === 'pondering') || C.state === 'judging';
+    this.think.w = clamp(this.think.w + (thinking ? 1 : -1) * DT / 0.3, 0, 1);
+    const base = this.blendedPosture(t), p = {};
+    for (const key of POSE_KEYS) p[key] = lerp(base[key], POSTURES.thinking[key], smooth(this.think.w));
+    const idleP = 0.03 * Math.sin(2 * Math.PI * t / 4), idleA = 0.05 * Math.sin(2 * Math.PI * t / 4 + 1);
+    const yaw = this.head.yaw, pitch = this.head.pitch + p.pitch + idleP;
+    const eyeHead = this.flags.staleEyes && this.prevHead ? this.prevHead : { yaw, pitch };
+    const since = t - this.think.enteredAt;
+    const glance = since >= 0 && since <= 1.2 ? 0.3 * Math.min(smooth(since / 0.2), smooth((1.2 - since) / 0.2)) : 0;
+    const eyesX = clamp((tg.x - eyeHead.yaw) * 1.6, -1, 1), eyesY = clamp((tg.y - eyeHead.pitch) * 1.6 + glance, -1, 1);
+    const it = this.player, playing = !!it && !it.paused;
+    this.speechW = clamp(this.speechW + (playing ? 1 : -1) * DT / 0.08, 0, 1);
+    let vis = VISEMES.rest, word = -1;
+    if (it) {
+      const tau = it.playhead, tr = it.track;
+      let i = tr.findIndex((sg) => tau < sg.t + sg.d); if (i < 0) i = tr.length - 1;
+      const sg = tr[i], pv = tr[i - 1] || { v: 'rest' }, u = smooth((tau - sg.t) / 0.05);
+      vis = {}; for (const key in VISEMES.rest) vis[key] = lerp(VISEMES[pv.v][key], VISEMES[sg.v][key], u);
+      word = sg.word >= 0 ? sg.word : (tr[i + 1] ? tr[i + 1].word : -1);
+    }
+    const w = smooth(this.speechW);
+    let arm = p.arm + idleA;
+    if (this.gesture) {
+      const tau = t - this.gesture.t0;
+      if (tau > CLIPS.wave.length) this.gesture = null;
+      else arm = lerp(arm, sampleKeys(CLIPS.wave.keys, tau), Math.min(smooth(tau / .2), smooth((CLIPS.wave.length - tau) / .3)));
+    }
+    const c = [yaw, pitch, eyesX, eyesY, p.lid * this.blinkAt(t), lerp(p.open, vis.open, w), lerp(p.stretch, vis.stretch, w), clamp(p.corners + w * vis.corners, -1, 1), arm];
+    this.prevHead = { yaw, pitch };
+    return {
+      t, c, posture: POSE_KEYS.map((key) => p[key]), conv: C.state, sub: C.sub, held: !!(C.run && C.run.held), runId: C.run ? C.run.id : 0,
+      att: this.att.state, emotions: this.emotions.map((e) => [e.name, this.weight(e, t)]).filter((x) => x[1] > 0.005),
+      think: this.think.w, glance, gesture: this.gesture ? this.gesture.name : '',
+      user: seg ? (seg.text || '(coughs)') : '', robot: it ? { text: it.text, word, kind: it.kind, paused: it.paused, words: it.words } : null,
+      target: { x: tg.x, y: tg.y }, speechW: w, vis, keys,
+    };
+  }
+  recording() {
+    return {
+      frames: this.frames, lanes: this.lanes, events: this.events, spoken: this.spoken, triggers: this.triggers, violations: this.violations,
+      judges: this.judges, resets: this.resets, roundAfterReset: this.roundAfterReset, memoryLog: this.memoryLog, items: this.items,
+      runs: this.runs.map((r) => ({ id: r.id, utterance: r.utterance, prompts: r.prompts, dropped: r.dropped, toolCalls: r.toolCalls, llmRounds: r.llmRounds })),
+    };
+  }
+}
+
+function simulate(flags) {
+  const sim = new Sim(flags), n = Math.round(RUN_END / DT) + 1;
+  for (let i = 0; i < n; i++) sim.tick(i * DT);
+  return sim.recording();
+}
+
+// ============================================================================
+// The scorecard: the spec's measures, computed from a recording.
+// ============================================================================
+function score(rec) {
+  const items = [];
+  const counts = {};
+  for (const r of rec.lanes) if (r.run && /^(rag|recall|prompt|llm|tool|tts|filler)$/.test(r.lane)) { const c = (counts[r.run] = counts[r.run] || {}); c[r.lane] = (c[r.lane] || 0) + 1; }
+  const ids = Object.keys(counts).map(Number).sort((a, b) => a - b);
+  const extra = ids.filter((id) => (counts[id].rag || 0) > 1 || (counts[id].recall || 0) > 1 || (counts[id].prompt || 0) !== (counts[id].llm || 0));
+  items.push({ ok: !extra.length, title: 'One call per step', detail: ids.map((id) => `run ${id}: ${['rag', 'recall', 'prompt', 'llm', 'tool', 'tts', 'filler'].filter((k) => counts[id][k]).map((k) => `${k} ${counts[id][k]}`).join(' · ')}`).join('\n') });
+  items.push({ ok: rec.violations.stale === 0, title: 'Nothing shown from a held or dropped run', detail: `${rec.violations.stale} words, emotions or filler lines` });
+  const lags = [];
+  for (const e of rec.events.filter((x) => x.kind === 'vad')) {
+    const a = rec.lanes.find((r) => r.lane === 'audio' && r.t0 < e.t - 1e-6 && r.t1 >= e.t - 1e-6);
+    if (a) lags.push({ t: e.t, lag: Math.max(0, a.t1 - e.t) });
+  }
+  const worst = lags.reduce((m, x) => (x.lag > m.lag ? x : m), { lag: 0, t: null });
+  items.push({ ok: worst.lag <= DT + 1e-6, title: 'Audio pauses as Sam speaks', detail: lags.length ? `within ${Math.round(worst.lag * 1000)} ms of the voice, ${lags.length} times` : 'no cut-in during speech', at: worst.lag > DT ? worst.t : null });
+  const invalidated = rec.events.filter((e) => e.kind === 'verdict' && e.text === 'invalidated').map((e) => e.t);
+  const lost = rec.spoken.filter((s) => s.kind === 'sentence' && s.outcome !== 'finished' && s.outcome !== 'playing' && !invalidated.some((v) => Math.abs(v - s.end) < 1e-6));
+  items.push({ ok: !lost.length, title: 'No reply lost to a cut-in', detail: lost.length ? lost.map((s) => `${quote(s.text)} cut at ${s.end.toFixed(1)} s`).join('\n') : 'every paused sentence came back', at: lost.length ? lost[0].end : null });
+  const confirmed = rec.events.filter((e) => e.kind === 'asr' && e.cutIn).length;
+  items.push({ ok: rec.judges === confirmed, title: 'One judge per confirmed cut-in', detail: `${rec.judges} judged of ${confirmed} cut-ins with words` });
+  let gaze = { err: 0, t: null };
+  for (const f of rec.frames) if (f.att === 'engaged') {
+    const ex = Math.abs(f.c[2] - clamp((f.target.x - f.c[0]) * 1.6, -1, 1));
+    const ey = Math.abs(f.c[3] - clamp((f.target.y - f.c[1]) * 1.6 + f.glance, -1, 1));
+    if (Math.max(ex, ey) > gaze.err) gaze = { err: Math.max(ex, ey), t: f.t };
+  }
+  items.push({ ok: gaze.err < 0.01, title: 'Eyes stay locked as the head moves', detail: `largest eye error ${gaze.err.toFixed(3)}`, at: gaze.err >= 0.01 ? gaze.t : null });
+  let fall = { d: 0, t: null }, snap = { d: 0, t: null, what: '' };
+  const named = (f, n) => f.emotions.filter((x) => x[0] === n).reduce((s, x) => s + x[1], 0);
+  for (let i = 1; i < rec.frames.length; i++) {
+    const a = rec.frames[i - 1], b = rec.frames[i];
+    for (const n of new Set([...a.emotions.map((x) => x[0]), ...b.emotions.map((x) => x[0])])) { const d = named(a, n) - named(b, n); if (d > fall.d) fall = { d, t: b.t }; }
+    for (const [k, what] of [[0, 'head yaw'], [1, 'head pitch'], [8, 'arm']]) { const d = Math.abs(b.c[k] - a.c[k]); if (d > snap.d) snap = { d, t: b.t, what }; }
+    POSE_KEYS.forEach((key, j) => { const d = Math.abs(b.posture[j] - a.posture[j]); if (d > snap.d) snap = { d, t: b.t, what: `posture ${key}` }; });
+  }
+  items.push({ ok: fall.d < 0.2, title: 'Emotions blend, never cut', detail: `largest fall in one tick ${fall.d.toFixed(2)}`, at: fall.d >= 0.2 ? fall.t : null });
+  items.push({ ok: snap.d < 0.25, title: 'No snaps in head, arm or posture', detail: `largest jump in one tick ${snap.d.toFixed(2)}, ${snap.what}`, at: snap.d >= 0.25 ? snap.t : null });
+  const reset = rec.events.find((e) => e.kind === 'reset');
+  const surprisedAfter = reset ? rec.triggers.filter((x) => x.t > reset.t && x.name === 'surprised' && x.source === 'attention').length : 0;
+  items.push({ ok: !!reset && rec.roundAfterReset === 0 && !surprisedAfter, title: 'Nobody resets the interaction', detail: reset ? `reset at ${reset.t.toFixed(1)} s, the round emptied` : 'no reset' });
+  const dropped = rec.lanes.filter((r) => r.outcome === 'dropped' && r.run && !/^(audio|state|attention)$/.test(r.lane));
+  const secs = dropped.reduce((s, r) => s + (r.t1 - r.t0), 0);
+  items.push({ ok: null, title: 'Work dropped with its run', detail: dropped.length ? `${secs.toFixed(1)} s of service time: ${dropped.map((r) => `${r.lane} ${(r.t1 - r.t0).toFixed(1)} s`).join(', ')}` : 'none' });
+  return items;
+}
+</script>
+
+<script id="designs">
+"use strict";
+// ============================================================================
+// The designs. One definition of the example: its motion graph, in the
+// vocabulary of arora-dataflow-nodes and three example modules, its statechart
+// and its reply run. Each design runs that definition by its own rules, counts
+// its work the way the NGBT spectrum does, and stores it in its own form.
+// ============================================================================
+const MOTION_GROUPS = [
+  ['gaze', 'Gaze', 'the target: a wander, the person, a glance away, held while lost'],
+  ['posture', 'Posture', 'the blended emotions, with the thinking expression over them'],
+  ['head', 'Head', 'follows the target, with the posture’s pitch and the idle sway'],
+  ['eyes', 'Eyes', 'the target minus this tick’s head, and the thinking glance up'],
+  ['lid', 'Lid', 'the posture’s lid times the blink clip'],
+  ['mouth', 'Mouth', 'the posture, with the viseme at the playhead blended over it'],
+  ['arm', 'Arm', 'the posture and the idle sway, overridden by the wave clip'],
+];
+const src = (id, key) => ({ id, kind: key === 'arora/time' ? 'Time' : 'Input', key, args: [], params: {}, group: 'inputs', module: '@arora/dataflow' });
+const fn = (group, id, kind, args, params = {}, module = '@arora/dataflow') => ({ id, kind, args, params, group, module });
+const MOTION = [
+  src('t', 'arora/time'), src('face_x', 'face/x'), src('face_y', 'face/y'),
+  src('att', 'attention/state'), src('att_since', 'attention/since'),
+  src('conv', 'conversation/state'), src('sub', 'conversation/sub'), src('think_since', 'thinking/since'),
+  src('active', 'emotion/active'), src('item', 'speech/item'), src('playhead', 'speech/playhead'), src('playing', 'speech/playing'),
+  src('g_start', 'gesture/start'),
+  fn('gaze', 'w_osc_x', 'Oscillator', ['@t'], { frequency: 0.37 / (2 * Math.PI), phase: 0.5 }),
+  fn('gaze', 'wander_x', 'Multiply', ['@w_osc_x', 0.45]),
+  fn('gaze', 'w_osc_y', 'Oscillator', ['@t'], { frequency: 0.23 / (2 * Math.PI), phase: 0 }),
+  fn('gaze', 'wander_y', 'Multiply', ['@w_osc_y', 0.1]),
+  fn('gaze', 'since', 'Subtract', ['@t', '@att_since']),
+  fn('gaze', 'g_phase', 'Subtract', ['@since', 3.5]),
+  fn('gaze', 'g_mod', 'Modulo', ['@g_phase', 4]),
+  fn('gaze', 'g_in', 'LessThan', ['@g_mod', 0.8]),
+  fn('gaze', 'g_after', 'GreaterThan', ['@g_phase', -1e-9]),
+  fn('gaze', 'present', 'Equal', ['@att', 'present']),
+  fn('gaze', 'glance', 'And', ['@present', '@g_after', '@g_in']),
+  fn('gaze', 'face_right', 'GreaterThan', ['@face_x', 0]),
+  fn('gaze', 'g_dx', 'If', ['@face_right', -0.55, 0.55]),
+  fn('gaze', 'gx_add', 'If', ['@glance', '@g_dx', 0]),
+  fn('gaze', 'gy_add', 'If', ['@glance', -0.12, 0]),
+  fn('gaze', 'live_x', 'Add', ['@face_x', '@gx_add']),
+  fn('gaze', 'live_y', 'Add', ['@face_y', '@gy_add']),
+  fn('gaze', 'nobody', 'Equal', ['@att', 'nobody']),
+  fn('gaze', 'lost', 'Equal', ['@att', 'lost']),
+  fn('gaze', 'pick_x', 'If', ['@nobody', '@wander_x', '@live_x']),
+  fn('gaze', 'pick_y', 'If', ['@nobody', '@wander_y', '@live_y']),
+  fn('gaze', 'target_x', 'Hold', ['@pick_x', '@lost'], {}, '@pip/motion'),
+  fn('gaze', 'target_y', 'Hold', ['@pick_y', '@lost'], {}, '@pip/motion'),
+  fn('posture', 'env', 'Envelopes', ['@active', '@t'], {}, '@pip/expression'),
+  fn('posture', 'base', 'PostureBlend', ['@env'], {}, '@pip/expression'),
+  fn('posture', 'is_think', 'Equal', ['@conv', 'thinking']),
+  fn('posture', 'is_ponder', 'Equal', ['@sub', 'pondering']),
+  fn('posture', 'is_judge', 'Equal', ['@conv', 'judging']),
+  fn('posture', 'pondering', 'And', ['@is_think', '@is_ponder']),
+  fn('posture', 'thinking', 'Or', ['@pondering', '@is_judge']),
+  fn('posture', 'think_target', 'If', ['@thinking', 1, 0]),
+  fn('posture', 'think_w', 'Slew', ['@think_target'], { max_rate: 1 / 0.3, initial: 0 }),
+  fn('posture', 'think_s', 'Smooth', ['@think_w'], {}, '@pip/motion'),
+  fn('posture', 'posture', 'BlendWeightedAverage', ['@base', '@think_s'], { with: 'thinking' }),
+  fn('posture', 'p_pitch', 'ReadRecord', ['@posture'], { key: 'pitch' }),
+  fn('posture', 'p_arm', 'ReadRecord', ['@posture'], { key: 'arm' }),
+  fn('posture', 'p_lid', 'ReadRecord', ['@posture'], { key: 'lid' }),
+  fn('posture', 'p_open', 'ReadRecord', ['@posture'], { key: 'open' }),
+  fn('posture', 'p_stretch', 'ReadRecord', ['@posture'], { key: 'stretch' }),
+  fn('posture', 'p_corners', 'ReadRecord', ['@posture'], { key: 'corners' }),
+  fn('head', 'head_yaw', 'Damp', ['@target_x'], { half_life: 0.25, initial: 0 }),
+  fn('head', 'ty_s', 'Multiply', ['@target_y', 0.6]),
+  fn('head', 'pitch_follow', 'Damp', ['@ty_s'], { half_life: 0.25, initial: 0 }),
+  fn('head', 'idle_osc_p', 'Oscillator', ['@t'], { frequency: 0.25, phase: 0 }),
+  fn('head', 'idle_p', 'Multiply', ['@idle_osc_p', 0.03]),
+  fn('head', 'head_pitch', 'Add', ['@pitch_follow', '@p_pitch', '@idle_p']),
+  fn('eyes', 'dx', 'Subtract', ['@target_x', '@head_yaw']),
+  fn('eyes', 'dx_g', 'Multiply', ['@dx', 1.6]),
+  fn('eyes', 'eyes_x', 'Clamp', ['@dx_g', -1, 1]),
+  fn('eyes', 'glance_up', 'ThinkGlance', ['@t', '@think_since'], {}, '@pip/motion'),
+  fn('eyes', 'dy', 'Subtract', ['@target_y', '@head_pitch']),
+  fn('eyes', 'dy_g', 'Multiply', ['@dy', 1.6]),
+  fn('eyes', 'dy_up', 'Add', ['@dy_g', '@glance_up']),
+  fn('eyes', 'eyes_y', 'Clamp', ['@dy_up', -1, 1]),
+  fn('lid', 'blink', 'Sample', ['@t'], { clip: 'blinks' }, '@arora/animation'),
+  fn('lid', 'lid', 'Multiply', ['@p_lid', '@blink']),
+  fn('mouth', 'vis', 'Viseme', ['@item', '@playhead'], {}, '@pip/lipsync'),
+  fn('mouth', 'sp_target', 'If', ['@playing', 1, 0]),
+  fn('mouth', 'sp_w', 'Slew', ['@sp_target'], { max_rate: 12.5, initial: 0 }),
+  fn('mouth', 'sp_s', 'Smooth', ['@sp_w'], {}, '@pip/motion'),
+  fn('mouth', 'v_open', 'ReadRecord', ['@vis'], { key: 'open' }),
+  fn('mouth', 'v_stretch', 'ReadRecord', ['@vis'], { key: 'stretch' }),
+  fn('mouth', 'v_corners', 'ReadRecord', ['@vis'], { key: 'corners' }),
+  fn('mouth', 'm_open', 'BlendWeightedAverage', ['@p_open', '@v_open', '@sp_s']),
+  fn('mouth', 'm_stretch', 'BlendWeightedAverage', ['@p_stretch', '@v_stretch', '@sp_s']),
+  fn('mouth', 'c_add', 'Multiply', ['@sp_s', '@v_corners']),
+  fn('mouth', 'c_sum', 'Add', ['@p_corners', '@c_add']),
+  fn('mouth', 'm_corners', 'Clamp', ['@c_sum', -1, 1]),
+  fn('arm', 'idle_osc_a', 'Oscillator', ['@t'], { frequency: 0.25, phase: 1 }),
+  fn('arm', 'idle_a', 'Multiply', ['@idle_osc_a', 0.05]),
+  fn('arm', 'arm_base', 'Add', ['@p_arm', '@idle_a']),
+  fn('arm', 'wave', 'Sample', ['@t', '@g_start'], { clip: 'wave' }, '@arora/animation'),
+  fn('arm', 'wave_v', 'ReadRecord', ['@wave'], { key: 'value' }),
+  fn('arm', 'wave_w', 'ReadRecord', ['@wave'], { key: 'weight' }),
+  fn('arm', 'arm', 'BlendWeightedAverage', ['@arm_base', '@wave_v', '@wave_w']),
+];
+const SINKS = [['head/yaw', 'head_yaw'], ['head/pitch', 'head_pitch'], ['eyes/x', 'eyes_x'], ['eyes/y', 'eyes_y'], ['eyes/lid', 'lid'], ['mouth/open', 'm_open'], ['mouth/stretch', 'm_stretch'], ['mouth/corners', 'm_corners'], ['arm/raise', 'arm']];
+const SINK_OF = new Map(SINKS.map(([key, id]) => [id, key]));
+const NODE = new Map(MOTION.map((n) => [n.id, n]));
+const refsOf = (n) => n.args.filter((x) => typeof x === 'string' && x[0] === '@').map((x) => x.slice(1));
+const STATEFUL = new Set(['Damp', 'Slew', 'Hold']);
+for (const n of MOTION) n.stateful = STATEFUL.has(n.kind);
+// Data order: what a node reads, then the node.
+const ORDER = (() => { const out = [], seen = new Set(); const visit = (id) => { if (seen.has(id)) return; seen.add(id); refsOf(NODE.get(id)).forEach(visit); out.push(NODE.get(id)); }; MOTION.forEach((n) => visit(n.id)); return out; })();
+const INDEX = new Map(ORDER.map((n, i) => [n.id, i]));
+const SOURCES = ORDER.filter((n) => n.group === 'inputs'), FUNCS = ORDER.filter((n) => n.group !== 'inputs');
+const READERS = new Map(MOTION.map((n) => [n.id, []]));
+for (const n of MOTION) for (const r of refsOf(n)) READERS.get(r).push(n.id);
+const GROUP_FUNCS = new Map(MOTION_GROUPS.map(([g]) => [g, FUNCS.filter((n) => n.group === g)]));
+
+function same(a, b) {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return Number.isNaN(a) && Number.isNaN(b);
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (!same(a[i], b[i])) return false; return true; }
+  const ka = Object.keys(a); if (ka.length !== Object.keys(b).length) return false;
+  for (const k of ka) if (!same(a[k], b[k])) return false;
+  return true;
+}
+function envelopeWeight(e, t) {
+  const out = e.fadeStart === null ? 1 : t <= e.fadeStart ? e.fadeFrom : e.fadeFrom * (1 - smooth((t - e.fadeStart) / e.fadeLen));
+  return Math.max(0, Math.min(smooth((t - e.t0) / 0.6), out));
+}
+function blendPosture(env) {
+  let sum = 0; const acc = Object.fromEntries(POSE_KEYS.map((k) => [k, 0]));
+  for (const [name, w] of env) { sum += w; for (const k of POSE_KEYS) acc[k] += w * POSTURES[name][k]; }
+  const n = Math.max(0, 1 - sum), d = Math.max(1, sum);
+  for (const k of POSE_KEYS) acc[k] = (acc[k] + n * POSTURES.neutral[k]) / d;
+  return acc;
+}
+function visemeAt(item, playhead) {
+  if (!item) return VISEMES.rest;
+  const tr = item.track; let i = tr.findIndex((sg) => playhead < sg.t + sg.d); if (i < 0) i = tr.length - 1;
+  const sg = tr[i], pv = tr[i - 1] || { v: 'rest' }, u = smooth((playhead - sg.t) / 0.05), vis = {};
+  for (const k in VISEMES.rest) vis[k] = lerp(VISEMES[pv.v][k], VISEMES[sg.v][k], u);
+  return vis;
+}
+const blinkAtTime = (t) => { for (const b of BLINKS) if (t >= b && t < b + CLIPS.blink.length) return sampleKeys(CLIPS.blink.keys, t - b); return 1; };
+const FN = {
+  Oscillator: ([t], p) => Math.sin(2 * Math.PI * p.frequency * t + p.phase),
+  Multiply: (a) => a.reduce((x, y) => x * y, 1),
+  Add: (a) => a.reduce((x, y) => x + y, 0),
+  Subtract: ([a, b]) => a - b,
+  Modulo: ([a, b]) => a % b,
+  LessThan: ([a, b]) => a < b,
+  GreaterThan: ([a, b]) => a > b,
+  Equal: ([a, b]) => a === b,
+  And: (a) => a.every(Boolean),
+  Or: (a) => a.some(Boolean),
+  If: ([c, a, b]) => (c ? a : b),
+  Clamp: ([x, lo, hi]) => clamp(x, lo, hi),
+  Damp: ([x], p, s) => { if (s.v === undefined) s.v = p.initial; s.v += (x - s.v) * (1 - Math.pow(2, -DT / p.half_life)); return s.v; },
+  Slew: ([x], p, s) => { if (s.v === undefined) s.v = p.initial; s.v += clamp(x - s.v, -p.max_rate * DT, p.max_rate * DT); return s.v; },
+  Hold: ([x, keep], p, s) => { if (!keep || s.v === undefined) s.v = x; return s.v; },
+  Smooth: ([x]) => smooth(x),
+  ThinkGlance: ([t, since]) => { const d = t - since; return d >= 0 && d <= 1.2 ? 0.3 * Math.min(smooth(d / 0.2), smooth((1.2 - d) / 0.2)) : 0; },
+  Envelopes: ([active, t]) => active.map((e) => [e.name, envelopeWeight(e, t)]),
+  PostureBlend: ([env]) => blendPosture(env),
+  BlendWeightedAverage: (a, p) => {
+    if (p.with) { const [base, w] = a, out = {}; for (const k of POSE_KEYS) out[k] = lerp(base[k], POSTURES[p.with][k], w); return out; }
+    return lerp(a[0], a[1], a[2]);
+  },
+  ReadRecord: ([r], p) => r[p.key],
+  Viseme: ([item, playhead], p, s, t, items) => visemeAt(items[item], playhead),
+  Sample: (a, p) => {
+    if (p.clip === 'blinks') return blinkAtTime(a[0]);
+    const [t, start] = a; if (start === null || start === undefined) return { value: 0, weight: 0 };
+    const tau = t - start; if (tau < 0 || tau > CLIPS.wave.length) return { value: 0, weight: 0 };
+    return { value: sampleKeys(CLIPS.wave.keys, tau), weight: Math.min(smooth(tau / 0.2), smooth((CLIPS.wave.length - tau) / 0.3)) };
+  },
+};
+
+// ---- the five designs ------------------------------------------------------------
+const DESIGNS = [
+  { id: 'compute', short: '#396', name: '#396 detached nodes', strategy: 'compute', lag: 0,
+    note: `The statechart is the tree. The motion graph is ${FUNCS.length} detached calls, pulled at their first read and run only when their arguments changed; nine sinks publish after the tree. The reply run is a task run the conversation spawns: its stages are module-call leaves ticked at every tick, and the prompt is a detached node the llm leaf reads.` },
+  { id: 'full', short: '#409', name: '#409 full tree nodes', strategy: 'full', lag: 0,
+    note: '#396’s file and rule, with every detached call also a full tree node: a status, a trace line and the attached call path. The same calls at the same ticks; each call also pays a full node.' },
+  { id: 'inc', short: '#404', name: '#404 incremental tree', strategy: 'inc', lag: 0,
+    note: 'One tree. Each motion group is a node-graph shape, PARALLEL[ leaf …, RUNNING ], its leaves on change and bound to keys, placed after the statechart. Clean leaves answer from their cache; RUNNING keeps each shape polled, so its PARALLEL checks every child at every tick. The prompt is a leaf on change.' },
+  { id: 'macro', short: '#405', name: '#405 macros, placed', strategy: 'macro', lag: 1,
+    note: 'Authored as #396’s file, each motion group a macro. Every group publishes a sink, so the loader anchors it at the root: WITH[ groups …, tree ]. Clean groups answer from their cache. They run before the tree, so they read what the tree wrote last tick: what the statechart drives arrives a tick late.' },
+  { id: 'control', short: '#257', name: '#257 BT in NG', strategy: 'control', lag: 1,
+    note: 'Vizij graphs: the conversation, attention and reply run as control nodes ticking actions, the motion as eager nodes that run at every tick with nothing cached. A state the control writes reaches the motion through the store at the next tick. The prompt is a lazy node under the llm action, so it runs at every tick the action is polled.' },
+];
+const COST_US = { fullNode: 0.02258660410253709, hostWrite: 0.07207905131266586, tick: 0.08054631507819726, native: 0.02942999195571001, module: 0.13278202941423906, storeWrite: 0.06509534618334416, detachedCheck: 0.009512341457231909, detachedPublish: 0.03262927691013938, detachedCall: 0.1405157081974673, cacheCheck: 0.0051276265604468345, storeObserve: 0.008794477399395248, versionWrite: 0.03825155565970652 };
+const CALL_US = 2, PROMPT_US = 2000;
+const blankMetrics = () => ({ tick: 0, calls: 0, visits: 0, compares: 0, writes: 0, module: 0, native: 0, detachedEval: 0, detachedCall: 0, detachedCheck: 0, detachedPublish: 0, cacheCheck: 0, storeObserve: 0, versionWrite: 0, storeWrite: 0, fullNode: 0, hostWrite: 0, prompt: 0 });
+function modeledUs(m) { let us = 0; for (const k in COST_US) us += (m[k] || 0) * COST_US[k]; return us + (m.calls - m.prompt) * CALL_US + m.prompt * PROMPT_US; }
+const CONTROL_KEYS = ['att', 'attSince', 'conv', 'sub', 'thinkSince', 'active', 'item', 'playhead', 'playing', 'gStart'];
+const INITIAL_KEYS = { att: 'nobody', attSince: 0, conv: 'idle', sub: '', thinkSince: -10, active: [], item: 0, playhead: 0, playing: false, gStart: null };
+
+class MotionGraphRun {
+  constructor(strategy, items) { this.s = strategy; this.items = items; this.val = new Map(); this.state = new Map(); this.last = new Map(); this.prevOut = null; }
+  tick(input, t) {
+    const S = this.s, m = blankMetrics(), act = new Uint8Array(ORDER.length), inc = S === 'inc' || S === 'macro';
+    m.tick = 1; m.hostWrite = 2;
+    for (const n of SOURCES) {
+      const v = n.kind === 'Time' ? t : input[n.key], changed = !same(this.val.get(n.id), v);
+      this.val.set(n.id, v);
+      if (inc) { m.storeObserve++; m.compares++; if (changed) m.versionWrite++; }
+      if (S === 'control') m.visits++;
+      act[INDEX.get(n.id)] = changed ? 1 : 2;
+    }
+    const ran = new Set();
+    for (const n of FUNCS) {
+      const args = n.args.map((x) => (typeof x === 'string' && x[0] === '@' ? this.val.get(x.slice(1)) : x));
+      let st = this.state.get(n.id); if (!st) { st = {}; this.state.set(n.id, st); }
+      const full = n.stateful ? [...args, st.v] : args, prev = this.last.get(n.id);
+      let run;
+      if (S === 'control') { run = true; m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; }
+      else if (S === 'compute' || S === 'full') {
+        m.visits++; m.detachedEval++; run = !prev;
+        if (prev) for (let i = 0; i < full.length; i++) { m.compares++; m.detachedCheck++; if (!same(prev[i], full[i])) { run = true; break; } }
+        if (run) { m.calls++; m.detachedCall++; if (S === 'full') m.fullNode++; }
+      } else run = !prev || full.some((v, i) => !same(prev[i], v));
+      if (run) {
+        const v = FN[n.kind](args, n.params, st, t, this.items), changed = !same(this.val.get(n.id), v);
+        this.val.set(n.id, v); this.last.set(n.id, full.slice()); ran.add(n.id);
+        if (inc) { m.visits++; m.calls++; m.module++; m.compares++; if (changed) { m.versionWrite++; m.compares += READERS.get(n.id).length; } }
+      }
+      act[INDEX.get(n.id)] = run ? 1 : 2;
+    }
+    if (S === 'inc') for (const [g] of MOTION_GROUPS) { m.visits += 2; m.cacheCheck += GROUP_FUNCS.get(g).length; }
+    if (S === 'macro') {
+      m.visits++;
+      for (const [g] of MOTION_GROUPS) {
+        m.cacheCheck++;
+        if (GROUP_FUNCS.get(g).some((n) => ran.has(n.id))) { m.visits++; m.cacheCheck += GROUP_FUNCS.get(g).length; }
+      }
+    }
+    const c = SINKS.map(([, id]) => this.val.get(id));
+    c.forEach((v, i) => {
+      const changed = !this.prevOut || !same(this.prevOut[i], v);
+      if (S === 'compute' || S === 'full') { m.detachedPublish++; m.writes++; }
+      else if (S === 'inc') { if (changed) { m.storeWrite++; m.writes++; } }
+      else if (S === 'macro') { if (changed) { m.visits++; m.storeWrite++; m.writes++; } }
+      else { m.visits++; m.storeWrite++; m.writes++; }
+    });
+    this.prevOut = c;
+    return { c, m, act, val: this.val };
+  }
+}
+
+// What the statechart, its async leaves and the prompt cost a design at each tick.
+function controlContext(base) {
+  const n = base.frames.length, active = Array.from({ length: n }, () => []), alive = new Uint8Array(n), prompt = new Array(n).fill(null);
+  const llmRound = new Map();
+  for (const r of base.lanes) {
+    if (!/^(rag|recall|llm|tool|tts)$/.test(r.lane) || !r.run) continue;
+    const round = r.lane === 'llm' ? (llmRound.set(r.run, (llmRound.get(r.run) || 0) + 1), llmRound.get(r.run)) : 0;
+    const i0 = Math.max(0, Math.ceil(r.t0 / DT - 1e-6)), i1 = Math.min(n - 1, Math.ceil(r.t1 / DT - 1e-6) - 1);
+    for (let i = i0; i <= i1; i++) { active[i].push(r.lane); alive[i] = 1; if (r.lane === 'llm') prompt[i] = { run: r.run, round }; }
+  }
+  let sig = '';
+  for (let i = 0; i < n; i++) {
+    if (!prompt[i]) { sig = ''; continue; }
+    const f = base.frames[i], top = f.emotions.slice().sort((a, b) => b[1] - a[1])[0], s = `${prompt[i].run}:${prompt[i].round}:${top ? top[0] : 'neutral'}`;
+    prompt[i].changed = s !== sig; sig = s;
+  }
+  return { active, alive, prompt };
+}
+function controlCost(S, f, prevKeys, ctx, i) {
+  const m = blankMetrics();
+  const conv = { listening: [3, 1], judging: [5, 1], speaking: [10, 1], thinking: [12, 1] }[f.conv] || [7, 0];
+  m.visits += 2 + conv[0] + 1 + (f.att === 'present' || f.att === 'engaged' ? 3 : 5);
+  let polls = conv[1];
+  const lanes = ctx.active[i];
+  if (ctx.alive[i]) m.visits++;
+  m.visits += lanes.length; polls += lanes.length;
+  m.calls += polls; m.module += polls;
+  const pr = ctx.prompt[i];
+  if (pr) {
+    if (S === 'compute' || S === 'full') {
+      m.visits++; m.detachedEval++;
+      if (pr.changed) { m.compares++; m.detachedCheck++; m.calls++; m.detachedCall++; m.prompt++; if (S === 'full') m.fullNode++; }
+      else { m.compares += 8; m.detachedCheck += 8; }
+    } else if (S === 'inc' || S === 'macro') { m.cacheCheck++; if (pr.changed) { m.visits++; m.calls++; m.module++; m.prompt++; } }
+    else { m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; m.prompt++; }
+  }
+  const changed = prevKeys ? CONTROL_KEYS.filter((k) => !same(prevKeys[k], f.keys[k])).length : CONTROL_KEYS.length;
+  m.storeWrite += changed; m.writes += changed;
+  if (S === 'inc' || S === 'macro') { m.storeObserve += 6; m.compares += 6; }
+  return m;
+}
+function designRecording(design, base) {
+  const run = new MotionGraphRun(design.strategy, base.items), ctx = controlContext(base);
+  const frames = [], cost = [], acts = [];
+  let prevKeys = null;
+  for (let i = 0; i < base.frames.length; i++) {
+    const f = base.frames[i], k = design.lag ? (i >= design.lag ? base.frames[i - design.lag].keys : INITIAL_KEYS) : f.keys, face = faceAt(f.t);
+    const input = { 'face/x': face.x, 'face/y': face.y, 'attention/state': k.att, 'attention/since': k.attSince, 'conversation/state': k.conv, 'conversation/sub': k.sub, 'thinking/since': k.thinkSince, 'emotion/active': k.active, 'speech/item': k.item, 'speech/playhead': k.playhead, 'speech/playing': k.playing, 'gesture/start': k.gStart };
+    const out = run.tick(input, f.t), cm = controlCost(design.strategy, f, prevKeys, ctx, i);
+    prevKeys = f.keys;
+    const m = blankMetrics();
+    for (const key in m) m[key] = (out.m[key] || 0) + (cm[key] || 0);
+    m.native = Math.max(0, m.visits - m.module - m.detachedEval);
+    const v = out.val;
+    frames.push({ ...f, c: out.c, posture: POSE_KEYS.map((key) => v.get(`p_${key}`)), target: { x: v.get('target_x'), y: v.get('target_y') }, glance: v.get('glance_up') });
+    cost.push({ m, us: modeledUs(m) });
+    acts.push(out.act);
+  }
+  return { ...base, frames, cost, acts, design };
+}
+function bestLag(rec, ref, channel, during) {
+  let best = { k: 0, err: Infinity };
+  for (let k = 0; k <= 3; k++) {
+    let err = 0;
+    for (let i = k; i < rec.frames.length; i++) if (!during || during(ref.frames[i])) err = Math.max(err, Math.abs(rec.frames[i].c[channel] - ref.frames[i - k].c[channel]));
+    if (err < best.err - 1e-12) best = { k, err };
+  }
+  return best;
+}
+function designScore(rec, ref) {
+  const items = score(rec);
+  let diff = 0, at = null;
+  for (let i = 0; i < rec.frames.length; i++) for (let j = 0; j < CHANNELS.length; j++) { const d = Math.abs(rec.frames[i].c[j] - ref.frames[i].c[j]); if (d > diff) { diff = d; at = rec.frames[i].t; } }
+  const speaking = (f) => f.speechW > 0.99, lip = bestLag(rec, ref, 5, speaking), ms = Math.round(lip.k * DT * 1000);
+  items.unshift(
+    { ok: null, title: 'Against the reference', detail: diff < 1e-9 ? 'the same nine channels at every tick' : `largest difference ${diff.toFixed(3)}; what the statechart drives arrives ${rec.design.lag} tick late`, at: diff < 1e-9 ? null : at },
+    { ok: ms <= 45, title: 'Mouth on the audio', detail: ms ? `${ms} ms behind the playhead, under the 45 ms people notice` : 'on the playhead at every tick' },
+  );
+  const total = rec.cost.reduce((s, c) => s + c.us, 0) / rec.cost.length, peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
+  items.push({ ok: null, title: 'Modeled cost', detail: `${total.toFixed(0)} µs a tick on average, ${peak.us.toFixed(0)} µs at ${rec.frames[peak.i].t.toFixed(1)} s`, at: rec.frames[peak.i].t });
+  return items;
+}
+
+// ---- the statechart and the reply run, as trees -------------------------------------
+const T = (k, label, children = [], extra = {}) => ({ k, label, children, ...extra });
+const TREES = {
+  conversation: T('fallback', 'conversation', [
+    T('seq', 'listen', [
+      T('check', 'voice, or confirming words', [], { key: 'conversation/listening', cond: (f) => f.conv === 'listening' }),
+      T('action', 'listen', [], { fn: '@pip/agent.listen', args: [], note: 'holds the reply run, pauses its audio, hands back after 1.5 s without words' }),
+    ]),
+    T('seq', 'judge', [
+      T('check', 'judging?', [], { key: 'conversation/judging', cond: (f) => f.conv === 'judging' }),
+      T('action', 'judge', [], { fn: '@pip/agent.judge', args: ['@round', '@said', '{asr/words}'], note: 'Running until the verdict' }),
+    ]),
+    T('seq', 'reply', [
+      T('check', 'a reply run?', [], { key: 'reply/run', cond: (f) => f.conv === 'thinking' || f.conv === 'speaking' }),
+      T('fallback', 'speak or think', [
+        T('seq', 'speak', [
+          T('check', 'audio ready?', [], { key: 'reply/audio_ready', cond: (f) => f.conv === 'speaking' }),
+          T('action', 'play', [], { fn: '@pip/speech.play', args: ['{reply/next}'], note: 'Running while it plays; the mouth reads its playhead' }),
+        ]),
+        T('seq', 'think', [
+          T('set', 'thinking expression', [], { key: 'conversation/expression', value: 'thinking' }),
+          T('action', 'await the first sentence', [], { fn: '@pip/agent.await', args: ['{reply/run}'] }),
+        ]),
+      ]),
+    ]),
+    T('running', 'idle'),
+  ]),
+  attention: T('fallback', 'attention', [
+    T('seq', 'someone there', [
+      T('check', 'face visible?', [], { key: 'face/visible', cond: (f) => f.att === 'present' || f.att === 'engaged' }),
+      T('set', 'present, or engaged while talking', [], { key: 'attention/state' }),
+    ]),
+    T('seq', 'cooldown', [
+      T('check', 'face seen in the last 1.5 s?', [], { key: 'attention/lost_since', cond: (f) => f.att === 'lost' }),
+      T('set', 'lost: sad, or surprised on return', [], { key: 'attention/state' }),
+    ]),
+    T('set', 'nobody: the interaction resets', [], { key: 'attention/state' }),
+  ]),
+  reply: T('taskrun', 'reply run', [
+    T('seq', 'turn', [
+      T('parallel', 'context', [
+        T('action', 'rag', [], { fn: '@pip/agent.rag', args: ['{reply/utterance}'], out: 'reply/docs', lane: 'rag' }),
+        T('action', 'recall', [], { fn: '@pip/agent.recall', args: ['{reply/utterance}'], out: 'reply/memories', lane: 'recall' }),
+      ]),
+      T('repeat', 'until it answers, at most two tool rounds', [
+        T('action', 'llm', [], { fn: '@pip/agent.llm', args: ['@prompt'], out: 'reply/answer', lane: 'llm', prompt: true }),
+        T('parallel', 'a tool call', [
+          T('action', 'tool', [], { fn: '@pip/tools.call', args: ['{reply/tool_call}'], out: 'reply/tool_results', lane: 'tool' }),
+          T('action', 'filler', [], { fn: '@pip/speech.play', args: ['“Let me check.”'], lane: 'filler' }),
+        ]),
+      ]),
+      T('foreach', 'each sentence, in order', [
+        T('action', 'tts', [], { fn: '@pip/speech.tts', args: ['{reply/sentence}'], out: 'reply/audio', lane: 'tts' }),
+      ]),
+      T('action', 'remember', [], { fn: '@pip/agent.remember', args: ['@turn'], lane: 'remember' }),
+    ]),
+  ]),
+};
+const PROMPT_ARGS = ['persona', 'tools', '@emotion', '{reply/memories}', '{reply/docs}', '{reply/tool_results}', '@round', '{reply/utterance}'];
+let treeIds = 0;
+(function number(n) { n.uid = ++treeIds; n.children.forEach(number); })(TREES.conversation);
+(function number(n) { n.uid = ++treeIds; n.children.forEach(number); })(TREES.attention);
+(function number(n) { n.uid = ++treeIds; n.children.forEach(number); })(TREES.reply);
+// One tick of a part: each node's status, or none when the tick does not reach it.
+function treeStatus(part, f, laneOn) {
+  const out = new Map();
+  const tick = (n) => {
+    let s;
+    switch (n.k) {
+      case 'check': s = n.cond(f) ? 'S' : 'F'; break;
+      case 'set': case 'running': s = n.k === 'set' ? 'S' : 'R'; break;
+      case 'action': s = n.lane ? (laneOn(n.lane) ? 'R' : 'S') : 'R'; break;
+      case 'seq': s = 'S'; for (const c of n.children) { const cs = tick(c); if (cs !== 'S') { s = cs; break; } } break;
+      case 'fallback': s = 'F'; for (const c of n.children) { const cs = tick(c); if (cs !== 'F') { s = cs; break; } } break;
+      default: { const ss = n.children.map(tick); s = ss.includes('R') ? 'R' : ss.includes('F') ? 'F' : 'S'; }
+    }
+    out.set(n.uid, s); return s;
+  };
+  if (part !== 'reply' || f.runId) tick(TREES[part]);
+  return out;
+}
+
+// ---- how each design writes the example down ------------------------------------------
+const fname = (n) => (n.module === '@arora/dataflow' ? n.kind.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() : `${n.module}.${n.kind.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}`);
+const lit = (x) => (typeof x === 'number' ? String(+x.toFixed(4)) : typeof x === 'string' ? `"${x}"` : String(x));
+const paramText = (n) => Object.entries(n.params).map(([k, v]) => `${k}: ${typeof v === 'number' ? +v.toFixed(4) : `"${v}"`}`);
+function refText(x, style) {
+  if (typeof x !== 'string' || x[0] !== '@') return lit(x);
+  const n = NODE.get(x.slice(1));
+  if (n.group === 'inputs') return style === 'graph' ? n.id : `{${n.key}}`;
+  if (style === 'cells') return SINK_OF.has(n.id) ? `{${SINK_OF.get(n.id)}}` : `{.${n.id}}`;
+  if (style === 'graph') return n.id;
+  return `@${n.id}`;
+}
+const callText = (n, style) => `${fname(n)}(${[...n.args.map((x) => refText(x, style)), ...paramText(n)].join(', ')})`;
+const groupNodes = (g) => FUNCS.filter((n) => n.group === g);
+const groupSinks = (g) => groupNodes(g).filter((n) => SINK_OF.has(n.id));
+const treeGlyph = { fallback: 'FALLBACK', seq: 'SEQUENCE', parallel: 'PARALLEL', repeat: 'REPEAT', foreach: 'FOR EACH', taskrun: 'TASK RUN' };
+function treeLines(node, opts = {}, pad = '') {
+  const out = [];
+  const walk = (n, p) => {
+    let line;
+    if (n.k === 'check') line = `${p}Truthy({${n.key}})   ${n.label}`;
+    else if (n.k === 'set') line = `${p}{${n.key}} = ${n.value ? `"${n.value}"` : '…'}   ${n.label}`;
+    else if (n.k === 'running') line = `${p}RUNNING   ${n.label}`;
+    else if (n.k === 'action') {
+      const args = n.args.map((a) => (a === '@prompt' && opts.prompt ? opts.prompt : a)).join(', ');
+      line = `${p}${n.fn}(${args})${n.out ? ` → {${n.out}}` : ''}${n.note ? `   ${n.note}` : ''}`;
+      if (n.prompt && opts.beforeLlm) out.push({ uid: n.uid, text: `${p}${opts.beforeLlm}` });
+    } else line = `${p}${treeGlyph[n.k]}   ${n.label}`;
+    out.push({ uid: n.uid, text: line });
+    n.children.forEach((c) => walk(c, p + '  '));
+  };
+  walk(node, pad);
+  return out;
+}
+// The stored form of one part: the lines of the file, each tied to what it names.
+function storedLines(design, part) {
+  const S = design ? design.strategy : 'reference', out = [], push = (text, id) => out.push({ text, id });
+  const group = MOTION_GROUPS.find(([g]) => g === part);
+  if (!design) {
+    if (group) { push(`reference · ${group[1].toLowerCase()}: plain functions, in data order`); for (const n of groupNodes(part)) push(`  ${n.id} = ${callText(n, 'refs')}${SINK_OF.has(n.id) ? `   → {${SINK_OF.get(n.id)}}` : ''}`, n.id); }
+    else { push(`reference · ${part}: an explicit state machine in plain code; the tree below is the same logic`); treeLines(TREES[part]).forEach((l) => push(`  ${l.text}`, l.uid)); }
+    return out;
+  }
+  if (group) {
+    const nodes = groupNodes(part), sinks = groupSinks(part);
+    if (S === 'compute' || S === 'full') {
+      push(`detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''} · ${group[1].toLowerCase()}`);
+      for (const n of nodes) push(`  ${n.id}: ${SINK_OF.has(n.id) ? `{${SINK_OF.get(n.id)}} = ` : ''}${callText(n, 'refs')}`, n.id);
+      if (sinks.length) push(`  sinks: ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')} publish after the tree, at every tick`);
+    } else if (S === 'inc') {
+      push(`PARALLEL   ◇ node graph: ${group[1].toLowerCase()} · a branch of the root PARALLEL, after the statechart`);
+      for (const n of nodes) push(`  ${refText('@' + n.id, 'cells')} = ${callText(n, 'cells')}   _on_change`, n.id);
+      push('  RUNNING');
+    } else if (S === 'macro') {
+      push(`authored · macro #${part}${sinks.length ? `, publishing ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')}` : ''}`);
+      for (const n of nodes) push(`  ${n.id}: ${callText(n, 'refs')}`, n.id);
+      push('');
+      push(`executed · placed when loaded: ${sinks.length ? 'the group publishes a sink, so it anchors at the root' : 'its readers publish sinks, so it anchors at the root'}`);
+      push('WITH   the root: macros before the tree');
+      push(`  PARALLEL   #${part}, in data order`);
+      for (const n of nodes) push(`    ${refText('@' + n.id, 'cells')} = ${callText(n, 'cells')}   _on_change`, n.id);
+      push('  ⋯   the statechart, the tree’s body');
+      for (const n of sinks) push(`Copy({.${n.id}} → {${SINK_OF.get(n.id)}})`, n.id);
+    } else {
+      push(`graph motion/${part} · eager: every node runs at every tick, in data order; nothing is cached`);
+      push('nodes');
+      const ext = new Set(); for (const n of nodes) for (const r of refsOf(n)) if (NODE.get(r).group !== part) ext.add(r);
+      for (const r of ext) { const n = NODE.get(r); push(`  ${r.padEnd(13)} ${n.group === 'inputs' ? `input        path: ${n.key}` : `input        path: motion/${n.group}/${n.id}   (written by motion/${n.group})`}`, r); }
+      for (const n of nodes) push(`  ${n.id.padEnd(13)} ${fname(n).padEnd(28)} ${paramText(n).join(', ')}   eager`, n.id);
+      for (const n of sinks) push(`  ${(n.id + '_out').padEnd(13)} output       path: ${SINK_OF.get(n.id)}`, n.id);
+      push('edges');
+      for (const n of nodes) refsOf(n).forEach((r) => push(`  ${r} → ${n.id}`, n.id));
+      for (const n of sinks) push(`  ${n.id} → ${n.id}_out.in`, n.id);
+    }
+    return out;
+  }
+  const tree = TREES[part];
+  if (S === 'control') {
+    push(`graph ${part} · control nodes tick what is wired into their child_N inputs; actions and their inputs are lazy`);
+    push('nodes');
+    const kinds = { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'control: repeat', foreach: 'control: for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'constant', action: 'action' };
+    const walk = (n) => { push(`  ${String(n.uid).padStart(3)} ${kinds[n.k].padEnd(18)} ${n.k === 'action' ? `function: ${n.fn}` : n.k === 'check' ? `reads: ${n.key}` : n.k === 'set' ? `path: ${n.key}` : n.k === 'running' ? 'value: Running' : ''}   ${n.label}   ${n.k === 'action' || n.k === 'check' ? 'lazy' : ''}`, n.uid); n.children.forEach(walk); };
+    walk(tree);
+    if (part === 'reply') push(`  prompt ${'@pip/agent.prompt'.padEnd(18)} lazy: read by llm, it runs at every tick llm is ticked`, 'prompt');
+    push('edges');
+    const edges = (n) => n.children.forEach((c, k) => { push(`  ${c.uid} → ${n.uid}.child_${k}`, c.uid); edges(c); });
+    edges(tree);
+    if (part === 'reply') push('  prompt → llm.prompt', 'prompt');
+    return out;
+  }
+  const head = { conversation: 'Conversation, a subtree under the root PARALLEL', attention: 'Attention, a subtree under the root PARALLEL', reply: 'ReplyRun, a task run the conversation spawns; it outlives its branch, and {reply/held} gates what it shows' }[part];
+  push(`tree, held from its root · ${head}`);
+  if (part === 'reply' && S === 'inc') {
+    treeLines(tree, { prompt: '{.prompt}', beforeLlm: `{.prompt} = @pip/agent.prompt(${PROMPT_ARGS.join(', ')})   _on_change` }, '  ').forEach((l) => push(l.text, l.uid));
+  } else if (part === 'reply' && S === 'macro') {
+    treeLines(tree, { prompt: '#prompt' }, '  ').forEach((l) => push(l.text, l.uid));
+    push('');
+    push('authored · macro #prompt, read by llm');
+    push(`  prompt: @pip/agent.prompt(${PROMPT_ARGS.join(', ')})`, 'prompt');
+    push('executed · placed before its reader: WITH[ PARALLEL[ {.prompt} on change ], llm ]', 'prompt');
+  } else {
+    treeLines(tree, {}, '  ').forEach((l) => push(l.text, l.uid));
+    if (part === 'reply') {
+      push('');
+      push(`detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''}`);
+      push(`  prompt: @pip/agent.prompt(${PROMPT_ARGS.join(', ')})   read by llm; runs only when its arguments changed`, 'prompt');
+    }
+  }
+  if (S === 'inc' && part !== 'reply') push('  a clean branch answers from its cache; Running leaves are polled at every tick');
+  return out;
+}
+// The graph of one part, for the drawing: nodes, edges, and an optional container.
+function graphModel(design, part) {
+  const S = design ? design.strategy : 'reference';
+  const group = MOTION_GROUPS.find(([g]) => g === part);
+  if (group) {
+    const nodes = [], edges = [], ext = new Map();
+    for (const n of groupNodes(part)) {
+      nodes.push({ id: n.id, kind: fname(n), label: n.id, sink: SINK_OF.get(n.id) });
+      for (const r of refsOf(n)) {
+        const rn = NODE.get(r);
+        if (rn.group !== part) { if (!ext.has(r)) ext.set(r, { id: `ext:${r}`, kind: rn.group === 'inputs' ? 'input' : `from ${rn.group}`, label: rn.group === 'inputs' ? `{${rn.key}}` : (S === 'inc' || S === 'macro') && SINK_OF.has(r) ? `{${SINK_OF.get(r)}}` : `@${r}`, port: true, ref: r }); edges.push({ from: `ext:${r}`, to: n.id }); }
+        else edges.push({ from: r, to: n.id });
+      }
+    }
+    for (const n of groupSinks(part)) { nodes.push({ id: `sink:${n.id}`, kind: S === 'macro' ? 'Copy' : S === 'control' ? 'output' : S === 'inc' ? 'bound key' : 'sink', label: `{${SINK_OF.get(n.id)}}`, port: true, ref: n.id, out: true }); edges.push({ from: n.id, to: `sink:${n.id}` }); }
+    const box = S === 'inc' ? `PARALLEL ◇ node graph: ${part} · with RUNNING last` : S === 'macro' ? `WITH at the root ▸ PARALLEL #${part}` : S === 'control' ? `graph motion/${part} · eager` : S === 'compute' || S === 'full' ? 'detached: held by no node' : 'plain functions';
+    return { kind: 'dag', nodes: [...ext.values(), ...nodes], edges, box };
+  }
+  const nodes = [], edges = [];
+  const label = (n) => (n.k === 'action' ? n.fn.split('.').pop() : n.label);
+  const kindOf = (n) => (S === 'control' ? { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'repeat', foreach: 'for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'running', action: 'action' }[n.k] : { fallback: '? fallback', seq: '→ sequence', parallel: '⇉ parallel', repeat: '↻ repeat', foreach: '↻ for each', taskrun: '▶ task run', check: '◇ check', set: '= set', running: '… running', action: '▢ action' }[n.k]);
+  const walk = (n, parent, k) => {
+    nodes.push({ id: n.uid, kind: kindOf(n), label: label(n), tree: n });
+    if (parent) edges.push({ from: parent.uid, to: n.uid, label: S === 'control' ? `child_${k}` : '' });
+    n.children.forEach((c, i) => walk(c, n, i));
+  };
+  walk(TREES[part], null, 0);
+  if (part === 'reply') {
+    const llm = nodes.find((x) => x.tree && x.tree.prompt);
+    const kind = S === 'inc' ? 'leaf, on change' : S === 'macro' ? 'macro, placed' : S === 'control' ? 'lazy node' : S === 'reference' ? 'function' : 'detached node';
+    nodes.push({ id: 'prompt', kind, label: 'prompt', port: false, data: true, attach: llm.id });
+    edges.push({ from: 'prompt', to: llm.id, data: true, label: S === 'control' ? 'runs every tick' : 'on change' });
+  }
+  return { kind: 'tree', nodes, edges, box: S === 'control' ? `graph ${part}` : part === 'reply' ? 'task run' : 'subtree' };
+}
+const PARTS = [
+  { id: 'conversation', label: 'Conversation' }, { id: 'attention', label: 'Attention' }, { id: 'reply', label: 'Reply run' },
+  ...MOTION_GROUPS.map(([id, label]) => ({ id, label, motion: true })),
+];
+if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS };
+</script>
+
+<script>
+"use strict";
+(() => {
+const N = Math.round(RUN_END / DT) + 1;
+const SVGNS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) if (kid != null) e.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  return e;
+};
+const sv = (tag, attrs = {}, text) => { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
+
+const IMPLS = [
+  { id: 'reference', name: 'Reference', note: 'The spec as plain code: an explicit state machine, plain motion functions and a scheduler over the mock services. Every design is checked against it.', flags: {} },
+  { id: 'foil', name: 'Naive foil', note: 'Drops the reply on any cut-in, replaces emotions instead of blending them, and reads the previous tick’s head for the eyes: three broken rules for the scorecard to catch.', flags: { halts: true, replaceEmotion: true, staleEyes: true } },
+  ...DESIGNS.map((d) => ({ id: d.id, name: d.name, note: d.note, design: d })),
+];
+const BEATS = [[1.2, 'face'], [5, 'asks'], [8.6, 'adds'], [10.6, 'invalidated'], [12.6, 'tool'], [14, 'lost'], [15, 'back'], [17.2, 'shade?'], [19.2, 'continue'], [23.8, 'cough'], [25.3, 'resumes'], [28, 'leaves'], [29.5, 'reset']];
+const LANES = [['state', 'conversation'], ['attention', 'attention'], ['user', 'Sam'], ['rag', 'rag'], ['recall', 'recall'], ['prompt', 'prompt'], ['llm', 'llm'], ['tool', 'tool'], ['judge', 'judge'], ['tts', 'tts'], ['audio', 'audio'], ['filler', 'filler'], ['remember', 'memory']];
+const PLOTS = [
+  { title: 'Head', series: [[0, 'yaw'], [1, 'pitch']], range: [-1, 1] },
+  { title: 'Eyes', series: [[2, 'x'], [3, 'y'], [4, 'lid']], range: [-1, 1.3] },
+  { title: 'Mouth', series: [[5, 'open'], [6, 'stretch'], [7, 'corners']], range: [-1, 1] },
+  { title: 'Arm', series: [[8, 'raise']], range: [-0.2, 1] },
+];
+const SERIES = ['var(--run-1)', 'var(--run-2)', 'var(--run-3)'];
+const runColor = (id) => (id >= 1 && id <= 3 ? `var(--run-${id})` : 'var(--run-x)');
+const TABS = [['graph', 'Graph'], ['outline', 'As it runs'], ['stored', 'Stored form']];
+
+const cache = new Map();
+function laneIndex(rec) {
+  const n = rec.frames.length, at = Array.from({ length: n }, () => new Set());
+  for (const r of rec.lanes) {
+    if (!r.run || !/^(rag|recall|llm|tool|tts|filler|remember)$/.test(r.lane)) continue;
+    const i0 = Math.max(0, Math.ceil(r.t0 / DT - 1e-6)), i1 = r.lane === 'remember' ? i0 : Math.min(n - 1, Math.ceil(r.t1 / DT - 1e-6) - 1);
+    for (let i = i0; i <= i1; i++) at[i].add(`${r.run}:${r.lane}`);
+  }
+  return at;
+}
+function recordingFor(id) {
+  if (!cache.has(id)) {
+    const impl = IMPLS.find((x) => x.id === id);
+    let rec;
+    if (impl.design) { const ref = recordingFor('reference'); rec = designRecording(impl.design, ref); rec.score = designScore(rec, ref); }
+    else { rec = simulate(impl.flags); rec.score = score(rec); }
+    rec.impl = impl; rec.laneAt = laneIndex(rec);
+    cache.set(id, rec);
+  }
+  return cache.get(id);
+}
+const S = { T: 16.6, playing: false, speed: 1, loop: true, pick: { a: 'compute', b: 'control' }, ghost: { a: true, b: true }, tab: 'graph', part: 'mouth' };
+const sides = {};
+const tip = document.getElementById('tip');
+const frameAt = (T) => clamp(Math.round(T / DT), 0, N - 1);
+const other = (side) => sides[side.key === 'a' ? 'b' : 'a'];
+
+// ---- the robot ----------------------------------------------------------------
+function robotMarkup(id) {
+  const arm = '<rect x="-10" y="-6" width="20" height="70" rx="10"/><circle cx="0" cy="68" r="12"/>';
+  const face = (main) => `<g data-k="eye"><ellipse ${main ? 'class="r-glow"' : ''} cx="0" cy="0" rx="13" ry="16"/>${main ? '<circle class="r-spark" cx="0" cy="0" r="3.4"/>' : ''}</g><g data-k="eye"><ellipse ${main ? 'class="r-glow"' : ''} cx="0" cy="0" rx="13" ry="16"/>${main ? '<circle class="r-spark" cx="0" cy="0" r="3.4"/>' : ''}</g><path data-k="mouth" ${main ? 'class="r-mouth"' : ''} d=""/>`;
+  return `<svg class="robot" viewBox="0 0 360 380" role="img" aria-label="Pip, a desktop robot with one arm and a face screen">
+    <ellipse class="r-shadow" cx="180" cy="362" rx="125" ry="9"/>
+    <rect class="r-body" x="88" y="304" width="184" height="52" rx="24"/>
+    <rect class="r-shade" x="104" y="336" width="152" height="10" rx="5"/>
+    <g data-k="ghost-arm" class="ghost">${arm}</g>
+    <g data-k="arm" class="r-body">${arm}</g>
+    <rect class="r-body" x="124" y="230" width="112" height="82" rx="20"/>
+    <circle class="r-shade" cx="132" cy="252" r="9"/>
+    <rect class="r-body" x="167" y="204" width="26" height="34" rx="7"/>
+    <g data-k="head"><rect class="r-body" x="94" y="68" width="172" height="142" rx="36"/><rect class="r-screen" x="111" y="85" width="138" height="108" rx="26"/>
+      <clipPath id="clip-${id}"><rect x="111" y="85" width="138" height="108" rx="26"/></clipPath>
+      <g clip-path="url(#clip-${id})"><g data-k="face">${face(true)}</g></g></g>
+    <g data-k="ghost-head" class="ghost"><rect x="94" y="68" width="172" height="142" rx="36"/><g data-k="ghost-face">${face(false)}</g></g>
+  </svg>`;
+}
+function robotRefs(svg, prefix = '') {
+  const q = (k) => svg.querySelector(`[data-k="${prefix}${k}"]`);
+  const face = q('face');
+  return { arm: q('arm'), head: q('head'), face, eyes: [...face.querySelectorAll('[data-k="eye"]')].map((g) => ({ g, ball: g.querySelector('ellipse'), spark: g.querySelector('circle') })), mouth: face.querySelector('[data-k="mouth"]') };
+}
+function poseRobot(r, c) {
+  const [yaw, pitch, ex0, ey0, lid, open, stretch, corners, arm] = c;
+  r.arm.setAttribute('transform', `translate(128 252) rotate(${20 + 140 * arm})`);
+  r.head.setAttribute('transform', `translate(${22 * yaw} ${-12 * pitch})`);
+  r.face.setAttribute('transform', `translate(${180 + 12 * yaw} ${138 - 9 * pitch}) scale(${1 - 0.14 * Math.abs(yaw)} 1)`);
+  const ex = 17 * ex0, ey = -12 * ey0, ry = 16 * clamp(lid, 0.06, 1.25);
+  r.eyes.forEach((eye, i) => {
+    eye.g.setAttribute('transform', `translate(${(i ? 31 : -31) + ex} ${-14 + ey})`);
+    eye.ball.setAttribute('ry', ry);
+    if (eye.spark) { eye.spark.setAttribute('transform', `translate(${4 * ex0} ${-3 * ey0})`); eye.spark.style.opacity = ry > 5 ? '' : '0'; }
+  });
+  const hw = 22 + 12 * stretch, cy = 32 - 9 * corners, gap = 1.5 + 22 * open;
+  r.mouth.setAttribute('d', `M ${-hw} ${cy} Q 0 ${32 - gap * 0.35} ${hw} ${cy} Q 0 ${32 + gap} ${-hw} ${cy} Z`);
+}
+
+// ---- building a side ----------------------------------------------------------
+function buildSide(key) {
+  const stage = document.querySelector(`.side[data-side="${key}"]`), trace = document.querySelector(`.trace[data-side="${key}"]`);
+  const label = key === 'a' ? 'Left' : 'Right';
+  const pick = el('select', { id: `pick-${key}`, 'aria-label': `${label} implementation`, onchange: () => { S.pick[key] = pick.value; S.ghost[key] = pick.value !== 'reference'; ghost.checked = S.ghost[key]; mount(key); mount(key === 'a' ? 'b' : 'a', true); if (key === 'a') mountAssets(); render(); } },
+    el('optgroup', { label: 'Plain code' }, IMPLS.filter((m) => !m.design).map((m) => el('option', { value: m.id, text: m.name }))),
+    el('optgroup', { label: 'Designs' }, IMPLS.filter((m) => m.design).map((m) => el('option', { value: m.id, text: m.name }))));
+  pick.value = S.pick[key];
+  const ghost = el('input', { type: 'checkbox', id: `ghost-${key}`, onchange: () => { S.ghost[key] = ghost.checked; render(); } });
+  ghost.checked = S.ghost[key];
+  const note = el('p', { class: 'impl-note' });
+  const box = el('div', { class: 'robot-box' }); box.innerHTML = robotMarkup(key);
+  const svg = box.querySelector('svg');
+  const capUser = el('p', { class: 'cap user' }, el('span', { class: 'who', text: 'Sam' }), el('span', { class: 'said' }));
+  const capRobot = el('p', { class: 'cap robot' }, el('span', { class: 'who', text: 'Pip' }), el('span', { class: 'said' }));
+  const chips = el('div', { class: 'chips' });
+  note.addEventListener('click', () => note.classList.toggle('open'));
+  stage.append(el('div', { class: 'side-head' }, pick, el('label', { class: 'ghost-toggle', for: `ghost-${key}` }, ghost, 'reference ghost')), note, box, el('div', { class: 'captions' }, capUser, capRobot), chips);
+  const side = sides[key] = { key, stage, trace, pick, ghost, note, svg, main: robotRefs(svg), shade: robotRefs(svg, 'ghost-'), ghostArm: svg.querySelector('[data-k="ghost-arm"]'), ghostHead: svg.querySelector('[data-k="ghost-head"]'), capUser, capRobot, chips, label };
+  side.shade.arm = side.ghostArm; side.shade.head = side.ghostHead;
+}
+
+function mount(key, costOnly = false) {
+  const side = sides[key], impl = IMPLS.find((m) => m.id === S.pick[key]);
+  if (costOnly) { if (side.rec) buildCost(side); return; }
+  side.note.textContent = impl.note || '';
+  side.ghost.disabled = impl.id === 'reference';
+  side.rec = recordingFor(impl.id);
+  side.capKey = ''; side.repKey = '';
+  const t = side.trace; t.replaceChildren();
+  t.append(el('h2', { class: 'trace-title' }, impl.name, el('span', { class: 'sub', text: `${side.label} side` })));
+  side.transcript = el('ol', { class: 'transcript' });
+  side.repTitle = el('h3'); side.repNote = el('p', { class: 'rep-note' }); side.view = el('div', { class: 'view' });
+  side.costBox = el('div', { class: 'svgbox' }); side.costStats = el('div', { class: 'cost-stats' }); side.costLegend = el('div', { class: 'legend' });
+  side.stripBox = el('div', { class: 'svgbox' }); side.stripLegend = el('div', { class: 'legend' });
+  side.plotsBox = el('div'); side.values = el('div', { class: 'values' });
+  side.scoreList = el('ul', { class: 'score' });
+  t.append(
+    el('section', { class: 'block' }, el('h3', { text: 'What it said' }), side.transcript),
+    el('section', { class: 'block' }, side.repTitle, side.view, side.repNote),
+    el('section', { class: 'block' }, el('h3', { text: 'Cost of each tick' }), side.costBox, side.costLegend, side.costStats),
+    el('section', { class: 'block' }, el('h3', { text: 'Services' }), side.stripBox, side.stripLegend),
+    el('section', { class: 'block' }, el('h3', { text: 'Channels' }), side.plotsBox, side.values),
+    el('section', { class: 'block' }, el('h3', { text: 'Scorecard' }), side.scoreList),
+  );
+  buildTranscript(side); buildRep(side); buildCost(side); buildStrip(side); buildPlots(side); buildScore(side);
+  side.valueCells = CHANNELS.map((name) => { const v = el('span', { text: '0.00' }); side.values.append(el('div', {}, el('span', { class: 'k', text: name }), v)); return v; });
+}
+
+function buildTranscript(side) {
+  side.rows = side.rec.spoken.map((s) => {
+    const status = [];
+    if (s.kind === 'filler') status.push('filler line, while a tool runs');
+    for (const [a, b] of s.pauses) status.push(b === null ? `paused at ${a.toFixed(1)} s` : `paused ${a.toFixed(1)}–${b.toFixed(1)} s`);
+    if (s.outcome === 'finished') status.push(`finished at ${s.end.toFixed(1)} s`);
+    else if (s.outcome === 'dropped') status.push(`dropped at ${s.end.toFixed(1)} s by the judge`);
+    else if (s.outcome === 'cut') status.push(`cut at ${s.end.toFixed(1)} s, never resumed`);
+    else if (s.outcome === 'stopped') status.push(`stopped at ${s.end.toFixed(1)} s`);
+    const li = el('li', { class: s.outcome === 'cut' ? 'cut' : '' }, el('span', { class: 't', text: `${s.t0.toFixed(1)} s` }), el('span', { class: 'what' }, el('span', { class: `text ${s.kind === 'filler' ? 'filler' : ''}`, text: quote(s.text) }), el('span', { class: 'status', text: status.join(' · ') })));
+    side.transcript.append(li);
+    return { li, s };
+  });
+}
+
+// ---- representations: graph, outline, stored form ---------------------------------
+const partLabel = (id) => PARTS.find((p) => p.id === id).label;
+function repNote(design, part, tab) {
+  const motion = MOTION_GROUPS.find(([g]) => g === part);
+  if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} as plain functions: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.';
+  if (tab === 'graph') {
+    if (motion) return { compute: 'Each node is a detached call: dashed when cached this tick, outlined when it ran. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape polled. Dashed: answered from its cache.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body.', control: 'Eager nodes: every one runs at every tick.' }[design.strategy];
+    return design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs. Green succeeded, red failed, blue is Running this tick.' : 'The tree as it ticks: green succeeded, red failed, blue is Running; faded nodes were not reached this tick.';
+  }
+  return tab === 'outline' ? 'Each line marked with what it did this tick.' : 'The text a person edits, or the file the loader reads, for this part.';
+}
+function buildRep(side) {
+  const design = side.rec.design || null, part = S.part, tab = S.tab;
+  side.repTitle.textContent = `${partLabel(part)} · ${TABS.find(([k]) => k === tab)[1].toLowerCase()}`;
+  side.repNote.textContent = repNote(design, part, tab);
+  side.repKey = `${side.rec.impl.id}|${part}|${tab}`;
+  side.repLines = null; side.gnodes = null;
+  if (tab === 'graph') buildGraph(side, design, part);
+  else {
+    const motion = PARTS.find((p) => p.id === part).motion;
+    const lines = tab === 'outline' && !motion ? treeLines(TREES[part]).map((l) => ({ text: l.text, id: l.uid })) : storedLines(design, part);
+    const pre = el('pre');
+    side.repLines = lines.map((l) => { const span = el('span', { text: l.text || ' ' }); pre.append(span); return { span, id: l.id }; });
+    if (tab === 'stored') side.repLines = null;
+    side.view.replaceChildren(pre);
+  }
+}
+function nodeSize(n) {
+  const text = 14 + 6.7 * Math.max(String(n.label).length, String(n.kind).length * 0.85 + (n.tree ? 9 : 0));
+  return { w: Math.round(clamp(text, 64, 250)), h: 36 };
+}
+function layoutDag(model) {
+  const byId = new Map(model.nodes.map((n) => [n.id, { ...n, ...nodeSize(n), preds: [], layer: 0 }]));
+  for (const e of model.edges) byId.get(e.to).preds.push(e.from);
+  const layerOf = (id, seen = new Set()) => {
+    const n = byId.get(id); if (n.port && !n.out) return 0; if (seen.has(id)) return 0; seen.add(id);
+    return n.preds.length ? 1 + Math.max(...n.preds.map((p) => layerOf(p, seen))) : 1;
+  };
+  for (const n of byId.values()) n.layer = layerOf(n.id);
+  const layers = [];
+  for (const n of byId.values()) (layers[n.layer] = layers[n.layer] || []).push(n);
+  for (let L = 1; L < layers.length; L++) {
+    if (!layers[L]) { layers[L] = []; continue; }
+    const pos = new Map(); layers.slice(0, L).forEach((ly) => (ly || []).forEach((n, i) => pos.set(n.id, i)));
+    layers[L].sort((a, b) => avgPos(a) - avgPos(b));
+    function avgPos(n) { const ps = n.preds.filter((p) => pos.has(p)); return ps.length ? ps.reduce((s, p) => s + pos.get(p), 0) / ps.length : 0; }
+  }
+  const gapX = 34, gapY = 10, top = 26, left = 10;
+  let x = left; const tallest = Math.max(...layers.map((ly) => (ly || []).length));
+  layers.forEach((ly) => {
+    if (!ly || !ly.length) return;
+    const colW = Math.max(...ly.map((n) => n.w)), offset = ((tallest - ly.length) * (36 + gapY)) / 2;
+    ly.forEach((n, i) => { n.x = x; n.y = top + offset + i * (36 + gapY); });
+    x += colW + gapX;
+  });
+  const nodes = [...byId.values()];
+  return { nodes, width: x + 10, height: top + tallest * (36 + gapY) + 10 };
+}
+function layoutTree(model) {
+  const byId = new Map(model.nodes.map((n) => [n.id, { ...n, ...nodeSize(n), kids: [], depth: 0 }]));
+  const treeEdges = model.edges.filter((e) => !e.data);
+  for (const e of treeEdges) byId.get(e.from).kids.push(byId.get(e.to));
+  const root = byId.get(model.nodes[0].id);
+  const depthW = [];
+  const setDepth = (n, d) => { n.depth = d; depthW[d] = Math.max(depthW[d] || 0, n.w); n.kids.forEach((k) => setDepth(k, d + 1)); };
+  setDepth(root, 0);
+  const data = model.nodes.filter((n) => n.data).map((n) => byId.get(n.id));
+  for (const dn of data) { const host = byId.get(dn.attach); dn.depth = host.depth + 1; depthW[dn.depth] = Math.max(depthW[dn.depth] || 0, dn.w); }
+  const gapX = 30, gapY = 8, top = 26;
+  const xs = [10]; for (let d = 1; d < depthW.length; d++) xs[d] = xs[d - 1] + depthW[d - 1] + gapX;
+  let row = 0;
+  const place = (n) => {
+    if (!n.kids.length) { n.y = top + row * (36 + gapY); row++; }
+    else { n.kids.forEach(place); n.y = (n.kids[0].y + n.kids[n.kids.length - 1].y) / 2; }
+    n.x = xs[n.depth];
+  };
+  place(root);
+  for (const dn of data) { const host = byId.get(dn.attach); dn.x = xs[dn.depth]; dn.y = host.y; }
+  const width = Math.max(...[...byId.values()].map((n) => n.x + n.w)) + 12;
+  return { nodes: [...byId.values()], width, height: top + row * (36 + gapY) + 8 };
+}
+function buildGraph(side, design, part) {
+  const model = graphModel(design, part), lay = model.kind === 'dag' ? layoutDag(model) : layoutTree(model);
+  const at = new Map(lay.nodes.map((n) => [n.id, n]));
+  const svg = sv('svg', { class: 'graph', width: lay.width, height: lay.height, viewBox: `0 0 ${lay.width} ${lay.height}`, role: 'img', 'aria-label': `${partLabel(part)} as ${design ? design.name : 'the reference'} holds it` });
+  const inner = lay.nodes.filter((n) => !n.port);
+  if (inner.length) {
+    const x0 = Math.min(...inner.map((n) => n.x)) - 6, y0 = Math.min(...inner.map((n) => n.y)) - 18, x1 = Math.max(...inner.map((n) => n.x + n.w)) + 6, y1 = Math.max(...inner.map((n) => n.y + n.h)) + 6;
+    const g = sv('g', { class: 'g-box' }); g.append(sv('rect', { x: x0, y: Math.max(2, y0), width: x1 - x0, height: y1 - Math.max(2, y0), rx: 8 }), sv('text', { x: x0 + 6, y: Math.max(2, y0) + 12 }, model.box));
+    svg.append(g);
+  }
+  for (const e of model.edges) {
+    const a = at.get(e.from), b = at.get(e.to);
+    let d;
+    if (e.data) { const x1 = a.x, y1 = a.y + a.h / 2, x2 = b.x + b.w, y2 = b.y + b.h / 2; d = `M${x1} ${y1} C${x1 - 20} ${y1} ${x2 + 20} ${y2} ${x2} ${y2}`; }
+    else { const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mx = (x1 + x2) / 2; d = `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`; }
+    svg.append(sv('path', { class: `g-edge${e.data ? ' data' : ''}`, d }));
+    if (e.label) { const lx = e.data ? (a.x + b.x + b.w) / 2 : b.x - 4, ly = e.data ? a.y - 2 : b.y + b.h / 2 - 4; svg.append(sv('text', { class: 'g-edge-label', x: lx, y: ly, 'text-anchor': e.data ? 'middle' : 'end' }, e.label)); }
+  }
+  side.gnodes = new Map();
+  for (const n of lay.nodes) {
+    const g = sv('g', { class: `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}`, transform: `translate(${n.x} ${n.y})`, tabindex: 0 });
+    g.append(sv('rect', { width: n.w, height: n.h, rx: n.port ? 18 : 6 }), sv('text', { class: 'k', x: 8, y: 13 }, n.kind), sv('text', { class: 'l', x: 8, y: 28 }, n.label));
+    if (n.tree) g.append(sv('text', { class: 'badge-s', x: n.w - 8, y: 13, 'text-anchor': 'end' }, ''));
+    const describe = () => {
+      if (n.tree) { const t = n.tree; return `<b>${escapeHtml(t.label)}</b><br>${escapeHtml(t.k === 'action' ? `${t.fn}(${t.args.join(', ')})` : t.k === 'check' ? `Truthy({${t.key}})` : t.k === 'set' ? `{${t.key}}` : n.kind)}${t.note ? `<br>${escapeHtml(t.note)}` : ''}`; }
+      if (n.data) return `<b>prompt</b><br>@pip/agent.prompt(${escapeHtml(PROMPT_ARGS.join(', '))})<br>${PROMPT_US / 1000} ms of work a call`;
+      const id = n.ref || n.id, mn = MOTION.find((x) => x.id === id);
+      return mn ? `<b>${escapeHtml(mn.id)}</b><br>${escapeHtml(mn.group === 'inputs' ? `{${mn.key}}` : `${mn.module} · ${mn.kind}`)}${mn.group !== 'inputs' ? `<br>${escapeHtml(mn.args.map((x) => (typeof x === 'string' ? x : String(+x.toFixed(4)))).join(', '))}` : ''}` : escapeHtml(n.label);
+    };
+    const show = (ev) => showTip(describe(), ev);
+    g.addEventListener('pointerenter', show); g.addEventListener('pointermove', show); g.addEventListener('pointerleave', hideTip);
+    g.addEventListener('focus', () => { const b = g.getBoundingClientRect(); showTip(describe(), { clientX: b.right, clientY: b.top }); }); g.addEventListener('blur', hideTip);
+    svg.append(g); side.gnodes.set(n.id, { g, n, badge: g.querySelector('.badge-s') });
+  }
+  // Fit a graph up to 1.6 times the panel's width; scroll a bigger one at its own size.
+  const room = Math.max(240, (side.view.getBoundingClientRect().width || side.trace.getBoundingClientRect().width || 600) - 4);
+  if (lay.width > room && room / lay.width >= 0.62) { svg.setAttribute('width', room); svg.setAttribute('height', Math.round(lay.height * room / lay.width)); }
+  side.view.replaceChildren(svg);
+}
+function liveRep(side, i) {
+  const rec = side.rec, f = rec.frames[i], part = S.part, motion = PARTS.find((p) => p.id === part).motion;
+  const act = rec.acts ? rec.acts[i] : null;
+  const laneOn = (lane) => rec.laneAt[i].has(`${f.runId}:${lane}`);
+  const statuses = motion ? null : treeStatus(part, f, laneOn);
+  const motionClass = (id) => { if (!act) return ''; const k = INDEX.get(id); if (k === undefined) return ''; return act[k] === 1 ? 'ran' : act[k] === 2 ? 'cached' : ''; };
+  if (side.gnodes) {
+    for (const { g, n, badge } of side.gnodes.values()) {
+      let cls = '';
+      if (n.tree) { const s = statuses.get(n.tree.uid); cls = s ? `st-${s}` : 'st-none'; if (badge) badge.textContent = s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
+      else if (n.data) cls = rec.cost && rec.cost[i].m.prompt ? 'ran' : laneOn('llm') ? 'cached' : 'st-none';
+      else if (motion) cls = motionClass(n.ref || n.id);
+      g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}`);
+    }
+  }
+  if (side.repLines) {
+    for (const { span, id } of side.repLines) {
+      let cls = '';
+      if (id !== undefined && id !== null) {
+        if (motion) cls = motionClass(id);
+        else if (typeof id === 'number') { const s = statuses.get(id); cls = s ? `st-${s}` : 'dim'; }
+        else if (id === 'prompt') cls = rec.cost && rec.cost[i].m.prompt ? 'ran' : '';
+      }
+      span.className = cls;
+    }
+  }
+}
+
+// ---- the cost of each tick -----------------------------------------------------------
+function buildCost(side) {
+  const rec = side.rec;
+  if (!rec.cost) {
+    side.costBox.replaceChildren(el('p', { class: 'planned', text: 'Plain code: there is no executor to model. Pick a design to see what each tick costs on it.' }));
+    side.costStats.replaceChildren(); side.costLegend.replaceChildren(); side.costNow = null; return;
+  }
+  const W = widthOf(side.costBox), H = 132, left = 44, right = 8, top = 8, bottom = 18, pw = W - left - right, ph = H - top - bottom;
+  const peer = other(side) && other(side).rec && other(side).rec.cost && other(side).rec !== rec ? other(side).rec : null;
+  const hi = Math.max(3000, ...rec.cost.map((c) => c.us), ...(peer ? peer.cost.map((c) => c.us) : [])), lo = 10;
+  const x = (t) => left + (t / RUN_END) * pw, y = (us) => top + (1 - (Math.log10(clamp(us, lo, hi)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo))) * ph;
+  const svg = sv('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Modeled microseconds of each tick on ${rec.impl.name}` });
+  for (const v of [10, 100, 1000]) { svg.append(sv('line', { class: 'grid', x1: left, x2: left + pw, y1: y(v), y2: y(v) })); svg.append(sv('text', { x: left - 4, y: y(v) + 3, 'text-anchor': 'end' }, v >= 1000 ? `${v / 1000} ms` : `${v} µs`)); }
+  for (let s = 0; s <= RUN_END; s += 10) svg.append(sv('text', { x: x(s), y: H - 4, 'text-anchor': s === 0 ? 'start' : 'middle' }, `${s} s`));
+  const path = (list) => list.map((c, i) => `${i ? 'L' : 'M'}${x(i * DT).toFixed(1)} ${y(c.us).toFixed(1)}`).join('');
+  if (peer) { const p = sv('path', { d: path(peer.cost), fill: 'none', 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }); p.style.stroke = 'var(--faint)'; svg.append(p); }
+  const main = sv('path', { d: path(rec.cost), fill: 'none', 'stroke-width': 1.6, 'stroke-linejoin': 'round' }); main.style.stroke = 'var(--run-1)'; svg.append(main);
+  side.costNow = sv('line', { class: 'now', x1: left, x2: left, y1: top, y2: top + ph }); svg.append(side.costNow); side.costX = x;
+  const hit = sv('rect', { x: left, y: 0, width: pw, height: H, fill: 'transparent' }); svg.append(hit);
+  const hover = sv('line', { class: 'hover', x1: left, x2: left, y1: top, y2: top + ph, visibility: 'hidden' }); svg.append(hover);
+  const readout = (ev) => {
+    const b = svg.getBoundingClientRect(), px = (ev.clientX - b.left) * (W / b.width), t = clamp(((px - left) / pw) * RUN_END, 0, RUN_END), i = frameAt(t), c = rec.cost[i];
+    hover.setAttribute('x1', x(i * DT)); hover.setAttribute('x2', x(i * DT)); hover.setAttribute('visibility', 'visible');
+    showTip(`<b>${(i * DT).toFixed(2)} s</b><div class="row"><i style="background:var(--run-1)"></i><b>${c.us.toFixed(0)} µs</b> ${escapeHtml(rec.impl.name)}</div>${peer ? `<div class="row"><i style="background:var(--faint)"></i><b>${peer.cost[i].us.toFixed(0)} µs</b> ${escapeHtml(peer.impl.name)}</div>` : ''}<div>${c.m.calls} calls · ${c.m.visits} visits · ${c.m.compares + c.m.cacheCheck} checks${c.m.prompt ? ` · ${c.m.prompt} prompt build` : ''}</div>`, ev);
+  };
+  hit.addEventListener('pointermove', readout); hit.addEventListener('pointerenter', readout);
+  hit.addEventListener('pointerleave', () => { hover.setAttribute('visibility', 'hidden'); hideTip(); });
+  side.costBox.replaceChildren(svg);
+  side.costLegend.replaceChildren(el('span', {}, el('i', { class: 'line', style: 'background:var(--run-1)' }), rec.impl.name), peer ? el('span', {}, el('i', { class: 'line', style: 'background:var(--faint)' }), `${peer.impl.name}, the other side`) : null, el('span', { text: 'log scale; a prompt build is 2 ms of work' }));
+  const avg = (f) => rec.cost.reduce((s, c) => s + f(c), 0) / rec.cost.length;
+  const peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
+  const prompts = rec.cost.reduce((s, c) => s + c.m.prompt, 0);
+  const stat = (k, v, a) => el('div', {}, el('span', { class: 'k', text: k }), el('span', { class: 'v', text: v }), a ? el('span', { class: 'a', text: a }) : null);
+  side.costNow2 = el('span', { class: 'v', text: '' });
+  side.costStats.replaceChildren(
+    el('div', {}, el('span', { class: 'k', text: 'this tick' }), side.costNow2, el('span', { class: 'a', text: 'modeled' })),
+    stat('average', `${avg((c) => c.us).toFixed(0)} µs`, 'a tick'),
+    stat('peak', `${peak.us.toFixed(0)} µs`, `at ${rec.frames[peak.i].t.toFixed(1)} s`),
+    stat('calls', avg((c) => c.m.calls).toFixed(1), 'a tick, average'),
+    stat('visits', avg((c) => c.m.visits).toFixed(1), 'a tick, average'),
+    stat('checks', avg((c) => c.m.compares + c.m.cacheCheck).toFixed(1), 'a tick, average'),
+    stat('prompt builds', String(prompts), `${(prompts * PROMPT_US / 1000).toFixed(0)} ms of work in all`),
+  );
+}
+
+// ---- the services strip -------------------------------------------------------
+function widthOf(box) { return Math.max(260, Math.floor(box.getBoundingClientRect().width || box.parentElement.getBoundingClientRect().width || 600)); }
+function buildStrip(side) {
+  const W = widthOf(side.stripBox), left = 78, right = 8, rowH = 16, top = 4, H = top + LANES.length * rowH + 22;
+  const pw = W - left - right, x = (t) => left + (t / RUN_END) * pw;
+  const svg = sv('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Service calls over the run, for the ${side.label.toLowerCase()} side` });
+  const hatchId = `hatch-${side.key}`;
+  const defs = sv('defs'); const pat = sv('pattern', { id: hatchId, width: 5, height: 5, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' });
+  const pl = sv('line', { x1: 0, y1: 0, x2: 0, y2: 5 }); pl.style.stroke = 'var(--panel)'; pl.style.strokeWidth = '2';
+  pat.append(pl); defs.append(pat); svg.append(defs);
+  for (let s = 0; s <= RUN_END; s += 5) { svg.append(sv('line', { class: 'grid', x1: x(s), x2: x(s), y1: top, y2: top + LANES.length * rowH })); svg.append(sv('text', { x: x(s), y: H - 6, 'text-anchor': s === 0 ? 'start' : 'middle' }, `${s} s`)); }
+  const recs = side.rec.lanes.slice();
+  for (const u of SCRIPT.user) recs.push({ lane: 'user', run: 0, t0: u.from, t1: u.to, label: u.text ? quote(u.text) : 'a cough', outcome: 'done' });
+  LANES.forEach(([lane, name], row) => {
+    const y = top + row * rowH;
+    svg.append(sv('text', { class: 'lane-name', x: 0, y: y + 11 }, name));
+    let alt = 0;
+    for (const r of recs.filter((q) => q.lane === lane)) {
+      const x0 = x(r.t0), w = Math.max(2, x(Math.min(r.t1, RUN_END)) - x0), neutral = lane === 'state' || lane === 'attention';
+      const rect = sv('rect', { x: x0, y: y + 3, width: w, height: 10, rx: 2 });
+      if (neutral) rect.setAttribute('class', alt++ % 2 ? 'state-b' : 'state-a'); else if (lane === 'user') rect.setAttribute('class', 'user'); else rect.style.fill = runColor(r.run);
+      const g = sv('g', { tabindex: 0 }); g.append(rect);
+      if (r.outcome === 'dropped' || r.outcome === 'cut' || r.outcome === 'stopped') { g.append(sv('rect', { x: x0, y: y + 3, width: w, height: 10, fill: `url(#${hatchId})` })); g.append(sv('text', { class: 'mark-x', x: x0 + w + 2, y: y + 12 }, '×')); }
+      if (neutral && w > r.label.length * 6 + 6) g.append(sv('text', { class: 'seg-label', x: x0 + 3, y: y + 11.5 }, r.label));
+      const describe = () => `<b>${lane === 'state' ? 'conversation' : lane}</b>${r.run ? ` · run ${r.run}` : ''}<br>${r.t0.toFixed(2)}–${Math.min(r.t1, RUN_END).toFixed(2)} s · ${escapeHtml(r.label)}${r.outcome !== 'done' ? ` · <b>${r.outcome}</b>` : ''}`;
+      const show = (ev) => showTip(describe(), ev);
+      g.addEventListener('pointerenter', show); g.addEventListener('pointermove', show); g.addEventListener('pointerleave', hideTip);
+      g.addEventListener('focus', () => { const b = g.getBoundingClientRect(); showTip(describe(), { clientX: b.right, clientY: b.top }); }); g.addEventListener('blur', hideTip);
+      svg.append(g);
+    }
+  });
+  svg.append(sv('line', { class: 'axis', x1: left, x2: W - right, y1: top + LANES.length * rowH, y2: top + LANES.length * rowH }));
+  side.stripNow = sv('line', { class: 'now', x1: left, x2: left, y1: top, y2: top + LANES.length * rowH }); svg.append(side.stripNow);
+  side.stripX = x;
+  side.stripBox.replaceChildren(svg);
+  side.stripLegend.replaceChildren(...side.rec.runs.map((r) => el('span', { title: r.utterance }, el('i', { style: `background:${runColor(r.id)}` }), `run ${r.id}${r.dropped ? ' (dropped)' : ''}`)), el('span', {}, el('i', { style: 'background:var(--faint)' }), 'Sam speaking'), el('span', {}, '× ended early'));
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function showTip(html, ev) {
+  tip.innerHTML = html; tip.hidden = false;
+  const r = tip.getBoundingClientRect(), pad = 12;
+  let x = ev.clientX + pad, y = ev.clientY + pad;
+  if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - pad;
+  tip.style.left = `${Math.max(8, x)}px`; tip.style.top = `${Math.max(8, y)}px`;
+}
+function hideTip() { tip.hidden = true; }
+
+// ---- the channel plots ----------------------------------------------------------
+function buildPlots(side) {
+  const W = widthOf(side.plotsBox), left = 30, right = 10, H = 66, frames = side.rec.frames;
+  const pw = W - left - right, x = (t) => left + (t / RUN_END) * pw;
+  side.plotNow = []; side.plotX = x;
+  side.plotsBox.replaceChildren();
+  for (const p of PLOTS) {
+    const [lo, hi] = p.range, y = (v) => 6 + (1 - (v - lo) / (hi - lo)) * (H - 12);
+    const svg = sv('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${p.title} channels over the run` });
+    for (const v of [lo, 0, hi]) { svg.append(sv('line', { class: v === 0 ? 'axis' : 'grid', x1: left, x2: left + pw, y1: y(v), y2: y(v) })); svg.append(sv('text', { x: left - 4, y: y(v) + 3, 'text-anchor': 'end' }, v === 0 ? '0' : String(v))); }
+    const step = Math.max(1, Math.floor(frames.length / pw));
+    p.series.forEach(([k], i) => {
+      let d = '';
+      for (let j = 0; j < frames.length; j += step) d += `${j ? 'L' : 'M'}${x(frames[j].t).toFixed(1)} ${y(frames[j].c[k]).toFixed(1)}`;
+      const path = sv('path', { d, fill: 'none', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }); path.style.stroke = SERIES[i];
+      svg.append(path);
+    });
+    const now = sv('line', { class: 'now', x1: left, x2: left, y1: 4, y2: H - 4 }); svg.append(now); side.plotNow.push(now);
+    const hover = sv('line', { class: 'hover', x1: left, x2: left, y1: 4, y2: H - 4, visibility: 'hidden' }); svg.append(hover);
+    const hit = sv('rect', { x: left, y: 0, width: pw, height: H, fill: 'transparent' }); svg.append(hit);
+    const readout = (ev) => {
+      const b = svg.getBoundingClientRect(), px = (ev.clientX - b.left) * (W / b.width);
+      const t = clamp(((px - left) / pw) * RUN_END, 0, RUN_END), f = frames[frameAt(t)];
+      hover.setAttribute('x1', x(f.t)); hover.setAttribute('x2', x(f.t)); hover.setAttribute('visibility', 'visible');
+      showTip(`<b>${f.t.toFixed(2)} s</b>` + p.series.map(([k, name], i) => `<div class="row"><i style="background:${SERIES[i]}"></i><b>${f.c[k].toFixed(2)}</b> ${name}</div>`).join(''), ev);
+    };
+    hit.addEventListener('pointermove', readout); hit.addEventListener('pointerenter', readout);
+    hit.addEventListener('pointerleave', () => { hover.setAttribute('visibility', 'hidden'); hideTip(); });
+    const head = el('div', { class: 'plot-head' }, el('h4', { text: p.title }), el('div', { class: 'legend' }, p.series.map(([, name], i) => el('span', {}, el('i', { class: 'line', style: `background:${SERIES[i]}` }), name))));
+    side.plotsBox.append(head, el('div', { class: 'svgbox' }, svg));
+  }
+}
+
+function buildScore(side) {
+  side.scoreList.replaceChildren(...side.rec.score.map((it) => {
+    const li = el('li', {}, el('span', { class: `badge ${it.ok === null ? 'info' : it.ok ? 'ok' : 'bad'}`, text: it.ok === null ? 'info' : it.ok ? '✓ pass' : '✗ fail' }), el('span', {}, el('span', { class: 'title', text: it.title }), el('span', { class: 'detail', text: it.detail })));
+    if (it.at != null) { li.dataset.at = it.at; li.tabIndex = 0; li.title = 'Jump to this moment'; const go = () => { S.playing = false; S.T = Math.max(0, it.at - 0.5); render(); }; li.addEventListener('click', go); li.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); }); }
+    return li;
+  }));
+}
+
+// ---- per-frame rendering ----------------------------------------------------------
+function renderSide(side, i) {
+  const f = side.rec.frames[i];
+  poseRobot(side.main, f.c);
+  const showGhost = S.ghost[side.key] && S.pick[side.key] !== 'reference';
+  side.ghostArm.style.display = side.ghostHead.style.display = showGhost ? '' : 'none';
+  if (showGhost) poseRobot(side.shade, recordingFor('reference').frames[i].c);
+  const capKey = `${f.user}|${f.robot ? `${f.robot.text}|${f.robot.word}|${f.robot.paused}` : ''}`;
+  if (capKey !== side.capKey) {
+    side.capKey = capKey;
+    const u = side.capUser.querySelector('.said'), r = side.capRobot.querySelector('.said');
+    u.textContent = f.user || '…'; side.capUser.classList.toggle('quiet', !f.user);
+    r.replaceChildren();
+    if (f.robot) {
+      if (f.robot.paused) r.append(el('span', { class: 'k', text: '(paused) ' }));
+      f.robot.words.forEach((w, j) => { r.append(el('span', { class: `${j === f.robot.word && !f.robot.paused ? 'now' : ''} ${f.robot.kind === 'filler' ? 'filler' : ''}`, text: w })); r.append(' '); });
+    } else r.textContent = '…';
+    side.capRobot.classList.toggle('quiet', !f.robot);
+  }
+  const chips = [el('span', { class: `chip${f.held ? ' held' : ''}` }, el('span', { class: 'k', text: 'talk' }), f.sub ? `${f.conv} · ${f.sub}` : f.conv, f.held ? ' · held' : '')];
+  chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'gaze' }), f.att));
+  for (const [name, w] of f.emotions.slice().sort((a, b) => b[1] - a[1])) chips.push(el('span', { class: 'chip' }, name, el('span', { class: 'w' }, el('i', { style: `width:${Math.round(w * 100)}%` }))));
+  if (f.think > 0.02) chips.push(el('span', { class: 'chip' }, 'thinking', el('span', { class: 'w' }, el('i', { style: `width:${Math.round(f.think * 100)}%` }))));
+  if (f.gesture) chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'clip' }), f.gesture));
+  if (side.rec.cost) chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'cost' }), `${side.rec.cost[i].us.toFixed(0)} µs`));
+  side.chips.replaceChildren(...chips);
+  for (const { li, s } of side.rows) {
+    const end = s.end ?? RUN_END, paused = s.pauses.some(([a, b]) => f.t >= a && f.t < (b ?? RUN_END));
+    li.classList.toggle('now', f.t >= s.t0 && f.t < end && !paused);
+  }
+  const sx = side.stripX(f.t); side.stripNow.setAttribute('x1', sx); side.stripNow.setAttribute('x2', sx);
+  const px = side.plotX(f.t); for (const ln of side.plotNow) { ln.setAttribute('x1', px); ln.setAttribute('x2', px); }
+  if (side.costNow) { const cx = side.costX(f.t); side.costNow.setAttribute('x1', cx); side.costNow.setAttribute('x2', cx); side.costNow2.textContent = `${side.rec.cost[i].us.toFixed(0)} µs`; }
+  f.c.forEach((v, j) => { side.valueCells[j].textContent = v.toFixed(2); });
+  liveRep(side, i);
+}
+
+// ---- the shared view controls ----------------------------------------------------------
+function buildRepControls() {
+  const tabs = el('div', { class: 'seg', role: 'group', 'aria-label': 'How to show a part' });
+  const partsRow = el('div', { class: 'parts', role: 'group', 'aria-label': 'Which part' });
+  const sync = () => {
+    [...tabs.children].forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === S.tab)));
+    [...partsRow.querySelectorAll('button')].forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === S.part)));
+  };
+  for (const [k, label] of TABS) tabs.append(el('button', { type: 'button', 'data-k': k, onclick: () => { S.tab = k; sync(); for (const s of Object.values(sides)) buildRep(s); render(); } }, label));
+  partsRow.append(el('span', { class: 'k', text: 'control ', style: 'font:11px var(--f-mono);color:var(--faint);align-self:center' }));
+  PARTS.forEach((p, i) => {
+    if (i === 3) partsRow.append(el('span', { class: 'gap' }), el('span', { class: 'k', text: 'motion ', style: 'font:11px var(--f-mono);color:var(--faint);align-self:center' }));
+    partsRow.append(el('button', { type: 'button', 'data-k': p.id, onclick: () => { S.part = p.id; sync(); for (const s of Object.values(sides)) buildRep(s); render(); } }, p.label));
+  });
+  sync();
+  const bar = el('section', { class: 'rep-controls', 'aria-label': 'Representation' },
+    el('div', { class: 'rep-bar' }, el('h2', { text: 'How each design holds it' }), tabs),
+    partsRow,
+    el('p', { class: 'rep-note', text: 'One part at a time, the same part on both sides. The control parts are the statechart and the reply run; the motion parts are the groups of the motion graph, split the way each design can split them: subtrees and a task run, node-graph shapes, macros, or separate Vizij graphs.' }));
+  document.querySelector('.tabs').before(bar);
+}
+
+// ---- every design at a glance -------------------------------------------------------------
+function buildGlance() {
+  const ref = recordingFor('reference');
+  const rows = DESIGNS.map((d) => {
+    const rec = recordingFor(d.id), n = rec.cost.length, avg = (f) => rec.cost.reduce((s, c) => s + f(c), 0) / n;
+    const peak = Math.max(...rec.cost.map((c) => c.us)), prompts = rec.cost.reduce((s, c) => s + c.m.prompt, 0);
+    const fails = rec.score.filter((x) => x.ok === false).length;
+    let diff = 0; rec.frames.forEach((f, i) => f.c.forEach((v, j) => { diff = Math.max(diff, Math.abs(v - ref.frames[i].c[j])); }));
+    return { d, cells: [d.name, diff < 1e-9 ? 'same' : `${d.lag} tick late`, `${avg((c) => c.us).toFixed(0)} µs`, `${peak.toFixed(0)} µs`, avg((c) => c.m.calls).toFixed(1), avg((c) => c.m.visits).toFixed(1), avg((c) => c.m.compares + c.m.cacheCheck).toFixed(1), String(prompts), String(fails)] };
+  });
+  const head = ['design', 'against the reference', 'average tick', 'peak tick', 'calls', 'visits', 'checks', 'prompt builds', 'failed checks'];
+  const tbody = el('tbody', {}, rows.map((r) => (r.tr = el('tr', {}, r.cells.map((c) => el('td', { text: c }))))));
+  const box = el('section', { class: 'glance', 'aria-label': 'Every design at a glance' },
+    el('h2', { text: 'Every design at a glance' }),
+    el('p', { text: 'The whole run, modeled with the NGBT spectrum’s per-operation costs fitted to the Rust benches, plus 2 µs of work a call and 2 ms a prompt build. Calls, visits and checks are averages a tick.' }),
+    el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h) => el('th', { text: h })))), tbody)));
+  document.querySelector('.traces').after(box);
+  return () => rows.forEach((r) => r.tr.classList.toggle('picked', r.d.id === S.pick.a || r.d.id === S.pick.b));
+}
+let markGlance = () => {};
+
+// ---- the timeline ---------------------------------------------------------------------
+const timelineBox = document.getElementById('timeline');
+let tl = null;
+function buildTimeline() {
+  const W = Math.max(280, Math.floor(timelineBox.getBoundingClientRect().width)), H = 46, left = 8, right = 8, pw = W - left - right;
+  const x = (t) => left + (t / RUN_END) * pw, narrow = W < 620;
+  const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'slider', tabindex: 0, 'aria-label': 'Time in the run', 'aria-valuemin': 0, 'aria-valuemax': RUN_END.toFixed(1) });
+  svg.append(sv('line', { class: 'axis', x1: left, x2: W - right, y1: 30, y2: 30 }));
+  for (let s = 0; s <= RUN_END; s += 5) { svg.append(sv('line', { class: 'axis', x1: x(s), x2: x(s), y1: 27, y2: 33 })); svg.append(sv('text', { x: x(s), y: 44, 'text-anchor': s === 0 ? 'start' : 'middle' }, `${s}`)); }
+  BEATS.forEach(([t, name], i) => {
+    svg.append(sv('line', { class: 'pin', x1: x(t), x2: x(t), y1: narrow ? 20 : (i % 2 ? 18 : 9), y2: 30 }));
+    svg.append(sv('circle', { class: 'pin-dot', cx: x(t), cy: 30, r: 2.5 }));
+    if (!narrow) svg.append(sv('text', { x: x(t) + 3, y: i % 2 ? 20 : 11 }, name));
+  });
+  const head = sv('line', { class: 'head', x1: left, x2: left, y1: 4, y2: 36 }), knob = sv('circle', { class: 'knob', cx: left, cy: 30, r: 5 });
+  svg.append(head, knob);
+  const seek = (ev) => { const b = svg.getBoundingClientRect(); S.T = clamp(((ev.clientX - b.left) * (W / b.width) - left) / pw * RUN_END, 0, RUN_END); render(); };
+  svg.addEventListener('pointerdown', (ev) => { S.playing = false; svg.setPointerCapture(ev.pointerId); seek(ev); });
+  svg.addEventListener('pointermove', (ev) => { if (svg.hasPointerCapture(ev.pointerId)) seek(ev); });
+  svg.addEventListener('keydown', (ev) => { const d = { ArrowLeft: -0.5, ArrowRight: 0.5 }[ev.key]; if (d) { ev.preventDefault(); S.playing = false; S.T = clamp(S.T + d, 0, RUN_END); render(); } });
+  timelineBox.replaceChildren(svg);
+  tl = { svg, head, knob, x };
+}
+
+// ---- the assets shelf -------------------------------------------------------------------
+const assets = document.getElementById('assets');
+const live = {};
+function section(title, n, ...body) { const d = el('details', {}, el('summary', {}, title, n != null ? el('span', { class: 'n', text: n }) : null), el('div', { class: 'body' }, body)); assets.append(d); return d; }
+function table(head, rows) { return el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h) => el('th', { text: h })))), el('tbody', {}, rows))); }
+function buildAssets() {
+  const fmt = (v) => (v > 0 && v !== 1 ? `+${v}` : String(v));
+  live.postureRows = {};
+  section('Postures', `${Object.keys(POSTURES).length}`, table(['posture', ...POSE_KEYS], Object.entries(POSTURES).map(([n, p]) => (live.postureRows[n] = el('tr', {}, el('td', { text: n }), POSE_KEYS.map((k) => el('td', { text: fmt(p[k]) })))))),
+    el('p', { class: 'impl-note', text: 'Bold rows are showing on the left robot now. Emotions blend as a weighted average, with neutral filling in below a total weight of 1.' }));
+  section('Visemes', `${Object.keys(VISEMES).length}`, table(['viseme', 'open', 'stretch', 'corners'], Object.entries(VISEMES).map(([n, v]) => el('tr', {}, el('td', { text: n }), ['open', 'stretch', 'corners'].map((k) => el('td', { text: fmt(v[k]) }))))),
+    el('p', { class: 'impl-note', text: 'The mock TTS gives a viseme to each vowel group, 180 ms each; an MBP of 60 ms where m, b or p comes before a vowel group or ends a word; 60 ms rest between words.' }));
+  section('Clips', `${Object.keys(CLIPS).length}`, el('ul', {}, Object.entries(CLIPS).map(([n, c]) => el('li', {}, el('b', { text: n }), ` · ${c.length} s · ${c.text}`))));
+  section('Prompts', '3', el('pre', { text: `persona\n${PERSONA}` }), el('pre', { text: `turn\n${TURN_TEMPLATE}` }), el('pre', { text: `judge\n${JUDGE_TEMPLATE}` }),
+    el('h3', { text: 'Built on the left side' }), (live.prompts = el('div', { class: 'body' })));
+  section('Tools and skills', `${TOOLS.length + SKILLS.length}`, table(['tool', 'arguments', 'kind', 'latency'], TOOLS.map((t2) => el('tr', {}, el('td', { text: t2.name }), el('td', { text: t2.args }), el('td', { text: t2.kind }), el('td', { text: `${t2.latency} s` })))),
+    el('p', { class: 'impl-note', text: `Skills a reply's gesture can name: ${SKILLS.join(', ')}. A held run may call info tools; action tools, playback, fillers and emotions wait for the hand-back.` }));
+  section('Knowledge', `${KNOWLEDGE.length}`, el('ul', {}, KNOWLEDGE.map((k) => el('li', {}, el('b', { text: k.id }), ` · ${k.text}${k.id === 'bus' ? ' (never retrieved)' : ''}`))));
+  section('Memory', null, el('ul', {}, MEMORY.map((m) => el('li', { text: m }))), el('h3', { text: 'Written by the left side' }), (live.memory = el('ul')));
+  section('Fillers', `${FILLERS.length}`, el('ul', {}, el('li', { text: `${quote(FILLERS[0])} when a tool call starts` }), el('li', { text: `${quote(FILLERS[1])} when a second tool call starts` })));
+  section('Script', `${SCRIPT.user.length + 3}`, el('ul', {},
+    el('li', { text: `The face appears at ${SCRIPT.faceAppears} s, drops out ${SCRIPT.faceLost[0]}–${SCRIPT.faceLost[1]} s and leaves at ${SCRIPT.faceLeaves} s.` }),
+    SCRIPT.user.map((u) => el('li', {}, el('span', { class: 'when', text: `${u.from}–${u.to} s` }), u.text ? quote(u.text) : 'a cough: voice, no words'))));
+  section('Mock replies', `${REPLIES.length}`, el('ul', {}, REPLIES.map(([k, v]) => el('li', {}, el('b', { text: k }), ` · ${v}`))),
+    el('p', { class: 'impl-note', text: 'Services: rag 1 s, recall 0.5 s beside it, prompt 2 ms, llm a tool call at +1 s or sentences from +2 s to +3 s, tools 1 s, judge verdict +1 s and follow-ups +2 s, TTS 1 s a sentence, one at a time.' }));
+  section('Motion graph', `${FUNCS.length} nodes`, el('p', { class: 'impl-note', text: `One definition every design runs: ${FUNCS.length} calls of @arora/dataflow and three example modules (@pip/motion, @pip/expression, @pip/lipsync) and @arora/animation, reading ${ORDER.length - FUNCS.length} store keys and publishing nine.` }),
+    el('ul', {}, MOTION_GROUPS.map(([g, label, what]) => el('li', {}, el('b', { text: label }), ` · ${GROUP_FUNCS.get(g).length} nodes · ${what}`))));
+}
+function mountAssets() {
+  const rec = sides.a.rec;
+  live.promptItems = [];
+  live.prompts.replaceChildren();
+  for (const r of rec.runs) for (const p of r.prompts) { const item = el('pre', { text: `${p.at.toFixed(1)} s · run ${r.id} · ${p.kind}\n${p.text}` }); live.prompts.append(item); live.promptItems.push({ item, at: p.at }); }
+  live.memory.replaceChildren(); live.memoryItems = [];
+  for (const m of rec.memoryLog) { const li = el('li', {}, el('span', { class: 'when', text: `${m.t.toFixed(1)} s` }), m.text); live.memory.append(li); live.memoryItems.push({ li, at: m.t }); }
+}
+function renderAssets(i) {
+  const f = sides.a.rec.frames[i], showing = new Set(f.emotions.map((x) => x[0]));
+  if (f.think > 0.02) showing.add('thinking');
+  for (const [n, row] of Object.entries(live.postureRows)) row.classList.toggle('live', showing.has(n) || (n === 'neutral' && !showing.size));
+  for (const { item, at } of live.promptItems) item.classList.toggle('future', at > f.t);
+  for (const { li, at } of live.memoryItems) li.classList.toggle('future', at > f.t);
+}
+
+// ---- controls and the loop -----------------------------------------------------------------
+const playBtn = document.getElementById('play'), clock = document.getElementById('clock');
+function render() {
+  const i = frameAt(S.T);
+  for (const key of ['a', 'b']) renderSide(sides[key], i);
+  renderAssets(i);
+  if (tl) { const x = tl.x(S.T); tl.head.setAttribute('x1', x); tl.head.setAttribute('x2', x); tl.knob.setAttribute('cx', x); tl.svg.setAttribute('aria-valuenow', S.T.toFixed(1)); }
+  clock.textContent = `${S.T.toFixed(1)} s / ${RUN_END.toFixed(1)} s`;
+  playBtn.textContent = S.playing ? 'Pause' : 'Play';
+}
+playBtn.addEventListener('click', () => { if (S.T >= RUN_END - 1e-6) S.T = 0; S.playing = !S.playing; last = performance.now(); render(); });
+document.getElementById('restart').addEventListener('click', () => { S.T = 0; render(); });
+document.getElementById('back').addEventListener('click', () => { S.playing = false; S.T = clamp(S.T - DT, 0, RUN_END); render(); });
+document.getElementById('fwd').addEventListener('click', () => { S.playing = false; S.T = clamp(S.T + DT, 0, RUN_END); render(); });
+document.getElementById('speed').addEventListener('change', (e) => { S.speed = +e.target.value; });
+document.getElementById('loop').addEventListener('change', (e) => { S.loop = e.target.checked; });
+const jump = document.getElementById('jump');
+jump.append(el('option', { value: '', text: 'a moment…' }), ...BEATS.map(([t, name]) => el('option', { value: t, text: `${t.toFixed(1)} s · ${name}` })));
+jump.addEventListener('change', () => { if (jump.value !== '') { S.playing = false; S.T = Math.max(0, +jump.value - 0.4); render(); } jump.value = ''; });
+for (const key of ['a', 'b']) {
+  document.getElementById(`tab-${key}`).addEventListener('click', () => {
+    document.querySelector('.traces').dataset.tab = key;
+    for (const k of ['a', 'b']) document.getElementById(`tab-${k}`).setAttribute('aria-selected', String(k === key));
+    requestAnimationFrame(() => { rebuildCharts(); render(); });
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest && e.target.closest('select, input, button, [role="slider"], summary')) return;
+  if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
+});
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (S.playing) {
+    S.T += dt * S.speed;
+    if (S.T >= RUN_END) { if (S.loop) S.T = 0; else { S.T = RUN_END; S.playing = false; } }
+    render();
+  }
+  requestAnimationFrame(loop);
+}
+function rebuildCharts() { for (const key of ['a', 'b']) { buildStrip(sides[key]); buildPlots(sides[key]); buildCost(sides[key]); } buildTimeline(); }
+let resizeTimer = null, lastWidth = 0;
+new ResizeObserver(() => {
+  const w = document.querySelector('.traces').getBoundingClientRect().width;
+  if (Math.abs(w - lastWidth) < 2) return; lastWidth = w;
+  clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { rebuildCharts(); render(); }, 120);
+}).observe(document.querySelector('.traces'));
+
+buildSide('a'); buildSide('b');
+buildRepControls();
+buildAssets();
+mount('a'); mount('b'); mount('a', true);
+mountAssets();
+markGlance = buildGlance(); markGlance();
+for (const key of ['a', 'b']) sides[key].pick.addEventListener('change', () => markGlance());
+buildTimeline();
+render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
