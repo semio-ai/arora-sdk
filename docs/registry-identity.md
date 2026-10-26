@@ -240,7 +240,7 @@ dependency, and that is what the package id adds.
 | Version uniqueness | Server-enforced: every publish goes through the endpoint. |
 | Version order | None: a fix on an older major is a release. |
 | Release dependencies | `{ scopedName, packageId, range }`. |
-| Artifact keys | `record`, `header`, `interface`, `wasm` and `native/<triple>`, as #616's S5a lists. |
+| Artifact keys | `record`, `header`, `wasm` and `native/<triple>`, as #616's S5a lists. |
 | Scope UUIDs | Bound to their account; `@arora`, `@vizij` and `@semio` held by Semio's accounts with their fixed ids. |
 
 **semio-cli and `arora-pkg`**: publish through the endpoint with a publish
