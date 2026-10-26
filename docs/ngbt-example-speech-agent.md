@@ -368,9 +368,8 @@ times are rounded; the reference computes them from the TTS rule (§6).
   comes from these counts.
 - **Waiting.** One second waiting on the llm: its 100 polls and what each
   reads.
-- **Two forms.** Each build is measured as its pull request proposes it, and
-  optimized: with every optimization its framework can take that lowers its
-  cost and leaves its channels unchanged (§10).
+- **Each build at its best.** Each build is measured with every optimization
+  its framework can take, each checked to leave its channels exact (§10).
 - **Effects.** Per run: one rag and one recall; one prompt per LLM round; one
   tool call; one TTS per sentence. One judge per confirmed interruption. One
   filler line, from run 2.
@@ -397,8 +396,7 @@ side, run in lockstep against one scripted world. It is one HTML file:
 download it and open it in a browser.
 
 - **Transport and timeline.** Play, scrub, step a tick, or jump to a moment of
-  the run: a cut-in, the cough, the face lost. A switch shows every build as
-  proposed or optimized.
+  the run: a cut-in, the cough, the face lost.
 - **Each side.** A frame offset, which starts at the design's lag, shows a
   design that runs a tick late at the same moment of its execution as the other
   side; the reference's ghost stays on the timeline. The robot, with a dashed
@@ -409,18 +407,18 @@ download it and open it in a browser.
   moment.
 - **How each design holds it.** One part at a time, the same part on both
   sides: the conversation, attention and reply run, or one of the seven motion
-  groups. Each is drawn as a graph, as a live outline, or as its stored form.
+  groups; or Full, every part at once, the three trees above the whole motion
+  graph. Each is drawn as a graph, as a live outline, or as its stored form.
   Nodes show what ran this tick, what answered from its cache, and each tree
   node's status. A node can be dragged to untangle a graph, with a reset per part.
 - **Every implementation at a glance.** The whole run's numbers for the
-  reference, the foil and the designs: each one's average tick as proposed and
-  optimized, and its work in the form the switch shows.
+  reference, the foil and the designs: each one's average tick and its work.
 - **The assets.** Every asset of §6, with the live ones following the left
   side: the postures showing, the prompts built, the memory written.
-- **The implementations.** The reference, the spec as plain code, which
-  every design is checked against, and optimized, the same program written
-  bespoke; a naive foil that drops the reply on any cut-in, replaces emotions
-  and reads the previous tick's head, for the scorecard to catch; and the five
+- **The implementations.** The reference, the spec as bespoke code, which
+  every design is checked against; a naive foil, the reference's code with
+  three rules broken for the scorecard to catch (it drops the reply on any
+  cut-in, replaces emotions and reads the previous tick's head); and the five
   designs of §10.
 - **Not there yet:** live controls (a face toggle and slider, buttons for the
   lines and the cough), and a Rust replay of the run, as for the Quori
@@ -444,12 +442,11 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 - **The reply run is a task run** the conversation spawns, with Arora's spawn
   and halt. It outlives the branch that started it. The tree writes
   `{reply/held}` to gate what it shows, and halts the run to drop it.
-- **Its stages are module-call leaves** ticked at every tick, returning
-  `Running` until done. This is Arora's async contract, and the way
-  arora-dataflow-nodes places external calls and task runs.
-- **The prompt is a node the llm leaf reads,** rebuilt when its arguments
-  change. The dominant emotion is one of them, so a change of mood while the
-  llm runs rebuilds it. The llm keeps the request it started.
+- **Its stages are module-call leaves,** returning `Running` until done. This
+  is Arora's async contract, and the way arora-dataflow-nodes places external
+  calls and task runs.
+- **The prompt is a node the llm leaf reads** when its call starts, cached by
+  its arguments. The llm keeps the request it started.
 
 | Design | Motion graph | When the motion sees the statechart | Prompt | Split into |
 |---|---|---|---|---|
@@ -457,59 +454,49 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 | #409 full tree nodes | The same, each call also a full tree node | The same tick | The same | #396's file |
 | #404 incremental tree | One node-graph shape per group, `PARALLEL[ leaf …, RUNNING ]`, leaves on change and bound to keys, after the statechart | The same tick | A leaf on change | One shape per group under the root `PARALLEL` |
 | #405 macros, placed | One macro per group, placed at the root in a `WITH` before the tree | A tick late | A macro placed before llm | One macro per group, authored and placed |
-| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion eager, run at every tick with nothing cached | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, run when its arguments change | One graph per region, joined to the motion by keys; the motion one graph, shown a group at a time, since a store hop between its groups would put the eyes a tick behind the head |
+| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion one graph whose nodes keep their outputs until a node they read changes and marks them | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, run when its arguments change | One graph per region, joined to the motion by keys; the motion one graph, shown a group at a time, since a store hop between its groups would put the eyes a tick behind the head |
 
-Every design caches the prompt by its arguments, as a basic measure. #257's
-pull request has no cache yet ("all calls (no cache yet)"); it was closed on
-21 October in favor of #396.
+#257's pull request was closed on 21 October in favor of #396.
 
 ### How the work is counted
 
 The bench runs on one clock at 100 Hz, and nothing in it is async: a wait is
-a leaf polled at every tick until its work is done. As proposed, each poll
-reads again what the leaf depends on. So a second of waiting on the llm is 100
-polls of its leaf, and each poll reads the prompt. The prompt reads eight
-arguments, two of them nodes (the emotion and the round). On a design that
-answers from its caches, that second is 400 node ticks, 100 executions (the
-polls) and 1,000 checks. On #257, whose emotion and round nodes run again at
-every poll, it is 400 node ticks, 300 executions and 1,000 checks.
+a leaf that answers `Running` until its work is done. A waiting leaf reads its
+arguments when its call starts and stays clean until the call completes, so a
+second of waiting on the llm is 100 checks of its clean branch, one a tick,
+and nothing else.
 
 - **The reference** counts with tracer calls in its own code, in the motion
   graph's units: a function of the graph that its code computes is a node tick
   and an execution. Where the graph has a selection node (`if`), the code takes
-  a branch instead, which computes nothing.
-  - Plain, as written for the spec, each region it steps (the conversation,
-    the attention, the emotions) is a node tick, and each guard a check. Each
-    wait is a poll: the service calls in flight, the judge, the player,
-    listening, awaiting the next sentence. A poll is a node tick and a check of
-    whether the wait is over. A call's start and its result run once each. The
-    prompt is built once per call. The motion computes every function its
-    branches need, at every tick.
-  - Bespoke, the same program takes every optimization plain code can, below.
+  a branch instead, which computes nothing. Each region it steps (the
+  conversation, the attention, the emotions) is a node tick, and each guard a
+  check. It polls nothing: its event loop checks one queue a tick for every
+  wait. A call's start and its result run once each, and the prompt is built
+  once per call.
 - **The designs** count by their rules:
-  - The statechart is the nodes its tick reaches; on #404's executor, the
-    dirty ones, with a check for each clean child.
-  - A poll is a module call, a node tick and an execution, plus its reads. A
-    store key is a check. A node is a node tick that answers from its cache
-    (detached: a check for each argument; versioned cells: one check) or runs
-    again (eager).
+  - The statechart is the dirty nodes its tick reaches, with a check for each
+    clean child.
+  - A call's start and its result are a module call each. A store key is a
+    check. A node is a node tick that answers from its cache (detached: a
+    check for each argument; versioned cells: one check) or runs again.
   - The motion graph follows each design's rule in the table above: detached
-    calls check their arguments, versioned cells their versions, and eager
-    nodes all run.
+    calls check their arguments, versioned cells their versions, and #257's
+    marked nodes run while its clean ones are not visited.
 - **Modeled µs.** The designs pay the NGBT spectrum's per-operation rates,
   plus 2 µs of work a call and 2 ms a prompt build. A poll that answers
   `Running` does no work and pays only its module call. The reference pays for
   its own work and nothing else.
 
-### What each build can do better
+### The optimizations each build runs with
 
-Each optimization keeps a build's channels as they were; the bench checks that
-at every tick. Optimized, a build runs with every one its framework can take,
-each kept only if it lowered the modeled cost.
+Each build runs with every optimization its framework can take that lowers its
+modeled cost. Each one keeps the build's channels exact; the bench checks that
+at every tick.
 
 | Optimization | What it does | From | Builds |
 |---|---|---|---|
-| A cache on every node | A node whose inputs did not change keeps its output | #257 ("no cache yet") | #257 |
+| A cache on every node | A node whose inputs did not change keeps its output | the other designs, which all cache | #257 |
 | Invalidation instead of comparison | A node that recomputes to a new value marks its readers; a tick runs only the marked nodes, and a clean one is neither visited nor compared | the bench, as #404's cells do | #257 |
 | An incremental control tick | A control node whose children are clean answers from its cache; only the marked branches are ticked | the bench, by #404's rules | #257 |
 | A dirty queue and a store subscription | A clean leaf is not checked; a store key is observed only when something writes it | #404, §5 of its proposal | #404, #405, and the trees of #396 and #409 |
@@ -517,19 +504,9 @@ each kept only if it lowered the modeled cost.
 | Sinks publish on change | A sink writes its key when its value changed | #404's comparison with #396 | #396, #409 |
 | Lazy conditionals | `if`, `and`, `or`, `hold` and a blend at weight 0 pull only the inputs their result needs | the bench | all |
 | Time horizons | A clip, an envelope or the thinking glance says when its value next changes, and its node does not run until then | the bench | all |
-| Latched arguments | A waiting leaf reads its arguments when its call starts, not at every poll, so the prompt is built once a call | the bench | all |
+| Latched arguments | A waiting leaf reads its arguments once, when its call starts, so the prompt is built once a call | the bench | all |
 | Native polls | A waiting leaf checks its call's handle without calling its module | the bench | all |
 | Wake on completion | A waiting leaf stays clean until its call completes, so its branch is not ticked while it waits | the bench | the trees on #404's executor, and #257 with its incremental control tick |
-
-Added one at a time, in this order, in µs a tick over the whole run:
-
-| Build | As proposed | Steps kept | Optimized |
-|---|---|---|---|
-| #396 | 94.0 | lazy −18.7, horizons −7.8, latched −1.5, native polls −0.1, sinks on change −0.03, #404's executor −0.2, subscription −0.1, wake −0.2 | 65.5 |
-| #409 | 95.0 | the same | 66.1 |
-| #404 | 94.8 | subscription −0.5, lazy −18.7, horizons −7.7, latched −1.5, native polls −0.1, wake −0.2 | 66.1 |
-| #405 | 94.8 | the same | 66.0 |
-| #257 | 171.4 | a cache on every node −76.5, invalidation −0.14, lazy −18.7, horizons −7.8, latched −1.5, native polls −0.1, incremental control −0.2, subscription −0.05, wake −0.2 | 66.2 |
 
 Three candidates were tried and dropped. Invalidation for #396 and #409 cost 0.2 µs
 more: it cuts their node ticks from 64 to 47 a tick and their checks from 104
@@ -541,15 +518,15 @@ cheaper to compare than to version. #405's `WITH[ PARALLEL[ leaf × N ], RUN ]`
 shape for #404's groups cost 0.2 µs more: every group but the mouth's changes
 at every tick, so few answer settled.
 
-Lazy conditionals are most of the gain. While someone is there, the wander's
-oscillators no longer run, and while Pip is engaged, neither does the glance
-timer. Time horizons come next: the blink clip between blinks, the wave when
-no gesture plays, the emotions' weights while they hold, the thinking glance
-outside its 1.2 s. The rest cut node ticks and checks more than µs.
+Lazy conditionals skip the most work. While someone is there, the wander's
+oscillators do not run, and while Pip is engaged, neither does the glance
+timer. Time horizons skip the next most: the blink clip between blinks, the
+wave when no gesture plays, the emotions' weights while they hold, the thinking
+glance outside its 1.2 s.
 
 ### The bespoke reference
 
-Optimized, the reference is the same program, written bespoke:
+The reference is the spec written bespoke:
 
 - **An event loop.** The voice, the words, every call's result and every
   deadline (the false alarm's 1.5 s, the lost face's cooldown, an emotion's hold
@@ -563,14 +540,11 @@ Optimized, the reference is the same program, written bespoke:
   the viseme moves: only in the 50 ms crossfade at the start of each segment of
   the track.
 
-Its code skips these computations, and it produces the plain run exactly, at
-every tick: every channel, caption, emotion, lane and event. It costs 55 µs a
-tick, against 118 for the plain code, and computes 26.6 of the graph's
-functions a tick.
+It costs 55 µs a tick and computes 26.6 of the graph's functions a tick.
 
 At the graph's granularity, 28.3 functions a tick are needed and change value.
 That is the floor for an exact implementation that computes every one of them,
-and the optimized designs run 29.0. The bespoke reference runs fewer, 26.6:
+and the designs run 29.0. The bespoke reference runs fewer, 26.6:
 it takes a branch where the graph has a selection node, skips the arm's blend
 while no wave plays, and knows two schedules a design does not (the glance
 away and the viseme's crossfades).
@@ -578,29 +552,23 @@ away and the viseme's crossfades).
 ### What the bench shows over the whole run
 
 - **#396, #409 and #404** produce the reference's nine channels at every
-  tick, as proposed and optimized.
+  tick.
 - **#405 and #257** produce them a tick late wherever the statechart drives
   them. At 100 Hz the mouth runs 10 ms behind the audio, under the 45 ms
   people notice, and the eyes move a tick late when a face appears.
 - **Work a tick,** on average, with one second waiting on the llm as node
   ticks · executions · checks:
 
-  | Implementation | Form | µs | Node ticks | Executions | Checks | 1 s on the llm | Prompt builds |
-  |---|---|---|---|---|---|---|---|
-  | Reference | plain | 118 | 62 | 58 | 12 | 100 · 0 · 100 | 4 |
-  | #396 detached nodes | as proposed | 94 | 95 | 42 | 121 | 400 · 100 · 1,000 | 7 |
-  | #409 full tree nodes | as proposed | 95 | 95 | 42 | 121 | 400 · 100 · 1,000 | 7 |
-  | #404 incremental tree | as proposed | 95 | 63 | 42 | 177 | 100 · 100 · 100 | 7 |
-  | #405 macros, placed | as proposed | 95 | 62 | 42 | 177 | 100 · 100 · 100 | 7 |
-  | #257 BT in NG | as proposed | 171 | 117 | 78 | 7 | 400 · 300 · 1,000 | 7 |
-  | Reference | bespoke | **55** | 28 | 27 | 18 | 0 · 0 · 100 | 4 |
-  | #396 detached nodes | optimized | 65.5 | 64 | 29 | 104 | 0 · 0 · 100 | 4 |
-  | #409 full tree nodes | optimized | 66 | 64 | 29 | 104 | 0 · 0 · 100 | 4 |
-  | #404 incremental tree | optimized | 66 | 46 | 29 | 64 | 0 · 0 · 100 | 4 |
-  | #405 macros, placed | optimized | 66 | 43 | 29 | 64 | 0 · 0 · 100 | 4 |
-  | #257 BT in NG | optimized | 66 | 40 | 29 | 60 | 0 · 0 · 100 | 4 |
+  | Implementation | µs | Node ticks | Executions | Checks | 1 s on the llm | Prompt builds |
+  |---|---|---|---|---|---|---|
+  | Reference | **55** | 28 | 27 | 18 | 0 · 0 · 100 | 4 |
+  | #396 detached nodes | 65.5 | 64 | 29 | 104 | 0 · 0 · 100 | 4 |
+  | #409 full tree nodes | 66 | 64 | 29 | 104 | 0 · 0 · 100 | 4 |
+  | #404 incremental tree | 66 | 46 | 29 | 64 | 0 · 0 · 100 | 4 |
+  | #405 macros, placed | 66 | 43 | 29 | 64 | 0 · 0 · 100 | 4 |
+  | #257 BT in NG | 66 | 40 | 29 | 60 | 0 · 0 · 100 | 4 |
 
-- **Optimized, the designs end within 0.7 µs of each other.** What is left is
+- **The designs end within 0.7 µs of each other.** What is left is
   the 29 functions that change a tick, at 2 µs each, and each framework's
   bookkeeping. #257, with invalidation and an incremental control tick, ticks
   the fewest nodes (40 a tick) and makes the fewest checks (60); #404 and #405
@@ -610,13 +578,9 @@ away and the viseme's crossfades).
   design. It makes 2.4 fewer calls a tick (5 µs): the selections it takes as
   branches, the arm's blend it skips while no wave plays, and the two
   schedules. The other 5.5 µs is bookkeeping a framework pays and it does not.
-- **The prompt.** Latched, every design builds it once per call, four times, as
-  the reference does. As proposed, a design's llm leaf reads its prompt at every
-  poll and rebuilds it when the dominant emotion changes mid-call: 7 builds.
-- **#404 and #405's statechart runs incrementally as proposed.** Their executor
-  answers a clean subtree from its cache: 6.4 node ticks a tick, against 16.6
-  for a tree ticked from the root.
-- **No build fails a check,** as proposed or optimized.
+- **The prompt.** Every design builds it once per call, four times, as the
+  reference does.
+- **No build fails a check.**
 
 ### Found, not applied
 
@@ -638,7 +602,7 @@ away and the viseme's crossfades).
 - **#405's groups placed after the tree's body,** which removes its tick of
   lag; the cost stays the same.
 - **Fusing a chain of arithmetic** (the eyes' subtract, scale and clamp) into
-  one step. Plain code does it, and the counts do not credit it.
+  one step. Bespoke code does it, and the counts do not credit it.
 
 ## 11. Extensions
 
