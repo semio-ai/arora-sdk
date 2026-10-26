@@ -850,7 +850,11 @@ nothing else describes, stays the record's.
 
 A run that asked for Studio and finds the device not enrolled enrolls it then,
 without a separate command: asking for Studio is the opt-in, and a person's
-approval in Studio is the consent the enrollment needs. Without an enrollment
+approval in Studio is the consent the enrollment needs. Enrolling as a command
+of its own is Semio's client's, `semio device enroll`, which saves the same
+credential in the device directory: arora's own verbs never reach Studio, and
+only a build with `studio-bridge`, Semio's runner build, reads that
+credential. Without an enrollment
 token, it enrolls by code, headless included: the code is in the log — or on
 standard error when the log shows no info lines, since the run waits on
 someone seeing it — and the run waits for a person's decision, so a service

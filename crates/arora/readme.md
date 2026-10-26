@@ -249,6 +249,11 @@ project than the run's — the run names its directory, and either the run is
 pointed at that project (the `FIREBASE_*` variables) or the directory is
 deleted to enroll the device with the run's.
 
+A device can also be enrolled before it runs, with Semio's own client:
+`semio device enroll` enrolls it by code or enrollment token and saves the
+credential in the same `studio/` of its device directory, which a run with
+`--studio` then connects with.
+
 The person approving the device sees its description: its name, and its model
 family and hardware and software versions. The name is `DEVICE_NAME`; under
 the terminal UI the operator is asked for one when it is unset, and it is

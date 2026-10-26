@@ -74,6 +74,9 @@
 //! another Firebase project than the run's, which says the two disagree on
 //! which Studio the device belongs to.
 //!
+//! A device can also be enrolled before it runs, with Semio's own client:
+//! `semio device enroll` saves the credential in the same device directory.
+//!
 //! Studio shows the person approving the device its description: its name,
 //! `DEVICE_NAME` — under the terminal UI the operator is asked for one when
 //! it is unset, and it is generated when left blank — and its model (below).
