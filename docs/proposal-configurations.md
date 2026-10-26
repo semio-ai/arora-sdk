@@ -687,7 +687,9 @@ router can grant it apart from calls.
 ### 3.6 What applying does
 
 The device applies one configuration at a time; a second request while one is
-being applied is refused at `Busy`.
+being applied is refused at `Busy`. A request for the configuration already
+running, by hash, changes nothing and replies `Applied`, so a client that
+lost a reply can retry safely.
 
 1. **Requirements.** For a published configuration it does not hold, the
    device first fetches the configuration's own `record` artifact, verified
@@ -723,7 +725,8 @@ being applied is refused at `Busy`.
 7. **Commit.** The device writes the new hash to `configuration/current.new`
    and renames it over the pointer file `configuration/current`: replacing a
    file by rename is atomic and repeatable, so every apply commits the same
-   way. It then removes the previous generation and replies `Applied`.
+   way. It then removes the previous generation, whose hash differs from the
+   new one (3.6's same-hash rule), and replies `Applied`.
    `Applied` therefore always means the configuration runs and a restart
    runs it again. At start, the device runs the generation `current` names;
    any other generation is one that never committed, which it reports as
