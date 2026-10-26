@@ -102,6 +102,7 @@ label.inline, .inline.mode-pick { display: inline-flex; align-items: center; gap
 .chip { font: 500 11px/1.6 var(--f-mono); padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: var(--panel-2); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .chip .k { color: var(--faint); }
 .chip.held { border-color: var(--ink); background: var(--panel); }
+.chip.poll { border-color: var(--poll); background: var(--poll-fill); }
 .chip .w { display: inline-block; width: 26px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .chip .w i { display: block; height: 100%; background: var(--ink); }
 
@@ -230,6 +231,8 @@ label.inline, .inline.mode-pick { display: inline-flex; align-items: center; gap
 .view pre span.polled::after { content: "   ● Running · polled"; color: var(--poll-ink); }
 .g-edge { fill: none; stroke: var(--faint); stroke-width: 1.2; }
 .g-edge.data { stroke-dasharray: 4 3; }
+.g-edge.active { stroke: var(--run-1); stroke-width: 2.8; }
+.g-edge-label.active { fill: var(--run-1); }
 .g-edge-label { font-size: 9px; fill: var(--faint); }
 .g-box rect { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 4; }
 .g-box text { font-size: 10px; fill: var(--muted); }
@@ -864,6 +867,7 @@ class Sim {
     // The conversation region: voice starts, voice ends, listening, a reply to move on. Bespoke, an event loop: the
     // voice, the words, the calls' results and every deadline come through one queue, checked once a tick.
     if (O) this.tr('statechart', 1, 0, 1); else this.tr('statechart', 1, 0, 4);
+    if (!O && C.state === 'idle') this.polled.push('idle');   // idle, the region checks for Sam's voice at every tick
     if (vad && !this.vadPrev) this.onVadOn(t);
     if (!vad && this.vadPrev) this.onVadOff(t, this.lastSeg);
     this.vadPrev = vad; if (seg) this.lastSeg = seg;
@@ -1547,6 +1551,8 @@ function controlWork(design, opt0, f, prevKeys, ctx, i) {
   if (laneOn('judge') && f.conv !== 'judging') waits.push({ leaf: 'judge', start: false, end: ctx.ends[i].has(key('judge')) });
   for (const w of waits) waitInto(polls, R, w, opt);
   const polled = waits.filter((w) => !opt.wake || w.start || w.end).map((w) => w.leaf);   // woken on completion, a wait is not polled
+  // Idle, the conversation’s RUNNING leaf waits for Sam’s voice: re-ticked at every tick, unless it is clean on #404’s executor with wake.
+  if (!leaf) { const idle = [...T.conversation].find(([uid, st]) => st === 'R' && TREE_NODE.get(uid).k === 'running'); if (idle && !(opt.wake && P && P.conversation.get(idle[0]) === 'R')) polled.push('idle'); }
   if (opt.wake && waits.length) sc.cacheCheck++;   // the executor's queue of completed calls
   // The prompt, read by the llm: at every poll, or latched, when its call starts.
   if (laneOn('llm') && (!opt.latch || ctx.starts[i].has(key('llm')))) promptInto(prompt, R, opt.latch || ctx.prompt[i].changed);
@@ -1675,7 +1681,7 @@ const TREE_NODE = new Map();
 for (const root of [TREES.conversation, TREES.attention, TREES.reply]) (function number(n) { n.uid = ++treeIds; TREE_NODE.set(n.uid, n); n.children.forEach(number); })(root);
 // The leaf each polled wait is: the conversation’s by its function, the reply run’s by its call.
 const POLL_UID = {};
-(function walk(n) { if (n.k === 'action') POLL_UID[n.fn.split('.').pop()] = n.uid; n.children.forEach(walk); })(TREES.conversation);
+(function walk(n) { if (n.k === 'action') POLL_UID[n.fn.split('.').pop()] = n.uid; if (n.k === 'running') POLL_UID.idle = n.uid; n.children.forEach(walk); })(TREES.conversation);
 (function walk(n) { if (n.k === 'action' && n.lane) POLL_UID[n.lane] = n.uid; n.children.forEach(walk); })(TREES.reply);
 // One tick of a part: each node's status, or none when the tick does not reach it.
 function treeStatus(part, f, laneOn) {
@@ -1883,6 +1889,8 @@ const PLOTS = [
 ];
 const SERIES = ['var(--run-1)', 'var(--run-2)', 'var(--run-3)'];
 const runColor = (id) => (id >= 1 && id <= 3 ? `var(--run-${id})` : 'var(--run-x)');
+// What a polled wait waits for, for the chip under each robot.
+const POLL_LABEL = { idle: 'the voice', listen: 'listen', judge: 'judge', play: 'audio', await: 'next sentence', rag: 'rag', recall: 'recall', llm: 'llm', tool: 'tool', tts: 'tts', filler: 'filler' };
 const TABS = [['graph', 'Graph'], ['outline', 'As it runs'], ['stored', 'Stored form']];
 
 // One recording per implementation and mode: as its pull request proposes it, or optimized. Every design replays
@@ -2026,9 +2034,9 @@ function repNote(design, part, tab, opt = {}) {
 function buildRep(side) {
   const design = side.rec.design || null, part = S.part, tab = S.tab;
   side.repTitle.textContent = `${partLabel(part)} · ${TABS.find(([k]) => k === tab)[1].toLowerCase()}`;
-  side.repNote.textContent = repNote(design, part, tab, side.rec.opt || { bespoke: !!side.rec.optimized });
+  side.repNote.textContent = repNote(design, part, tab, side.rec.opt || { bespoke: !!side.rec.optimized }) + (PARTS.find((p) => p.id === part).motion && tab !== 'stored' ? ' Nothing here waits, so nothing is polled: the waits are in the conversation and the reply run, and the chip under each robot lists them.' : '');
   side.repKey = `${side.rec.impl.id}|${part}|${tab}`;
-  side.repLines = null; side.gnodes = null;
+  side.repLines = null; side.gnodes = null; side.gedges = null;
   if (tab === 'graph') { buildGraph(side, design, part); side.repNote.textContent += ' Drag a node to move it; with a node focused, the arrow keys move it.'; }
   else {
     side.resetLayout.hidden = true;
@@ -2166,6 +2174,7 @@ function buildGraph(side, design, part) {
     g.addEventListener('pointermove', onMove); g.addEventListener('pointerup', onUp); g.addEventListener('pointercancel', onUp);
   };
   edges.forEach(placeEdge); placeBox();
+  side.gedges = edges;
   side.gnodes = new Map();
   for (const n of lay.nodes) {
     const g = sv('g', { class: `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}`, transform: `translate(${n.x} ${n.y})`, tabindex: 0 });
@@ -2200,12 +2209,19 @@ function liveRep(side, i) {
   const polled = new Set((rec.polls && rec.polls[i] || []).map((k) => POLL_UID[k]));
   const motionClass = (id) => { if (!act) return ''; const k = INDEX.get(id); if (k === undefined) return ''; return act[k] === 1 ? 'ran' : act[k] === 2 ? 'cached' : 'skipped'; };
   if (side.gnodes) {
+    const active = new Set();   // Running, polled, or run this tick: an edge between two of them is on the active path
     for (const { g, n, badge } of side.gnodes.values()) {
       let cls = '';
       if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid); cls = s ? `st-${s}${p ? ' polled' : ''}` : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
       else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'cached' : 'st-none';
       else if (motion) cls = motionClass(n.ref || n.id);
       g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}`);
+      if (cls.startsWith('st-R') || cls === 'ran') active.add(n.id);
+    }
+    for (const { e, path, label } of side.gedges) {
+      const on = active.has(e.from) && active.has(e.to);
+      path.setAttribute('class', `g-edge${e.data ? ' data' : ''}${on ? ' active' : ''}`);
+      if (label) label.setAttribute('class', `g-edge-label${on ? ' active' : ''}`);
     }
   }
   if (side.repLines) {
@@ -2413,6 +2429,8 @@ function renderSide(side, i) {
   if (f.think > 0.02) chips.push(el('span', { class: 'chip' }, 'thinking', el('span', { class: 'w' }, el('i', { style: `width:${Math.round(f.think * 100)}%` }))));
   if (f.gesture) chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'clip' }), f.gesture));
   chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'tick' }), usText(side.rec.cost[i].us)));
+  const polls = side.rec.polls ? side.rec.polls[i] : [];
+  chips.push(el('span', { class: `chip${polls.length ? ' poll' : ''}` }, el('span', { class: 'k', text: 'polls' }), polls.length ? polls.map((k) => POLL_LABEL[k] || k).join(' · ') : 'nothing'));
   side.chips.replaceChildren(...chips);
   for (const { li, s } of side.rows) {
     const end = s.end ?? RUN_END, paused = s.pauses.some(([a, b]) => f.t >= a && f.t < (b ?? RUN_END));
