@@ -1740,8 +1740,11 @@ function treeLines(node, opts = {}, pad = '') {
 function storedLines(design, part, opt = {}) {
   const S = design ? design.strategy : 'reference', out = [], push = (text, id) => out.push({ text, id });
   const group = MOTION_GROUPS.find(([g]) => g === part);
+  // The values a motion group reads from another group, each with its line, so the views show it ran or was kept.
+  const fromOthers = group ? [...new Set(groupNodes(part).flatMap(refsOf))].filter((r) => NODE.get(r).group !== 'inputs' && NODE.get(r).group !== part) : [];
+  const reads = (say) => fromOthers.forEach((r) => push(`  ${say(r, NODE.get(r).group)}`, r));
   if (!design) {
-    if (group) { push(`reference · ${group[1].toLowerCase()}: plain functions, in data order`); for (const n of groupNodes(part)) push(`  ${n.id} = ${callText(n, 'refs')}${SINK_OF.has(n.id) ? `   → {${SINK_OF.get(n.id)}}` : ''}`, n.id); }
+    if (group) { push(`reference · ${group[1].toLowerCase()}: plain functions, in data order`); reads((r, g) => `reads ${r}, computed with the ${g} group`); for (const n of groupNodes(part)) push(`  ${n.id} = ${callText(n, 'refs')}${SINK_OF.has(n.id) ? `   → {${SINK_OF.get(n.id)}}` : ''}`, n.id); }
     else { push(`reference · ${part}: an explicit state machine in plain code; the tree below is the same logic`); treeLines(TREES[part]).forEach((l) => push(`  ${l.text}`, l.uid)); }
     return out;
   }
@@ -1749,14 +1752,17 @@ function storedLines(design, part, opt = {}) {
     const nodes = groupNodes(part), sinks = groupSinks(part);
     if (S === 'compute' || S === 'full') {
       push(`detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''} · ${group[1].toLowerCase()}`);
+      reads((r, g) => `reads @${r}, a detached node of the ${g} group`);
       for (const n of nodes) push(`  ${n.id}: ${SINK_OF.has(n.id) ? `{${SINK_OF.get(n.id)}} = ` : ''}${callText(n, 'refs')}`, n.id);
       if (sinks.length) push(`  sinks: ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')} publish after the tree, at every tick`);
     } else if (S === 'inc') {
       push(`PARALLEL   ◇ node graph: ${group[1].toLowerCase()} · a branch of the root PARALLEL, after the statechart`);
+      reads((r, g) => `reads ${refText('@' + r, 'cells')}, a cell the ${g} group's shape writes`);
       for (const n of nodes) push(`  ${refText('@' + n.id, 'cells')} = ${callText(n, 'cells')}   _on_change`, n.id);
       push('  RUNNING');
     } else if (S === 'macro') {
       push(`authored · macro #${part}${sinks.length ? `, publishing ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')}` : ''}`);
+      reads((r, g) => `reads @${r}, from macro #${g}`);
       for (const n of nodes) push(`  ${n.id}: ${callText(n, 'refs')}`, n.id);
       push('');
       push(`executed · placed when loaded: ${sinks.length ? 'the group publishes a sink, so it anchors at the root' : 'its readers publish sinks, so it anchors at the root'}`);
@@ -1766,10 +1772,12 @@ function storedLines(design, part, opt = {}) {
       push('  ⋯   the statechart, the tree’s body');
       for (const n of sinks) push(`Copy({.${n.id}} → {${SINK_OF.get(n.id)}})`, n.id);
     } else {
-      push(opt.cacheAll ? `graph motion/${part} · every node with an argument cache: it runs when an input changed, and keeps its output otherwise` : `graph motion/${part} · eager: every node runs at every tick, in data order; nothing is cached`);
+      // The motion is one Vizij graph, shown a group at a time: a value from another group comes by wire, in the same
+      // tick. Split into graphs joined by store keys, each hop would cost a tick: the eyes would follow last tick's head.
+      push(`graph motion · its ${group[1].toLowerCase()} nodes; the motion is one graph, shown a group at a time · ${opt.cacheAll ? 'every node with an argument cache: it runs when an input changed, and keeps its output otherwise' : 'eager: every node runs at every tick, in data order; nothing is cached'}`);
       push('nodes');
       const ext = new Set(); for (const n of nodes) for (const r of refsOf(n)) if (NODE.get(r).group !== part) ext.add(r);
-      for (const r of ext) { const n = NODE.get(r); push(`  ${r.padEnd(13)} ${n.group === 'inputs' ? `input        path: ${n.key}` : `input        path: motion/${n.group}/${n.id}   (written by motion/${n.group})`}`, r); }
+      for (const r of ext) { const n = NODE.get(r); push(`  ${r.padEnd(13)} ${n.group === 'inputs' ? `input        path: ${n.key}` : `${fname(n).padEnd(28)} in the ${n.group} group, wired in`}`, r); }
       for (const n of nodes) push(`  ${n.id.padEnd(13)} ${fname(n).padEnd(28)} ${paramText(n).join(', ')}   ${opt.cacheAll ? 'cached' : 'eager'}`, n.id);
       for (const n of sinks) push(`  ${(n.id + '_out').padEnd(13)} output       path: ${SINK_OF.get(n.id)}`, n.id);
       push('edges');
@@ -1828,7 +1836,7 @@ function graphModel(design, part, opt = {}) {
       }
     }
     for (const n of groupSinks(part)) { nodes.push({ id: `sink:${n.id}`, kind: S === 'macro' ? 'Copy' : S === 'control' ? 'output' : S === 'inc' ? 'bound key' : 'sink', label: `{${SINK_OF.get(n.id)}}`, port: true, ref: n.id, out: true }); edges.push({ from: n.id, to: `sink:${n.id}` }); }
-    const box = S === 'inc' ? `PARALLEL ◇ node graph: ${part} · with RUNNING last` : S === 'macro' ? `WITH at the root ▸ PARALLEL #${part}` : S === 'control' ? `graph motion/${part} · ${opt.cacheAll ? 'cached' : 'eager'}` : S === 'compute' || S === 'full' ? 'detached: held by no node' : 'plain functions';
+    const box = S === 'inc' ? `PARALLEL ◇ node graph: ${part} · with RUNNING last` : S === 'macro' ? `WITH at the root ▸ PARALLEL #${part}` : S === 'control' ? `graph motion · ${part} · ${opt.cacheAll ? 'cached' : 'eager'}` : S === 'compute' || S === 'full' ? 'detached: held by no node' : 'plain functions';
     return { kind: 'dag', nodes: [...ext.values(), ...nodes], edges, box };
   }
   const nodes = [], edges = [];

@@ -454,7 +454,7 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 | #409 full tree nodes | The same, each call also a full tree node | The same tick | The same | #396's file |
 | #404 incremental tree | One node-graph shape per group, `PARALLEL[ leaf …, RUNNING ]`, leaves on change and bound to keys, after the statechart | The same tick | A leaf on change | One shape per group under the root `PARALLEL` |
 | #405 macros, placed | One macro per group, placed at the root in a `WITH` before the tree | A tick late | A macro placed before llm | One macro per group, authored and placed |
-| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion eager, run at every tick with nothing cached | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, run when its arguments change | One graph per region and per group, joined by keys |
+| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion eager, run at every tick with nothing cached | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, run when its arguments change | One graph per region, joined to the motion by keys; the motion one graph, shown a group at a time, since a store hop between its groups would put the eyes a tick behind the head |
 
 Every design caches the prompt by its arguments, as a basic measure. #257's
 pull request has no cache yet ("all calls (no cache yet)"); it was closed on
