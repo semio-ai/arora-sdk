@@ -18,6 +18,7 @@
   --robot: #e3e6e0; --robot-edge: #b4b9b0; --robot-shade: #cfd3cb; --screen: #131b21; --glow: #4fc9df; --ghost: #c2562a;
   --run-1: #2a78d6; --run-2: #eb6834; --run-3: #1baf7a; --run-x: #8b928c;
   --good: #0ca30c; --bad: #d03b3b; --good-ink: #1d7a1d; --bad-ink: #b42e2e;
+  --poll: #6fd25a; --poll-fill: #e4f8dc; --poll-ink: #2f7a20;
   --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
   --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -28,6 +29,7 @@
   --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
+  --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
   color-scheme: dark;
 } }
 :root[data-theme="dark"] {
@@ -36,6 +38,7 @@
   --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
+  --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -221,6 +224,10 @@ label.inline, .inline.mode-pick { display: inline-flex; align-items: center; gap
 .g-node.st-none { opacity: .45; }
 .g-node .badge-s { font: 600 9.5px var(--f-mono); }
 .g-node.st-R .badge-s { fill: var(--run-1); } .g-node.st-S .badge-s { fill: var(--good-ink); } .g-node.st-F .badge-s { fill: var(--bad-ink); }
+.g-node.polled rect { stroke: var(--poll); stroke-width: 3.2; fill: var(--poll-fill); }
+.g-node.polled .badge-s { fill: var(--poll-ink); }
+.view pre span.polled { background: var(--poll-fill); }
+.view pre span.polled::after { content: "   ● Running · polled"; color: var(--poll-ink); }
 .g-edge { fill: none; stroke: var(--faint); stroke-width: 1.2; }
 .g-edge.data { stroke-dasharray: 4 3; }
 .g-edge-label { font-size: 9px; fill: var(--faint); }
@@ -471,7 +478,7 @@ class Run {
   step(t) {
     // A poll of each service call in flight: a tick, and a check of whether it is done. Bespoke, the calls are due
     // in the event loop's queue, which the tick checks once.
-    if (!this.sim.flags.opt) { const calls = new Set(this.pending.map((p) => p.rec)).size; this.sim.tr('polls', calls, 0, calls); }
+    if (!this.sim.flags.opt) { const calls = new Set(this.pending.map((p) => p.rec)); this.sim.tr('polls', calls.size, 0, calls.size); for (const r of calls) this.sim.polled.push(r.lane); }
     for (;;) {
       this.pending.sort((a, b) => a.when - b.when);
       const p = this.pending[0];
@@ -558,7 +565,7 @@ class Sim {
     this.gesture = null; this.head = { yaw: 0, pitch: 0 }; this.eyeGaze = { x: 0, y: 0 }; this.target = { x: 0, y: 0 }; this.lastTarget = { x: 0, y: 0 };
     this.player = null; this.speechW = 0; this.judge = null; this.judges = 0; this.resets = 0; this.roundAfterReset = null;
     this.items = { 0: null }; this.itemCount = 0;
-    this.work = null; this.costs = [];
+    this.work = null; this.costs = []; this.polled = []; this.pollLog = [];   // and the waits each tick polled
     this.emoVer = 0; this.mc = null;   // bespoke: a count of changes to the emotions, and what the motion keeps
     this.prevHead = null; this.vadPrev = false; this.lastSeg = null; this.stateRec = null; this.attRec = null;
     this.setConv(0, 'idle');
@@ -665,7 +672,7 @@ class Sim {
   stepJudge(t) {
     const J = this.judge;
     if (!J) return;
-    if (!this.flags.opt) this.tr('polls', 1, 0, 1);   // the judge in flight: is its verdict, or are its follow-ups, in?
+    if (!this.flags.opt) { this.tr('polls', 1, 0, 1); this.polled.push('judge'); }   // the judge in flight: is its verdict, or are its follow-ups, in?
     if (!J.verdictDone && t >= J.t0 + LATENCY.verdict - 1e-9) {
       this.tr('polls', 0, 1);
       J.verdictDone = true; J.rec.label = J.out.verdict; this.log(t, 'verdict', J.out.verdict);
@@ -738,7 +745,7 @@ class Sim {
     const it = this.player;
     if (!it || it.paused) return;
     // The player: the playhead moves on; has it reached the end? Bespoke, the end is a deadline in the queue.
-    if (!this.flags.opt) this.tr('polls', 1, 0, 1);
+    if (!this.flags.opt) { this.tr('polls', 1, 0, 1); this.polled.push(it.kind === 'filler' ? 'filler' : 'play'); }
     it.playhead += DT;
     if (it.playhead >= it.length - 1e-9) {
       it.seg.t1 = t; it.log.end = t; it.log.outcome = 'finished'; this.player = null;
@@ -756,7 +763,7 @@ class Sim {
     const C = this.conv, run = C.run;
     if (!run || run.held || run.dropped || this.player) return;
     if (C.state !== 'thinking' && C.state !== 'speaking') return;
-    if (!this.flags.opt) this.tr('polls', 1, 0, 1);   // await: is the next sentence's audio ready? Bespoke, an event.
+    if (!this.flags.opt) { this.tr('polls', 1, 0, 1); this.polled.push('await'); }   // await: is the next sentence's audio ready? Bespoke, an event.
     const next = run.order().find((s) => !s.played);
     if (next && next.ready !== undefined) { if (C.state === 'thinking') this.setConv(t, 'speaking'); this.startItem(t, this.sentenceItem(next)); }
     else if (!next && C.state === 'speaking' && run.llmDone && !(this.judge && this.judge.run === run)) this.replyEnded(t);
@@ -851,7 +858,7 @@ class Sim {
 
   // ---- one tick -----------------------------------------------------------------
   tick(t) {
-    this.work = blankWork();
+    this.work = blankWork(); this.polled = [];
     const seg = SCRIPT.user.find((u) => t >= u.from - 1e-9 && t < u.to - 1e-9) || null;
     const vad = !!seg, face = faceAt(t), C = this.conv, O = this.flags.opt;
     // The conversation region: voice starts, voice ends, listening, a reply to move on. Bespoke, an event loop: the
@@ -861,7 +868,7 @@ class Sim {
     if (!vad && this.vadPrev) this.onVadOff(t, this.lastSeg);
     this.vadPrev = vad; if (seg) this.lastSeg = seg;
     if (C.state === 'listening') {
-      if (!O) this.tr('polls', 1, 0, C.vadOff ? 2 : 1);   // listen: words yet, and after the voice, 1.5 s without them?
+      if (!O) { this.tr('polls', 1, 0, C.vadOff ? 2 : 1); this.polled.push('listen'); }   // listen: words yet, and after the voice, 1.5 s without them?
       if (C.vadOff && C.words === undefined && t - C.vadOnAt >= 1.5 - 1e-9) this.falseAlarm(t);
     }
     for (const run of this.runs) if (!run.dropped) run.step(t);
@@ -871,7 +878,7 @@ class Sim {
     this.stepAttention(t, face);
     this.stepEmotions(t);
     this.frames.push(this.motion(t, seg));
-    this.costs.push(plainCost(this.work));
+    this.costs.push(plainCost(this.work)); this.pollLog.push(this.polled);
   }
   // Where the playhead is in an item's track: its segment, the one before, the crossfade's progress, and the word.
   trackAt(it) {
@@ -1014,7 +1021,7 @@ class Sim {
   recording() {
     return {
       frames: this.frames, lanes: this.lanes, events: this.events, spoken: this.spoken, triggers: this.triggers, violations: this.violations,
-      judges: this.judges, resets: this.resets, roundAfterReset: this.roundAfterReset, memoryLog: this.memoryLog, items: this.items, cost: this.costs, optimized: !!this.flags.opt,
+      judges: this.judges, resets: this.resets, roundAfterReset: this.roundAfterReset, memoryLog: this.memoryLog, items: this.items, cost: this.costs, polls: this.pollLog, optimized: !!this.flags.opt,
       runs: this.runs.map((r) => ({ id: r.id, utterance: r.utterance, prompts: r.prompts, dropped: r.dropped, toolCalls: r.toolCalls, llmRounds: r.llmRounds })),
     };
   }
@@ -1539,20 +1546,21 @@ function controlWork(design, opt0, f, prevKeys, ctx, i) {
   for (const lane of SERVICES) if (laneOn(lane)) waits.push({ leaf: lane, start: ctx.starts[i].has(key(lane)), end: ctx.ends[i].has(key(lane)) });
   if (laneOn('judge') && f.conv !== 'judging') waits.push({ leaf: 'judge', start: false, end: ctx.ends[i].has(key('judge')) });
   for (const w of waits) waitInto(polls, R, w, opt);
+  const polled = waits.filter((w) => !opt.wake || w.start || w.end).map((w) => w.leaf);   // woken on completion, a wait is not polled
   if (opt.wake && waits.length) sc.cacheCheck++;   // the executor's queue of completed calls
   // The prompt, read by the llm: at every poll, or latched, when its call starts.
   if (laneOn('llm') && (!opt.latch || ctx.starts[i].has(key('llm')))) promptInto(prompt, R, opt.latch || ctx.prompt[i].changed);
   const changed = prevKeys ? CONTROL_KEYS.filter((k) => !same(prevKeys[k], f.keys[k])).length : CONTROL_KEYS.length;
   sc.storeWrite += changed; sc.writes += changed;
   if (incremental) { const k = opt.subscription ? changedReads(T, P) : 6; sc.storeObserve += k; sc.compares += k; }
-  return { statechart: sc, polls, prompt };
+  return { statechart: sc, polls, prompt, polled };
 }
 const workOf = (m) => ({ ticks: m.visits, execs: m.calls, checks: m.compares + m.cacheCheck });
 // A design's run of the whole script: as proposed, optimized (true), or with the options given.
 function designRecording(design, base, optimized = false) {
   const opt = typeof optimized === 'object' ? optimized : optionsFor(design, optimized);
   const run = new MotionGraphRun(design.strategy, base.items, opt), ctx = controlContext(base);
-  const frames = [], cost = [], acts = [];
+  const frames = [], cost = [], acts = [], polls = [];
   let prevKeys = null;
   for (let i = 0; i < base.frames.length; i++) {
     const f = base.frames[i], k = design.lag ? (i >= design.lag ? base.frames[i - design.lag].keys : INITIAL_KEYS) : f.keys, face = faceAt(f.t);
@@ -1565,9 +1573,9 @@ function designRecording(design, base, optimized = false) {
     const v = out.val;
     frames.push({ ...f, c: out.c, posture: POSE_KEYS.map((key) => v.get(`p_${key}`)), target: { x: v.get('target_x'), y: v.get('target_y') }, eyeGaze: { x: v.get('eye_tx'), y: v.get('eye_ty') }, glance: v.get('glance_up') });
     cost.push({ w, all: workTotals(w), builds: m.prompt, m, us: modeledUs(m) });
-    acts.push(out.act);
+    acts.push(out.act); polls.push(areas.polled);
   }
-  return { ...base, frames, cost, acts, design, optimized: !!optimized, opt };
+  return { ...base, frames, cost, acts, polls, design, optimized: !!optimized, opt };
 }
 // One second waiting on the llm: a poll at every tick, the prompt unchanged. Plain code checks whether its call is
 // done, or with an event loop, checks one queue for every wait; a design polls the leaf, as its options allow.
@@ -1665,6 +1673,10 @@ const PROMPT_ARGS = ['persona', 'tools', '@emotion', '{reply/memories}', '{reply
 let treeIds = 0;
 const TREE_NODE = new Map();
 for (const root of [TREES.conversation, TREES.attention, TREES.reply]) (function number(n) { n.uid = ++treeIds; TREE_NODE.set(n.uid, n); n.children.forEach(number); })(root);
+// The leaf each polled wait is: the conversation’s by its function, the reply run’s by its call.
+const POLL_UID = {};
+(function walk(n) { if (n.k === 'action') POLL_UID[n.fn.split('.').pop()] = n.uid; n.children.forEach(walk); })(TREES.conversation);
+(function walk(n) { if (n.k === 'action' && n.lane) POLL_UID[n.lane] = n.uid; n.children.forEach(walk); })(TREES.reply);
 // One tick of a part: each node's status, or none when the tick does not reach it.
 function treeStatus(part, f, laneOn) {
   const out = new Map();
@@ -2004,17 +2016,17 @@ function buildTranscript(side) {
 const partLabel = (id) => PARTS.find((p) => p.id === id).label;
 function repNote(design, part, tab, opt = {}) {
   const motion = MOTION_GROUPS.find(([g]) => g === part);
-  if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} as plain functions: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.';
+  if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} as plain functions: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.' + (tab === 'stored' ? '' : opt.bespoke ? ' Bespoke, it polls nothing: its event loop hands each wait its result.' : ' Light green: a wait it polled this tick.');
   if (tab === 'graph') {
     if (motion) return { compute: 'Each node is a detached call: dashed when cached this tick, outlined when it ran. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape polled. Dashed: answered from its cache.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body.', control: opt.cacheAll ? 'Each node with an argument cache: dashed when it kept its output this tick, outlined when it ran.' : 'Eager nodes: every one runs at every tick.' }[design.strategy] + (opt.lazy ? ' Faded: not needed this tick, on a branch a conditional did not take.' : '');
-    return design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs. Green succeeded, red failed, blue is Running this tick.' : 'The tree as it ticks: green succeeded, red failed, blue is Running; faded nodes were not reached this tick.';
+    return design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs. Green succeeded, red failed, blue is Running this tick, light green a wait polled this tick.' : 'The tree as it ticks: green succeeded, red failed, blue is Running, light green a wait polled this tick; faded nodes were not reached this tick.';
   }
-  return tab === 'outline' ? 'Each line marked with what it did this tick.' : 'The text a person edits, or the file the loader reads, for this part.';
+  return tab === 'outline' ? 'Each line marked with what it did this tick; a wait polled this tick is light green.' : 'The text a person edits, or the file the loader reads, for this part.';
 }
 function buildRep(side) {
   const design = side.rec.design || null, part = S.part, tab = S.tab;
   side.repTitle.textContent = `${partLabel(part)} · ${TABS.find(([k]) => k === tab)[1].toLowerCase()}`;
-  side.repNote.textContent = repNote(design, part, tab, side.rec.opt || {});
+  side.repNote.textContent = repNote(design, part, tab, side.rec.opt || { bespoke: !!side.rec.optimized });
   side.repKey = `${side.rec.impl.id}|${part}|${tab}`;
   side.repLines = null; side.gnodes = null;
   if (tab === 'graph') { buildGraph(side, design, part); side.repNote.textContent += ' Drag a node to move it; with a node focused, the arrow keys move it.'; }
@@ -2185,11 +2197,12 @@ function liveRep(side, i) {
   const act = rec.acts ? rec.acts[i] : null;
   const laneOn = (lane) => rec.laneAt[i].has(`${f.runId}:${lane}`);
   const statuses = motion ? null : treeStatus(part, f, laneOn);
+  const polled = new Set((rec.polls && rec.polls[i] || []).map((k) => POLL_UID[k]));
   const motionClass = (id) => { if (!act) return ''; const k = INDEX.get(id); if (k === undefined) return ''; return act[k] === 1 ? 'ran' : act[k] === 2 ? 'cached' : 'skipped'; };
   if (side.gnodes) {
     for (const { g, n, badge } of side.gnodes.values()) {
       let cls = '';
-      if (n.tree) { const s = statuses.get(n.tree.uid); cls = s ? `st-${s}` : 'st-none'; if (badge) badge.textContent = s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
+      if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid); cls = s ? `st-${s}${p ? ' polled' : ''}` : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
       else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'cached' : 'st-none';
       else if (motion) cls = motionClass(n.ref || n.id);
       g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}`);
@@ -2200,7 +2213,7 @@ function liveRep(side, i) {
       let cls = '';
       if (id !== undefined && id !== null) {
         if (motion) cls = motionClass(id);
-        else if (typeof id === 'number') { const s = statuses.get(id); cls = s ? `st-${s}` : 'dim'; }
+        else if (typeof id === 'number') { const s = statuses.get(id); cls = s ? `st-${s}${s === 'R' && polled.has(id) ? ' polled' : ''}` : 'dim'; }
         else if (id === 'prompt') cls = rec.cost[i].builds ? 'ran' : '';
       }
       span.className = cls;
