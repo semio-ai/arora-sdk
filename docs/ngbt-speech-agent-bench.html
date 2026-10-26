@@ -246,6 +246,8 @@ label.inline, .inline.mode-pick { display: inline-flex; align-items: center; gap
 .cost-stats .v { font: 600 14px var(--f-mono); font-variant-numeric: tabular-nums; }
 .cost-stats .a { font: 11px var(--f-mono); color: var(--faint); }
 .cost-stats .wide { grid-column: span 2; }
+.stats-label { margin: 12px 0 0; font: 600 11px var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cost-stats.live .v { color: var(--run-1); }
 .cost-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; margin-bottom: 6px; }
 .cost-head h3 { margin: 0; }
 .seg.small button { min-height: 26px; padding: 2px 8px; font-size: 12px; }
@@ -2011,13 +2013,16 @@ function mount(key, costOnly = false) {
   side.costBox = el('div', { class: 'svgbox' }); side.costStats = el('div', { class: 'cost-stats' }); side.costLegend = el('div', { class: 'legend' });
   side.measureSeg = el('div', { class: 'seg small', role: 'group', 'aria-label': 'What the chart shows' }, MEASURES.map(([k, label]) => el('button', { type: 'button', 'data-k': k, onclick: () => { S.measure = k; for (const s of Object.values(sides)) if (s.rec) buildCost(s); render(); } }, label)));
   side.workTable = el('table', { class: 'work' }); buildWorkTable(side);
+  // This tick's totals, live, each beside the other side's at the same moment of the timeline (offsets applied).
+  side.liveStats = el('div', { class: 'cost-stats live' }); side.live = {};
+  for (const [k, label] of MEASURES) { const v = el('span', { class: 'v' }), a = el('span', { class: 'a' }); side.live[k] = { v, a }; side.liveStats.append(el('div', {}, el('span', { class: 'k', text: label }), v, a)); }
   side.stripBox = el('div', { class: 'svgbox' }); side.stripLegend = el('div', { class: 'legend' });
   side.plotsBox = el('div'); side.values = el('div', { class: 'values' });
   side.scoreList = el('ul', { class: 'score' });
   t.append(
     el('section', { class: 'block' }, el('h3', { text: 'What it said' }), side.transcript),
     el('section', { class: 'block' }, el('div', { class: 'rep-head' }, side.repTitle, side.resetLayout), side.view, side.repNote),
-    el('section', { class: 'block' }, el('div', { class: 'cost-head' }, el('h3', { text: 'Cost of each tick' }), side.measureSeg), side.costBox, side.costLegend, side.workTable, side.costStats),
+    el('section', { class: 'block' }, el('div', { class: 'cost-head' }, el('h3', { text: 'Cost of each tick' }), side.measureSeg), side.costBox, side.costLegend, el('p', { class: 'stats-label', text: 'This tick, beside the other side at the same moment' }), side.liveStats, side.workTable, el('p', { class: 'stats-label', text: 'The whole run, on average' }), side.costStats),
     el('section', { class: 'block' }, el('h3', { text: 'Services' }), side.stripBox, side.stripLegend),
     el('section', { class: 'block' }, el('h3', { text: 'Channels' }), side.plotsBox, side.values),
     el('section', { class: 'block' }, el('h3', { text: 'Scorecard' }), side.scoreList),
@@ -2330,8 +2335,10 @@ function buildWorkTable(side) {
     el('thead', {}, el('tr', {}, ['this tick', 'node ticks', 'executions', 'checks'].map((h) => el('th', { scope: 'col', text: h })))),
     el('tbody', {}, AREAS.map(([a, label]) => el('tr', {}, el('td', { text: label }), cells(a))), el('tr', { class: 'all' }, el('td', { text: 'all' }), cells('all'))));
 }
-function renderWork(side, i) {
-  const c = side.rec.cost[i];
+function renderWork(side, i, at = i) {
+  const c = side.rec.cost[i], o = other(side), oc = o && o.rec ? o.rec.cost[clamp(at + (S.offset[o.key] || 0), 0, N - 1)] : null;
+  const show = (k, x) => (k === 'us' ? usText(x) : String(x));
+  for (const [k] of MEASURES) { const x = measureOf(c, k); side.live[k].v.textContent = show(k, x); side.live[k].a.textContent = oc ? `other side ${show(k, measureOf(oc, k))}` : ''; }
   side.workCaption.textContent = `At ${(i * DT).toFixed(2)} s: ${usText(c.us)}${side.rec.design ? ', modeled' : ', its own work'}`;
   for (const [a] of AREAS) ['ticks', 'execs', 'checks'].forEach((k, j) => { side.workCells[a][j].textContent = c.w[a][k]; });
   ['ticks', 'execs', 'checks'].forEach((k, j) => { side.workCells.all[j].textContent = c.all[k]; });
@@ -2461,7 +2468,7 @@ function renderSide(side, at) {
   const sx = side.stripX(f.t); side.stripNow.setAttribute('x1', sx); side.stripNow.setAttribute('x2', sx);
   const px = side.plotX(f.t); for (const ln of side.plotNow) { ln.setAttribute('x1', px); ln.setAttribute('x2', px); }
   const cx = side.costX(f.t); side.costNow.setAttribute('x1', cx); side.costNow.setAttribute('x2', cx);
-  renderWork(side, i);
+  renderWork(side, i, at);
   f.c.forEach((v, j) => { side.valueCells[j].textContent = v.toFixed(2); });
   liveRep(side, i);
 }
