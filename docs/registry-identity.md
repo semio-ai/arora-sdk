@@ -200,7 +200,8 @@ dependency, and that is what the package id adds.
 |---|---|---|
 | `arora-registry` | arora-sdk | Records in memory at runtime; the `RegistrySource` trait and its types |
 | `arora-index` | arora-sdk | Asset management over any source: resolution, verification, cache, `DirSource` |
-| `arora-cli` | arora-sdk | Arora configurations and packages in any registry: publish, move, folder registries. It reaches Studio through the programs its user configuration names |
+| `arora` | arora-sdk | Runs a device (`arora run`), and dispatches the package verbs to `arora-pkg` and unknown verbs to `arora-<verb>` ([configurations](proposal-configurations.md) 3.11) |
+| `arora-pkg` | arora-sdk | The package verbs: `add`, `install`, `publish`, `deprecate`, `version`, `vendor`, `login`; folder registries and moves. It reaches Studio through the programs its user configuration names |
 | `semio-studio-session` | studio-bridge | Sign-in to Studio, device enrollment, the session and its credential |
 | `semio-studio-assets` | studio-bridge | Studio's `RegistrySource`: reads Studio's packages, publishes through the endpoint |
 | `arora-studio-bridge-client` | studio-bridge | The device's live connection to Studio, on the same session |
@@ -242,9 +243,10 @@ dependency, and that is what the package id adds.
 | Artifact keys | `record`, `header`, `interface`, `wasm` and `native/<triple>`, as #616's S5a lists. |
 | Scope UUIDs | Bound to their account; `@arora`, `@vizij` and `@semio` held by Semio's accounts with their fixed ids. |
 
-**semio-cli and `arora-cli`**: publish through the endpoint with a publish
-token; `arora-cli` also binds ids in folder registries and writes the alias a
-move leaves.
+**semio-cli and `arora-pkg`**: publish through the endpoint with a publish
+token; `arora-pkg` also binds ids in folder registries and writes the alias a
+move leaves. `semio` installs `arora-semio`, `arora-credential-semio` and
+`arora-registry-semio`, through which `arora` reaches Studio.
 
 ## 9. Studio's publish endpoint
 
@@ -269,7 +271,7 @@ today's project rule, which stops someone with view access to a project from
 publishing its content as their own.
 
 - A package created without a project has no source asset, so its releases
-  come from CI or a CLI. Studio's release dialog says so instead of offering
+  come from CI, `arora publish` or `semio package publish`. Studio's release dialog says so instead of offering
   a release from a project.
 - Until STUDIO-402 lands, a model or face release needs its root: a model's
   file supplies one; a face publish sends it.
