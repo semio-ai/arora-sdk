@@ -143,7 +143,7 @@ their rights: a tool's session carries the `tool` claim, a device's the
 
 - Record UUIDs, scope ids and the shape of `FrozenReference` are unchanged.
 - It works without Studio. A folder or a static host lays packages out by
-  name; a package's id sits in a file next to its name.
+  name, one index file per package with its id and releases (section 10).
 - Every lookup names a scope, so a project's per-scope registry mapping
   routes every request.
 - A record UUID copied from public source gains nothing: packages are
@@ -219,7 +219,7 @@ dependency, and that is what the package id adds.
 | Placement | `PackageId`, `Dependency` and `Pin` in `arora-types`, since a configuration record embeds pins; the trait and the source-only types in `arora-registry`. |
 | `Pin` | Name requested, package id, registry, version, artifact keys with hashes, locator. A pin finds its release by its name and version, following aliases and redirects, and checks the id and hashes; the locator is only a shortcut on the registry that made it. |
 | Resolver checks | Release id against pin and dependency; record `parent` against the release's scope; two contents for one record id and version refused. |
-| `arora-index` | Pins carry the id; `fetch` no longer requires the current name to equal the pinned one; `DirSource` reads `<scope>/<name>/package.json`. |
+| `arora-index` | Pins carry the id; `fetch` no longer requires the current name to equal the pinned one; `DirSource` reads the layout of section 10. |
 | Record versions | Unchanged: a derived type keeps its declared version, which its own package releases. |
 | Scopes | The fixed ids of `arora`, `vizij` and `semio` stay. |
 
@@ -306,7 +306,106 @@ Outside semio_studio, `semio-studio-assets` publishes through the endpoint
 instead of Firestore's REST API, and `semio-studio-session` keeps the token
 for `semio`'s credential provider; both are small.
 
-## 10. Open questions
+## 10. Running your own registry
+
+A team, a lab or a community can publish packages without Semio, with no
+server, database or account: a registry is a folder, served as static files
+when others need it.
+
+**1. Choose the form.**
+
+| Form | What it is | For |
+|---|---|---|
+| A folder | A directory on disk or a network share | One machine, a lab, offline use |
+| A static host | The same folder over HTTPS: GitHub Pages, S3, nginx | A team, a public community index |
+| A server | The protocol over HTTP, or a `RegistrySource` of its own | Access control, search, very large catalogues |
+
+The second and the third start as the first.
+
+**2. Lay it out.** A folder and a static host share one layout:
+
+```text
+my-registry/
+├── index/
+│   └── lab/
+│       └── gaze.json        the package: its id, or the alias a move left, and every release
+└── blobs/
+    └── sha256/<hash>        the artifacts, by content
+```
+
+```json
+{
+  "name": "@lab/gaze",
+  "id": "0b6e3f6c-5d1e-4a8f-9f2a-3c7d2e9b1a40",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "kind": "module",
+      "scope": "6c61622d-…",
+      "artifacts": {
+        "record": { "sha256": "3b1f…c09a", "size": 2210 },
+        "header": { "sha256": "9d04…77e1", "size": 1830 },
+        "wasm":   { "sha256": "a7e2…41d6", "size": 412512 }
+      },
+      "dependencies": [
+        { "name": "@arora/status", "id": "…", "kind": "type", "range": "^1.4" }
+      ],
+      "deprecated": false
+    }
+  ]
+}
+```
+
+A static host cannot list a directory, so a client finds a package's releases
+in the one file it fetches by name. Blobs are named by their hash, so an
+artifact shared by several releases or packages is stored once, and a mirror
+copies the folder as it is.
+
+**3. Publish.** `arora publish gaze --registry ./my-registry` builds, hashes
+each artifact, runs the interface check, writes the blobs and adds the
+release to `index/lab/gaze.json`. At a package's first publish it mints the
+id, or binds the one the publisher presents if no package holds it in this
+registry.
+
+**4. Serve.** Push the folder to any static host. In a git-hosted registry, a
+publish is a pull request, and review is the access control, as in
+crates.io's index.
+
+**5. Point projects at it.** A project maps the scope to the registry in its
+`arora.toml`, and every lookup of that scope goes there and nowhere else:
+
+```toml
+[registries]
+lab = "https://lab.example.org/arora/"
+
+[scopes]
+"@lab" = "lab"
+```
+
+**6. Keep packages private (optional).** Put the host behind
+authentication, and name a credential provider in the user's own
+`~/.config/arora/config.toml`, never in a project's file; `arora login
+--registry lab` runs it. A device fetches with its own credential.
+
+**7. Look after it.**
+
+- **A bad release** is deprecated, `arora deprecate @lab/gaze@1.1.0`: never
+  edited or removed. A fix is a new version, a backport included.
+- **A rename or a move to another scope** leaves the old name as an alias:
+  `index/lab/gaze.json` becomes `{ "name": "@lab/gaze", "id": "…",
+  "alias_of": "@lab/eyes" }`.
+- **A move to another registry** leaves a redirect: the alias plus
+  `"registry": "https://…"`. The resolver follows it, checks the id at every
+  hop and refuses a cycle.
+- **A mirror** copies the folder as it is: ids, hashes and aliases come
+  along.
+
+**Whatever the registry, the consumer verifies.** The resolver checks every
+artifact against its SHA-256, the package id against the pin, and each
+record's scope against its release, so a compromised mirror can withhold a
+package, never substitute one.
+
+## 11. Open questions
 
 - **A Studio scope's UUID**: derived from the owning account's id (a version 8
   UUID over SHA-256 of a fixed namespace and the id), so nothing is stored and

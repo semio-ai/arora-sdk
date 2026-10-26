@@ -538,9 +538,11 @@ pub struct Pin {
   shape `RemoteCachedRegistry` has today. It persists under the device
   directory (records in the `records/` layout, artifacts by content hash), in
   the directory the bridge client already uses, not a second cache root.
-- **Implementations:** a local directory (`DirSource`, no network), whose
-  package directories hold a `package.json` with the id, or the alias a move
-  left; a static host over HTTPS, laid out the same way; Studio's backend,
+- **Implementations:** a local directory (`DirSource`, no network) and a
+  static host over HTTPS, which share one layout: `index/<scope>/<name>.json`
+  holds a package's id, or the alias a move left, and every release, and
+  `blobs/sha256/<hash>` its artifacts ([registry identity](registry-identity.md)
+  section 10); Studio's backend,
   `StudioSource` in Semio's `semio-studio-assets`, signed in through
   `semio-studio-session`; Studio's page, backed by its own store client.
 - **Publishing is the backend's.** A backend publishes through one path that
@@ -817,7 +819,7 @@ with native modules changes them, by restarting.
   and its types, exact lookup, and the new kinds. Its public API carries
   `arora-types`' types, so it moves with that major.
 - **`arora-index`.** Pins carry the package id and find their release by
-  locator; `DirSource` reads each package's `package.json`; the resolver
+  locator; `DirSource` reads the shared folder layout; the resolver
   makes the checks of 3.3.
 - **Studio** ([semio_studio#616](https://github.com/semio-ai/semio_studio/pull/616)).
   Its publish endpoint becomes the one publish path, the web app's included:
@@ -1031,7 +1033,7 @@ follows:
 | `arora_index::Source` with `releases(scoped_name, kind)` and `fetch(release, key)` | `arora_registry::RegistrySource` with `releases(package, kind)` and `artifact(release, key)`; the resolver looks up by name |
 | `Release` and `ResolvedRef` keyed by scoped name, no id | `Release`, `Dependency` and `Pin` keep the name and add the package id; the pin keeps the name it was requested under |
 | `fetch(pin)` finds the release under the pin's exact name, so a pin made before a transfer fails for every blob not cached | A pin finds its release by its requested name and version, following aliases and redirects, and checks the id and hashes; the locator is only a shortcut on the registry that made it |
-| `DirSource`: `<scope>/<name>/<version>/release.json` | The same, plus `<scope>/<name>/package.json` with the package id, or the alias a move left |
+| `DirSource`: `<scope>/<name>/<version>/release.json` | `index/<scope>/<name>.json`, the package's id or alias and every release, and `blobs/sha256/<hash>`: the layout a static host serves too, since it cannot list a directory |
 | `release_id`, the source's opaque id | `locator`, still opaque |
 | `SourceOptions` | `Limits`, the same fields |
 | `TokenSource` in `arora-index` | Leaves the trait: a source is built with its credentials (3.3) |
@@ -1076,7 +1078,7 @@ Each stage lands on its own.
    with package ids, dependencies and pins; exact lookup; freezing a
    configuration, its type versions chosen once, with its checks.
    `arora-index`: the resolver's checks, pins found by name and version, `DirSource`'s
-   `package.json`. `arora-pkg` (3.11): publishing to a folder registry, which binds
+   folder layout. `arora-pkg` (3.11): publishing to a folder registry, which binds
    the id, and moving a package, which leaves an alias. Studio: the publish
    endpoint as the one publish path, binding ids and checking scopes, with
    the backfill and the renames ([registry identity](registry-identity.md)).
