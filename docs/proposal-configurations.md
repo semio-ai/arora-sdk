@@ -1,7 +1,7 @@
 # Proposal: configurations — modules, type records and behaviors applied together
 
 Status: draft, for review.
-Date: 2026-10-16.
+Date: 2026-10-26.
 
 A device runs modules and behaviors. Today each reaches it by a separate path:
 an operator copies a module directory into the device directory, a client
@@ -19,29 +19,45 @@ In short:
 
 - **Everything a device runs is a record.** Modules, structures and
   enumerations already are; behaviors and configurations become record kinds
-  too. Records are versioned and frozen, held in `arora-registry`, and kept by
-  the store's backend as versioned assets. Releases, ranges and content
-  hashes are record metadata.
+  too. Records are versioned and frozen, held in `arora-registry`, and
+  published in packages: a release of a package carries its record as an
+  artifact, hashed like the others.
+- **Names address, ids identify, hashes verify.** A package is looked up by
+  its scoped name, `@scope/name`, which routes the request to one registry.
+  It keeps an id of its own, bound by its registry at its first publish,
+  through renames, transfers and moves to another registry. A release is a
+  package's version, published once, with a SHA-256 per artifact. Records
+  keep their UUIDs inside; nothing looks a package up by a record's UUID
+  ([registry identity](registry-identity.md)).
+- **Each type is a package of its own**, with its own semver. A module
+  depends on the type packages it names, and a resolver picks the version of
+  each type compatible with every module using it.
 - **The store is the only source of records.** A device resolves through its
   own `arora-registry`, filled through a **registry source**, and does not
   serve records. arora-sdk knows only the source trait, so a backend could be
   distributed; for now the only backend is Studio's, whose source is
-  Semio's `semio-studio-assets` crate, signed in through `semio-studio-auth`.
-  The device's cache stays in the device directory the bridge client uses.
+  Semio's `semio-studio-assets` crate, signed in through
+  `semio-studio-session`. The device's cache stays in the device directory
+  the bridge client uses.
 - **Every record lives in a scope**, the top folder named by the `@handle`
   of the account that publishes it, as a scoped name says. A module and its
   own types live in the module's scope; a type modules of different scopes
-  share states its own, so they ship one record and load together on a
-  device. Its owner declares a scope's id in code; where records are
-  published or exchanged, the store's ownership of the scope decides.
+  share lives in the scope it states, published once there. Its owner
+  declares a scope's id in code; where records are published or exchanged,
+  the store's ownership of the scope decides.
+- **Three parties, three kinds of access.** An author signs in to publish.
+  Whoever deploys a configuration of public packages needs no account. A
+  device resolves as itself, and may be enrolled with a Studio account that
+  manages it.
 - **A guest module is indexed from its module record.** The header stays as it
   is; the record, checked against it, gives every export its frozen signature
   in the method index. This unblocks behaviors calling `step_values`
   ([STUDIO-347](https://linear.app/semio-ai/issue/STUDIO-347)) before any
   store or protocol work.
-- **A configuration is a frozen record** that pins module records, type
-  records and behavior records, with requirements on the device. HAL and
-  bridge settings are not part of it.
+- **A configuration is a frozen record** that references module records,
+  type records and behavior records, pins the release of every package they
+  come from, and states requirements on the device. HAL and bridge settings
+  are not part of it.
 - **One remote surface:** `ApplyConfiguration` changes what a device runs, and
   `DescribeConfiguration` returns it. There is no remote operation to load,
   reload or unload a single module.
@@ -51,11 +67,12 @@ In short:
   not apply leaves the old one running.
 - **The claim is the gate.** The router grants the new operations to the
   device's claimant, as it grants calls; the device adds no access rule.
-- **The cost is a two-repo release**: an `arora-bridge` major, an
-  `arora-types` major for the new record kinds, a `studio-bridge-msgs` major
-  with its client chain, a router grant, and a protocol revision a device
-  announces, so a client never sends the new operations to a device that
-  cannot answer them.
+- **The cost is a release across four repos**: an `arora-bridge` major, an
+  `arora-types` major for the new record kinds with an `arora-registry`
+  major for the source trait, a `studio-bridge-msgs` major with its client
+  chain, a router grant, a protocol revision a device announces, so a client
+  never sends the new operations to a device that cannot answer them, and
+  Studio's publish endpoint binding package ids.
 
 ---
 
@@ -70,8 +87,10 @@ In short:
 | `arora-registry-remote` 1.0 | arora-sdk | `RemoteRegistry` reads records from semio-db through `semio-client`; `RemoteCachedRegistry` puts a `LocalRegistry` in front of it as a cache. Reads the semio-cli login file. | `arora-cli`, `arora-module-cli` | Merged, private; over semio-db |
 | semio-record | semio-record | A record vocabulary over `arora-types`' references and freezing: record kinds — users, organizations, folders, modules, structures, enumerations, animations, scenes — with private, public, unfrozen and frozen facets, the actions that build them, and access control lists. | semio-db and its clients; a newer store client | Maintained, reused |
 | semio-db, semio-client, semio-store-rpc | separate repos | GraphQL record store on ScyllaDB: records by id and version, semver tags with a `yanked` flag, a folder tree rooted at its user and organization records, path-to-id names; a WebSocket blob store; their client. | semio-cli, `arora-registry-remote` | Deprecated |
-| semio-cli | semio-cli | CLI over semio-db: create, tag and read records per kind, blob upload and download, login. | Developers | Maintained; over semio-db |
-| `arora-index` | arora-sdk, `crates/arora-index` | Resolves a published Studio v2 asset `{scopedName, range}` to a release with Studio's selection rules; fetches its primary artifact verified by SHA-256; content-addressed cache with sealed private blobs and `resolved.json`; `resolve_with_fallback`; `build::models()`. Reads Firestore and Storage directly. | Nothing yet | [#360](https://github.com/semio-ai/arora-sdk/pull/360), open, `publish = false` |
+| semio-cli | semio-cli | `semio`: resolves, fetches, shows and publishes Studio's assets through the Studio source; signs in by a code a person approves and enrolls devices ([semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11)). Its record commands over semio-db remain. | Developers | Maintained |
+| `arora-index` | arora-sdk, `crates/arora-index` | Resolves an asset `{scopedName, range}` to a release with Studio's selection rules, through an object-safe `Source` trait; verifies each artifact by SHA-256 before use; content-addressed cache with sealed private blobs and `resolved.json`; `resolve_with_fallback`; `DirSource`, a local directory; `build::models_with(source)`. Its pins hold no package id, and `fetch` finds a release only under the pin's exact name. | Nothing yet | [#360](https://github.com/semio-ai/arora-sdk/pull/360), open, `publish = false` |
+| Studio source | studio-bridge, `index-source` (to ship as `semio-studio-assets`) | `StudioSource` implements `arora-index`'s `Source` over Firestore and Storage REST: follows a name's claim or alias to its package and lists its releases, fetches artifacts, plans and makes Studio's publish writes. | semio-cli | [studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109), open |
+| `semio-studio-session` | studio-bridge | Sign-in to Studio by a code a person approves, device enrollment by code or token, a session that renews its ID tokens, and the credential kept encrypted in a directory. One crate for the device client, the TUI and `semio`. | The device client, the TUI, `semio` | [studio-bridge#114](https://github.com/semio-ai/studio-bridge/pull/114), open |
 | `feat/type-registry` | arora-sdk branch | Emitted `records/` and a `records.json` id→name index per module; a wasm `Registry` in `arora-web` resolving ids to names. | Nothing | Unmerged; the crate it changes no longer exists |
 | Module directories | `arora`, `module_dir` | A device loads every `<device dir>/modules/*/` (a `header.json` beside one artifact) at start, and each `--module` directory. | The `arora` runner | Merged |
 | Guest module indexing | `arora`, `module_discovery` | A guest module whose module record the device's registry holds (`AroraBuilder::with_registry`, or `records/` in its module directory) has every export indexed with the record's frozen signature, checked against the header. Without a record, an export joins the method index only when its parameters and return are primitives or optional scalar primitives; a module loaded or reloaded on a running device is indexed from its header. `with_declared_module` indexes every export from a Rust declaration. | Every device | Merged (records: arora 13.1) |
@@ -81,10 +100,10 @@ In short:
 | `arora-web` | arora-sdk | Browser runtime: `AroraRuntimeBuilder.withModule(headerJson, bytes)`, `withCompiledModule`, and `withRecords(records)`, the records its guest modules are described by. | arora-sdk demos | Merged (records: 10.1) |
 | Bridge operations | `arora-bridge` 6.1 | `Get`, `Update`, `Call`, `ListKeys`, `ListMethods` (deprecated), `DescribeMethods`. Behaviors travel as calls to the interpreter module (`LOAD`, `EDIT`, `SPAWN`, `HALT`). Nothing carries modules or records. | Every bridge | Merged |
 | Studio Bridge | studio-bridge | `AroraOp` mirrors `BridgeOp` (msgs 6.x); sender-addressed command keys `rpc/{device}/{principal}/{op}/{target}` the router authorizes per operation; protocol token `mgmt/{device}/liveliness/protocol/2`; the device's Studio credentials. | Studio, `arora --features studio-bridge` | Merged |
-| Studio v2 assets | semio_studio | `scopedNames`, `publishedAssets/{id}/releases`; a release has `artifacts: {key → {storage, contentHash, role}}`; asset types `Model`, `Animation`, `Face`; `resolveDependency`. No module, type or configuration asset. | Studio | Merged |
+| Studio v2 assets | semio_studio | A package is `publishedAssets/{id}`; `scopedNames/{@scope:slug}` claims point at it, and a transfer keeps the id and leaves the old name as an alias. A release, `publishedAssets/{id}/releases/{id}`, has `artifacts: {key → {storage, contentHash, role}}`, keys `primary` and `preview` only; release dependencies are keyed by package id; asset types `Model`, `Animation`, `Face`; `resolveDependency`. No module, type or configuration asset. | Studio | Merged |
 | `studio-arora` | semio_studio, Studio-on-Arora branches | Studio's wasm crate on arora 13 (`^13.1`). Loads `@vizij/animation-module` 4.1 (header, wasm and records from npm) once as a `CompiledModule`; builds each emulated device with `with_compiled_module` and `with_registry`; pushes the stepping behavior by `spawn_graph`, relinks it by `edit`. | Studio | Branch ([semio_studio#610](https://github.com/semio-ai/semio_studio/pull/610)) |
 | `vizij-animation-module` | vizij-rs | The animation module (module record 2.0.0, `@vizij/animation`), declared in Rust. The npm package `@vizij/animation-module` ships its header beside the wasm and, from 4.1.0, its records under `artifact/records/`: the module record and the records of the structures its functions name, in the `vizij` scope. | Studio, vizij devices | Merged, published |
-| `arora-animation-module` | arora-sdk, `modules/animation` | The animation module, moved from vizij-rs ([#372](https://github.com/semio-ai/arora-sdk/pull/372)) with every id kept: module record 3.0.0, named `arora-animation` (to be renamed `animation`), its records in the `arora` scope. `module_dir::write` writes its module directory, `records/` included. | Studio's `feature/studio-arora-animation` branch | Merged, unpublished |
+| `arora-animation-module` | arora-sdk, `modules/animation` | The animation module, moved from vizij-rs ([#372](https://github.com/semio-ai/arora-sdk/pull/372)) with its module id kept: module record 3.0.0, `@arora/animation`, its records in the `arora` scope at versions of their own, past those `@vizij/animation-module` ships. `module_dir::write` writes its module directory, `records/` included. | Studio | Merged, published (crate 2.0.0) |
 
 ### 1.2 The gap behind STUDIO-347
 
@@ -117,12 +136,13 @@ reloaded on a running device is still indexed from its header (4.3).
 
 | Concern | Overlapping components | Owner | Why |
 |---|---|---|---|
-| What a published thing is | Records (`arora-types`); Studio v2 assets and `arora-index`'s `AssetType` / `ResolvedRef` | Records | A record is already versioned, frozen and referenced by id and version; a module record is what a declaration and the authoring pipeline produce. Release metadata — content hashes, deprecation, the scoped name — attaches to a record version instead of forming a second vocabulary. |
+| What a published thing is | Records (`arora-types`); Studio v2 assets and `arora-index`'s `AssetType` / `ResolvedRef` | Packages that carry records | A record is already versioned, frozen and referenced by id and version; a module record is what a declaration and the authoring pipeline produce. A package is what a registry names, identifies and releases; a release of a record kind carries its record as the artifact `record`, so the record and its release metadata — artifact hashes, deprecation — never form two vocabularies. |
+| Package identity | Studio's `publishedAssets/{id}` behind name claims and aliases; `arora-index`'s name-only pins | The registry, which binds a package id at first publish ([registry identity](registry-identity.md)) | Studio already keeps a package's id across a transfer; carrying it in releases, aliases and pins lets every client tell a reused name from the package it pinned, and follow a package to another registry. |
 | Holding records in a process | `arora-registry`'s `LocalRegistry`; the `feat/type-registry` `Registry`; `arora-index`'s `resolved.json` | `arora-registry` | One registry for authoring (tag, freeze) and for devices (exact lookup). A record carries its name, so the `records.json` index is not needed. `ty::low::TypeRegistry` stays on the header vocabulary's axis ([design note](design_decisions.md#two-type-vocabularies-two-axes)). |
 | Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through the `RegistrySource` trait in `arora-registry`, one implementation per backend (3.3) | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. `arora-index`'s selection, verification and sealing work over any source; the Studio source is Semio's `semio-studio-assets`. |
-| Connecting to Studio, credentials | `arora-index`'s `FIREBASE_*` configuration and `TokenSource`; studio-bridge's client | Semio's `semio-studio-auth`, which the bridge client and the Studio source both use | Arora works without Studio. Sign-in is one Semio crate; the bridge client keeps the device's credentials in its directory. |
+| Connecting to Studio, credentials | `arora-index`'s `TokenSource`; the Studio source's `/tool-login` sign-in; studio-bridge's client | Semio's `semio-studio-session`, which the bridge client, the Studio source and `semio` all use | Arora works without Studio. Sign-in is one Semio crate; the bridge client keeps the device's credentials in its directory. |
 | The device's cache directory | `arora-index`'s `<device dir>/assets/`; the Studio Bridge client's directory; `<device dir>/modules/` | One cache, in the device directory, shared with the bridge client | Two cache roots for one device drift. Operator-installed `modules/` stays a separate, unverified input. |
-| Publishing | semio-cli (semio-db); Studio's web publishing | The store's backend | Records are published where they are read, and the backend decides at publication who owns a scope (2.2). semio-cli publishes to semio-db, which is deprecated. |
+| Publishing | semio-cli (semio-db, then Studio through the Studio source); Studio's web publishing | The store's backend, through one publish path per backend | Records are published where they are read, and the backend decides at publication who owns a scope (2.2) and which package an id names (3.3). On Studio that path is its publish endpoint, the web app's included. |
 | Release selection | `arora-registry`'s `resolve_tag`; `arora-index`; Studio's `resolveDependency` | `arora-index`'s resolver, with the source supplying releases and metadata | One rule for a range: the newest non-deprecated version that satisfies it and has the requested artifact, as Studio's `resolveDependency`. |
 
 ---
@@ -197,10 +217,12 @@ declaration.
     types take it: the module macros pass it to the types its functions
     name, and those to the types they name.
   - A type modules of different scopes share states its own,
-    `#[arora(scope = ARORA)]`, and its record lives there whatever names it.
-    A module naming it ships that record and the scope's folder, nothing
-    else: `Status` and `TickId` live in the `arora` scope (`arora.Status`),
-    vizij's types in `vizij`.
+    `#[arora(scope = ARORA)]`, and its record lives there whatever names it:
+    `Status` and `TickId` live in the `arora` scope (`arora.Status`),
+    vizij's types in `vizij`. A module directory, installed by hand,
+    carries the closure of its records, that record and the scope's folder
+    included. A published module does not: the type is published once, as a
+    package of its own in its scope, and the module depends on it (3.3).
   - A name is unique within a scope by the registry's rule: a registry, on
     a device or a client, refuses a second record under a path another
     record holds, so two records cannot take one name in a scope there.
@@ -224,10 +246,12 @@ declaration.
     their scope by UUID (`parent`), never by handle, so a renamed scope
     breaks no record: the UUID is the scope's identity and the handle its
     readable address, two complementary ways to reach it.
-  - Moving an asset to another scope re-parents its later versions only:
+  - Moving a package to another scope re-parents its later versions only:
     each version published after the move names the new scope, and
-    earlier versions keep theirs. The asset keeps its UUID, and so does
-    each scope, so a reference by id and version resolves across the move.
+    earlier versions keep theirs. A record embeds its parent, so a moved
+    record is new content and takes a new version; its id stays. The
+    package keeps its id (3.3), and each scope keeps its own, so a pin and
+    a reference by id and version resolve across the move.
 - **An export step** writes `records/` beside the header: for a declared
   module from `AroraModule::record` and the derived types; for a `module.yaml`
   module from `arora-module-cli`'s analysis, which already produces both.
@@ -294,13 +318,15 @@ pub struct Configuration {
     pub modules: Vec<FrozenReference>,
     pub behaviors: Vec<FrozenReference>,
     pub types: Vec<FrozenReference>, // records the others do not already bring
+    pub packages: Vec<Pin>,          // where each record and artifact comes from (3.3)
 }
 ```
 
 - **Freezing locks a configuration.** As authored, a configuration names
   version requirements (the unfrozen form); freezing it against a registry
-  pins each to the newest tagged version that satisfies it, with the existing
-  `Freeze` and `Resolver`. A device applies only frozen configurations, so a
+  pins each to the newest published, non-deprecated version that satisfies
+  it, with the existing `Freeze` and `Resolver`, and records the pin of each
+  release it draws from. A device applies only frozen configurations, so a
   device and the client that sent the configuration run the same records.
 - **Freezing checks the behaviors against the modules.** Each function a
   behavior calls must be an export of a module record the configuration pins,
@@ -308,29 +334,83 @@ pub struct Configuration {
   applies or reloads: a configuration carries both sides, and is checked where
   it is made.
 - **The record set is closed.** Every reference reachable from the
-  configuration resolves to a record its registry can supply.
+  configuration resolves to a record in the `record` artifact of a release
+  the configuration pins. `packages` is the configuration's lock: freezing
+  writes one pin per package it draws a record or an artifact from, and a
+  device fetches exactly those.
+- **Type versions are chosen once for the whole configuration.** A module
+  record pins the type versions it was built against, and its dependencies
+  state the ranges it accepts. Freezing picks, for each type, the newest
+  version every module and behavior accepts, and refuses a configuration
+  where none does, naming the type and the modules that disagree.
 
-**Release metadata on a record version.** A tagged version carries, besides
-its frozen content:
+**A release carries its record.** A release of a record kind carries the
+frozen record as the artifact `record`, beside its other artifacts: for a
+module, the header and one executable per executor (`wasm`, then native
+targets). The module record's `executable` id becomes this map of keys to
+hashes. A module's published form is therefore one package whose releases
+carry the module record, the header and the executables; each type it names
+is a package of its own, which the module's release depends on.
 
-- the content hash of each artifact, by key: for a module, the header and one
-  executable per executor (`wasm`, then native targets); the module record's
-  `executable` id becomes this map;
-- `deprecated`, which keeps a version out of range selection (1.3) and is
-  the only part of a release that changes after publication;
-- the scoped name a source publishes it under, when it has one.
+**A release is immutable.** A release is a package's version: the pair
+(package id, version) names one set of artifact hashes, and so one frozen
+record, forever. New content is a new version. A release can be deprecated,
+which keeps it out of range selection (1.3) and is the only change after
+publication; it is never edited, replaced or unpublished. Versions need not
+be published in order: a fix on an older major, 1.4.1 after 2.0.0, is a
+release like any other.
 
-A module's published form is therefore its module record, its header and
-executables as artifacts of that record version, and the type records it
-depends on as records of their own.
+### 3.3 Packages, releases and registry sources
 
-**A release is immutable.** A published thing has a stable id, the record's
-UUID, which survives renames and transfers between scopes. Each version of
-that id is published once: the pair (id, version) names exactly one frozen
-record and one set of artifact hashes, forever. New content is a new
-version. A release can be deprecated, never edited, replaced or unpublished.
+[Registry identity](registry-identity.md) states the scheme across Studio,
+the open registry protocol and devices; this section states the part
+arora-sdk holds.
 
-### 3.3 Registry sources
+A **package** is what a registry publishes under one name: a module with its
+executables, a single type, a behavior, a configuration, a model. It wraps
+nothing: a type's package is that type, released at each of its versions.
+Records need a package only to be published. A module directory, a local
+registry and an inline configuration carry records directly.
+
+**Names address, ids identify, hashes verify.**
+
+- **A name routes.** Every lookup, dependency and pin names a package by its
+  scoped name, `@scope/name`, and a project maps each scope to one
+  registry. A registry can therefore be plain files laid out by name.
+- **An id identifies.** A package has an id of its own, a UUID its registry
+  binds at the package's first publish: one it mints, or the one the
+  publisher presents when no package holds it there.
+  - An id another package holds is refused. Whether that package takes the
+    publish is its owner's decision, and moving an id between owners goes
+    through the registry's operator.
+  - A deleted package's id is never bound again, so a name that is reused
+    never answers with the id a pin holds.
+  - A package's id is never a record's UUID. A package may carry several
+    records, or none (a model), and a record's UUID is public in source.
+- **A hash verifies.** Each artifact carries its SHA-256, and the resolver
+  checks the bytes against it before they are used or cached.
+- **A move keeps the id.** A transfer to another scope, a rename within a
+  scope and a move to another registry each leave the old name pointing at
+  the new one, as an alias or, for another registry, a redirect, carrying the
+  id. The resolver follows one hop and requires the id it finds to be the id
+  it followed. A consumer holding the id keeps resolving across the move,
+  with no new dependency and no breaking release.
+
+**Types are packages.** Each type is published once, as a package of its
+own in its scope, with its own semver; its release carries its record. A
+module's release depends on the type packages it names, with the ranges its
+module record accepts, and a configuration picks one version of each type
+for all its modules (3.2). A type defined inside another package, such as a
+profile inside the model it describes, is reached through a dependency on
+that package.
+
+**Three parties.** Producing, deploying and running need different access:
+
+| Party | Does | Needs |
+|---|---|---|
+| An author | Publishes packages and releases | An account that owns the scope, on the backend's one publish path |
+| A deployer, such as Studio or `arora-cli` | Resolves, freezes and applies a configuration | Nothing for public packages; read access to private ones |
+| A device | Fetches what its configuration pins, and runs it | Nothing for public packages. For private ones, and for the Studio Bridge, its enrollment, which ties it to an account that manages it |
 
 One trait serves every backend and every kind, records and plain assets
 alike:
@@ -342,7 +422,7 @@ alike:
 #[async_trait]
 pub trait RegistrySource: Send + Sync {
     /// Every release of a package, in listing order, which breaks ties in
-    /// selection. A name is resolved through aliases to the package's id.
+    /// selection. A name is followed through an alias or a redirect.
     async fn releases(
         &self,
         package: &PackageRef,
@@ -360,20 +440,38 @@ pub trait RegistrySource: Send + Sync {
 }
 
 pub enum PackageRef {
-    Name(ScopedName), // `@scope/name`, as people type it
-    Id(Uuid),         // what records and pins hold
+    Name(ScopedName), // `@scope/name`: every lookup the resolver makes
+    Id(PackageId),    // for a person who holds only the id; optional, a
+                      // source without an id index answers `NotFound`
 }
 
 pub struct Release {
-    pub id: Uuid,                 // the package: stable across renames and transfers
-    pub version: Version,         // unique per id
-    pub scoped_name: ScopedName,  // the package's current name
-    pub kind: Kind,               // an open string: model, face, animation, module, behavior, configuration…
+    pub package: Option<PackageId>, // `None` from a registry that keeps no ids
+    pub version: Version,           // unique per package
+    pub scoped_name: ScopedName,    // the package's current name
+    pub scope: Option<Uuid>,        // the scope it was published under
+    pub kind: Kind,                 // an open string: model, face, animation, module, type, behavior, configuration…
     pub artifacts: BTreeMap<String, Artifact>, // key → SHA-256 and size
+    pub dependencies: Vec<Dependency>,
     pub deprecated: bool,
     pub private: bool,
     pub family: Option<String>,
-    pub locator: String,          // opaque to everyone but the source that made it
+    pub locator: String,            // opaque to everyone but the source that made it
+}
+
+pub struct Dependency {
+    pub name: ScopedName,           // routes the lookup
+    pub package: Option<PackageId>, // checks what the name answers
+    pub range: VersionReq,
+}
+
+pub struct Pin {
+    pub requested: ScopedName,      // the name it was asked for under
+    pub package: Option<PackageId>,
+    pub registry: RegistryName,     // the registry the requested scope maps to
+    pub version: Version,
+    pub artifacts: BTreeMap<String, Sha256>, // the keys it uses
+    pub locator: String,
 }
 ```
 
@@ -388,27 +486,38 @@ pub struct Release {
   range that has the requested artifact), checks the pinned hash before a
   download, verifies the bytes, caches them by hash, and falls back to the
   last pin only on a `Network` error. A source transports; it is never
-  trusted with the check.
-- **A pin holds the id.** A pin is the package id, the exact version, the
-  artifact key and its hash, with the scoped name it was requested under.
-  Two pins with one id and version and different hashes are a corrupt source,
-  refused as `Malformed`.
+  trusted with the check. The resolver also refuses:
+  - a release whose id differs from the pin's or the dependency's;
+  - a record whose `parent` is not the release's `scope`;
+  - two releases of one package and version whose hashes differ for one
+    artifact key, and one record id and version arriving with two different
+    contents: both are a corrupt source, `Malformed`.
+- **A pin finds its release again.** A fetch through a pin finds the release
+  by its locator and checks the id, never the current name, so a pin made
+  before a move still fetches. A pin with an id, served by a registry that
+  keeps none, is accepted with a warning naming that registry.
 - **Credentials are not in the trait.** A source is constructed with what it
-  needs to authenticate, as the device or as a person, from a credential
-  provider. No call passes a token.
+  needs to authenticate, as the device, as a person or as nobody, from a
+  credential provider. No call passes a token.
 - **A device's registry is a `LocalRegistry` in front of a source**, the
   shape `RemoteCachedRegistry` has today. It persists under the device
   directory (records in the `records/` layout, artifacts by content hash), in
   the directory the bridge client already uses, not a second cache root.
-- **Implementations:** a local directory (`DirSource`, no network); a static
-  host over HTTPS; Studio's backend, `StudioSource` in Semio's
-  `semio-studio-assets`, signed in through `semio-studio-auth`; Studio's page,
-  backed by its own store client.
+- **Implementations:** a local directory (`DirSource`, no network), whose
+  package directories hold a `package.json` with the id, or the alias a move
+  left; a static host over HTTPS, laid out the same way; Studio's backend,
+  `StudioSource` in Semio's `semio-studio-assets`, signed in through
+  `semio-studio-session`; Studio's page, backed by its own store client.
+- **Publishing is the backend's.** A backend publishes through one path that
+  binds names and package ids, checks that the publishing account owns the
+  scope of every record's `parent`, records that account on the release, and
+  hashes each artifact before it writes the release. On Studio, that path is
+  its publish endpoint, for the web app, `semio` and `arora-cli` alike.
 - **Where it lives.** The trait and its types (`RegistrySource`, `Release`,
-  `PackageRef`, `Kind`, `SourceError`) are in `arora-registry`, which already
-  builds for `wasm32` in `arora-web`, so Studio's page uses the same types.
-  `arora-index` is the client over it: resolver, cache, sealing, `DirSource`
-  and the build helper.
+  `PackageRef`, `PackageId`, `Dependency`, `Pin`, `Kind`, `SourceError`) are
+  in `arora-registry`, which already builds for `wasm32` in `arora-web`, so
+  Studio's page uses the same types. `arora-index` is the client over it:
+  resolver, cache, sealing, `DirSource` and the build helper.
 - **semio-db is not a backend.** It is deprecated, so the design is not
   shaped by its structure — its account-rooted tree, its naming rules. Its
   record vocabulary, semio-record, is reused by a newer store client.
@@ -422,30 +531,29 @@ pub struct Release {
 
 ### 3.4 Naming a configuration
 
-A configuration is named in record terms. What `arora-index` calls an asset
-specification maps onto them:
+A configuration is a package like the others. What `arora-index` calls an
+asset specification maps onto packages and records:
 
-| `arora-index` | Record terms |
+| `arora-index` | Packages and records |
 |---|---|
-| scoped name `@scope/name` | the record `name` in the scope's folder: the path `scope.name` (`Selector::Path`), resolved to a record id by the registry |
-| version range | `VersionReq`, in an unfrozen reference: authoring only |
-| asset type | `RecordType`, implied by the operation and checked by `type_of` |
-| content hash | release metadata of the record version |
+| scoped name `@scope/name` | the package's name, which routes the lookup; inside a release, its record is `name` in the scope's folder, the path `scope.name` |
+| version range | a dependency's `VersionReq`; on a device, only the exact version a pin holds |
+| asset type | `Kind`; for a record kind, also the record's `RecordType`, checked by `type_of` |
+| content hash | an artifact's SHA-256 in the release |
 
-A module record is the asset: `@vizij/animation` is the module record
-`animation` in the `vizij` scope. The types it names are records of their
-own, in its scope (`vizij.StepValues`) or in the scope they state
-(`arora.Status`); a release carries them as records its module record
-depends on, not as parts of its scoped name. A configuration is an asset the
-same way, under the scope of whoever publishes it.
+`@vizij/animation` is the package whose releases carry the module record
+`animation` of the `vizij` scope. Each type it names is a package of its
+own, in its scope (`vizij.StepValues`) or in the scope it states
+(`arora.Status`), and the module's release depends on it. A configuration
+is published the same way, under the scope of whoever publishes it.
 
-Records reference each other and their scope by UUID, so renaming a scope
-or moving an asset to another scope (2.2) breaks no reference: the path
-follows the scope's current handle, and resolving an old address (an alias
-in Studio) is the source's.
+Records reference each other and their scope by UUID, and a package keeps
+its id across a move (3.3), so renaming a scope or moving a package to
+another scope (2.2) breaks no reference and no pin: the path follows the
+scope's current handle, and the old name points at the new one.
 
-The bridge operation takes the frozen form — id, exact version and the
-configuration record's content hash — because a device applies only what is
+The bridge operation takes a configuration by its pin, plus the
+configuration record's reference, because a device applies only what is
 frozen. A name and a range are resolved by whoever sends it (Studio, a CLI),
 against the same registry.
 
@@ -472,8 +580,9 @@ pub struct ConfigurationRequest {
 }
 
 pub enum ConfigurationSource {
-    /// A configuration record the device's registry resolves.
-    Published { reference: FrozenReference, content_hash: String },
+    /// A published configuration: the pin of its release, and the
+    /// reference of the record that release carries.
+    Published { pin: Pin, reference: FrozenReference },
     /// A frozen configuration sent whole, with the records it pins that are
     /// not published: a project's behaviors as edited in Studio. Never a
     /// module's executable.
@@ -533,9 +642,10 @@ being applied is refused at `Busy`.
 
 1. **Requirements.** The device checks executors, interpreters and family
    against its own. Nothing is fetched yet.
-2. **Resolve and fetch.** The device's registry resolves every record the
-   configuration pins, through its source, and fetches each artifact it does
-   not hold, verified against the hash its record version carries.
+2. **Fetch.** The device fetches, through its source, each artifact of the
+   configuration's pins that it does not hold, verified against the pin's
+   hash, and loads the records the releases carry into its registry. Every
+   reference the configuration makes must then resolve there.
 3. **Diff.** Against the running configuration, each module is *kept* (same
    id, version and executable hash), *reloaded* (same id, anything else
    changed), *unloaded* or *loaded*; each behavior is kept, replaced, halted
@@ -609,9 +719,11 @@ with native modules changes them, by restarting.
   `DescribeConfiguration` to whoever may read the device. The device adds no
   access rule of its own. On the open router, which authenticates nobody,
   anyone who reaches the device may apply one, as anyone may call it today.
-- **The device resolves as itself.** Its source authenticates with the
+- **The device fetches as itself.** Its source authenticates with the
   device's identity, never the sender's: a claimant cannot make a device fetch
-  a record its owner may not use, and sends no token.
+  a package its owner may not use, and sends no token. A configuration of
+  public packages needs no identity at all; private packages need the
+  device's enrollment, which ties it to the account that manages it (3.3).
 - **No executable travels inline.** An inline configuration carries records;
   every executable is an artifact of a published module record, verified by
   hash. Development keeps `--module` for unpublished modules.
@@ -624,8 +736,18 @@ with native modules changes them, by restarting.
   and is matched exhaustively. The record kinds' frozen serde shapes join the
   store's wire contract, with their golden tests; the store's backend
   accepts the new kinds.
-- **`arora-registry` minor.** The registry source trait, exact lookup, and
-  the new kinds.
+- **`arora-registry` major, with `arora-types`'.** The registry source trait
+  and its types, exact lookup, and the new kinds. Its public API carries
+  `arora-types`' types, so it moves with that major.
+- **`arora-index`.** Pins carry the package id and find their release by
+  locator; `DirSource` reads each package's `package.json`; the resolver
+  makes the checks of 3.3.
+- **Studio** ([semio_studio#616](https://github.com/semio-ai/semio_studio/pull/616)).
+  Its publish endpoint becomes the one publish path, the web app's included:
+  it binds package ids, checks every record's scope, and hashes artifacts.
+  Every published package gets its `packageId`, the document id where that
+  is a UUID; release dependencies hold `{ scopedName, packageId, range }`;
+  aliases carry the id.
 - **`arora-bridge` major (7.0.0).** `BridgeOp` gains two variants and is
   matched exhaustively by the runtime and every bridge. The same major can
   mark it `#[non_exhaustive]` so a later operation is a minor (open question).
@@ -636,8 +758,8 @@ with native modules changes them, by restarting.
   chunks (`apply-configuration`, `describe-configuration`): a
   `studio-bridge-msgs` major, then majors of `arora-studio-bridge-client` and
   `studio-bridge-studio-client`, then `arora` re-pins the device client. The
-  Studio registry source ships as `semio-studio-assets`. A release across
-  three repos.
+  Studio registry source ships as `semio-studio-assets`, publishing through
+  the endpoint. A release across four repos.
 - **The router** grants the new chunks to the claimant, compiled with the
   other grants.
 - **Negotiation.** A device that answers the new operations announces
@@ -668,26 +790,27 @@ records and artifacts through its own source, as itself.
 
 ### 4.3 STUDIO-347, end to end
 
-1. arora-sdk publishes its animation module (`arora-animation-module`, module
-   record 3.0.0, in the `arora` scope): its module record with the header
-   and `wasm` artifacts, and the records of `StepValues`, `OutputKeys`,
-   `PlayerState`, `InstanceState`, `AnimationClip`, `Clip` and the types
-   they reference.
-2. A Studio project depends on the module `^3.0.0`. Studio freezes the
-   project's configuration: the module record at 3.0.0, and the
-   `animation-stepping` behavior record (`behavior-tree` 1.1), checked against
-   the module record's `step_values` and `player_states`.
+1. arora-sdk publishes `@arora/animation` 3.0.0: a release carrying the
+   module record, the header and the `wasm` artifact. It depends on the
+   packages of `StepValues`, `OutputKeys`, `PlayerState`, `InstanceState`,
+   `AnimationClip` and the types they reference, each published in the
+   `arora` scope.
+2. A Studio project depends on `@arora/animation` `^3.0.0`. Studio freezes
+   the project's configuration: the module record at 3.0.0, one version of
+   each type it names, and the `animation-stepping` behavior record
+   (`behavior-tree` 1.2), checked against the module record's `step_values`
+   and `player_states`; `packages` pins each release.
 3. **Emulated device:** Studio applies it on the loopback bridge; the page's
    source supplies the records and the compiled module; `step_values` is
    indexed from the module record; the behavior starts.
 4. **Real device on the `arora` runner:** Studio applies it over the Studio
-   Bridge. The device's Studio source resolves the module record and fetches
-   its artifacts, the device prepares, swaps between two steps, and replies
+   Bridge. The device's Studio source fetches what the pins name, the device
+   prepares, swaps between two steps, and replies
    `Applied`. Studio reads `DescribeMethods` again and finds `step_values`.
 5. When the output key table changes, Studio edits the running behavior with
    a call (`EDIT` today, `edit_graph` on the branch once branches exist); the
    configuration is unchanged.
-6. arora-sdk publishes the module record 3.0.1 with a fix. Studio applies
+6. arora-sdk publishes `@arora/animation` 3.0.1 with a fix. Studio applies
    the configuration frozen against it: the device reloads the animation
    module between two steps, indexes it from its record, and the stepping
    behavior keeps running, its next `step_values` reaching the new instance
@@ -713,8 +836,10 @@ follows:
 
 | Today | Converged |
 |---|---|
-| `arora_index::Source` with `releases(scoped_name, kind)` and `fetch(release, key)` | `arora_registry::RegistrySource` with `releases(package, kind)` and `artifact(release, key)` |
-| `Release` and `ResolvedRef` keyed by scoped name, no id | `Release` and the pin carry the package id; the scoped name is how it was requested |
+| `arora_index::Source` with `releases(scoped_name, kind)` and `fetch(release, key)` | `arora_registry::RegistrySource` with `releases(package, kind)` and `artifact(release, key)`; the resolver looks up by name |
+| `Release` and `ResolvedRef` keyed by scoped name, no id | `Release`, `Dependency` and `Pin` keep the name and add the package id; the pin keeps the name it was requested under |
+| `fetch(pin)` finds the release under the pin's exact name, so a pin made before a transfer fails for every blob not cached | A pin finds its release by locator and checks the id |
+| `DirSource`: `<scope>/<name>/<version>/release.json` | The same, plus `<scope>/<name>/package.json` with the package id, or the alias a move left |
 | `release_id`, the source's opaque id | `locator`, still opaque |
 | `SourceOptions` | `Limits`, the same fields |
 | `TokenSource` in `arora-index` | Leaves the trait: a source is built with its credentials (3.3) |
@@ -726,7 +851,8 @@ private blobs, the fallback policy, `SourceError`'s categories, `DirSource`
 and the build helper. What the source must serve configurations:
 
 1. several artifacts per release, each with its own hash, fetched by key;
-2. an exact pin (id, version and hash) checked before download;
+2. an exact pin (name, package id, version and hash) checked before
+   download;
 3. the types buildable for `wasm32` without the transport, so Studio's page
    uses them;
 4. an extensible set of kinds, so a new kind is not a breaking change.
@@ -740,9 +866,9 @@ Each stage lands on its own.
 1. **Records beside headers** (section 2). `arora`: `with_registry`,
    indexing from module records, `records/` in module directories.
    `arora-types-derive`: structure and enumeration records. `arora-web`:
-   records. vizij-rs: export and ship the records. Studio: pass them.
-   Unblocks STUDIO-347. Landed, except Studio's part
+   records. vizij-rs: export and ship the records. Studio: pass them
    ([semio_studio#610](https://github.com/semio-ai/semio_studio/pull/610)).
+   Unblocks STUDIO-347. Landed.
 2. **Module reload** on a running device, from the module-reload work: load,
    reload and unload between steps, instantiation before any old instance is
    dropped, interrupted commands, native modules refused. A module loaded or
@@ -753,10 +879,16 @@ Each stage lands on its own.
    between steps, one module at a time, interrupted commands and the native
    refusal; a module it loads or reloads is indexed from its header, so the
    record check and `ModuleError::Record` are still to do.
-3. **Record kinds and sources.** `arora-types`: behavior and configuration
-   records; release metadata on record versions. `arora-registry`: the source
-   trait, exact lookup, freezing a configuration with its checks. Sources:
-   record directories.
+3. **Packages, record kinds and sources** (3.2, 3.3). `arora-types`:
+   behavior and configuration records. `arora-registry`: the source trait
+   with package ids, dependencies and pins; exact lookup; freezing a
+   configuration, its type versions chosen once, with its checks.
+   `arora-index`: the resolver's checks, pins found by locator, `DirSource`'s
+   `package.json`. `arora-cli`: publishing to a folder registry, which binds
+   the id, and moving a package, which leaves an alias. Studio: the publish
+   endpoint as the one publish path, binding ids and checking scopes, with
+   the backfill and the renames ([registry identity](registry-identity.md)).
+   Types published as packages of their own.
 4. **Configurations in the runtime.** `Arora::apply_configuration` with the
    diff and swap (3.6), persistence and the start-up apply,
    `--configuration` on the runner. No protocol change.
@@ -791,27 +923,32 @@ Each stage lands on its own.
   failure land as an `arora` minor; an exhaustive one makes each a major.
 - **Model family in requirements**: required, or left to Studio's binding
   check?
+- **A Studio scope's UUID.** Derived from the owning account's id, so
+  nothing is stored and nothing drifts, but a scope can then never pass to
+  another account; or minted when the handle is claimed and bound in a
+  stored document. `arora`, `vizij` and `semio` keep their fixed ids either
+  way.
 
 ---
 
 ## 8. Design decisions
 
-### Published things are records
+### Published things are records, in packages
 
 Arora already has a versioned, frozen, referenceable form for what it shares:
 records, held in `arora-registry`. A module record is what a declaration and
-the authoring pipeline produce. Expressing releases, ranges and hashes as
-record metadata keeps one vocabulary and one registry for modules, types,
-behaviors and configurations; a second, asset-shaped vocabulary would have to
-be translated at every boundary.
+the authoring pipeline produce. A package's release carries its record as an
+artifact, so a registry stores and verifies records as it does any other
+bytes, and the record never gains a second, asset-shaped description to be
+translated at every boundary.
 
 ### arora-sdk knows a registry source, not Studio
 
 Arora works without Studio. The source trait lets a device fill its registry
 from local directories or any backend of the store alike. Studio's backend,
 the only one for now, is reached through Semio's crates: `semio-studio-assets`
-for the source and `semio-studio-auth` for sign-in, which the bridge client
-uses too. arora links them only in its opt-in Studio feature.
+for the source and `semio-studio-session` for sign-in, which the bridge client
+and `semio` use too. arora links them only in its opt-in Studio feature.
 
 ### One registry source for every kind
 
@@ -824,14 +961,60 @@ records without a record-shaped endpoint. Two traits, one for assets and one
 for records, would put two caches, two pins and two fallback policies on one
 device.
 
+### Names address, ids identify, hashes verify
+
+Each question has one answer, and each answer one form. Where to look is the
+scoped name: it routes to one registry, lays a registry out as plain files,
+and is what people type, so every lookup, dependency and pin goes by it.
+Which bytes is the hash, checked before anything is used. Which package is
+the id: the one thing that stays when a name changes. It lets a pin refuse a
+different package that later takes the name it holds, lets one package
+reached under two names load once, and lets a consumer follow a package to
+another scope or registry, checking the alias or redirect instead of
+trusting it, with no new dependency and no breaking release. The id is never
+a route, so no registry needs an index of ids.
+
+### A package's id is the registry's, never a record's
+
+A registry binds a package's id at its first publish and refuses it to any
+other package, so an id names one package on that registry for good. A
+record's UUID cannot serve: a package may carry several records or none, the
+same record id ships in packages of different scopes when a package moves,
+and record UUIDs are printed in source, where anyone can copy them. Who may
+take an id another package holds is the holder's decision, and a move
+between owners goes through the registry's operator, because no registry
+can tell a rightful successor from a copy.
+
+### Each type is a package of its own
+
+A type is a record that modules and clients exchange values of, so its
+version must say whether *that type* changed compatibly. Published once in
+its own package, with its own semver, it is saved once and reused by every
+module that names it, and a configuration picks one version every module
+accepts. Shipped inside each module that names it, the same record would
+reach a device from several packages; versioned by the release that ships
+it, a module's major for a changed function would mark every type it carries
+incompatible.
+
 ### A release is immutable
 
-A package keeps one id for its life, through renames and transfers, and each
-of its versions is published once. A pin, a configuration and a frozen record
-reference that pair, so the bytes behind it must never change: a fix is a new
-version, and a bad release is deprecated, never edited or removed.
-Deprecation is the one field that changes, because it only steers selection
-and never changes what a pin fetches.
+Each version of a package is published once. A pin, a configuration and a
+frozen record reference that version, so the bytes behind it must never
+change: a fix is a new version, and a bad release is deprecated, never edited
+or removed. Deprecation is the one field that changes, because it only steers
+selection and never changes what a pin fetches. Order is free: a fix on an
+older major is a release, so a version need not be above the latest.
+
+### Three parties, three kinds of access
+
+Producing, deploying and running are done by different parties, often on
+different machines. An author publishes, so the backend checks an account
+that owns the scope. A deployer resolves and applies, and public packages
+ask nothing of it, so deploying public work needs no account. A device runs
+what it is given and fetches as itself, never as the sender; its enrollment
+ties it to the account that manages it, which private packages and the
+Studio Bridge require. Sharing one sign-in crate keeps the three on one
+session model without merging their rights.
 
 ### The resolver verifies, not the source
 
@@ -863,11 +1046,11 @@ Records refer to their scope by UUID, declared rather than derived from the
 handle, so a renamed handle leaves every record intact: a rename is an
 update of the scope's folder record, the one record that carries the
 handle. The handle is the address people read and type; the UUID is what
-records hold. Moving an asset to another scope re-parents only the versions
+records hold. Moving a package to another scope re-parents only the versions
 published after the move, because an earlier version is frozen: a
 configuration pins it, and changing its parent would change a record others
-have already resolved. The asset's UUID does not change, so every reference
-to it still resolves.
+have already resolved. The package's id and its records' ids do not change,
+so every pin and reference still resolves.
 
 ### Code declares a scope; the store decides at exchange
 
@@ -932,7 +1115,7 @@ a device with native modules changes them by restarting.
 ### The device fetches; the sender sends references
 
 Sending executables over the bridge would make a module's size a query's
-payload, bypass the hash a record version carries, and let a claimant hand a
+payload, bypass the hash a pin carries, and let a claimant hand a
 device bytes its owner is not entitled to. The device's own source and cache
 make the result the same whoever sent the request, and let it restart offline.
 
@@ -945,9 +1128,26 @@ make the result the same whoever sent the request, and let it restart offline.
 - **A `record` call on the source, beside `versions` and `artifact`.** It
   needs every backend to serve records as such, and leaves the record out of
   the hash check its artifacts get.
-- **Identity by scoped name and version alone.** A name changes with a
-  rename or a transfer, so a pin by name breaks where a pin by id holds; the
-  name stays the way a person asks for a package.
+- **Identity by scoped name alone, with aliases for moves**, as npm,
+  crates.io, Maven and Go identify packages. An alias works only inside the
+  registry that recorded it, and a registry without aliases turns a rename
+  into a new package that leaves its consumers on a deprecated one. A name
+  freed by a deletion can be taken by another package, which a pin by name
+  cannot tell from the one it pinned. None of those registries lets a
+  package move to another scope or registry without its consumers changing
+  their dependency; the id is what this proposal adds to have that.
+- **A lookup by id, with an index of ids in every registry.** Every registry
+  and mirror would have to keep that index in step with its names. Lookups
+  go by name, and the id sits next to the name it belongs to.
+- **The record's UUID as the package's id.** See "A package's id is the
+  registry's, never a record's".
+- **A type versioned by the release that ships it, or shipped inside each
+  module naming it.** See "Each type is a package of its own".
+- **A release UUID.** A release is a package's version: the pair, with the
+  artifacts' hashes, already names it once and for all. A registry's own
+  release key stays inside the opaque locator.
+- **Versions published in increasing order only.** It refuses a fix on an
+  older major, which a published version's immutability does not require.
 - **The trait in `arora-index`.** `arora-registry` is where a device's
   `LocalRegistry` sits in front of a source, and it already builds for
   `wasm32`; `arora-index` depends on it, not the reverse.
@@ -960,6 +1160,6 @@ make the result the same whoever sent the request, and let it restart offline.
 - **The HAL in the configuration.** A HAL's models and components are fixed
   for its life; changing them is a restart.
 - **A type's record under the module that defines it.** A module naming
-  another module's type would have to ship that module's record for the
-  type's path to resolve, and a vocabulary no module defines (`Status`)
-  would need one invented to own it.
+  another module's type would depend on that whole module for the type's
+  path to resolve, and a vocabulary no module defines (`Status`) would need
+  one invented to own it.
