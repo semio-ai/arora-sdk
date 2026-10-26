@@ -402,8 +402,11 @@ authentication, and name a credential provider in the user's own
 
 **Whatever the registry, the consumer verifies.** The resolver checks every
 artifact against its SHA-256, the package id against the pin, and each
-record's scope against its release, so a compromised mirror can withhold a
-package, never substitute one.
+record's scope against its release. Against a pin, a compromised mirror can
+withhold a package, never substitute one. A first resolution, or an update
+to a version not yet pinned, trusts the hashes the registry its scope maps
+to advertises, so a project maps a scope only to a registry or mirror it
+trusts for that scope.
 
 ## 11. Open questions
 
