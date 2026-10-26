@@ -77,8 +77,10 @@ it, and indexes the record by its UUID.
 - **A move keeps the id.** A transfer to another scope, a rename within a
   scope and a move to another registry leave the old name pointing at the
   new one, carrying the id: an alias inside the registry, a redirect naming
-  the target registry otherwise. The resolver follows one hop and requires
-  the id it finds to be the id it followed.
+  the target registry otherwise. Inside a registry an alias points at the
+  package, so a later move updates it and it stays one hop. Across
+  registries the resolver follows a bounded number of redirects, requires
+  the id at every hop to be the id it set out with, and refuses a cycle.
 - **A version is published once.** A release never changes after
   publication, except `deprecated`, which only steers range selection. The
   registry refuses a second release of a version with different content, and
@@ -213,7 +215,8 @@ dependency, and that is what the package id adds.
 |---|---|
 | `RegistrySource` | `releases()` looks up by `ScopedName`; `PackageRef::Id` is an optional convenience a source may answer. |
 | `Release` | Carries `package` (the id, `None` from a registry that keeps none), `scope`, `dependencies` and the opaque `locator`. |
-| `Pin` | Name requested, package id, registry, version, artifact keys with hashes, locator. A pin finds its release by locator and checks the id. |
+| Placement | `PackageId`, `Dependency` and `Pin` in `arora-types`, since a configuration record embeds pins; the trait and the source-only types in `arora-registry`. |
+| `Pin` | Name requested, package id, registry, version, artifact keys with hashes, locator. A pin finds its release by its name and version, following aliases and redirects, and checks the id and hashes; the locator is only a shortcut on the registry that made it. |
 | Resolver checks | Release id against pin and dependency; record `parent` against the release's scope; two contents for one record id and version refused. |
 | `arora-index` | Pins carry the id; `fetch` no longer requires the current name to equal the pinned one; `DirSource` reads `<scope>/<name>/package.json`. |
 | Record versions | Unchanged: a derived type keeps its declared version, which its own package releases. |
