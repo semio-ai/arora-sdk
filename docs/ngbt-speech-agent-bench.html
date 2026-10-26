@@ -218,6 +218,9 @@ label.inline, .inline.mode-pick { display: inline-flex; align-items: center; gap
 .g-node.cached rect { stroke-dasharray: 3 3; stroke: var(--faint); }
 .g-node.skipped { opacity: .4; }
 .view pre span.skipped { color: var(--faint); }
+.view pre span.st-R.cached::after { content: "   ● Running · from its cache"; color: var(--run-1); }
+.view pre span.st-S.cached::after { content: "   ✓ from its cache"; color: var(--good-ink); }
+.view pre span.st-F.cached::after { content: "   ✗ from its cache"; color: var(--bad-ink); }
 .view pre span.skipped::after { content: "   not needed"; }
 .g-node.st-R rect { stroke: var(--run-1); stroke-width: 2.2; fill: var(--panel-2); }
 .g-node.st-S rect { stroke: var(--good); stroke-width: 1.6; }
@@ -1510,7 +1513,7 @@ function fullTreeInto(m, T) {
 // #404's executor: a node is dirty when what it reads changed, when the last tick did not reach it, or when it is a
 // Running leaf; dirt climbs to the root. A dirty node is ticked, and a clean child answers from its cache. With wake on
 // completion, a leaf still waiting for its call is clean.
-function incTreeInto(m, T, P, opt) {
+function incTreeInto(m, T, P, opt, seen) {
   const part = (name) => {
     const now = T[name], before = P ? P[name] : new Map(), dirty = new Map();
     const mark = (n) => {
@@ -1526,12 +1529,13 @@ function incTreeInto(m, T, P, opt) {
     return { now, dirty, root: TREES[name], isDirty: mark(TREES[name]) };
   };
   const visit = (p, n) => {
+    seen[n.uid] = 1;
     if (n.k !== 'action') { m.visits++; if (n.k === 'check') m.compares++; }
-    for (const c of n.children) if (p.now.has(c.uid)) { if (p.dirty.get(c.uid)) visit(p, c); else m.cacheCheck++; }
+    for (const c of n.children) if (p.now.has(c.uid)) { if (p.dirty.get(c.uid)) visit(p, c); else { m.cacheCheck++; seen[c.uid] = 2; } }
   };
   const [conv, att, reply] = TREE_PARTS.map(part);
-  if (conv.isDirty || att.isDirty) { m.visits++; for (const p of [conv, att]) if (p.isDirty) visit(p, p.root); else m.cacheCheck++; }
-  if (reply.now.size) { if (reply.isDirty) visit(reply, reply.root); else m.cacheCheck++; }
+  if (conv.isDirty || att.isDirty) { m.visits++; for (const p of [conv, att]) if (p.isDirty) visit(p, p.root); else { m.cacheCheck++; seen[p.root.uid] = 2; } }
+  if (reply.now.size) { if (reply.isDirty) visit(reply, reply.root); else { m.cacheCheck++; seen[reply.root.uid] = 2; } }
 }
 // The store keys the tree's checks read that changed: what a store subscription reports.
 function changedReads(T, P) { let k = 0; for (const part of TREE_PARTS) for (const [uid, s] of T[part]) if (TREE_NODE.get(uid).k === 'check' && (!P || P[part].get(uid) !== s)) k++; return Math.min(k, 6); }
@@ -1543,7 +1547,8 @@ function controlWork(design, opt0, f, prevKeys, ctx, i) {
   const S = design.strategy, R = readRule(design, opt), sc = blankMetrics(), polls = blankMetrics(), prompt = blankMetrics();
   const key = (lane) => `${f.runId}:${lane}`, laneOn = (lane) => ctx.laneAt[i].has(key(lane));
   const T = ctx.trees[i], P = i ? ctx.trees[i - 1] : null;
-  if (incremental) incTreeInto(sc, T, P, opt); else fullTreeInto(sc, T);
+  const treeTicks = incremental ? new Uint8Array(treeIds + 1) : null;   // null: every node reached is ticked
+  if (incremental) incTreeInto(sc, T, P, opt, treeTicks); else fullTreeInto(sc, T);
   // The waits: the conversation's leaf, the reply run's calls in flight, and the judge's follow-ups after its verdict.
   const waits = [], leaf = ctx.convLeaf[i];
   if (leaf) waits.push({ leaf, start: ctx.convLeaf[i - 1] !== leaf, end: ctx.convLeaf[i + 1] !== leaf });
@@ -1559,14 +1564,14 @@ function controlWork(design, opt0, f, prevKeys, ctx, i) {
   const changed = prevKeys ? CONTROL_KEYS.filter((k) => !same(prevKeys[k], f.keys[k])).length : CONTROL_KEYS.length;
   sc.storeWrite += changed; sc.writes += changed;
   if (incremental) { const k = opt.subscription ? changedReads(T, P) : 6; sc.storeObserve += k; sc.compares += k; }
-  return { statechart: sc, polls, prompt, polled };
+  return { statechart: sc, polls, prompt, polled, treeTicks };
 }
 const workOf = (m) => ({ ticks: m.visits, execs: m.calls, checks: m.compares + m.cacheCheck });
 // A design's run of the whole script: as proposed, optimized (true), or with the options given.
 function designRecording(design, base, optimized = false) {
   const opt = typeof optimized === 'object' ? optimized : optionsFor(design, optimized);
   const run = new MotionGraphRun(design.strategy, base.items, opt), ctx = controlContext(base);
-  const frames = [], cost = [], acts = [], polls = [];
+  const frames = [], cost = [], acts = [], polls = [], treeTicks = [];
   let prevKeys = null;
   for (let i = 0; i < base.frames.length; i++) {
     const f = base.frames[i], k = design.lag ? (i >= design.lag ? base.frames[i - design.lag].keys : INITIAL_KEYS) : f.keys, face = faceAt(f.t);
@@ -1579,9 +1584,9 @@ function designRecording(design, base, optimized = false) {
     const v = out.val;
     frames.push({ ...f, c: out.c, posture: POSE_KEYS.map((key) => v.get(`p_${key}`)), target: { x: v.get('target_x'), y: v.get('target_y') }, eyeGaze: { x: v.get('eye_tx'), y: v.get('eye_ty') }, glance: v.get('glance_up') });
     cost.push({ w, all: workTotals(w), builds: m.prompt, m, us: modeledUs(m) });
-    acts.push(out.act); polls.push(areas.polled);
+    acts.push(out.act); polls.push(areas.polled); treeTicks.push(areas.treeTicks);
   }
-  return { ...base, frames, cost, acts, polls, design, optimized: !!optimized, opt };
+  return { ...base, frames, cost, acts, polls, treeTicks, design, optimized: !!optimized, opt };
 }
 // One second waiting on the llm: a poll at every tick, the prompt unchanged. Plain code checks whether its call is
 // done, or with an event loop, checks one queue for every wait; a design polls the leaf, as its options allow.
@@ -2035,7 +2040,7 @@ function repNote(design, part, tab, opt = {}) {
   if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} as plain functions: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.' + (tab === 'stored' ? '' : opt.bespoke ? ' Bespoke, it polls nothing: its event loop hands each wait its result.' : ' Light green: a wait it polled this tick.');
   if (tab === 'graph') {
     if (motion) return { compute: 'Each node is a detached call: dashed when cached this tick, outlined when it ran. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape polled. Dashed: answered from its cache.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body.', control: opt.cacheAll ? 'Each node with an argument cache: dashed when it kept its output this tick, outlined when it ran.' : 'Eager nodes: every one runs at every tick.' }[design.strategy] + (opt.lazy ? ' Faded: not needed this tick, on a branch a conditional did not take.' : '');
-    return design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs. Green succeeded, red failed, blue is Running this tick, light green a wait polled this tick.' : 'The tree as it ticks: green succeeded, red failed, blue is Running, light green a wait polled this tick; faded nodes were not reached this tick.';
+    return design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs. Green succeeded, red failed, blue is Running this tick, light green a wait polled this tick. Every node reached is ticked at every tick.' : 'The tree as it ticks: green succeeded, red failed, blue is Running, light green a wait polled this tick; faded nodes were not reached this tick.' + (design.strategy === 'inc' || design.strategy === 'macro' || opt.incTree ? ' On #404’s executor a node drawn dashed was answered from its cache, not ticked: the blue path is what it ticked.' : ' Every node reached is ticked at every tick.');
   }
   return tab === 'outline' ? 'Each line marked with what it did this tick; a wait polled this tick is light green.' : 'The text a person edits, or the file the loader reads, for this part.';
 }
@@ -2215,16 +2220,17 @@ function liveRep(side, i) {
   const laneOn = (lane) => rec.laneAt[i].has(`${f.runId}:${lane}`);
   const statuses = motion ? null : treeStatus(part, f, laneOn);
   const polled = new Set((rec.polls && rec.polls[i] || []).map((k) => POLL_UID[k]));
+  const tk = rec.treeTicks && rec.treeTicks[i];   // on an incremental executor: which tree nodes it ticked
   const motionClass = (id) => { if (!act) return ''; const k = INDEX.get(id); if (k === undefined) return ''; return act[k] === 1 ? 'ran' : act[k] === 2 ? 'cached' : 'skipped'; };
   if (side.gnodes) {
     const active = new Set();   // Running, polled, or run this tick: an edge between two of them is on the active path
     for (const { g, n, badge } of side.gnodes.values()) {
       let cls = '';
-      if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid); cls = s ? `st-${s}${p ? ' polled' : ''}` : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
+      if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid), kept = s && tk && tk[n.tree.uid] !== 1; cls = s ? `st-${s}${p ? ' polled' : ''}${kept ? ' cached' : ''}` : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
       else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'cached' : 'st-none';
       else if (motion) cls = motionClass(n.ref || n.id);
       g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}`);
-      if (cls.startsWith('st-R') || cls === 'ran') active.add(n.id);
+      if ((cls.startsWith('st-R') && !cls.includes('cached')) || cls === 'ran') active.add(n.id);
     }
     for (const { e, path, label } of side.gedges) {
       const on = active.has(e.from) && active.has(e.to);
@@ -2237,7 +2243,7 @@ function liveRep(side, i) {
       let cls = '';
       if (id !== undefined && id !== null) {
         if (motion) cls = motionClass(id);
-        else if (typeof id === 'number') { const s = statuses.get(id); cls = s ? `st-${s}${s === 'R' && polled.has(id) ? ' polled' : ''}` : 'dim'; }
+        else if (typeof id === 'number') { const s = statuses.get(id); cls = s ? `st-${s}${s === 'R' && polled.has(id) ? ' polled' : ''}${tk && tk[id] !== 1 ? ' cached' : ''}` : 'dim'; }
         else if (id === 'prompt') cls = rec.cost[i].builds ? 'ran' : '';
       }
       span.className = cls;
