@@ -894,8 +894,10 @@ Other commands on PATH (arora-<name>):
 - **`arora run PROJECT`** freezes the project's configuration and applies it
   at start, as `--configuration` does (3.8).
 - **The package verbs are a separate binary, `arora-pkg`**, which `arora`
-  hands each of them to, so the runtime built for robots carries no
-  resolver, publisher or credential code. Without `arora-pkg` installed,
+  hands each of them to, so the runtime built for robots carries no range
+  resolution, publishing or sign-in code: it keeps only what a device needs,
+  fetching and verifying what its configuration pins, with its own
+  credential. Without `arora-pkg` installed,
   `arora add` says how to install it. It reaches registries through
   `RegistrySource` implementations (3.3) and credential providers named in
   the user's `~/.config/arora/config.toml`, never in a project's file, and
@@ -1320,8 +1322,9 @@ make the result the same whoever sent the request, and let it restart offline.
 A person runs a device and manages its project with one command, as `go`,
 `deno` and `cargo` do, so `arora add` and `arora publish` explain themselves
 next to `arora run`. The package verbs live in `arora-pkg`, which `arora`
-hands them to, because a robot's runtime should carry no resolver,
-publisher or credential code it never uses. Unknown verbs run
+hands them to, because a robot's runtime should carry no range
+resolution, publishing or sign-in code it never uses; it keeps the fetch and
+verification its configuration needs, and its own credential. Unknown verbs run
 `arora-<verb>` from `PATH`, which lets Semio add `arora semio …` without
 Arora shipping anything that reaches Semio.
 
@@ -1332,7 +1335,7 @@ Arora shipping anything that reaches Semio.
   running modules, `arora`'s; a coined name has to be learnt and explained,
   where `arora add` reads as what it does.
 - **Every verb compiled into `arora`.** The runtime built for robots, NAO
-  included, would carry registry, publishing and credential code.
+  included, would carry range resolution, publishing and sign-in code.
 - **A Studio asset vocabulary in arora-sdk** (asset types, resolved
   references, a Studio resolver as a crate of its own). It duplicates records
   and their registry, and puts Studio's protocol in a runtime that works
