@@ -510,6 +510,8 @@ each kept only if it lowered the modeled cost.
 | Optimization | What it does | From | Builds |
 |---|---|---|---|
 | A cache on every node | A node whose inputs did not change keeps its output | #257 ("no cache yet") | #257 |
+| Invalidation instead of comparison | A node that recomputes to a new value marks its readers; a tick runs only the marked nodes, and a clean one is neither visited nor compared | the bench, as #404's cells do | #257 |
+| An incremental control tick | A control node whose children are clean answers from its cache; only the marked branches are ticked | the bench, by #404's rules | #257 |
 | A dirty queue and a store subscription | A clean leaf is not checked; a store key is observed only when something writes it | #404, §5 of its proposal | #404, #405, and the trees of #396 and #409 |
 | The tree on #404's executor | A clean subtree of the statechart answers from its cache | #404, which any tree can opt into | #396, #409 |
 | Sinks publish on change | A sink writes its key when its value changed | #404's comparison with #396 | #396, #409 |
@@ -517,7 +519,7 @@ each kept only if it lowered the modeled cost.
 | Time horizons | A clip, an envelope or the thinking glance says when its value next changes, and its node does not run until then | the bench | all |
 | Latched arguments | A waiting leaf reads its arguments when its call starts, not at every poll, so the prompt is built once a call | the bench | all |
 | Native polls | A waiting leaf checks its call's handle without calling its module | the bench | all |
-| Wake on completion | A waiting leaf stays clean until its call completes, so its branch is not ticked while it waits | the bench | the trees on #404's executor |
+| Wake on completion | A waiting leaf stays clean until its call completes, so its branch is not ticked while it waits | the bench | the trees on #404's executor, and #257 with its incremental control tick |
 
 Added one at a time, in this order, in µs a tick over the whole run:
 
@@ -527,9 +529,13 @@ Added one at a time, in this order, in µs a tick over the whole run:
 | #409 | 95.0 | the same | 66.1 |
 | #404 | 94.8 | subscription −0.5, lazy −18.7, horizons −7.7, latched −1.5, native polls −0.1, wake −0.2 | 66.1 |
 | #405 | 94.8 | the same | 66.0 |
-| #257 | 171.4 | a cache on every node −76.5, lazy −18.7, horizons −7.8, latched −1.5, native polls −0.1 | 66.7 |
+| #257 | 171.4 | a cache on every node −76.5, invalidation −0.14, lazy −18.7, horizons −7.8, latched −1.5, native polls −0.1, incremental control −0.2, subscription −0.05, wake −0.2 | 66.2 |
 
-Two candidates were tried and dropped. Versions instead of value comparison
+Three candidates were tried and dropped. Invalidation for #396 and #409 cost 0.2 µs
+more: it cuts their node ticks from 64 to 47 a tick and their checks from 104
+to 66, but a value comparison here costs less than the version bookkeeping that
+replaces it. For #257 it saves its input and output nodes' visits, and pays.
+Versions instead of value comparison
 (#396's proposal, §9) cost 0.7 µs more: nearly every value here is a number,
 cheaper to compare than to version. #405's `WITH[ PARALLEL[ leaf × N ], RUN ]`
 shape for #404's groups cost 0.2 µs more: every group but the mouth's changes
@@ -592,14 +598,14 @@ away and the viseme's crossfades).
   | #409 full tree nodes | optimized | 66 | 64 | 29 | 104 | 0 · 0 · 100 | 4 |
   | #404 incremental tree | optimized | 66 | 46 | 29 | 64 | 0 · 0 · 100 | 4 |
   | #405 macros, placed | optimized | 66 | 43 | 29 | 64 | 0 · 0 · 100 | 4 |
-  | #257 BT in NG | optimized | 67 | 101 | 29 | 108 | 100 · 0 · 100 | 4 |
+  | #257 BT in NG | optimized | 66 | 40 | 29 | 60 | 0 · 0 · 100 | 4 |
 
-- **Optimized, the designs end within 1.2 µs of each other.** What is left is
+- **Optimized, the designs end within 0.7 µs of each other.** What is left is
   the 29 functions that change a tick, at 2 µs each, and each framework's
-  bookkeeping. #404 and #405 tick the fewest nodes and make the fewest checks.
-  #396 and #409 visit every needed node and compare its arguments. #257 ticks
-  its whole statechart at every tick, since Vizij's control nodes have no
-  incremental executor.
+  bookkeeping. #257, with invalidation and an incremental control tick, ticks
+  the fewest nodes (40 a tick) and makes the fewest checks (60); #404 and #405
+  come next. #396 and #409 visit every needed node and compare its arguments,
+  64 node ticks and 104 checks, which costs about the same in µs.
 - **The bespoke reference is the cheapest,** 10 µs a tick under the best
   design. It makes 2.4 fewer calls a tick (5 µs): the selections it takes as
   branches, the arm's blend it skips while no wave plays, and the two
@@ -627,9 +633,6 @@ away and the viseme's crossfades).
   this model: 10 µs. Run in the executor without a module call, they would cost
   a node tick each. The flat 2 µs a call cannot tell a selection from a blend;
   work by kind of function is the model's next refinement.
-- **#257 with an incremental control tick.** Vizij's control nodes would keep
-  statuses that answer from a cache, and its statechart would fall from 16.6
-  node ticks a tick to about 2.5: under half a µs at native rates.
 - **#409's comparison inside its node's tick,** as its pull request suggests:
   at most its full-node cost, 0.7 µs a tick here.
 - **#405's groups placed after the tree's body,** which removes its tick of

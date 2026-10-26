@@ -292,8 +292,8 @@ label.inline, .inline.mode-pick { display: inline-flex; align-items: center; gap
     <div class="transport">
       <button id="play" class="primary" type="button">Play</button>
       <button id="restart" type="button" aria-label="Back to the start">Start</button>
-      <button id="back" type="button" aria-label="One tick back">−1</button>
-      <button id="fwd" type="button" aria-label="One tick forward">+1</button>
+      <button id="back" type="button" aria-label="One frame back" title="One frame (10 ms) back · key ,">◀ frame</button>
+      <button id="fwd" type="button" aria-label="One frame forward" title="One frame (10 ms) forward · key .">frame ▶</button>
       <label class="inline" for="speed">speed <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option></select></label>
       <label class="inline" for="loop"><input id="loop" type="checkbox" checked> loop</label>
       <span class="inline mode-pick">builds <span class="seg small" id="mode" role="group" aria-label="Builds as their pull requests propose them, or optimized"></span></span>
@@ -1295,6 +1295,8 @@ const DESIGNS = [
 // Optimized, a build runs with every one of its own; each was kept only if it lowered the modeled cost (§10).
 const OPT_INFO = {
   cacheAll: { label: 'a cache on every node', source: '#257: “no cache yet”', text: 'a node whose inputs did not change keeps its output, and so its readers find theirs unchanged' },
+  invalidate: { label: 'invalidation instead of comparison', source: 'the bench, as #404’s cells do', text: 'a node that recomputes to a new value marks its readers; a tick runs only the marked nodes, and a clean one is neither visited nor compared' },
+  incControl: { label: 'an incremental control tick', source: 'the bench, by #404’s rules', text: 'a control node whose children are clean answers from its cache; only the marked branches are ticked' },
   subscription: { label: 'a dirty queue and a store subscription', source: '#404, §5 of its proposal', text: 'a clean leaf is not checked, and a store key is observed only when something writes it' },
   publishChanged: { label: 'sinks publish on change', source: '#404’s comparison with #396', text: 'a sink writes its key when its value changed, checked against what it last wrote' },
   incTree: { label: 'the tree on #404’s executor', source: '#404, which any tree can opt into', text: 'a clean subtree of the statechart answers from its cache instead of being ticked' },
@@ -1309,7 +1311,7 @@ const OPTIMIZATIONS = {
   full: ['lazy', 'horizon', 'latch', 'nativePolls', 'publishChanged', 'incTree', 'subscription', 'wake'],
   inc: ['subscription', 'lazy', 'horizon', 'latch', 'nativePolls', 'wake'],
   macro: ['subscription', 'lazy', 'horizon', 'latch', 'nativePolls', 'wake'],
-  control: ['cacheAll', 'lazy', 'horizon', 'latch', 'nativePolls'],
+  control: ['cacheAll', 'invalidate', 'lazy', 'horizon', 'latch', 'nativePolls', 'incControl', 'subscription', 'wake'],
 };
 const optionsFor = (design, optimized) => (optimized ? Object.fromEntries(OPTIMIZATIONS[design.strategy].map((k) => [k, true])) : {});
 const COST_US = { fullNode: 0.02258660410253709, hostWrite: 0.07207905131266586, tick: 0.08054631507819726, native: 0.02942999195571001, module: 0.13278202941423906, storeWrite: 0.06509534618334416, detachedCheck: 0.009512341457231909, detachedPublish: 0.03262927691013938, detachedCall: 0.1405157081974673, cacheCheck: 0.0051276265604468345, storeObserve: 0.008794477399395248, versionWrite: 0.03825155565970652 };
@@ -1354,13 +1356,15 @@ class MotionGraphRun {
   }
   tick(input, t) {
     const S = this.s, O = this.opt, m = blankMetrics(), act = new Uint8Array(ORDER.length), vals = this.v, stamp = this.stamp, tickNo = ++this.tickNo;
-    const inc = S === 'inc' || S === 'macro', detached = S === 'compute' || S === 'full' || S === 'control', cached = S !== 'control' || O.cacheAll;
+    const inc = S === 'inc' || S === 'macro', detached = S === 'compute' || S === 'full' || S === 'control', cached = S !== 'control' || O.cacheAll || O.invalidate;
+    const marks = detached && O.invalidate;   // invalidation: a changed value marks its readers, and only marked nodes are visited
     m.tick = 1; m.hostWrite = 2;
     for (const n of SOURCES) {
       const v = n.kind === 'Time' ? t : input[n.key], changed = !same(vals[n.idx], v);
       vals[n.idx] = v; stamp[n.idx] = tickNo;
       if (inc && (changed || !O.subscription)) { m.storeObserve++; m.compares++; if (changed) m.versionWrite++; }
-      if (S === 'control') m.visits++;
+      if (marks) { if (changed) { m.storeObserve++; m.compares++; m.versionWrite++; if (S === 'control') m.visits++; } }
+      else if (S === 'control') m.visits++;
       act[n.idx] = changed ? 1 : 2;
     }
     const ran = new Set();
@@ -1373,7 +1377,7 @@ class MotionGraphRun {
       if (!args) { args = new Array(n.from.length); for (let i = 0; i < args.length; i++) args[i] = get(i); }
       const full = n.stateful ? [...args, st.v] : args, prev = this.last[n.idx];
       const horizon = O.horizon && n.tArg >= 0 && HORIZON[n.kind], within = horizon && t < this.h[n.idx];
-      if (within) m.cacheCheck++;
+      if (within && !marks) m.cacheCheck++;
       // Whether an argument changed, the clock aside while its horizon holds; each comparison counted when it is a value's.
       const differs = (counted) => {
         for (let i = 0; i < full.length; i++) {
@@ -1385,7 +1389,7 @@ class MotionGraphRun {
       };
       let run;
       if (!cached) { run = true; m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; }
-      else if (detached) {
+      else if (detached && !marks) {
         m.visits++; m.detachedEval++;
         run = !prev || differs(true);
         if (run) { m.calls++; m.detachedCall++; if (S === 'full') m.fullNode++; }
@@ -1393,6 +1397,7 @@ class MotionGraphRun {
       if (run) {
         const v = FN[n.kind](args, n.params, st, t, this.items), changed = !same(vals[n.idx], v);
         if (inc) { m.visits++; m.calls++; m.module++; m.compares++; if (changed) { m.versionWrite++; m.compares += n.readers; } }
+        else if (marks) { m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; if (S === 'full') m.fullNode++; m.compares++; if (changed) { m.versionWrite++; m.compares += n.readers; } }
         else if (O.versions) { m.compares++; if (changed) m.versionWrite++; }
         vals[n.idx] = v; this.last[n.idx] = full; ran.add(n.idx);
         if (horizon) this.h[n.idx] = HORIZON[n.kind](args, n.params, t);
@@ -1415,7 +1420,8 @@ class MotionGraphRun {
     const c = SINK_IDX.map((k) => vals[k]);
     c.forEach((v, i) => {
       const changed = !this.prevOut || !same(this.prevOut[i], v);
-      if (S === 'compute' || S === 'full') { if (!O.publishChanged) { m.detachedPublish++; m.writes++; } else { m.compares++; m.detachedCheck++; if (changed) { m.detachedPublish++; m.writes++; } } }
+      if (marks) { if (changed) { if (S === 'control') { m.visits++; m.storeWrite++; } else m.detachedPublish++; m.writes++; } }
+      else if (S === 'compute' || S === 'full') { if (!O.publishChanged) { m.detachedPublish++; m.writes++; } else { m.compares++; m.detachedCheck++; if (changed) { m.detachedPublish++; m.writes++; } } }
       else if (S === 'inc') { if (changed) { m.storeWrite++; m.writes++; } }
       else if (S === 'macro') { if (changed) { m.visits++; m.storeWrite++; m.writes++; } }
       else if (cached) { m.visits++; m.compares++; m.detachedCheck++; if (changed) { m.storeWrite++; m.writes++; } }
@@ -1465,7 +1471,7 @@ function promptInto(m, S, changed) {
   if (S === 'full') m.fullNode++;
 }
 // How a design reads the nodes under a poll: #257 runs them again, unless every node has a cache.
-const readRule = (design, opt) => (design.strategy === 'control' && opt.cacheAll ? 'compute' : design.strategy);
+const readRule = (design, opt) => (design.strategy === 'control' && (opt.cacheAll || opt.invalidate) ? 'compute' : design.strategy);
 // The ticks a call is in flight, from the tick it starts to the last before it ends.
 function laneTicks(r, n) { const i0 = Math.max(0, Math.ceil(r.t0 / DT - 1e-6)); return [i0, r.lane === 'remember' ? i0 : Math.min(n - 1, Math.ceil(r.t1 / DT - 1e-6) - 1)]; }
 function laneIndex(rec) {
@@ -1543,7 +1549,7 @@ function incTreeInto(m, T, P, opt, seen) {
 // The store keys the tree's checks read that changed: what a store subscription reports.
 function changedReads(T, P) { let k = 0; for (const part of TREE_PARTS) for (const [uid, s] of T[part]) if (TREE_NODE.get(uid).k === 'check' && (!P || P[part].get(uid) !== s)) k++; return Math.min(k, 6); }
 // What the statechart, the waits and the prompt cost a design at one tick.
-const incrementalTree = (design, opt) => design.strategy === 'inc' || design.strategy === 'macro' || !!opt.incTree;
+const incrementalTree = (design, opt) => design.strategy === 'inc' || design.strategy === 'macro' || !!opt.incTree || !!opt.incControl;
 function controlWork(design, opt0, f, prevKeys, ctx, i) {
   // A tree ticked from the root at every tick ticks its waiting leaves too: wake on completion needs #404's executor.
   const incremental = incrementalTree(design, opt0), opt = incremental ? opt0 : { ...opt0, wake: false };
@@ -1782,7 +1788,7 @@ function storedLines(design, part, opt = {}) {
     } else {
       // The motion is one Vizij graph, shown a group at a time: a value from another group comes by wire, in the same
       // tick. Split into graphs joined by store keys, each hop would cost a tick: the eyes would follow last tick's head.
-      push(`graph motion · its ${group[1].toLowerCase()} nodes; the motion is one graph, shown a group at a time · ${opt.cacheAll ? 'every node with an argument cache: it runs when an input changed, and keeps its output otherwise' : 'eager: every node runs at every tick, in data order; nothing is cached'}`);
+      push(`graph motion · its ${group[1].toLowerCase()} nodes; the motion is one graph, shown a group at a time · ${opt.invalidate ? 'every node keeps its output until a node it reads changes and marks it; a tick runs only the marked nodes' : opt.cacheAll ? 'every node with an argument cache: it runs when an input changed, and keeps its output otherwise' : 'eager: every node runs at every tick, in data order; nothing is cached'}`);
       push('nodes');
       const ext = new Set(); for (const n of nodes) for (const r of refsOf(n)) if (NODE.get(r).group !== part) ext.add(r);
       for (const r of ext) { const n = NODE.get(r); push(`  ${r.padEnd(13)} ${n.group === 'inputs' ? `input        path: ${n.key}` : `${fname(n).padEnd(28)} in the ${n.group} group, wired in`}`, r); }
@@ -2624,13 +2630,15 @@ function render() {
   for (const key of ['a', 'b']) renderSide(sides[key], i);
   renderAssets(i);
   if (tl) { const x = tl.x(S.T); tl.head.setAttribute('x1', x); tl.head.setAttribute('x2', x); tl.knob.setAttribute('cx', x); tl.svg.setAttribute('aria-valuenow', S.T.toFixed(1)); }
-  clock.textContent = `${S.T.toFixed(1)} s / ${RUN_END.toFixed(1)} s`;
+  clock.textContent = `${(frameAt(S.T) * DT).toFixed(2)} s · frame ${frameAt(S.T)} / ${N - 1}`;
   playBtn.textContent = S.playing ? 'Pause' : 'Play';
 }
 playBtn.addEventListener('click', () => { if (S.T >= RUN_END - 1e-6) S.T = 0; S.playing = !S.playing; last = performance.now(); render(); });
 document.getElementById('restart').addEventListener('click', () => { S.T = 0; render(); });
-document.getElementById('back').addEventListener('click', () => { S.playing = false; S.T = clamp(S.T - DT, 0, RUN_END); render(); });
-document.getElementById('fwd').addEventListener('click', () => { S.playing = false; S.T = clamp(S.T + DT, 0, RUN_END); render(); });
+// A step lands exactly on the next frame, whatever the time was.
+const stepFrame = (d) => { S.playing = false; S.T = clamp(frameAt(S.T) + d, 0, N - 1) * DT; render(); };
+document.getElementById('back').addEventListener('click', () => stepFrame(-1));
+document.getElementById('fwd').addEventListener('click', () => stepFrame(1));
 document.getElementById('speed').addEventListener('change', (e) => { S.speed = +e.target.value; });
 document.getElementById('loop').addEventListener('change', (e) => { S.loop = e.target.checked; });
 const jump = document.getElementById('jump');
@@ -2646,6 +2654,7 @@ for (const key of ['a', 'b']) {
 document.addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('select, input, button, [role="slider"], summary')) return;
   if (e.key === ' ') { e.preventDefault(); playBtn.click(); }
+  else if (e.key === ',' || e.key === '.') { e.preventDefault(); stepFrame(e.key === ',' ? -1 : 1); }
 });
 let last = performance.now();
 function loop(now) {
