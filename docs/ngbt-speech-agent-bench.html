@@ -19,6 +19,7 @@
   --run-1: #2a78d6; --run-2: #eb6834; --run-3: #1baf7a; --run-x: #8b928c;
   --good: #0ca30c; --bad: #d03b3b; --good-ink: #1d7a1d; --bad-ink: #b42e2e;
   --poll: #6fd25a; --poll-fill: #e4f8dc; --poll-ink: #2f7a20;
+  --ran-fill: #d6e6fa; --check: #d08a0c; --check-fill: #fbe9c2; --check-ink: #8a5800;
   --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
   --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -30,6 +31,7 @@
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
   --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
+  --ran-fill: #1a3150; --check: #e6a23a; --check-fill: #3d2f12; --check-ink: #f3c56e;
   color-scheme: dark;
 } }
 :root[data-theme="dark"] {
@@ -39,6 +41,7 @@
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
   --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
+  --ran-fill: #1a3150; --check: #e6a23a; --check-fill: #3d2f12; --check-ink: #f3c56e;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -200,8 +203,6 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .view pre span.st-R::after { content: "   ● Running"; color: var(--run-1); }
 .view pre span.st-S::after { content: "   ✓"; color: var(--good-ink); }
 .view pre span.st-F::after { content: "   ✗"; color: var(--bad-ink); }
-.view pre span.ran::after { content: "   ran"; color: var(--run-1); }
-.view pre span.cached::after { content: "   cached"; color: var(--faint); }
 .view pre span.dim { color: var(--faint); }
 .graph text { font-family: var(--f-mono); }
 .g-node { cursor: grab; touch-action: none; }
@@ -216,29 +217,56 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .g-node .l { font: 600 11.5px var(--f-body); fill: var(--ink); }
 .g-node.port rect { fill: var(--panel-2); stroke: none; }
 .g-node.port .l { font: 500 11px var(--f-mono); }
-.g-node.data rect { stroke-dasharray: 5 3; }
-.g-node.ran rect { fill: var(--panel-2); stroke: var(--run-1); stroke-width: 2; }
-.g-node.cached rect { stroke-dasharray: 3 3; stroke: var(--faint); }
-.g-node.skipped { opacity: .4; }
-.view pre span.skipped { color: var(--faint); }
-.view pre span.st-R.cached::after { content: "   ● Running · from its cache"; color: var(--run-1); }
-.view pre span.st-S.cached::after { content: "   ✓ from its cache"; color: var(--good-ink); }
-.view pre span.st-F.cached::after { content: "   ✗ from its cache"; color: var(--bad-ink); }
-.view pre span.skipped::after { content: "   not needed"; }
-.g-node.st-R rect { stroke: var(--run-1); stroke-width: 2.2; fill: var(--panel-2); }
+/* What a node did this tick is its fill: blue re-evaluated or ticked, amber visited to collect its data and kept;
+   not visited, it has none and fades, the more when it was not needed. A tree node's status is its border. */
+.g-node.st-R rect { fill: var(--panel-2); }
+.g-node.ran rect { fill: var(--ran-fill); stroke: var(--run-1); stroke-width: 2; }
+.g-node.visited rect { fill: var(--check-fill); stroke: var(--check); stroke-width: 2; }
+.g-node.untouched { opacity: .55; }
+.g-node.skipped { opacity: .3; }
+.g-node.st-R rect { stroke: var(--run-1); stroke-width: 2.2; }
 .g-node.st-S rect { stroke: var(--good); stroke-width: 1.6; }
 .g-node.st-F rect { stroke: var(--bad); stroke-width: 1.6; }
-.g-node.st-none { opacity: .45; }
+.g-node.st-none { opacity: .4; }
+.view pre span.ran { background: var(--ran-fill); }
+.view pre span.visited { background: var(--check-fill); }
+.view pre span.untouched, .view pre span.skipped { color: var(--faint); }
+.view pre span.ran::after { content: "   ran"; color: var(--run-1); }
+.view pre span.visited::after { content: "   visited, kept"; color: var(--check-ink); }
+.view pre span.untouched::after { content: "   not visited"; }
+.view pre span.skipped::after { content: "   not needed"; }
+.view pre span.st-R.ran::after { content: "   ● Running · ticked"; color: var(--run-1); }
+.view pre span.st-S.ran::after { content: "   ✓ ticked"; color: var(--good-ink); }
+.view pre span.st-F.ran::after { content: "   ✗ ticked"; color: var(--bad-ink); }
+.view pre span.st-R.visited::after { content: "   ● Running · checked, from its cache"; color: var(--check-ink); }
+.view pre span.st-S.visited::after { content: "   ✓ checked, from its cache"; color: var(--check-ink); }
+.view pre span.st-F.visited::after { content: "   ✗ checked, from its cache"; color: var(--check-ink); }
+.view pre span.st-R.untouched::after { content: "   ● Running · not visited"; }
+.view pre span.st-S.untouched::after { content: "   ✓ not visited"; }
+.view pre span.st-F.untouched::after { content: "   ✗ not visited"; }
 .g-node .badge-s { font: 600 9.5px var(--f-mono); }
 .g-node.st-R .badge-s { fill: var(--run-1); } .g-node.st-S .badge-s { fill: var(--good-ink); } .g-node.st-F .badge-s { fill: var(--bad-ink); }
 .g-node.polled rect { stroke: var(--poll); stroke-width: 3.2; fill: var(--poll-fill); }
 .g-node.polled .badge-s { fill: var(--poll-ink); }
 .view pre span.polled { background: var(--poll-fill); }
-.view pre span.polled::after { content: "   ● Running · polled"; color: var(--poll-ink); }
+.view pre span.polled::after, .view pre span.st-R.polled::after { content: "   ● Running · polled"; color: var(--poll-ink); }
 .g-edge { fill: none; stroke: var(--faint); stroke-width: 1.2; }
 .g-edge.data { stroke-dasharray: 4 3; }
 .g-edge.active { stroke: var(--run-1); stroke-width: 2.8; }
+.g-edge.read { stroke: var(--check); stroke-width: 2.2; }
 .g-edge-label.active { fill: var(--run-1); }
+.g-edge-label.read { fill: var(--check-ink); }
+.rep-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.rep-legend .key { display: inline-flex; align-items: center; gap: 6px; }
+.rep-legend .sw { width: 16px; height: 11px; border-radius: 3px; border: 1.5px solid var(--line); background: var(--panel); }
+.rep-legend .sw.ran { background: var(--ran-fill); border-color: var(--run-1); }
+.rep-legend .sw.visited { background: var(--check-fill); border-color: var(--check); }
+.rep-legend .sw.untouched { opacity: .55; }
+.rep-legend .sw.skipped { opacity: .3; }
+.rep-legend .sw.polled { background: var(--poll-fill); border: 2.5px solid var(--poll); }
+.rep-legend .ln { width: 18px; height: 3px; border-radius: 2px; }
+.rep-legend .ln.active { background: var(--run-1); }
+.rep-legend .ln.read { background: var(--check); }
 .g-edge-label { font-size: 9px; fill: var(--faint); }
 .g-box rect { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 4; }
 .g-box text { font-size: 10px; fill: var(--muted); }
@@ -1323,7 +1351,7 @@ const INITIAL_KEYS = { att: 'nobody', attSince: 0, conv: 'idle', sub: '', thinkS
 
 // Each node's place in data order, where each of its arguments comes from (a node's place, or -1 for a literal),
 // and which of them is the clock.
-for (const n of ORDER) { n.idx = INDEX.get(n.id); n.from = n.args.map((x) => (typeof x === 'string' && x[0] === '@' ? INDEX.get(x.slice(1)) : -1)); n.readers = READERS.get(n.id).length; n.tArg = n.args.indexOf('@t'); }
+for (const n of ORDER) { n.idx = INDEX.get(n.id); n.from = n.args.map((x) => (typeof x === 'string' && x[0] === '@' ? INDEX.get(x.slice(1)) : -1)); n.readers = READERS.get(n.id).length; n.readerIdx = READERS.get(n.id).map((r) => INDEX.get(r)); n.tArg =n.args.indexOf('@t'); }
 const SINK_IDX = SINKS.map(([, id]) => INDEX.get(id));
 const GROUP_IDX = MOTION_GROUPS.map(([g]) => GROUP_FUNCS.get(g).map((n) => n.idx));
 // Lazy conditionals: a node pulls its condition first, then only the inputs its result needs; null for all of them.
@@ -1345,7 +1373,9 @@ const HORIZON = {
   Envelopes: (a, p, t) => envelopeHorizon(a[0], t),
 };
 // One design's run of the motion graph: strategy compute, full, inc, macro or control, with its optimizations (OPT_INFO).
-// Evaluation pulls from the sinks; a node runs at most once a tick.
+// Evaluation pulls from the sinks; a node runs at most once a tick. What each node did, by the design's rule, is its
+// act: re-evaluated (1), visited to collect its data and kept (2), kept without a visit (3), or not needed (0).
+const RAN = 1, VISITED = 2, UNTOUCHED = 3;
 class MotionGraphRun {
   constructor(strategy, items, opt = {}) {
     this.s = strategy; this.items = items; this.opt = opt; this.prevOut = null; this.tickNo = 0;
@@ -1364,7 +1394,7 @@ class MotionGraphRun {
       if (inc && (changed || !O.subscription)) { m.storeObserve++; m.compares++; if (changed) m.versionWrite++; }
       if (marks) { if (changed) { m.storeObserve++; m.compares++; m.versionWrite++; if (S === 'control') m.visits++; } }
       else if (S === 'control') m.visits++;
-      act[n.idx] = changed ? 1 : 2;
+      if (changed) act[n.idx] = RAN;
     }
     const ran = new Set();
     const evaluate = (n) => {
@@ -1401,9 +1431,18 @@ class MotionGraphRun {
         vals[n.idx] = v; this.last[n.idx] = full; ran.add(n.idx);
         if (horizon) this.h[n.idx] = HORIZON[n.kind](args, n.params, t);
       }
-      act[n.idx] = run ? 1 : 2;
+      // Kept: visited when the executor reached the node to compare its arguments or its horizon, untouched otherwise.
+      act[n.idx] = run ? RAN : (detached && !marks) || (within && !marks) ? VISITED : UNTOUCHED;
     };
     for (const k of SINK_IDX) evaluate(ORDER[k]);
+    // A store key that did not change: read by a node visited to collect its data, or wired in untouched where only
+    // what changes is observed. Read by no node needed this tick, it was not needed.
+    const quiet = marks || (inc && O.subscription);
+    for (const n of SOURCES) if (!act[n.idx]) {
+      const read = n.readerIdx.filter((k) => act[k]);
+      if (read.length) act[n.idx] = !quiet && read.some((k) => act[k] !== UNTOUCHED) ? VISITED : UNTOUCHED;
+    }
+    if (inc && !O.subscription) for (const g of GROUP_IDX) for (const k of g) if (act[k] === UNTOUCHED) act[k] = VISITED;   // each reached leaf checked
     // What #404's node-graph shapes and #405's placed groups check at every tick.
     const reached = (g) => GROUP_IDX[g].reduce((s, k) => s + (act[k] ? 1 : 0), 0), dirty = (g) => GROUP_IDX[g].some((k) => ran.has(k));
     if (S === 'inc') MOTION_GROUPS.forEach((_, g) => {
@@ -2075,12 +2114,12 @@ function buildTranscript(side) {
 const partLabel = (id) => (id === 'full' ? 'Full' : PARTS.find((p) => p.id === id).label);
 const isMotion = (part) => part !== 'full' && PARTS.find((p) => p.id === part).motion;
 function repNote(design, part, tab) {
-  if (part === 'full') return tab === 'stored' ? 'Every part’s stored form, one after another.' : 'Every part at once: the conversation over the attention, the reply run beside them, and the whole motion graph below. The colours, dashes and blue paths mean what they mean in each part. Fitted to the panel’s width; “Actual size” shows it unscaled, to scroll.';
+  if (part === 'full') return tab === 'stored' ? 'Every part’s stored form, one after another.' : 'Every part at once: the conversation over the attention, the reply run beside them, and the whole motion graph below. The colours mean what they mean in each part. Fitted to the panel’s width; “Actual size” shows it unscaled, to scroll.';
   const motion = MOTION_GROUPS.find(([g]) => g === part);
   if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} in its own code, each value only when what it follows from changed: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.' + (tab === 'stored' ? '' : ' It polls nothing: its event loop hands each wait its result.');
   if (tab === 'graph') {
-    if (motion) return { compute: 'Each node is a detached call: dashed when cached this tick, outlined when it ran. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape running. Dashed: clean, answered from its cache.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body.', control: 'Each node keeps its output until a node it reads changes and marks it: dashed when it kept its output this tick, outlined when it ran.' }[design.strategy] + ' Faded: not needed this tick, on a branch a conditional did not take.';
-    return (design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs. Green succeeded, red failed, blue is Running this tick, light green a wait polled this tick.' : 'The tree as it ticks: green succeeded, red failed, blue is Running, light green a wait polled this tick; faded nodes were not reached this tick.') + ' A node drawn dashed was answered from its cache, not ticked: the blue path is what the tick reached.';
+    if (motion) return { compute: 'Each node is a detached call, visited whenever a reader needs it: blue when it ran, amber when it was visited, compared its arguments and answered from its cache. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node: blue when it ran, amber when visited and answered from its cache.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape running. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', control: 'Each node keeps its output until a node it reads changes and marks it; only marked nodes are visited, and each runs: blue. A store key is visited when it changes.' }[design.strategy] + ' Faint: not visited; fainter: not needed this tick, on a branch a conditional did not take.';
+    return (design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs.' : 'The tree as it ticks.') + ' Blue fill: ticked; amber: its parent checked its cached status and did not tick it; faint: not visited; fainter: not reached this tick. The blue path is what the tick ticked, the amber edges what it checked.';
   }
   return tab === 'outline' ? 'Each line marked with what it did this tick; a wait polled this tick is light green.' : 'The text a person edits, or the file the loader reads, for this part.';
 }
@@ -2281,21 +2320,31 @@ function liveRep(side, i) {
   const statuses = motion ? null : full ? new Map(['conversation', 'attention', 'reply'].flatMap((p) => [...treeStatus(p, f, laneOn)])) : treeStatus(part, f, laneOn);
   const polled = new Set((rec.polls && rec.polls[i] || []).map((k) => POLL_UID[k]));
   const tk = rec.treeTicks && rec.treeTicks[i];   // on an incremental executor: which tree nodes it ticked
-  const motionClass = (id) => { if (!act) return ''; const k = INDEX.get(id); if (k === undefined) return ''; return act[k] === 1 ? 'ran' : act[k] === 2 ? 'cached' : 'skipped'; };
+  // What a node did this tick, as its fill: re-evaluated or ticked (ran), visited to collect its data and kept
+  // (visited), not visited (untouched), or not needed (skipped). A tree node's border is its status.
+  const VISIT = ['skipped', 'ran', 'visited', 'untouched'];
+  const motionClass = (id) => { if (!act) return ''; const k = INDEX.get(id); return k === undefined ? '' : VISIT[act[k]]; };
+  // On an incremental executor a tree node was ticked (1), had its cached status checked by its parent (2), or
+  // was left untouched.
+  const treeClass = (uid) => {
+    const s = statuses.get(uid), p = s === 'R' && polled.has(uid);
+    return `st-${s}${p ? ' polled' : ''}${!tk ? '' : tk[uid] === 1 ? ' ran' : tk[uid] === 2 ? ' visited' : ' untouched'}`;
+  };
   if (side.gnodes) {
-    const active = new Set();   // Running, polled, or run this tick: an edge between two of them is on the active path
+    const state = new Map();   // ran or visited: an edge between two ran nodes is the active path, one into or out of a visit is a read
     for (const { g, n, badge } of side.gnodes.values()) {
       let cls = '';
-      if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid), kept = s && tk && tk[n.tree.uid] !== 1; cls = s ? `st-${s}${p ? ' polled' : ''}${kept ? ' cached' : ''}` : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; }
-      else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'cached' : 'st-none';
+      if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid); cls = s ? treeClass(n.tree.uid) : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; if (!tk && s === 'R') state.set(n.id, 'ran'); }
+      else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'untouched' : 'st-none';
       else if (motion || full) cls = motionClass(n.ref || n.id);
       g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}`);
-      if ((cls.startsWith('st-R') && !cls.includes('cached')) || cls === 'ran') active.add(n.id);
+      const words = cls.split(' ');
+      if (words.includes('ran')) state.set(n.id, 'ran'); else if (words.includes('visited')) state.set(n.id, 'visited');
     }
     for (const { e, path, label } of side.gedges) {
-      const on = active.has(e.from) && active.has(e.to);
-      path.setAttribute('class', `g-edge${e.data ? ' data' : ''}${on ? ' active' : ''}`);
-      if (label) label.setAttribute('class', `g-edge-label${on ? ' active' : ''}`);
+      const a = state.get(e.from), b = state.get(e.to), on = a === 'ran' && b === 'ran', read = !on && !!a && !!b;
+      path.setAttribute('class', `g-edge${e.data ? ' data' : ''}${on ? ' active' : read ? ' read' : ''}`);
+      if (label) label.setAttribute('class', `g-edge-label${on ? ' active' : read ? ' read' : ''}`);
     }
   }
   if (side.repLines) {
@@ -2303,7 +2352,7 @@ function liveRep(side, i) {
       let cls = '';
       if (id !== undefined && id !== null) {
         if (motion) cls = motionClass(id);
-        else if (typeof id === 'number') { const s = statuses.get(id); cls = s ? `st-${s}${s === 'R' && polled.has(id) ? ' polled' : ''}${tk && tk[id] !== 1 ? ' cached' : ''}` : 'dim'; }
+        else if (typeof id === 'number') cls = statuses.get(id) ? treeClass(id) : 'dim';
         else if (id === 'prompt') cls = rec.cost[i].builds ? 'ran' : '';
         else if (full) cls = motionClass(id);
       }
@@ -2537,9 +2586,14 @@ function buildRepControls() {
     partsRow.append(partButton(p.id, p.label));
   });
   sync();
+  const key = (cls, text) => el('span', { class: 'key' }, el('i', { class: cls }), text);
+  const legend = el('div', { class: 'rep-legend', 'aria-label': 'What the colours mean' },
+    key('sw ran', 're-evaluated, or ticked'), key('sw visited', 'visited to collect its data, kept'), key('sw untouched', 'not visited'), key('sw skipped', 'not needed this tick'), key('sw polled', 'a wait polled'),
+    key('ln active', 'between two re-evaluated nodes'), key('ln read', 'read by a visit'),
+    el('span', { class: 'key', text: 'A tree node’s border is its status: green succeeded, red failed, blue Running.' }));
   const bar = el('section', { class: 'rep-controls', 'aria-label': 'Representation' },
     el('div', { class: 'rep-bar' }, el('h2', { text: 'How each design holds it' }), tabs),
-    partsRow,
+    partsRow, legend,
     el('p', { class: 'rep-note', text: 'One part at a time, the same part on both sides, or Full, every part at once. The control parts are the statechart and the reply run; the motion parts are the groups of the motion graph, split the way each design can split them: subtrees and a task run, node-graph shapes, macros, or separate Vizij graphs.' }));
   document.querySelector('.tabs').before(bar);
 }

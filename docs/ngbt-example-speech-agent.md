@@ -409,8 +409,12 @@ download it and open it in a browser.
   sides: the conversation, attention and reply run, or one of the seven motion
   groups; or Full, every part at once, the three trees above the whole motion
   graph. Each is drawn as a graph, as a live outline, or as its stored form.
-  Nodes show what ran this tick, what answered from its cache, and each tree
-  node's status. A node can be dragged to untangle a graph, with a reset per part.
+  A node's colour is what the tick did with it, by the design's rule: blue,
+  re-evaluated or ticked; amber, visited to collect its data and kept (a
+  detached node comparing its arguments, a tree node whose cached status its
+  parent checked); none, not visited, fainter when not needed. Edges between
+  two blue nodes are blue, edges into or out of a visit amber. A tree node's
+  border is its status. A node can be dragged to untangle a graph, with a reset per part.
 - **Every implementation at a glance.** The whole run's numbers for the
   reference, the foil and the designs: each one's average tick and its work.
 - **The assets.** Every asset of §6, with the live ones following the left
