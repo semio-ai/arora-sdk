@@ -484,9 +484,11 @@ and nothing else.
   - A call's start and its result are a module call each. A store key is a
     check. A node is a node tick that answers from its cache (detached: a
     check for each argument; versioned cells: one check) or runs again.
-  - The motion graph follows each design's rule in the table above: detached
-    calls check their arguments, versioned cells their versions, and #257's
-    marked nodes run while its clean ones are not visited.
+  - The motion graph follows each design's rule in the table above, with the
+    optimizations below: in #396, #409 and #257 a node that recomputes to a
+    new value marks its readers, and only marked nodes are visited; #404's and
+    #405's cells are versioned, and only the leaves whose inputs changed are
+    ticked.
 - **Modeled µs.** The designs pay the NGBT spectrum's per-operation rates,
   plus 2 µs of work a call and 2 ms a prompt build. A poll that answers
   `Running` does no work and pays only its module call. The reference pays for
@@ -495,13 +497,14 @@ and nothing else.
 ### The optimizations each build runs with
 
 Each build runs with every optimization its framework can take that lowers its
-modeled cost. Each one keeps the build's channels exact; the bench checks that
-at every tick.
+modeled cost, and with invalidation on #396 and #409, which does not (below).
+Each one keeps the build's channels exact; the bench checks that at every
+tick.
 
 | Optimization | What it does | From | Builds |
 |---|---|---|---|
 | A cache on every node | A node whose inputs did not change keeps its output | the other designs, which all cache | #257 |
-| Invalidation instead of comparison | A node that recomputes to a new value marks its readers; a tick runs only the marked nodes, and a clean one is neither visited nor compared | the bench, as #404's cells do | #257 |
+| Invalidation instead of comparison | A node that recomputes to a new value marks its readers; a tick runs only the marked nodes, and a clean one is neither visited nor compared | the bench, as #404's cells do | #257, #396, #409 |
 | An incremental control tick | A control node whose children are clean answers from its cache; only the marked branches are ticked | the bench, by #404's rules | #257 |
 | A dirty queue and a store subscription | A clean leaf is not checked; a store key is observed only when something writes it | #404, §5 of its proposal | #404, #405, and the trees of #396 and #409 |
 | The tree on #404's executor | A clean subtree of the statechart answers from its cache | #404, which any tree can opt into | #396, #409 |
@@ -512,17 +515,23 @@ at every tick.
 | Native polls | A waiting leaf checks its call's handle without calling its module | the bench | all |
 | Wake on completion | A waiting leaf stays clean until its call completes, so its branch is not ticked while it waits | the bench | the trees on #404's executor, and #257 with its incremental control tick |
 
-Three candidates were tried and dropped. Invalidation for #396 and #409 cost 0.24 µs
-more: it halves their node ticks, from 64 to 32 a tick, and cuts their checks
-from 104 to 60, but a value comparison here (9.5 ns) costs less than the
-version write that marks a reader (38 ns). A detached node is pulled and
-checks its arguments to know it is still valid; marked, it would be told. For
-#257 it saves its input and output nodes' visits, and pays.
-Versions instead of value comparison
-(#396's proposal, §9) cost 0.7 µs more: nearly every value here is a number,
-cheaper to compare than to version. #405's `WITH[ PARALLEL[ leaf × N ], RUN ]`
-shape for #404's groups cost 0.2 µs more: every group but the mouth's changes
-at every tick, so few answer settled.
+**Invalidation on #396 and #409 costs 0.24 µs more a tick, and is kept.** A
+detached node is held by no node and has no list of its readers: pulled, it
+checks its arguments to know its cached value still holds, and they are
+detached nodes too, so every needed node is visited and compared at every
+tick. With invalidation the executor builds each node's readers when the file
+loads, and a node that recomputes to a new value marks them. That halves their
+node ticks, from 64 to 32 a tick, and cuts their checks from 104 to 60; they
+then visit what #257 visits, node for node. In µs it costs more, since a value
+comparison here (9.5 ns) costs less than the version write that marks a reader
+(38 ns), and 28 of the 75 needed nodes change at every tick. For #257 it saves
+its input and output nodes' visits, and pays.
+
+Two candidates were tried and dropped. Versions instead of value comparison
+(#396's proposal, §9), tried before invalidation, cost 0.7 µs more: nearly
+every value here is a number, cheaper to compare than to version. #405's
+`WITH[ PARALLEL[ leaf × N ], RUN ]` shape for #404's groups cost 0.2 µs more:
+every group but the mouth's changes at every tick, so few answer settled.
 
 Lazy conditionals skip the most work. While someone is there, the wander's
 oscillators do not run, and while Pip is engaged, neither does the glance
@@ -568,22 +577,22 @@ away and the viseme's crossfades).
   | Implementation | µs | Node ticks | Executions | Checks | 1 s on the llm | Prompt builds |
   |---|---|---|---|---|---|---|
   | Reference | **55** | 28 | 27 | 18 | 0 · 0 · 100 | 4 |
-  | #396 detached nodes | 65.5 | 64 | 29 | 104 | 0 · 0 · 100 | 4 |
-  | #409 full tree nodes | 66 | 64 | 29 | 104 | 0 · 0 · 100 | 4 |
+  | #396 detached nodes | 65.7 | 32 | 29 | 60 | 0 · 0 · 100 | 4 |
+  | #409 full tree nodes | 66.4 | 32 | 29 | 60 | 0 · 0 · 100 | 4 |
   | #404 incremental tree | 66 | 46 | 29 | 64 | 0 · 0 · 100 | 4 |
   | #405 macros, placed | 66 | 43 | 29 | 64 | 0 · 0 · 100 | 4 |
   | #257 BT in NG | 66 | 40 | 29 | 60 | 0 · 0 · 100 | 4 |
 
 - **The designs end within 0.7 µs of each other.** What is left is
   the 29 functions that change a tick, at 2 µs each, and each framework's
-  bookkeeping. #257, with invalidation and an incremental control tick, ticks
-  the fewest nodes (40 a tick) and makes the fewest checks (60); #404 and #405
-  come next. #396 and #409 visit every needed node and compare its arguments,
-  64 node ticks and 104 checks, which costs about the same in µs.
-- **The bespoke reference is the cheapest,** 10 µs a tick under the best
-  design. It makes 2.4 fewer calls a tick (5 µs): the selections it takes as
+  bookkeeping. #396, #409 and #257, with invalidation, visit only what changed:
+  the same nodes at nearly every tick, and the same 60 checks. #396 and #409
+  tick the fewest nodes (32 a tick); #257 also visits its graph's input and
+  output nodes (40). #404 and #405 tick 46 and 43, with 64 checks.
+- **The bespoke reference is the cheapest,** 10.4 µs a tick under the best
+  design. It makes 2.3 fewer calls a tick (4.6 µs): the selections it takes as
   branches, the arm's blend it skips while no wave plays, and the two
-  schedules. The other 5.5 µs is bookkeeping a framework pays and it does not.
+  schedules. The other 5.8 µs is bookkeeping a framework pays and it does not.
 - **The prompt.** Every design builds it once per call, four times, as the
   reference does.
 - **No build fails a check.**

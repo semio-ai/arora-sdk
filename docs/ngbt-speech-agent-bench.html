@@ -1308,7 +1308,7 @@ const FN = {
 // ---- the five designs ------------------------------------------------------------
 const DESIGNS = [
   { id: 'compute', short: '#396', name: '#396 detached nodes', strategy: 'compute', lag: 0,
-    note: `The statechart is the tree. The motion graph is ${FUNCS.length} detached calls, pulled at their first read and run only when their arguments changed; nine sinks publish after the tree. The reply run is a task run the conversation spawns: its stages are module-call leaves that wait on their calls, and the prompt is a detached node the llm leaf reads.` },
+    note: `The statechart is the tree. The motion graph is ${FUNCS.length} detached calls, held by no node and run only when an argument changed; nine sinks publish after the tree. The reply run is a task run the conversation spawns: its stages are module-call leaves that wait on their calls, and the prompt is a detached node the llm leaf reads.` },
   { id: 'full', short: '#409', name: '#409 full tree nodes', strategy: 'full', lag: 0,
     note: '#396’s file and rule, with every detached call also a full tree node: a status, a trace line and the attached call path. The same calls at the same ticks; each call also pays a full node.' },
   { id: 'inc', short: '#404', name: '#404 incremental tree', strategy: 'inc', lag: 0,
@@ -1319,7 +1319,8 @@ const DESIGNS = [
     note: 'Vizij graphs: the conversation, attention and reply run as control nodes ticking actions, the motion as one graph whose nodes keep their outputs until a node they read changes and marks them. A state the control writes reaches the motion through the store at the next tick. The prompt is a lazy node under the llm action, cached by its arguments as in every design.' },
 ];
 // What each build can do better, and where the idea comes from: its own pull request, another's, or the bench.
-// Optimized, a build runs with every one of its own; each was kept only if it lowered the modeled cost (§10).
+// Optimized, a build runs with every one of its own; each was kept only if it lowered the modeled cost (§10), but
+// invalidation on #396 and #409, kept although it costs them 0.24 µs a tick, for half their node ticks.
 const OPT_INFO = {
   cacheAll: { label: 'a cache on every node', source: 'the other designs, which all cache', text: 'a node whose inputs did not change keeps its output, and so its readers find theirs unchanged' },
   invalidate: { label: 'invalidation instead of comparison', source: 'the bench, as #404’s cells do', text: 'a node that recomputes to a new value marks its readers; a tick runs only the marked nodes, and a clean one is neither visited nor compared' },
@@ -1334,8 +1335,8 @@ const OPT_INFO = {
   wake: { label: 'wake on completion', source: 'the bench', text: 'a waiting leaf stays clean until its call completes, so its branch is not ticked while it waits' },
 };
 const OPTIMIZATIONS = {
-  compute: ['lazy', 'horizon', 'latch', 'nativePolls', 'publishChanged', 'incTree', 'subscription', 'wake'],
-  full: ['lazy', 'horizon', 'latch', 'nativePolls', 'publishChanged', 'incTree', 'subscription', 'wake'],
+  compute: ['invalidate', 'lazy', 'horizon', 'latch', 'nativePolls', 'publishChanged', 'incTree', 'subscription', 'wake'],
+  full: ['invalidate', 'lazy', 'horizon', 'latch', 'nativePolls', 'publishChanged', 'incTree', 'subscription', 'wake'],
   inc: ['subscription', 'lazy', 'horizon', 'latch', 'nativePolls', 'wake'],
   macro: ['subscription', 'lazy', 'horizon', 'latch', 'nativePolls', 'wake'],
   control: ['cacheAll', 'invalidate', 'lazy', 'horizon', 'latch', 'nativePolls', 'incControl', 'subscription', 'wake'],
@@ -2118,7 +2119,7 @@ function repNote(design, part, tab) {
   const motion = MOTION_GROUPS.find(([g]) => g === part);
   if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} in its own code, each value only when what it follows from changed: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.' + (tab === 'stored' ? '' : ' It polls nothing: its event loop hands each wait its result.');
   if (tab === 'graph') {
-    if (motion) return { compute: 'Each node is a detached call, visited whenever a reader needs it: blue when it ran, amber when it was visited, compared its arguments and answered from its cache. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node: blue when it ran, amber when visited and answered from its cache.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape running. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', control: 'Each node keeps its output until a node it reads changes and marks it; only marked nodes are visited, and each runs: blue. A store key is visited when it changes.' }[design.strategy] + ' Faint: not visited; fainter: not needed this tick, on a branch a conditional did not take.';
+    if (motion) return { compute: 'Each node is a detached call. A call that recomputes to a new value marks its readers, and only marked calls are visited, each run: blue. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node; only marked calls are visited, each run: blue.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape running. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', control: 'Each node keeps its output until a node it reads changes and marks it; only marked nodes are visited, and each runs: blue. A store key is visited when it changes.' }[design.strategy] + ' Faint: not visited; fainter: not needed this tick, on a branch a conditional did not take.';
     return (design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs.' : 'The tree as it ticks.') + ' Blue fill: ticked; amber: its parent checked its cached status and did not tick it; faint: not visited; fainter: not reached this tick. The blue path is what the tick ticked, the amber edges what it checked.';
   }
   return tab === 'outline' ? 'Each line marked with what it did this tick; a wait polled this tick is light green.' : 'The text a person edits, or the file the loader reads, for this part.';
