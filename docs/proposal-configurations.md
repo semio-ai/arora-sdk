@@ -399,9 +399,12 @@ registry and an inline configuration carry records directly.
   the new one, as an alias or, for another registry, a redirect, carrying the
   id. Inside a registry an alias points at the package, not at a name, so a
   later move updates it and it stays one hop. A redirect to another registry
-  can lead to another redirect: the resolver follows a bounded number of
-  hops, requires the id at every hop to be the id it set out with, and
-  refuses a cycle. A consumer holding the id keeps resolving across the
+  can lead to another redirect. A source answers a move to another registry
+  as `Listing::Moved`, and the resolver follows it: it maps the destination
+  registry to a source through the same configuration that maps scopes to
+  registries, follows a bounded number of hops, requires the id at every
+  hop to be the id it set out with, and refuses a cycle or a registry it
+  has no source for. A consumer holding the id keeps resolving across the
   move, with no new dependency and no breaking release.
 
 **Types are packages.** Each type is published once, as a package of its
@@ -435,13 +438,14 @@ alike:
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub trait RegistrySource: MaybeSend + MaybeSync {
     /// Every release of a package, in listing order, which breaks ties in
-    /// selection. A name is followed through an alias or a redirect.
+    /// selection. An alias inside this registry is followed; a move to
+    /// another registry is answered as `Moved`, for the resolver to follow.
     async fn releases(
         &self,
         package: &PackageRef,
         kind: &Kind,
         limits: Limits,
-    ) -> Result<Vec<Release>, SourceError>;
+    ) -> Result<Listing, SourceError>;
     /// One artifact of a release, by key. The caller verifies the bytes
     /// against the release's hash before it uses or caches them.
     async fn artifact(
@@ -450,6 +454,13 @@ pub trait RegistrySource: MaybeSend + MaybeSync {
         key: &str,
         limits: Limits,
     ) -> Result<Vec<u8>, SourceError>;
+}
+
+pub enum Listing {
+    Found(Vec<Release>),
+    /// The package moved to another registry: where, under which name, and
+    /// the id it keeps there.
+    Moved { registry: RegistryName, name: ScopedName, package: PackageId },
 }
 
 pub enum PackageRef {
@@ -474,12 +485,14 @@ pub struct Release {
 
 pub struct Dependency {
     pub name: ScopedName,           // routes the lookup
+    pub kind: Kind,
     pub package: Option<PackageId>, // checks what the name answers
     pub range: VersionReq,
 }
 
 pub struct Pin {
     pub requested: ScopedName,      // the name it was asked for under
+    pub kind: Kind,
     pub package: Option<PackageId>,
     pub registry: RegistryName,     // the registry the requested scope maps to
     pub version: Version,
@@ -531,10 +544,11 @@ pub struct Pin {
   scope of every record's `parent`, records that account on the release, and
   hashes each artifact before it writes the release. On Studio, that path is
   its publish endpoint, for the web app, `semio` and `arora-cli` alike.
-- **Where it lives.** What records embed — `PackageId`, `Dependency` and
-  `Pin`, which a configuration record carries — is in `arora-types`, beside
-  the records. The trait and the types only sources use (`RegistrySource`,
-  `Release`, `PackageRef`, `Kind`, `SourceError`) are in `arora-registry`,
+- **Where it lives.** What records embed — `PackageId`, `Kind`,
+  `Dependency` and `Pin`, which a configuration record carries — is in
+  `arora-types`, beside the records. The trait and the types only sources use
+  (`RegistrySource`, `Listing`, `Release`, `PackageRef`, `SourceError`) are in
+  `arora-registry`,
   which depends on `arora-types` and already builds for `wasm32` in
   `arora-web`, so Studio's page uses the same types. `arora-index` is the
   client over it: resolver, cache, sealing, `DirSource` and the build helper.
@@ -616,12 +630,14 @@ pub enum ConfigurationSource {
 }
 ```
 
-**A configuration is identified by its hash**: the SHA-256 of its frozen
-record in the canonical serialization, which for a published one is the hash
-its pin holds for the `record` artifact, and for an inline one the device
-computes the same way. Expectations, reports, progress keys and persistence
-all use it, so an inline configuration is named as precisely as a published
-one.
+**A configuration is identified by its hash.** For a published one, it is
+the hash its pin holds for the `record` artifact, which covers everything
+else through the pins' hashes. For an inline one, it is the SHA-256 of the
+canonical serialization of the configuration together with the records it
+carries, in id and version order, which the device computes on receipt: two
+inline configurations whose unpublished records differ in any byte have
+different hashes. Expectations, reports, progress keys and persistence all
+use it.
 
 Both reply, like every operation, with a `CallResult` whose `ret` encodes over
 the value plane:
@@ -692,27 +708,30 @@ being applied is refused at `Busy`.
    costs about 0.9 M instructions, compiling it about 1.5 G), builds the new
    method index from the module records (2.1), and lowers each new behavior
    against it. A failure here changes nothing.
-5. **Stage.** The device writes durably to `<device dir>/configuration/staged/`
-   everything a restart needs: the configuration's pin and record, or, inline,
-   the configuration and its records. A failure here, such as a full disk,
-   changes nothing.
+5. **Stage.** The device writes durably, to a generation directory of its
+   own, `<device dir>/configuration/<hash>/`, everything a restart needs:
+   the configuration's pin and record, or, inline, the configuration and its
+   records. A failure here, such as a full disk, changes nothing.
 6. **Swap, between two steps.** The device instantiates every new and changed
    module before dropping any old instance, then reloads, unloads and loads,
    and starts, replaces or halts behaviors. A behavior that is kept keeps
    running as if nothing changed: its next call reaches the new instance of a
    reloaded module. A command from a bridge that is in flight to a module
    being reloaded or unloaded is interrupted, and its caller gets an error. If
-   an instance fails to start, the new instances are dropped, the staged
-   files removed, and nothing has changed.
-7. **Commit.** The device renames `staged/` to `current/`, one atomic rename
-   in one directory that needs no space, then replies `Applied`. `Applied`
-   therefore always means the configuration runs and a restart runs it
-   again. A device that stops before the commit restarts with the last
-   committed configuration and reports the staged one as refused, with stage
-   `Stage`, so a client that got no reply finds out. Should the rename itself
-   fail, the device keeps running the new configuration, reports the failure
-   in `arora/configuration/refused`, and returns to the last committed one at
-   its next start.
+   an instance fails to start, the new instances are dropped, the new
+   generation is removed, and nothing has changed.
+7. **Commit.** The device writes the new hash to `configuration/current.new`
+   and renames it over the pointer file `configuration/current`: replacing a
+   file by rename is atomic and repeatable, so every apply commits the same
+   way. It then removes the previous generation and replies `Applied`.
+   `Applied` therefore always means the configuration runs and a restart
+   runs it again. At start, the device runs the generation `current` names;
+   any other generation is one that never committed, which it reports as
+   refused with stage `Stage`, so a client that got no reply finds out, and
+   removes. Should the pointer write itself fail, the device keeps running
+   the new configuration, reports the failure in
+   `arora/configuration/refused`, and returns to the generation `current`
+   still names at its next start.
 
 | Kept | Changed |
 |---|---|
