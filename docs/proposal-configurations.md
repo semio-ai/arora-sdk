@@ -284,7 +284,7 @@ A configuration says what a device runs on top of its hardware.
 | **Module records**, pinned by id and version, each with its executables | A configuration means exactly these modules. |
 | **Type records** the module records and behaviors depend on | The method index and every client need them to type the calls. |
 | **Behavior records**, each a named graph with its graph type and version | A behavior is versioned like a module. Its type and version say which interpreter runs it ([behavior languages](proposal-behavior-languages.md) 3.6). |
-| **Requirements**: executors, interpreters with their versions, optionally a model family | A device refuses a configuration it cannot run before fetching anything. |
+| **Requirements**: executors, interpreters with their versions, optionally a model family | A device refuses a configuration it cannot run before fetching anything but the configuration's own record. |
 
 | Out | Why |
 |---|---|
@@ -338,11 +338,16 @@ pub struct Configuration {
   the configuration pins. `packages` is the configuration's lock: freezing
   writes one pin per package it draws a record or an artifact from, and a
   device fetches exactly those.
-- **Type versions are chosen once for the whole configuration.** A module
-  record pins the type versions it was built against, and its dependencies
-  state the ranges it accepts. Freezing picks, for each type, the newest
-  version every module and behavior accepts, and refuses a configuration
-  where none does, naming the type and the modules that disagree.
+- **One version of each type is bound for the whole configuration.** A
+  module record pins the type versions it was built against, and its
+  dependencies state the ranges it accepts, each including the version it
+  pins. Freezing picks, for each type, the newest version in every range,
+  and records it in the configuration's `types`. On the device, a frozen
+  reference to that type resolves to the bound version, whatever version it
+  pins: signatures, the closure check and the method index all use the
+  binding, which is in the pinned version's range by construction, and no
+  published record changes. A configuration where no version is in every
+  range is refused, naming the type and the modules that disagree.
 
 **A release carries its record.** A release of a record kind carries the
 frozen record as the artifact `record`, beside its other artifacts: for a
@@ -392,9 +397,12 @@ registry and an inline configuration carry records directly.
 - **A move keeps the id.** A transfer to another scope, a rename within a
   scope and a move to another registry each leave the old name pointing at
   the new one, as an alias or, for another registry, a redirect, carrying the
-  id. The resolver follows one hop and requires the id it finds to be the id
-  it followed. A consumer holding the id keeps resolving across the move,
-  with no new dependency and no breaking release.
+  id. Inside a registry an alias points at the package, not at a name, so a
+  later move updates it and it stays one hop. A redirect to another registry
+  can lead to another redirect: the resolver follows a bounded number of
+  hops, requires the id at every hop to be the id it set out with, and
+  refuses a cycle. A consumer holding the id keeps resolving across the
+  move, with no new dependency and no breaking release.
 
 **Types are packages.** Each type is published once, as a package of its
 own in its scope, with its own semver; its release carries its record. A
@@ -419,8 +427,13 @@ alike:
 /// A registry: the releases of a package, and the bytes of their artifacts.
 /// It maps its protocol onto `SourceError`; only `Network` permits falling
 /// back to a pin, and only a definitive `NotFound` clears one.
-#[async_trait]
-pub trait RegistrySource: Send + Sync {
+// Native sources are `Send + Sync`; on wasm32 the trait is `?Send`, so a
+// browser source can await JavaScript promises and hold page-local state.
+// `MaybeSend` and `MaybeSync` are `Send` and `Sync` natively, and empty on
+// wasm32; the resolver takes the same bounds.
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+pub trait RegistrySource: MaybeSend + MaybeSync {
     /// Every release of a package, in listing order, which breaks ties in
     /// selection. A name is followed through an alias or a redirect.
     async fn releases(
@@ -492,10 +505,15 @@ pub struct Pin {
   - two releases of one package and version whose hashes differ for one
     artifact key, and one record id and version arriving with two different
     contents: both are a corrupt source, `Malformed`.
-- **A pin finds its release again.** A fetch through a pin finds the release
-  by its locator and checks the id, never the current name, so a pin made
-  before a move still fetches. A pin with an id, served by a registry that
-  keeps none, is accepted with a warning naming that registry.
+- **A pin finds its release again.** A fetch through a pin asks the
+  registry its requested name maps to for that name's releases, following
+  aliases and redirects, takes the pinned version, and checks the id and
+  every pinned hash before it downloads. A fresh device needs only the pin,
+  and a pin made before a move still fetches. The locator is a shortcut,
+  valid only on the registry that made it: a source may use it to skip the
+  listing, never after a redirect to another registry. A pin with an id,
+  served by a registry that keeps none, is accepted with a warning naming
+  that registry.
 - **Credentials are not in the trait.** A source is constructed with what it
   needs to authenticate, as the device, as a person or as nobody, from a
   credential provider. No call passes a token.
@@ -513,11 +531,13 @@ pub struct Pin {
   scope of every record's `parent`, records that account on the release, and
   hashes each artifact before it writes the release. On Studio, that path is
   its publish endpoint, for the web app, `semio` and `arora-cli` alike.
-- **Where it lives.** The trait and its types (`RegistrySource`, `Release`,
-  `PackageRef`, `PackageId`, `Dependency`, `Pin`, `Kind`, `SourceError`) are
-  in `arora-registry`, which already builds for `wasm32` in `arora-web`, so
-  Studio's page uses the same types. `arora-index` is the client over it:
-  resolver, cache, sealing, `DirSource` and the build helper.
+- **Where it lives.** What records embed — `PackageId`, `Dependency` and
+  `Pin`, which a configuration record carries — is in `arora-types`, beside
+  the records. The trait and the types only sources use (`RegistrySource`,
+  `Release`, `PackageRef`, `Kind`, `SourceError`) are in `arora-registry`,
+  which depends on `arora-types` and already builds for `wasm32` in
+  `arora-web`, so Studio's page uses the same types. `arora-index` is the
+  client over it: resolver, cache, sealing, `DirSource` and the build helper.
 - **semio-db is not a backend.** It is deprecated, so the design is not
   shaped by its structure — its account-rooted tree, its naming rules. Its
   record vocabulary, semio-record, is reused by a newer store client.
@@ -574,9 +594,15 @@ pub enum BridgeOp {
 
 pub struct ConfigurationRequest {
     pub configuration: ConfigurationSource,
-    /// Apply only if the device runs this configuration now, so a client
-    /// never replaces one it has not seen. `None` applies over any.
-    pub replaces: Option<FrozenReference>,
+    /// What the device must run now for the request to apply, so a client
+    /// never replaces a configuration it has not seen.
+    pub expects: Expectation,
+}
+
+pub enum Expectation {
+    Any,                  // apply over whatever runs
+    Nothing,              // apply only if no configuration runs
+    Running(Sha256),      // apply only over this configuration
 }
 
 pub enum ConfigurationSource {
@@ -589,6 +615,13 @@ pub enum ConfigurationSource {
     Inline { configuration: ConfigurationFrozen, records: Vec<Record> },
 }
 ```
+
+**A configuration is identified by its hash**: the SHA-256 of its frozen
+record in the canonical serialization, which for a published one is the hash
+its pin holds for the `record` artifact, and for an inline one the device
+computes the same way. Expectations, reports, progress keys and persistence
+all use it, so an inline configuration is named as precisely as a published
+one.
 
 Both reply, like every operation, with a `CallResult` whose `ret` encodes over
 the value plane:
@@ -609,11 +642,11 @@ pub enum ConfigurationOutcome {
 }
 
 pub enum ConfigurationStage {
-    Requirements, Resolve, Fetch, Verify, Prepare, Swap, Busy, Replaced, Restart,
+    Requirements, Resolve, Fetch, Verify, Prepare, Stage, Swap, Busy, Replaced, Restart,
 }
 ```
 
-`Replaced` refuses a request whose `replaces` is not what the device runs;
+`Replaced` refuses a request whose expectation is not what the device runs;
 `Restart` one that would reload or unload a native module (3.6). `Err(String)`
 stays what it is for every operation: the request could not be decoded or
 reached nothing. A refusal is an answer, so a client can show its stage and
@@ -640,8 +673,10 @@ router can grant it apart from calls.
 The device applies one configuration at a time; a second request while one is
 being applied is refused at `Busy`.
 
-1. **Requirements.** The device checks executors, interpreters and family
-   against its own. Nothing is fetched yet.
+1. **Requirements.** For a published configuration it does not hold, the
+   device first fetches the configuration's own `record` artifact, verified
+   against its pin. It then checks executors, interpreters and family
+   against its own, before fetching anything else.
 2. **Fetch.** The device fetches, through its source, each artifact of the
    configuration's pins that it does not hold, verified against the pin's
    hash, and loads the records the releases carry into its registry. Every
@@ -657,16 +692,27 @@ being applied is refused at `Busy`.
    costs about 0.9 M instructions, compiling it about 1.5 G), builds the new
    method index from the module records (2.1), and lowers each new behavior
    against it. A failure here changes nothing.
-5. **Swap, between two steps.** The device instantiates every new and changed
+5. **Stage.** The device writes durably to `<device dir>/configuration/staged/`
+   everything a restart needs: the configuration's pin and record, or, inline,
+   the configuration and its records. A failure here, such as a full disk,
+   changes nothing.
+6. **Swap, between two steps.** The device instantiates every new and changed
    module before dropping any old instance, then reloads, unloads and loads,
    and starts, replaces or halts behaviors. A behavior that is kept keeps
    running as if nothing changed: its next call reaches the new instance of a
    reloaded module. A command from a bridge that is in flight to a module
    being reloaded or unloaded is interrupted, and its caller gets an error. If
-   an instance fails to start, the new instances are dropped and nothing has
-   changed.
-6. **Persist.** The device writes the configuration's reference (or, inline,
-   its records) to `<device dir>/configuration/`, then replies `Applied`.
+   an instance fails to start, the new instances are dropped, the staged
+   files removed, and nothing has changed.
+7. **Commit.** The device renames `staged/` to `current/`, one atomic rename
+   in one directory that needs no space, then replies `Applied`. `Applied`
+   therefore always means the configuration runs and a restart runs it
+   again. A device that stops before the commit restarts with the last
+   committed configuration and reports the staged one as refused, with stage
+   `Stage`, so a client that got no reply finds out. Should the rename itself
+   fail, the device keeps running the new configuration, reports the failure
+   in `arora/configuration/refused`, and returns to the last committed one at
+   its next start.
 
 | Kept | Changed |
 |---|---|
@@ -696,14 +742,17 @@ remote writes:
 
 | Key | Holds |
 |---|---|
-| `arora/configuration/running` | The running configuration's reference and content hash. Unit when none. |
-| `arora/configuration/pending` | While a configuration is being applied: its reference and the current stage. Unit otherwise. |
-| `arora/configuration/refused` | The last refusal: reference, stage and reason. |
+| `arora/configuration/running` | The running configuration's hash and, when published, its pin. Unit when none. |
+| `arora/configuration/pending` | While a configuration is being applied: its hash and the current stage. Unit otherwise. |
+| `arora/configuration/refused` | The last refusal: hash, stage and reason. |
 
 The reply to `ApplyConfiguration` is final: `Applied` or `Refused`. Fetching
 can outlast a query's timeout; a client that loses the reply reads these keys,
 which the Studio Bridge already syncs. `DescribeConfiguration` returns the
-configuration record with every record it pins.
+configuration record, its hash and its pins: references and hashes, never the
+contents of the records it pins, published or inline. A client resolves the
+published ones through its own source, as itself, so reading a device grants
+no read of a private record (3.9).
 
 ### 3.8 Applying without a bridge
 
@@ -728,7 +777,8 @@ with native modules changes them, by restarting.
   every executable is an artifact of a published module record, verified by
   hash. Development keeps `--module` for unpublished modules.
 - **Private artifacts stay sealed** in the device's cache, by the source that
-  fetched them. `DescribeConfiguration` returns records, never executables.
+  fetched them. `DescribeConfiguration` returns the configuration record and
+  its pins, never another record's contents and never an executable (3.7).
 
 ### 3.10 Release and rollout
 
@@ -838,7 +888,7 @@ follows:
 |---|---|
 | `arora_index::Source` with `releases(scoped_name, kind)` and `fetch(release, key)` | `arora_registry::RegistrySource` with `releases(package, kind)` and `artifact(release, key)`; the resolver looks up by name |
 | `Release` and `ResolvedRef` keyed by scoped name, no id | `Release`, `Dependency` and `Pin` keep the name and add the package id; the pin keeps the name it was requested under |
-| `fetch(pin)` finds the release under the pin's exact name, so a pin made before a transfer fails for every blob not cached | A pin finds its release by locator and checks the id |
+| `fetch(pin)` finds the release under the pin's exact name, so a pin made before a transfer fails for every blob not cached | A pin finds its release by its requested name and version, following aliases and redirects, and checks the id and hashes; the locator is only a shortcut on the registry that made it |
 | `DirSource`: `<scope>/<name>/<version>/release.json` | The same, plus `<scope>/<name>/package.json` with the package id, or the alias a move left |
 | `release_id`, the source's opaque id | `locator`, still opaque |
 | `SourceOptions` | `Limits`, the same fields |
@@ -883,7 +933,7 @@ Each stage lands on its own.
    behavior and configuration records. `arora-registry`: the source trait
    with package ids, dependencies and pins; exact lookup; freezing a
    configuration, its type versions chosen once, with its checks.
-   `arora-index`: the resolver's checks, pins found by locator, `DirSource`'s
+   `arora-index`: the resolver's checks, pins found by name and version, `DirSource`'s
    `package.json`. `arora-cli`: publishing to a folder registry, which binds
    the id, and moving a package, which leaves an alias. Studio: the publish
    endpoint as the one publish path, binding ids and checking scopes, with
