@@ -783,7 +783,8 @@ with native modules changes them, by restarting.
 ### 3.10 Release and rollout
 
 - **`arora-types` major.** `RecordType` gains `Behavior` and `Configuration`,
-  and is matched exhaustively. The record kinds' frozen serde shapes join the
+  and is matched exhaustively; `PackageId`, `Dependency` and `Pin` join the
+  records that embed them. The record kinds' frozen serde shapes join the
   store's wire contract, with their golden tests; the store's backend
   accepts the new kinds.
 - **`arora-registry` major, with `arora-types`'.** The registry source trait
