@@ -512,10 +512,12 @@ at every tick.
 | Native polls | A waiting leaf checks its call's handle without calling its module | the bench | all |
 | Wake on completion | A waiting leaf stays clean until its call completes, so its branch is not ticked while it waits | the bench | the trees on #404's executor, and #257 with its incremental control tick |
 
-Three candidates were tried and dropped. Invalidation for #396 and #409 cost 0.2 µs
-more: it cuts their node ticks from 64 to 47 a tick and their checks from 104
-to 66, but a value comparison here costs less than the version bookkeeping that
-replaces it. For #257 it saves its input and output nodes' visits, and pays.
+Three candidates were tried and dropped. Invalidation for #396 and #409 cost 0.24 µs
+more: it halves their node ticks, from 64 to 32 a tick, and cuts their checks
+from 104 to 60, but a value comparison here (9.5 ns) costs less than the
+version write that marks a reader (38 ns). A detached node is pulled and
+checks its arguments to know it is still valid; marked, it would be told. For
+#257 it saves its input and output nodes' visits, and pays.
 Versions instead of value comparison
 (#396's proposal, §9) cost 0.7 µs more: nearly every value here is a number,
 cheaper to compare than to version. #405's `WITH[ PARALLEL[ leaf × N ], RUN ]`
