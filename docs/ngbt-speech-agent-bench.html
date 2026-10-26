@@ -79,6 +79,7 @@ label.inline, .inline.mode-pick { display: inline-flex; align-items: center; gap
 .side-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; min-width: 0; }
 .side-head select { flex: 1 1 140px; min-width: 0; max-width: 100%; font-weight: 600; }
 .ghost-toggle { font-size: 12px; color: var(--muted); display: inline-flex; gap: 5px; align-items: center; }
+.offset-pick select { min-height: 26px; padding: 2px 6px; font-size: 12px; }
 .impl-note { margin: 0; font-size: 12px; color: var(--muted); }
 .robot-box { display: flex; justify-content: center; }
 .robot { width: 100%; max-width: 300px; height: auto; display: block; }
@@ -1921,7 +1922,10 @@ function recordingFor(id, opt = S.opt) {
   }
   return cache.get(key);
 }
-const S = { T: 16.6, playing: false, speed: 1, loop: true, pick: { a: 'compute', b: 'control' }, ghost: { a: true, b: true }, tab: 'graph', part: 'mouth', measure: 'us', opt: true };
+const S = { T: 16.6, playing: false, speed: 1, loop: true, pick: { a: 'compute', b: 'control' }, ghost: { a: true, b: true }, tab: 'graph', part: 'mouth', measure: 'us', opt: true, offset: {} };
+// A side's frame offset: how many frames after the timeline's it shows, so a design that runs a tick late is seen at the
+// same moment of its execution as the other side. It starts at the design's lag.
+const lagOf = (id) => { const impl = IMPLS.find((m) => m.id === id); return impl && impl.design ? impl.design.lag : 0; };
 const sides = {};
 const tip = document.getElementById('tip');
 const frameAt = (T) => clamp(Math.round(T / DT), 0, N - 1);
@@ -1970,12 +1974,16 @@ function poseRobot(r, c) {
 function buildSide(key) {
   const stage = document.querySelector(`.side[data-side="${key}"]`), trace = document.querySelector(`.trace[data-side="${key}"]`);
   const label = key === 'a' ? 'Left' : 'Right';
-  const pick = el('select', { id: `pick-${key}`, 'aria-label': `${label} implementation`, onchange: () => { S.pick[key] = pick.value; S.ghost[key] = pick.value !== 'reference'; ghost.checked = S.ghost[key]; mount(key); mount(key === 'a' ? 'b' : 'a', true); if (key === 'a') mountAssets(); render(); } },
+  const pick = el('select', { id: `pick-${key}`, 'aria-label': `${label} implementation`, onchange: () => { S.pick[key] = pick.value; S.ghost[key] = pick.value !== 'reference'; ghost.checked = S.ghost[key]; S.offset[key] = lagOf(pick.value); offset.value = String(S.offset[key]); mount(key); mount(key === 'a' ? 'b' : 'a', true); if (key === 'a') mountAssets(); render(); } },
     el('optgroup', { label: 'Hand-written' }, IMPLS.filter((m) => !m.design).map((m) => el('option', { value: m.id, text: m.name }))),
     el('optgroup', { label: 'Designs' }, IMPLS.filter((m) => m.design).map((m) => el('option', { value: m.id, text: m.name }))));
   pick.value = S.pick[key];
   const ghost = el('input', { type: 'checkbox', id: `ghost-${key}`, onchange: () => { S.ghost[key] = ghost.checked; render(); } });
   ghost.checked = S.ghost[key];
+  if (S.offset[key] === undefined) S.offset[key] = lagOf(S.pick[key]);
+  const offset = el('select', { id: `offset-${key}`, 'aria-label': `${label} side's frame offset`, onchange: () => { S.offset[key] = +offset.value; render(); } },
+    [0, 1, 2, 3].map((k) => el('option', { value: k, text: k === 1 ? '+1 frame' : `+${k} frames` })));
+  offset.value = String(S.offset[key]);
   const note = el('p', { class: 'impl-note' });
   const box = el('div', { class: 'robot-box' }); box.innerHTML = robotMarkup(key);
   const svg = box.querySelector('svg');
@@ -1983,7 +1991,7 @@ function buildSide(key) {
   const capRobot = el('p', { class: 'cap robot' }, el('span', { class: 'who', text: 'Pip' }), el('span', { class: 'said' }));
   const chips = el('div', { class: 'chips' });
   note.addEventListener('click', () => note.classList.toggle('open'));
-  stage.append(el('div', { class: 'side-head' }, pick, el('label', { class: 'ghost-toggle', for: `ghost-${key}` }, ghost, 'reference ghost')), note, box, el('div', { class: 'captions' }, capUser, capRobot), chips);
+  stage.append(el('div', { class: 'side-head' }, pick, el('label', { class: 'ghost-toggle', for: `ghost-${key}` }, ghost, 'reference ghost'), el('label', { class: 'ghost-toggle offset-pick', for: `offset-${key}`, title: 'Show this side this many frames after the timeline, to line up a design that runs a tick late' }, 'offset', offset)), note, box, el('div', { class: 'captions' }, capUser, capRobot), chips);
   const side = sides[key] = { key, stage, trace, pick, ghost, note, svg, main: robotRefs(svg), shade: robotRefs(svg, 'ghost-'), ghostArm: svg.querySelector('[data-k="ghost-arm"]'), ghostHead: svg.querySelector('[data-k="ghost-head"]'), capUser, capRobot, chips, label };
   side.shade.arm = side.ghostArm; side.shade.head = side.ghostHead;
 }
@@ -2419,12 +2427,12 @@ function buildScore(side) {
 }
 
 // ---- per-frame rendering ----------------------------------------------------------
-function renderSide(side, i) {
-  const f = side.rec.frames[i];
+function renderSide(side, at) {
+  const i = clamp(at + (S.offset[side.key] || 0), 0, N - 1), f = side.rec.frames[i];   // the ghost stays on the timeline’s frame
   poseRobot(side.main, f.c);
   const showGhost = S.ghost[side.key] && S.pick[side.key] !== 'reference';
   side.ghostArm.style.display = side.ghostHead.style.display = showGhost ? '' : 'none';
-  if (showGhost) poseRobot(side.shade, recordingFor('reference').frames[i].c);
+  if (showGhost) poseRobot(side.shade, recordingFor('reference').frames[at].c);
   const capKey = `${f.user}|${f.robot ? `${f.robot.text}|${f.robot.word}|${f.robot.paused}` : ''}`;
   if (capKey !== side.capKey) {
     side.capKey = capKey;

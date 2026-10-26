@@ -399,7 +399,10 @@ download it and open it in a browser.
 - **Transport and timeline.** Play, scrub, step a tick, or jump to a moment of
   the run: a cut-in, the cough, the face lost. A switch shows every build as
   proposed or optimized.
-- **Each side.** The robot, with a dashed ghost of the reference; live
+- **Each side.** A frame offset, which starts at the design's lag, shows a
+  design that runs a tick late at the same moment of its execution as the other
+  side; the reference's ghost stays on the timeline. The robot, with a dashed
+  ghost of the reference; live
   captions; the states; what it said; the service strip; the channels; the
   cost of each tick, charted as µs, node ticks, executions or checks, with
   this tick's work by area; and the scorecard. A failed check jumps to its
