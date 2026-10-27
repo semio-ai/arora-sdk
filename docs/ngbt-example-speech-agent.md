@@ -429,8 +429,19 @@ download it and open it in a browser.
   parent checked); none, not visited, fainter when not needed. Edges between
   two blue nodes are blue, edges into or out of a visit amber. A tree node's
   border is its status. A node can be dragged to untangle a graph, with a reset per part.
+- **The inspector and the watch.** Select a node in any view, or a line that
+  names one: each side's inspector shows what its design holds for the node's
+  inputs and output at this tick, with where it is kept and its state (ran,
+  kept, stale, a tick late, not what the node ran with, or not kept). Any bool,
+  state or number among them can be watched, up to six, on a plot under the
+  views, as each side's design holds it: bools on 0 and 1, states on the
+  steps of the longest watched list, numbers from ±1 up as needed. A dashed
+  line is a value that is stale, a tick late, or not what the node ran with;
+  a gap, one the design does not keep. Text is not plotted.
 - **Every implementation at a glance.** The whole run's numbers for the
   reference, the foil and the designs: each one's average tick and its work.
+- **Inspecting values, at a glance.** What an inspector finds in each build
+  over the run (§10, Inspecting values).
 - **The assets.** Every asset of §6, with the live ones following the left
   side: the postures showing, the prompts built, the memory written.
 - **The implementations.** The reference, the spec as bespoke code, which
@@ -610,6 +621,83 @@ away and the viseme's crossfades).
 - **The prompt.** Every design builds it once per call, four times, as the
   reference does.
 - **No build fails a check.**
+
+### Inspecting values
+
+A debugger's watch on a node: its inputs and its output at every tick. The
+designs all map to the same kind of view, so what tells them apart is what
+each keeps for that view to read. Read from each pull request's code (paths
+under `crates/arora-behavior-tree/src/`, and vizij-rs
+`crates/node-graph/vizij-graph-core/src/` for #257), and measured on the
+motion graph over the run:
+
+| Implementation | Outputs kept | Stale among them | Inputs show what the node ran with | Store keys a tick apart | Statuses | What an inspector reaches |
+|---|---|---|---|---|---|---|
+| Reference | 45% | — | — | 0% | none: no tree | nothing it names: instrument the code |
+| #396 detached nodes | 100% | 13% | 98% | 0% | kept, private | `detached_output`; `observe_detached` |
+| #409 full tree nodes | 100% | 13% | 98% | 0% | kept; each call's `detached_status` | as #396, with a status and a trace line per call |
+| #404 incremental tree | 100% | 13% | 87% | 0% | kept, private | nothing outside the tree |
+| #405 macros, placed | 100% | 13% | 92% | 9.2% | kept, private | less than #404 for placed nodes |
+| #257 BT in NG | 100% | 13% | 92% | 9.2% | the `out` port, typed `Status` | `eval_all`, `get_outputs_delta` |
+
+- **No design passes node values by publish and subscribe.** Each keeps them
+  in a cache, a cell or a port, for the next tick to read. The store is the
+  only push channel (`subscribe` in `arora-types/src/data/store.rs:322-345`,
+  and the bridge's `subscribe` and `values_changed`), and it carries store
+  keys, never a node's inputs or outputs. A tree-local cell reaches no observer
+  (`variable.rs:109-115`).
+- **Every build holds the same stale values,** 13% of its node outputs: they
+  take the same laziness, so the same nodes go unread. They differ in what they
+  keep beside the output, and in whether anything outside the executor can
+  tell a stale value from a current one. No build exposes that today; #257's
+  code sidesteps it by keeping nothing for a node it did not tick.
+- **#396 and #409 keep the most.** A detached node's cache holds its last call:
+  the outputs, and the arguments it ran with, which it compares and lends to
+  the call (`detached.rs:186-199, 1000-1025, 1063-1066`). An input row shows
+  what the node ran with at every tick after its first call, older than what
+  feeds it now at 19% of input-ticks. `detached_output` reads the outputs. The
+  arguments and the cache's tick are private: an accessor for each would give
+  an inspector the whole call, and staleness by comparing the arguments with
+  their sources. `observe_detached` keeps a node current by running it at
+  every tick (`behavior_tree.rs:92-98`), which advances a stateful node on a
+  branch not taken: watching that way changes what runs. #409 adds a status
+  per call, `detached_status`, which is none before the first call and after
+  a failure, so a failed call shows, and a trace line per real call
+  (`behavior_tree.rs:98, 1295` on #409).
+- **#404 keeps statuses and cells, but no values of a node's own.** A leaf's
+  output is the cell it is bound to, and its inputs are the cells it reads, as
+  they are now (`behavior_tree.rs:1398-1406`). Those are what it ran with only
+  while the leaf is clean: an input row shows a newer value at 13% of
+  input-ticks, and what the node ran with is gone. A cell counts versions only
+  while it has readers. The dirty bit and the statuses are private
+  (`incremental.rs:49-58`), and nothing reaches an observer outside the tree.
+- **#405 shows less than #404.** A placed node is an `_on_change` leaf with a
+  private port, which `observe_detached` and `detached_outputs` no longer reach
+  (`docs/proposal-placing-detached-nodes.md:264-270` on #405). Unplaced nodes
+  keep #396's cache, so one file has two regimes. Its groups run before the
+  tree, so at 9.2% of ticks the graph and the store hold different values of
+  a key.
+- **#257 has the surface an inspector wants, and keeps no inputs.** Every port
+  is typed and shaped, a control node's status is its `out` port, and the wasm
+  `eval_all` returns every port, with `get_outputs_delta` the changes since a
+  token (`vizij-graph-wasm/src/lib.rs:1079-1127`). Inputs go into temporary
+  vectors (`eval/eval_node.rs:2707-2788`). Its code clears the ports at each
+  tick, and a lazy node not ticked holds nothing (`eval/control_tests.rs:344-347`).
+  So it never shows a stale value, but has nothing to show for an unticked
+  node, and the wasm delta skips that node, so a viewer keeps its last value
+  unmarked. The cache the bench adds keeps every output, as in the other
+  builds. What the control writes reaches the graph a tick late, as in #405.
+  Its pull request is closed.
+- **The reference keeps 45% of its outputs,** in fields known only to its
+  author. Its other values are locals of the tick, and it has no tree, so no
+  statuses. The cheapest program is the hardest to inspect.
+
+For an inspector, **#409 is the best placed, then #396.** They are the only
+builds that keep each node's last call whole, and #409 shows a failed one;
+what they lack is two private fields made readable. #257's port surface is
+the most complete, but it keeps no inputs and lets unticked nodes vanish.
+#404 keeps no values a node ran with, and #405 hides its placed nodes. The
+reference keeps the least.
 
 ### Found, not applied
 

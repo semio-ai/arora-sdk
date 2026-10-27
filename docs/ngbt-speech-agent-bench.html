@@ -17,6 +17,7 @@
   --line: #d3d7cf; --grid: #e6e9e3;
   --robot: #e3e6e0; --robot-edge: #b4b9b0; --robot-shade: #cfd3cb; --screen: #131b21; --glow: #4fc9df; --ghost: #c2562a;
   --person: #d3d6d9; --person-edge: #a3a9ae; --person-shirt: #9fb4cc; --person-hair: #575c61; --person-ink: #26292c;
+  --w-1: #2a78d6; --w-2: #eb6834; --w-3: #1baf7a; --w-4: #eda100; --w-5: #e87ba4; --w-6: #008300;
   --run-1: #2a78d6; --run-2: #eb6834; --run-3: #1baf7a; --run-x: #8b928c;
   --good: #0ca30c; --bad: #d03b3b; --good-ink: #1d7a1d; --bad-ink: #b42e2e;
   --poll: #6fd25a; --poll-fill: #e4f8dc; --poll-ink: #2f7a20;
@@ -30,6 +31,7 @@
   --line: #31363a; --grid: #262a2e;
   --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
   --person: #737a80; --person-edge: #8d949a; --person-shirt: #46607e; --person-hair: #2a2d30; --person-ink: #141618;
+  --w-1: #3987e5; --w-2: #d95926; --w-3: #199e70; --w-4: #c98500; --w-5: #d55181; --w-6: #008300;
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
   --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
@@ -41,6 +43,7 @@
   --line: #31363a; --grid: #262a2e;
   --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
   --person: #737a80; --person-edge: #8d949a; --person-shirt: #46607e; --person-hair: #2a2d30; --person-ink: #141618;
+  --w-1: #3987e5; --w-2: #d95926; --w-3: #199e70; --w-4: #c98500; --w-5: #d55181; --w-6: #008300;
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
   --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
@@ -302,6 +305,42 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .work th:first-child, .work td:first-child { text-align: left; font-family: var(--f-body); }
 .work tr.all td { font-weight: 600; border-bottom: 0; }
 .tip .sub { color: var(--muted); font: 11px var(--f-mono); margin: 0 0 3px 16px; }
+/* the inspector: what the side's design holds for the selected node, at this tick */
+.view pre span.pick { cursor: pointer; }
+.view pre span.pick:hover { box-shadow: inset 3px 0 0 var(--faint); }
+.view pre span.sel { box-shadow: inset 3px 0 0 var(--ink); }
+.g-node.sel rect { stroke: var(--ink); stroke-width: 3; }
+.inspector { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; min-width: 0; }
+.inspector[hidden] { display: none; }
+.insp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.insp-head b { font: 600 13px var(--f-mono); }
+.insp-head .kind { font: 11.5px var(--f-mono); color: var(--muted); }
+.insp-head button { margin-left: auto; min-height: 24px; padding: 0 8px; font-size: 12px; }
+.insp-where { margin: 0; font-size: 12px; color: var(--muted); max-width: 72ch; }
+.insp-box { overflow-x: auto; }
+.insp { border-collapse: collapse; width: 100%; font: 11.5px var(--f-mono); font-variant-numeric: tabular-nums; }
+.insp th { font: 500 11px var(--f-body); color: var(--muted); text-align: left; padding: 2px 6px; white-space: nowrap; }
+.insp td { padding: 3px 6px; border-top: 1px solid var(--grid); vertical-align: baseline; }
+.insp td.role { color: var(--faint); white-space: nowrap; }
+.insp td.port { white-space: nowrap; }
+.insp td.v { overflow-wrap: anywhere; min-width: 16ch; }
+.insp tr.field td.port { padding-left: 18px; color: var(--muted); }
+.insp td.act { text-align: right; white-space: nowrap; }
+.tag { font: 500 10.5px/1.6 var(--f-mono); padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; color: var(--muted); }
+.tag.ran { color: var(--run-1); border-color: var(--run-1); }
+.tag.stale, .tag.late { color: var(--check-ink); border-color: var(--check); background: var(--check-fill); }
+.tag.none { color: var(--faint); border-style: dashed; }
+.insp button.watch { min-height: 22px; padding: 0 7px; font-size: 11px; }
+.insp button.watch[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.insp-hint { margin: 0; font-size: 11.5px; color: var(--faint); }
+/* the watch plot: one band per kind of value, each on its own scale */
+.watch-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 8px; margin-bottom: 6px; }
+.watch-head h3 { margin: 0; }
+.watch-head button { min-height: 24px; padding: 0 8px; font-size: 12px; }
+.watch-empty { margin: 0; font-size: 12.5px; color: var(--muted); max-width: 70ch; }
+.watch-legend button { min-height: 20px; padding: 0 6px; font-size: 11px; line-height: 1; border-radius: 999px; }
+.watch-legend .wl { display: inline-flex; align-items: center; gap: 5px; font-family: var(--f-mono); color: var(--ink); }
+.chart .band-name { fill: var(--muted); font-weight: 500; }
 @media (max-width: 760px) {
   .tabs { display: flex; }
   .traces { grid-template-columns: minmax(0, 1fr); }
@@ -320,6 +359,8 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .glance td { font-family: var(--f-mono); }
 .glance td:first-child { font-family: var(--f-body); font-weight: 600; }
 .glance tr.picked td { background: var(--panel-2); }
+.glance th.text { text-align: left; }
+.glance td.text { font-family: var(--f-body); text-align: left; white-space: normal; min-width: 14ch; max-width: 30ch; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -1629,6 +1670,11 @@ function controlWork(design, opt0, f, prevKeys, ctx, i) {
   return { statechart: sc, polls, prompt, polled, treeTicks };
 }
 const workOf = (m) => ({ ticks: m.visits, execs: m.calls, checks: m.compares + m.cacheCheck });
+// The store keys the motion graph reads at tick i, as the statechart left them `lag` ticks before.
+function motionInput(frames, i, lag = 0) {
+  const k = lag ? (i >= lag ? frames[i - lag].keys : INITIAL_KEYS) : frames[i].keys, face = faceAt(frames[i].t);
+  return { 'face/x': face.x, 'face/y': face.y, 'attention/state': k.att, 'attention/since': k.attSince, 'conversation/state': k.conv, 'conversation/sub': k.sub, 'thinking/since': k.thinkSince, 'emotion/active': k.active, 'speech/item': k.item, 'speech/playhead': k.playhead, 'speech/playing': k.playing, 'gesture/start': k.gStart };
+}
 // A design's run of the whole script, with its optimizations (true) or the options given.
 function designRecording(design, base, optimized = false) {
   const opt = typeof optimized === 'object' ? optimized : optionsFor(design, optimized);
@@ -1636,8 +1682,7 @@ function designRecording(design, base, optimized = false) {
   const frames = [], cost = [], acts = [], polls = [], treeTicks = [];
   let prevKeys = null;
   for (let i = 0; i < base.frames.length; i++) {
-    const f = base.frames[i], k = design.lag ? (i >= design.lag ? base.frames[i - design.lag].keys : INITIAL_KEYS) : f.keys, face = faceAt(f.t);
-    const input = { 'face/x': face.x, 'face/y': face.y, 'attention/state': k.att, 'attention/since': k.attSince, 'conversation/state': k.conv, 'conversation/sub': k.sub, 'thinking/since': k.thinkSince, 'emotion/active': k.active, 'speech/item': k.item, 'speech/playhead': k.playhead, 'speech/playing': k.playing, 'gesture/start': k.gStart };
+    const f = base.frames[i], input = motionInput(base.frames, i, design.lag);
     const out = run.tick(input, f.t), areas = { ...controlWork(design, opt, f, prevKeys, ctx, i), motion: out.m };
     prevKeys = f.keys;
     const m = blankMetrics(), w = {};
@@ -1649,6 +1694,25 @@ function designRecording(design, base, optimized = false) {
     acts.push(out.act); polls.push(areas.polled); treeTicks.push(areas.treeTicks);
   }
   return { ...base, frames, cost, acts, polls, treeTicks, design, optimized: !!optimized, opt };
+}
+// A probe of a recording, for the inspector: its motion graph run again, keeping at each tick what the design holds
+// for every node, its output and the arguments it last ran with, beside an eager run of the same inputs, which
+// computes every node at every tick: what each would be now. The reference and the foil run no graph; theirs is the
+// eager run of their own keys.
+// Kept beside the recording, not in it: a design's recording copies the reference's fields.
+const probes = new WeakMap();
+function probeOf(rec) {
+  if (probes.has(rec)) return probes.get(rec);
+  const design = rec.design, n = rec.frames.length, held = [], args = [], truth = [];
+  const run = design ? new MotionGraphRun(design.strategy, rec.items, rec.opt) : null, eager = new MotionGraphRun('control', rec.items, {});
+  for (let i = 0; i < n; i++) {
+    const t = rec.frames[i].t, input = motionInput(rec.frames, i, design ? design.lag : 0);
+    if (run) { run.tick(input, t); held.push(run.v.slice()); args.push(run.last.slice()); }
+    eager.tick(input, t); truth.push(eager.v.slice());
+  }
+  const probe = { held: run ? held : truth, args, truth };
+  probes.set(rec, probe);
+  return probe;
 }
 // One second waiting on the llm, the prompt unchanged. The reference's event loop checks one queue for every wait;
 // a design's waiting leaf costs what its options allow.
@@ -2024,11 +2088,239 @@ function graphModel(design, part, opt = {}) {
   }
   return { kind: 'tree', nodes, edges, box: S === 'control' ? `graph ${part}` : part === 'reply' ? 'task run' : 'subtree' };
 }
+// ---- what an inspector reads ----------------------------------------------------------------
+// A port's value at a tick and its state: 0 not kept, 1 ran this tick, 2 kept and current, 3 kept but stale (what it
+// follows from changed and it did not run), 4 a tick late (the store already holds a newer value), 5 a literal, and
+// 6 an input shown as its source holds it now, newer than what the node ran with, which nothing kept, and 7 an input
+// shown as the node ran with it, older than what feeds it now.
+const NONE = 0, FRESH = 1, KEPT = 2, STALE = 3, LATE = 4, LITERAL = 5, NEWER = 6, OLDER = 7;
+const ENUM_OF = { 'attention/state': ['nobody', 'present', 'engaged', 'lost'], 'conversation/state': ['idle', 'listening', 'judging', 'thinking', 'speaking'], 'conversation/sub': ['', 'pondering', 'preparing'] };
+const STATUS_NAMES = ['Success', 'Failure', 'Running'], STATUS_OF = { S: 'Success', F: 'Failure', R: 'Running' };
+const EMOTION_NAMES = ['neutral', 'happy', 'sad', 'surprised'];
+// A value's type, for the inspector and the watch plot's scales: a state from the key it comes from, else from the value.
+function typeOfValue(v, key) {
+  if (key && ENUM_OF[key]) return { kind: 'enum', values: ENUM_OF[key] };
+  if (typeof v === 'boolean') return { kind: 'bool' };
+  if (typeof v === 'number' || v === null || v === undefined) return { kind: 'float' };
+  if (typeof v === 'string') return { kind: 'string' };
+  if (Array.isArray(v)) return { kind: 'list' };
+  return { kind: 'record', fields: Object.keys(v).filter((k) => typeof v[k] === 'number').map((name) => ({ name, type: { kind: 'float' } })) };
+}
+// A motion node's type, from the first value an eager run gives it.
+const nodeTypes = new Map();
+function motionType(rec, id) {
+  if (!nodeTypes.has(id)) {
+    const n = NODE.get(id), p = probeOf(rec), k = INDEX.get(id);
+    let v; for (const row of p.truth) if (row[k] !== null && row[k] !== undefined) { v = row[k]; break; }
+    nodeTypes.set(id, typeOfValue(v, n.key));
+  }
+  return nodeTypes.get(id);
+}
+// The control side, for the inspector: each tree node's status at every tick, held from the last tick that reached it
+// on an executor that caches statuses; a check's key; the key a set writes; the prompt and the emotion it was built with.
+const TREE_PART = new Map();
+for (const part of ['conversation', 'attention', 'reply']) (function walk(n) { TREE_PART.set(n.uid, part); n.children.forEach(walk); })(TREES[part]);
+const dominant = (f) => { const top = f.emotions.slice().sort((a, b) => b[1] - a[1])[0]; return top ? top[0] : 'neutral'; };
+function statusSeries(rec, uid, keeps) {
+  const ctx = controlContext(rec), part = TREE_PART.get(uid), n = rec.frames.length, v = new Array(n), st = new Uint8Array(n);
+  let last;
+  for (let i = 0; i < n; i++) {
+    const s = ctx.trees[i][part].get(uid), tk = rec.treeTicks && rec.treeTicks[i];
+    if (s) { last = STATUS_OF[s]; v[i] = last; st[i] = !keeps ? NONE : !tk || tk[uid] === 1 ? FRESH : KEPT; }
+    else { v[i] = last; st[i] = keeps && last !== undefined ? STALE : NONE; }
+  }
+  return { v, st };
+}
+// A store key the tree reads or writes: held by the store, written this tick when it changed.
+function keySeries(rec, value) {
+  const n = rec.frames.length, v = new Array(n), st = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { v[i] = value(rec.frames[i]); st[i] = i && v[i] !== v[i - 1] ? FRESH : KEPT; }
+  return { v, st };
+}
+// The prompt: built when an llm call starts (its arguments latched), then held by its cache while the call runs, and
+// stale once no call reads it; the emotion it was built with, and the emotion now.
+function promptSeries(rec, which) {
+  const ctx = controlContext(rec), n = rec.frames.length, v = new Array(n), st = new Uint8Array(n);
+  let text, emo;
+  for (let i = 0; i < n; i++) {
+    const p = ctx.prompt[i], q = i ? ctx.prompt[i - 1] : null, start = !!p && (!q || q.run !== p.run || q.round !== p.round);
+    if (start) {
+      const run = rec.runs.find((r) => r.id === p.run), built = run && run.prompts.filter((x) => x.kind === `prompt ${p.round}`)[0];
+      if (built) { text = built.text; const m = /You feel (\w+)\./.exec(text); emo = m ? m[1] : undefined; }
+    }
+    if (which === 'now') { v[i] = dominant(rec.frames[i]); st[i] = KEPT; continue; }
+    v[i] = which === 'out' ? text : emo;
+    st[i] = v[i] === undefined ? NONE : start ? FRESH : p ? KEPT : STALE;
+  }
+  return { v, st };
+}
+// What each build keeps of the motion graph, where an inspector reads it (from the code of each pull request): a node's
+// output (out), what its inputs show (args: the arguments it last ran with, which the node keeps; source: nothing of its
+// own, only what its sources hold now), and the notation it names things in.
+//   #396, #409: a detached node's cache holds its last call, outputs and the arguments it compared and lent to the call.
+//   #404: a leaf keeps its status; its output is the cell it is bound to, its inputs the cells it reads, versions only.
+//   #405: placed, a node is a #404 leaf with a private port, which observe_detached and detached_outputs do not reach.
+//   #257: every node's output is a typed port; inputs go into temporary vectors. Its code clears the ports at each tick
+//   and a lazy node not ticked holds nothing; the bench's cache on every node keeps them, as in the build it runs.
+const HOLDS = {
+  reference: { out: 'field', args: 'source', style: 'code' },
+  compute: { out: 'cache', args: 'args', style: 'refs' },
+  full: { out: 'cache', args: 'args', style: 'refs', status: true },
+  inc: { out: 'cell', args: 'source', style: 'cells' },
+  macro: { out: 'cell', args: 'source', style: 'cells' },
+  control: { out: 'port', args: 'source', style: 'wired' },
+};
+const holdsOf = (rec) => HOLDS[rec.design ? rec.design.strategy : 'reference'];
+// The values the bespoke code keeps from one tick to the next, in its fields and memo: its state, the followers, the
+// posture, the speech weight, the viseme, the blink, and what it writes. The rest are locals of the tick.
+const REF_FIELDS = new Set(['target_x', 'target_y', 'glance', 'thinking', 'think_w', 'think_s', 'env', 'base', 'posture', 'p_pitch', 'p_arm', 'p_lid', 'p_open', 'p_stretch', 'p_corners', 'head_yaw', 'ty_s', 'pitch_follow', 'eye_tx', 'eye_ty', 'sp_w', 'sp_s', 'vis', 'v_open', 'v_stretch', 'v_corners', 'blink', ...SINKS.map(([, id]) => id)]);
+// A motion node's ports, as the inspector lists them: its inputs, its output, and the store key it is copied to.
+function motionPorts(rec, n) {
+  const H = holdsOf(rec), lag = rec.design ? rec.design.lag : 0, own = refText('@' + n.id, H.style === 'cells' ? 'cells' : H.style === 'wired' ? 'wired' : 'code');
+  if (n.group === 'inputs') {
+    const type = motionType(rec, n.id), ports = [{ key: 'out', role: 'reads', short: 'read', label: H.style === 'wired' ? `${n.id}: input({${n.key}})` : `{${n.key}}`, type }];
+    if (lag) ports.push({ key: 'store', role: 'store', short: 'store', label: `{${n.key}}`, title: 'the key in the store now', type });
+    return ports;
+  }
+  const ports = n.args.map((a, k) => {
+    const src = typeof a === 'string' && a[0] === '@' ? a.slice(1) : null;
+    return { key: `in${k}`, role: `in ${k + 1}`, short: `in ${k + 1}`, label: refText(a, H.style), src, type: src ? motionType(rec, src) : typeOfValue(a) };
+  });
+  ports.push({ key: 'out', role: 'out', short: 'out', label: H.out === 'cell' ? (SINK_OF.has(n.id) && rec.design.strategy === 'inc' ? `{${SINK_OF.get(n.id)}}` : `{.${n.id}}`) : H.out === 'field' ? n.id : `@${n.id}`, type: motionType(rec, n.id) });
+  if (SINK_OF.has(n.id) && !(rec.design && rec.design.strategy === 'inc')) ports.push({ key: 'store', role: 'store', short: 'store', label: `{${SINK_OF.get(n.id)}}`, title: 'the key it publishes', type: motionType(rec, n.id) });
+  if (H.status) ports.push({ key: 'status', role: 'status', short: 'status', label: 'detached_status', title: 'none before its first call and after a failure', type: { kind: 'enum', values: STATUS_NAMES } });
+  return ports;
+}
+// A motion node's value at every tick, by port. Its output: run this tick, kept and current, or kept but stale. An
+// input: the argument it last ran with, or its source's output. A store key: what the store holds now.
+function motionSeries(rec, n, port) {
+  const H = holdsOf(rec), p = probeOf(rec), k = n.idx, N = rec.frames.length, v = new Array(N), st = new Uint8Array(N), design = rec.design;
+  const outState = (i, idx) => {
+    const id = ORDER[idx].id;
+    if (!design) return REF_FIELDS.has(id) || ORDER[idx].group === 'inputs' ? (i && !same(p.held[i][idx], p.held[i - 1][idx]) ? FRESH : KEPT) : NONE;
+    if (ORDER[idx].group === 'inputs') return design.lag && !same(p.held[i][idx], motionInput(rec.frames, i, 0)[ORDER[idx].key]) ? LATE : rec.acts[i][idx] === RAN ? FRESH : KEPT;
+    return rec.acts[i][idx] === RAN ? FRESH : same(p.held[i][idx], p.truth[i][idx]) ? KEPT : STALE;
+  };
+  for (let i = 0; i < N; i++) {
+    if (port === 'out') { v[i] = p.held[i][k]; st[i] = outState(i, k); continue; }
+    if (port === 'store') { v[i] = n.group === 'inputs' ? motionInput(rec.frames, i, 0)[n.key] : p.held[i][k]; st[i] = i && !same(v[i], v[i - 1]) ? FRESH : KEPT; continue; }
+    if (port === 'status') { v[i] = p.args[i][k] ? 'Success' : undefined; st[i] = !p.args[i][k] ? NONE : rec.acts[i][k] === RAN ? FRESH : KEPT; continue; }
+    const j = +port.slice(2), src = n.from[j];
+    if (src < 0) { v[i] = n.args[j]; st[i] = LITERAL; continue; }
+    if (!design) { v[i] = p.held[i][src]; st[i] = outState(i, src); continue; }
+    const ran = p.args[i][k];
+    if (H.args === 'args') {
+      // The cache's arguments: what the node ran with, stale once its source moved on.
+      v[i] = ran ? ran[j] : undefined;
+      st[i] = !ran ? NONE : rec.acts[i][k] === RAN ? FRESH : same(ran[j], p.truth[i][src]) ? KEPT : OLDER;
+    } else {
+      // Nothing of the node's own: its source as it is now, which is what the node ran with only until it changes.
+      v[i] = p.held[i][src];
+      const late = ORDER[src].group === 'inputs' && outState(i, src) === LATE;
+      st[i] = late ? LATE : rec.acts[i][k] === RAN ? FRESH : !ran || same(ran[j], v[i]) ? KEPT : NEWER;
+    }
+  }
+  return { v, st };
+}
+// What the inspector says of a node for one implementation, and its ports.
+function inspectNode(rec, sel) {
+  const S = rec.design ? rec.design.strategy : 'reference', name = rec.design ? rec.design.short : 'the reference';
+  if (sel.kind === 'motion') {
+    const n = NODE.get(sel.id);
+    return { name: n.id, kind: n.group === 'inputs' ? `store key {${n.key}}` : `${fname(n)} · ${n.group}`, where: motionWhere(S, n, rec), ports: motionPorts(rec, n) };
+  }
+  if (sel.kind === 'prompt') {
+    const where = {
+      reference: 'The reference builds the prompt in its code when an llm call starts, and logs it: the log, and the emotion written in it, are what a debugger sees.',
+      compute: 'A detached node: its cache holds the prompt and the arguments it was built with, read once when an llm call starts, until the next call.',
+      full: 'As #396: its cache holds the prompt and the arguments it was built with; as a tree node it also has a status.',
+      inc: 'A leaf on change, bound to {.prompt}: the cell holds the prompt, and the llm leaf latches it when its call starts. The leaf keeps versions of what it reads, not values: what it was built with is gone once the emotion moves on.',
+      macro: 'Placed before the llm: a leaf on change with a private port, as in #404. It keeps no arguments: what it was built with is gone once the emotion moves on.',
+      control: 'A lazy node under the llm action: its output port holds the prompt, and the bench’s argument cache, which every build here has, keeps the arguments it was built with. #257’s code keeps no inputs.',
+    }[S];
+    return { name: 'prompt', kind: 'agent.prompt · reply run', where,
+      ports: [{ key: 'emo', role: 'in', short: 'emotion', label: '@emotion, built with', type: { kind: 'enum', values: EMOTION_NAMES } }, { key: 'now', role: 'now', short: 'emotion now', label: '@emotion, now', type: { kind: 'enum', values: EMOTION_NAMES } }, { key: 'out', role: 'out', short: 'out', label: 'the prompt', type: { kind: 'string' } }] };
+  }
+  const t = TREE_NODE.get(sel.id), ports = [];
+  if (t.k === 'check') ports.push({ key: 'key', role: 'reads', short: 'reads', label: `{${t.key}}`, type: { kind: 'bool' } });
+  if (t.k === 'set' && t.key === 'attention/state') ports.push({ key: 'key', role: 'writes', short: 'writes', label: `{${t.key}}`, type: { kind: 'enum', values: ENUM_OF['attention/state'] } });
+  t.children.forEach((c, j) => ports.push({ key: `child${j}`, role: S === 'control' ? `child_${j}` : `child ${j + 1}`, short: c.name, label: c.name, type: { kind: 'enum', values: STATUS_NAMES } }));
+  if (t.prompt) ports.push({ key: 'prompt', role: 'in', short: 'prompt', label: S === 'inc' ? '{.prompt}' : S === 'macro' ? '#prompt' : '@prompt', type: { kind: 'string' } });
+  ports.push({ key: 'status', role: 'out', short: 'status', label: 'status', type: { kind: 'enum', values: STATUS_NAMES } });
+  return { name: t.name, kind: `${t.k === 'action' ? fnText(t.fn) : t.k} · ${TREE_PART.get(t.uid)}`, where: treeWhere(S, t), ports };
+}
+const seriesMemo = new WeakMap();
+function seriesOf(rec, sel, port) {
+  if (!seriesMemo.has(rec)) seriesMemo.set(rec, new Map());
+  const memo = seriesMemo.get(rec), key = `${sel.kind}:${sel.id}:${port}`;
+  if (memo.has(key)) return memo.get(key);
+  let out;
+  const dot = port.indexOf('.'), base = dot < 0 ? port : port.slice(0, dot), field = dot < 0 ? null : port.slice(dot + 1);
+  if (field) { const s = seriesOf(rec, sel, base); out = { v: s.v.map((x) => (x && typeof x === 'object' ? x[field] : undefined)), st: s.st }; }
+  else if (sel.kind === 'motion') out = motionSeries(rec, NODE.get(sel.id), port);
+  else if (sel.kind === 'prompt') { out = promptSeries(rec, port); if (port === 'emo' && rec.design && holdsOf(rec).args === 'source' && rec.design.strategy !== 'control') out.st.fill(NONE); }
+  else {
+    const t = TREE_NODE.get(sel.id), keeps = !!rec.design;
+    if (port === 'status') out = statusSeries(rec, t.uid, keeps);
+    else if (port.startsWith('child')) out = statusSeries(rec, t.children[+port.slice(5)].uid, keeps);
+    else if (port === 'prompt') out = promptSeries(rec, 'out');
+    else if (t.k === 'check') { out = keySeries(rec, (f) => t.cond(f)); if (!keeps) out.st.fill(NONE); }
+    else out = keySeries(rec, (f) => f.att);
+  }
+  memo.set(key, out);
+  return out;
+}
+// Where each build keeps a node's values, and what an inspector reaches: the code of each pull request, read for this.
+// The whole run, as an inspector would find it: of the motion graph's node outputs at every tick, how many the build
+// keeps and how many of those are stale; of their inputs, how many show what the node ran with (a tick late included)
+// and how many are older than what feeds them now; of the store keys the graph reads, how many ticks the graph and
+// the store hold different values.
+function inspectionStats(rec) {
+  const c = { out: new Array(8).fill(0), in: new Array(8).fill(0), key: new Array(8).fill(0) };
+  for (const n of ORDER) for (const p of motionPorts(rec, n)) {
+    const b = n.group === 'inputs' ? (p.key === 'out' ? c.key : null) : p.key === 'out' ? c.out : p.key.startsWith('in') ? c.in : null;
+    if (b) for (const st of seriesOf(rec, { kind: 'motion', id: n.id }, p.key).st) b[st]++;
+  }
+  const all = (b) => b.reduce((s, x) => s + x, 0) - b[LITERAL];
+  const kept = all(c.out) - c.out[NONE], ranWith = rec.design && holdsOf(rec).args === 'args' ? all(c.in) - c.in[NONE] : c.in[FRESH] + c.in[KEPT] + c.in[LATE];
+  return { outKept: kept / all(c.out), outStale: c.out[STALE] / Math.max(1, kept), inRanWith: rec.design ? ranWith / all(c.in) : null, inOlder: c.in[OLDER] / all(c.in), keysApart: c.key[LATE] / all(c.key) };
+}
+function motionWhere(S, n, rec) {
+  const sink = SINK_OF.has(n.id), key = sink ? `{${SINK_OF.get(n.id)}}` : '';
+  if (n.group === 'inputs') return {
+    reference: 'The reference keeps this in its own state, a field of the program: nothing names it, and a debugger reads it by knowing the code.',
+    compute: `A store key, read in the tick the statechart wrote it. The store keeps one value a key, set on change; the bridge lists keys with their types, and pushes the changes to a subscriber at a clone and a send each.`,
+    full: 'A store key, as in #396: one value a key, listed by the bridge with its type and pushed to a subscriber on change.',
+    inc: 'A store key, as in #396; the leaves that read it also keep its version, and a copy of what they last saw, while they read it.',
+    macro: 'A store key. The groups run before the tree, so the motion reads what the statechart wrote last tick: for a tick, the graph and the store hold two values.',
+    control: 'A store key, read by the graph’s input node. What the control writes reaches the graph at the next tick: for a tick, the graph and the store hold two values.',
+  }[S] || '';
+  const local = !REF_FIELDS.has(n.id);
+  return {
+    reference: local ? `A local of the bespoke code’s tick, gone when the tick ends${sink ? `, but for the channel it writes, ${key}` : ''}. Nothing lists or names the code’s values: a debugger sees what its author logs or breaks on.` : `The bespoke code keeps this in a field between ticks${sink ? `, and writes it to ${key}` : ''}. Nothing lists or names the code’s values: a debugger reads a field by knowing the code.`,
+    compute: `The node’s cache keeps its last call: the outputs, which detached_output reads, and the arguments it ran with, which the cache compares and lends to the call${sink ? `; the value is also in its port and, after the tree, in ${key}` : ''}. The arguments and the cache’s tick are private today, and nothing public says a kept value is stale; observe_detached keeps a node current by running it at every tick, which would advance a stateful node on a branch not taken.`,
+    full: `As #396: the cache keeps the outputs and the arguments it ran with${sink ? `, and ${key} a copy` : ''}. Each call is also a tree node: detached_status is none before its first call and after a failure, so a failed call shows, and each real call prints a trace line.`,
+    inc: `The leaf keeps only its status: the output lives in the cell it is bound to, ${sink ? key : `{.${n.id}}`}, and its inputs are the cells it reads, as they are now. While the leaf is clean they are what it ran with; once one changes, what it ran with is gone. A cell counts versions while it has readers, and a private dirty bit marks the leaf; nothing reaches an observer outside the tree.`,
+    macro: `Placed: an _on_change leaf before its readers, with a private port, {.${n.id}}, read only through a reader’s argument; observe_detached and detached_outputs no longer reach it${sink ? `, and a Copy publishes ${key} before the tree’s body` : ''}. Its inputs are cells, as in #404, and what the statechart wrote arrives a tick late.`,
+    control: `The node’s output is a typed port with its shape, and eval_all returns every port, get_outputs_delta the changes; its inputs are not kept, only the ports they come from${sink ? `, and an output node writes ${key}` : ''}. #257’s code clears the ports at each tick and a lazy node not ticked holds nothing; the build here keeps them, with the bench’s cache on every node.`,
+  }[S] || '';
+}
+function treeWhere(S, t) {
+  const what = t.k === 'check' ? ` It reads {${t.key}}, a store key the bridge lists and pushes on change.` : t.k === 'set' ? ` It writes {${t.key}}, a store key.` : t.prompt ? ' Its prompt is its argument, latched when the call starts.' : '';
+  return {
+    reference: `The reference has no tree: its state machine keeps its states in fields, and a node’s status exists nowhere.${t.k === 'set' ? ` {${t.key}} is one of its states.` : ''}`,
+    compute: `On #404’s executor, which this build takes, each node keeps its last status, privately; a clean branch answers from it.${what}`,
+    full: `As #396: on #404’s executor each node keeps its last status, privately.${what}`,
+    inc: `Each node keeps its last status, privately, beside a dirty bit; a clean branch answers from its cache and prints no trace line.${what}`,
+    macro: `As #404: each node keeps its last status, privately, beside a dirty bit.${what}`,
+    control: `The control node’s status is its out port, typed Status, which eval_all returns with every other port; its children are its child_0, child_1, … inputs, not kept.${what}`,
+  }[S] || '';
+}
 const PARTS = [
   { id: 'conversation', label: 'Conversation' }, { id: 'attention', label: 'Attention' }, { id: 'reply', label: 'Reply run' },
   ...MOTION_GROUPS.map(([id, label]) => ({ id, label, motion: true })),
 ];
-if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim };
+if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim, probeOf, ORDER, INDEX, NODE, SINK_IDX, SOURCES, TREES, TREE_NODE, motionInput, seriesOf, inspectNode, motionPorts, FUNCS };
 </script>
 
 <script>
@@ -2080,7 +2372,7 @@ function recordingFor(id) {
   }
   return cache.get(id);
 }
-const S = { T: 16.6, playing: false, speed: 1, loop: true, pick: { a: 'compute', b: 'control' }, ghost: { a: true, b: true }, tab: 'graph', part: 'mouth', measure: 'us', offset: {}, fit: true };
+const S = { T: 16.6, playing: false, speed: 1, loop: true, pick: { a: 'compute', b: 'control' }, ghost: { a: true, b: true }, tab: 'graph', part: 'mouth', measure: 'us', offset: {}, fit: true, sel: null, watch: [] };
 // A side's frame offset: how many frames after the timeline's it shows, so a design that runs a tick late is seen at the
 // same moment of its execution as the other side. It starts at the design's lag.
 const lagOf = (id) => { const impl = IMPLS.find((m) => m.id === id); return impl && impl.design ? impl.design.lag : 0; };
@@ -2206,16 +2498,21 @@ function mount(key, costOnly = false) {
   for (const [k, label] of MEASURES) { const v = el('span', { class: 'v' }), a = el('span', { class: 'a' }); side.live[k] = { v, a }; side.liveStats.append(el('div', {}, el('span', { class: 'k', text: label }), v, a)); }
   side.stripBox = el('div', { class: 'svgbox' }); side.stripLegend = el('div', { class: 'legend' });
   side.plotsBox = el('div'); side.values = el('div', { class: 'values' });
+  side.inspector = el('div', { class: 'inspector', hidden: true, 'aria-live': 'off' });
+  side.watchBox = el('div', { class: 'svgbox' }); side.watchLegend = el('div', { class: 'legend watch-legend' });
+  side.watchEmpty = el('p', { class: 'watch-empty', text: 'Select a node in any view above, on either side, then watch its inputs or output: each side plots them as its design holds them.' });
+  side.watchClear = el('button', { type: 'button', hidden: true, onclick: clearWatches }, 'Clear');
   side.scoreList = el('ul', { class: 'score' });
   t.append(
     el('section', { class: 'block' }, el('h3', { text: 'What it said' }), side.transcript),
-    el('section', { class: 'block' }, el('div', { class: 'rep-head' }, side.repTitle, el('span', { class: 'rep-actions' }, side.zoom, side.resetLayout)), side.view, side.repNote),
+    el('section', { class: 'block' }, el('div', { class: 'rep-head' }, side.repTitle, el('span', { class: 'rep-actions' }, side.zoom, side.resetLayout)), side.view, side.inspector, side.repNote),
+    el('section', { class: 'block' }, el('div', { class: 'watch-head' }, el('h3', { text: 'Watch' }), side.watchClear), side.watchEmpty, side.watchBox, side.watchLegend),
     el('section', { class: 'block' }, el('div', { class: 'cost-head' }, el('h3', { text: 'Cost of each tick' }), side.measureSeg), side.costBox, side.costLegend, el('p', { class: 'stats-label', text: 'This tick, beside the other side at the same moment' }), side.liveStats, side.workTable, el('p', { class: 'stats-label', text: 'The whole run, on average' }), side.costStats),
     el('section', { class: 'block' }, el('h3', { text: 'Services' }), side.stripBox, side.stripLegend),
     el('section', { class: 'block' }, el('h3', { text: 'Channels' }), side.plotsBox, side.values),
     el('section', { class: 'block' }, el('h3', { text: 'Scorecard' }), side.scoreList),
   );
-  buildTranscript(side); buildRep(side); buildCost(side); buildStrip(side); buildPlots(side); buildScore(side);
+  buildTranscript(side); buildRep(side); buildInspector(side); buildWatch(side); buildCost(side); buildStrip(side); buildPlots(side); buildScore(side);
   side.valueCells = CHANNELS.map((name) => { const v = el('span', { text: '0.00' }); side.values.append(el('div', {}, el('span', { class: 'k', text: name }), v)); return v; });
 }
 
@@ -2250,9 +2547,9 @@ function repNote(design, part, tab) {
 function buildRep(side) {
   const design = side.rec.design || null, part = S.part, tab = S.tab;
   side.repTitle.textContent = `${partLabel(part)} · ${TABS.find(([k]) => k === tab)[1].toLowerCase()}`;
-  side.repNote.textContent = repNote(design, part, tab) + (isMotion(part) && tab !== 'stored' ? ' Nothing here waits, so nothing is polled: the waits are in the conversation and the reply run, and the chip under each robot lists them.' : '') + (tab === 'graph' ? '' : ` ${NOTATION}`);
+  side.repNote.textContent = repNote(design, part, tab) + (isMotion(part) && tab !== 'stored' ? ' Nothing here waits, so nothing is polled: the waits are in the conversation and the reply run, and the chip under each robot lists them.' : '') + (tab === 'graph' ? '' : ` ${NOTATION}`) + ' Click a node, or a line that names one, to inspect it.';
   side.repKey = `${side.rec.impl.id}|${part}|${tab}`;
-  side.repLines = null; side.gnodes = null; side.gedges = null;
+  side.repLines = null; side.gnodes = null; side.gedges = null; side.pickLines = [];
   side.view.classList.toggle('full', part === 'full');
   side.zoom.hidden = part !== 'full' || tab !== 'graph'; side.zoom.textContent = S.fit ? 'Actual size' : 'Fit to width';
   if (tab === 'graph') { buildGraph(side, design, part); side.repNote.textContent += ' Drag a node to move it; with a node focused, the arrow keys move it.'; }
@@ -2264,6 +2561,7 @@ function buildRep(side) {
     // A line's // comment is muted, so the file's own text stands out.
     const lineSpan = (text) => { const at = text.search(/(^|\s)\/\/ /); if (at < 0) return el('span', { text: text || ' ' }); const cut = text[at] === '/' ? at : at + 1; return el('span', {}, text.slice(0, cut), el('i', { class: 'cmt', text: text.slice(cut) })); };
     side.repLines = lines.map((l) => { const span = lineSpan(l.text); pre.append(span); return { span, id: l.id }; });
+    side.pickLines = side.repLines.filter((l) => l.id !== undefined && l.id !== null && selFor(l.id)).map((l) => { const sel = selFor(l.id); l.span.classList.add('pick'); l.span.addEventListener('click', () => select(sel)); return { span: l.span, sel }; });
     if (tab === 'stored') side.repLines = null;
     side.view.replaceChildren(pre);
   }
@@ -2407,7 +2705,7 @@ function buildGraph(side, design, part) {
     const onUp = () => {
       g.removeEventListener('pointermove', onMove); g.removeEventListener('pointerup', onUp); g.removeEventListener('pointercancel', onUp);
       dragging = false; svg.classList.remove('dragging');
-      if (n.x !== x0 || n.y !== y0) { remember(n); fit(); }
+      if (n.x !== x0 || n.y !== y0) { remember(n); fit(); } else select(selOfNode(n));
     };
     g.addEventListener('pointermove', onMove); g.addEventListener('pointerup', onUp); g.addEventListener('pointercancel', onUp);
   };
@@ -2429,12 +2727,13 @@ function buildGraph(side, design, part) {
     g.addEventListener('focus', () => { const b = g.getBoundingClientRect(); showTip(describe(), { clientX: b.right, clientY: b.top }); }); g.addEventListener('blur', hideTip);
     g.addEventListener('pointerdown', (ev) => startDrag(ev, n, g));
     g.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); select(selOfNode(n)); return; }
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
       if (!d) return;
       ev.preventDefault(); const step = ev.shiftKey ? 2 : 12;
       move(n, g, n.x + d[0] * step, n.y + d[1] * step); remember(n); fit();
     });
-    svg.append(g); side.gnodes.set(n.id, { g, n, badge: g.querySelector('.badge-s') });
+    svg.append(g); side.gnodes.set(n.id, { g, n, badge: g.querySelector('.badge-s'), sel: selOfNode(n) });
   }
   fit();
   side.view.replaceChildren(svg);
@@ -2458,12 +2757,12 @@ function liveRep(side, i) {
   };
   if (side.gnodes) {
     const state = new Map();   // ran or visited: an edge between two ran nodes is the active path, one into or out of a visit is a read
-    for (const { g, n, badge } of side.gnodes.values()) {
+    for (const { g, n, badge, sel } of side.gnodes.values()) {
       let cls = '';
       if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid); cls = s ? treeClass(n.tree.uid) : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; if (!tk && s === 'R') state.set(n.id, 'ran'); }
       else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'untouched' : 'st-none';
       else if (motion || full) cls = motionClass(n.ref || n.id);
-      g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}`);
+      g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}${sameSel(sel, S.sel) ? ' sel' : ''}`);
       const words = cls.split(' ');
       if (words.includes('ran')) state.set(n.id, 'ran'); else if (words.includes('visited')) state.set(n.id, 'visited');
     }
@@ -2485,6 +2784,179 @@ function liveRep(side, i) {
       span.className = cls;
     }
   }
+  for (const { span, sel } of side.pickLines || []) { span.classList.add('pick'); span.classList.toggle('sel', sameSel(sel, S.sel)); }
+}
+
+// ---- the inspector and the watch plot ----------------------------------------------------
+// Select a node in any view, on either side: each side's inspector shows what its design holds for the node's inputs
+// and output at this tick, and where; any bool, state or number among them can be watched over the run, on both sides.
+const WATCH_MAX = 6;
+const sameSel = (a, b) => !!a && !!b && a.kind === b.kind && a.id === b.id;
+function selFor(id) {
+  if (typeof id === 'number') return { kind: 'tree', id };
+  if (id === 'prompt') return { kind: 'prompt', id };
+  return NODE.has(id) ? { kind: 'motion', id } : null;
+}
+// A drawn node's selection: a tree node, the prompt, or a motion node, a port standing for the node it names.
+function selOfNode(n) {
+  if (n.tree) return { kind: 'tree', id: n.tree.uid };
+  if (n.data) return { kind: 'prompt', id: 'prompt' };
+  const id = n.ref || n.id;
+  return NODE.has(id) ? { kind: 'motion', id } : null;
+}
+function select(sel) {
+  if (!sel) return;
+  S.sel = sel;
+  for (const s of Object.values(sides)) buildInspector(s);
+  render();
+}
+function closeInspector() { S.sel = null; for (const s of Object.values(sides)) buildInspector(s); render(); }
+const isWatched = (sel, port) => S.watch.some((w) => sameSel(w.sel, sel) && w.port === port);
+function toggleWatch(sel, port, label, type) {
+  const at = S.watch.findIndex((w) => sameSel(w.sel, sel) && w.port === port);
+  if (at >= 0) S.watch.splice(at, 1);
+  else if (S.watch.length < WATCH_MAX) {
+    // A watch keeps its colour until it is removed; a new one takes the first free slot.
+    const used = new Set(S.watch.map((w) => w.slot)); let slot = 1; while (used.has(slot)) slot++;
+    S.watch.push({ sel, port, label, type: type.kind, values: type.values, slot });
+  }
+  for (const s of Object.values(sides)) { buildWatch(s); syncWatchButtons(s); }
+  render();
+}
+function clearWatches() { S.watch = []; for (const s of Object.values(sides)) { buildWatch(s); syncWatchButtons(s); } render(); }
+const TAG_TEXT = ['not kept', 'ran', 'kept', 'stale', 'a tick late', 'literal', 'not what it ran with', 'ran with, now older'];
+const TAG_CLASS = ['none', 'ran', 'kept', 'stale', 'late', 'kept', 'late', 'stale'];
+function fmtValue(v, type) {
+  if (v === undefined) return '—';
+  if (v === null) return 'none';
+  if (type.kind === 'bool') return v ? 'true' : 'false';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3);
+  if (typeof v === 'string') return type.kind === 'enum' ? (v === '' ? '(none)' : v) : quote(v.length > 48 ? `${v.slice(0, 46)}…` : v);
+  if (Array.isArray(v)) return v.length ? v.map((x) => (Array.isArray(x) ? `${x[0]} ${typeof x[1] === 'number' ? x[1].toFixed(2) : x[1]}` : x && x.name ? x.name : String(x))).join(', ') : '(empty)';
+  if (typeof v === 'object') return Object.entries(v).map(([k, x]) => `${k} ${typeof x === 'number' ? x.toFixed(2) : x}`).join(', ');
+  return String(v);
+}
+const watchable = (type) => type.kind === 'bool' || type.kind === 'enum' || type.kind === 'float';
+function buildInspector(side) {
+  const box = side.inspector, sel = S.sel;
+  side.inspRows = [];
+  box.hidden = !sel;
+  if (!sel) { box.replaceChildren(); return; }
+  const info = inspectNode(side.rec, sel);
+  const body = el('tbody');
+  const row = (p, field) => {
+    const type = field ? field.type : p.type, port = field ? `${p.key}.${field.name}` : p.key;
+    const v = el('td', { class: 'v' }), tag = el('span', { class: 'tag' }), act = el('td', { class: 'act' });
+    if (watchable(type)) {
+      const label = `${info.name} · ${field ? `${p.short}.${field.name}` : p.short}`;
+      const b = el('button', { type: 'button', class: 'watch', 'aria-pressed': String(isWatched(sel, port)), title: 'Plot this value over the run, below', onclick: () => toggleWatch(sel, port, label, type) }, isWatched(sel, port) ? 'watching' : 'watch');
+      act.append(b); side.inspRows.push({ v, tag, port, type, button: b });
+    } else {
+      if (!field && p.type.kind !== 'record') act.append(el('span', { class: 'insp-hint', text: p.type.kind === 'string' ? 'text: not plotted' : '' }));
+      side.inspRows.push({ v, tag, port, type });
+    }
+    body.append(el('tr', { class: field ? 'field' : '' }, el('td', { class: 'role', text: field ? '' : p.role }), el('td', { class: 'port', text: field ? field.name : p.label, title: field ? '' : p.title || '' }), v, el('td', {}, tag), act));
+    if (!field && type.kind === 'record') for (const fl of type.fields) row(p, fl);
+  };
+  for (const p of info.ports) row(p);
+  box.replaceChildren(
+    el('div', { class: 'insp-head' }, el('b', { text: info.name }), el('span', { class: 'kind', text: info.kind }), el('button', { type: 'button', onclick: closeInspector, 'aria-label': 'Close the inspector' }, 'Close')),
+    el('p', { class: 'insp-where', text: info.where }),
+    el('div', { class: 'insp-box' }, el('table', { class: 'insp' }, el('thead', {}, el('tr', {}, ['', 'port', 'this tick', '', ''].map((h) => el('th', { scope: 'col', text: h })))), body)));
+  side.inspKey = '';
+}
+function syncWatchButtons(side) { for (const r of side.inspRows || []) if (r.button) { const on = isWatched(S.sel, r.port); r.button.setAttribute('aria-pressed', String(on)); r.button.textContent = on ? 'watching' : 'watch'; } }
+function renderInspector(side, i) {
+  if (!S.sel || !side.inspRows) return;
+  for (const r of side.inspRows) {
+    const s = seriesOf(side.rec, S.sel, r.port), st = s.st[i];
+    r.v.textContent = st === 0 ? '—' : fmtValue(s.v[i], r.type);
+    if (r.type.kind === 'string') r.v.title = st === 0 || typeof s.v[i] !== 'string' ? '' : s.v[i];
+    r.tag.textContent = TAG_TEXT[st]; r.tag.className = `tag ${TAG_CLASS[st]}`;
+  }
+}
+// A watched value as a number on its band's scale: a bool 0 or 1, a state its place in its list, a number itself;
+// NaN where the design keeps no such value.
+function watchNumbers(rec, w) {
+  const s = seriesOf(rec, w.sel, w.port), n = s.v.length, y = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = s.v[i];
+    y[i] = s.st[i] === 0 || v === undefined || v === null ? NaN : w.type === 'bool' ? (v ? 1 : 0) : w.type === 'enum' ? w.values.indexOf(v) : typeof v === 'number' ? v : NaN;
+  }
+  return { y, st: s.st, raw: s.v };
+}
+function buildWatch(side) {
+  const ws = S.watch, rec = side.rec;
+  side.watchNow = [];
+  side.watchEmpty.hidden = ws.length > 0; side.watchClear.hidden = !ws.length;
+  if (!ws.length) { side.watchBox.replaceChildren(); side.watchLegend.replaceChildren(); return; }
+  const series = ws.map((w) => ({ w, ...watchNumbers(rec, w) }));
+  const bands = [];
+  const kind = (k) => series.filter((x) => x.w.type === k);
+  if (kind('bool').length) bands.push({ name: 'bool', list: kind('bool'), lo: 0, hi: 1, h: 40, ticks: [[0, 'false'], [1, 'true']], step: true });
+  if (kind('enum').length) {
+    const list = kind('enum'), K = Math.max(...list.map((x) => x.w.values.length)), one = list.length === 1 ? list[0].w.values : null;
+    bands.push({ name: 'state', list, lo: 0, hi: K - 1, h: Math.max(50, 15 * K), ticks: Array.from({ length: K }, (_, k) => [k, one ? (one[k] === '' ? '(none)' : one[k] || '') : String(k)]), step: true });
+  }
+  if (kind('float').length) {
+    const list = kind('float'); let lo = -1, hi = 1;
+    for (const x of list) for (const v of x.y) if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    lo = -niceMax(-lo); hi = niceMax(hi);
+    bands.push({ name: 'number', list, lo, hi, h: 104, ticks: [[lo, num(lo)], [0, '0'], [hi, num(hi)]] });
+  }
+  const W = widthOf(side.watchBox), left = 58, right = 8, gap = 16, bottom = 18;
+  let H = 2; for (const b of bands) { b.top = H + 22; H = b.top + b.h + gap; } H += bottom - gap;
+  const pw = W - left - right, x = (t) => left + (t / RUN_END) * pw;
+  const svg = sv('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Watched values over the run, as ${rec.impl.name} holds them` });
+  for (let s = 0; s <= RUN_END; s += 10) svg.append(sv('text', { x: x(s), y: H - 4, 'text-anchor': s === 0 ? 'start' : 'middle' }, `${s} s`));
+  for (const b of bands) {
+    const y = (v) => b.top + (1 - (v - b.lo) / (b.hi - b.lo || 1)) * b.h;
+    svg.append(sv('text', { class: 'band-name', x: 0, y: b.top - 11 }, b.name));
+    // A tick too near the one before it keeps its line and drops its label.
+    let lastY = -Infinity;
+    for (const [v, text] of b.ticks.slice().sort((p, q) => q[0] - p[0])) {
+      svg.append(sv('line', { class: v === 0 && b.name === 'number' ? 'axis' : 'grid', x1: left, x2: left + pw, y1: y(v), y2: y(v) }));
+      if (y(v) - lastY >= 11) { svg.append(sv('text', { x: left - 4, y: y(v) + 3, 'text-anchor': 'end' }, text)); lastY = y(v); }
+    }
+    b.list.forEach((sr, j) => {
+      // Lines on one level stay apart by a pixel or two; a stale stretch is dashed, and where nothing is kept, a gap.
+      const dy = b.step ? (j - (b.list.length - 1) / 2) * 2.5 : 0;
+      // Each run of one style is one subpath, so a dash pattern runs on across frames.
+      const d = { solid: '', dashed: '' };
+      let prev = null, cur = null;
+      for (let i = 0; i < sr.y.length; i++) {
+        const v = sr.y[i];
+        if (!Number.isFinite(v)) { prev = null; cur = null; continue; }
+        const px = x(i * DT).toFixed(1), py = (y(v) + dy).toFixed(1), style = sr.st[i] >= 3 && sr.st[i] !== 5 ? 'dashed' : 'solid';
+        const to = b.step ? `H${px}V${py}` : `L${px} ${py}`;
+        if (prev && cur === style) d[style] += to;
+        else d[style] += prev ? `M${prev.px} ${prev.py}${to}` : `M${px} ${py}h0.01`;
+        prev = { px, py }; cur = style;
+      }
+      const { solid, dashed } = d;
+      for (const [d, dash] of [[solid, null], [dashed, '3 3']]) {
+        if (!d) continue;
+        const p = sv('path', { d, fill: 'none', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }); p.style.stroke = `var(--w-${sr.w.slot})`;
+        if (dash) p.setAttribute('stroke-dasharray', dash);
+        svg.append(p);
+      }
+    });
+    const now = sv('line', { class: 'now', x1: left, x2: left, y1: b.top, y2: b.top + b.h }); svg.append(now); side.watchNow.push(now);
+  }
+  side.watchX = x;
+  const hit = sv('rect', { x: left, y: 0, width: pw, height: H, fill: 'transparent' }); svg.append(hit);
+  const hover = sv('line', { class: 'hover', x1: left, x2: left, y1: 4, y2: H - bottom, visibility: 'hidden' }); svg.append(hover);
+  const readout = (ev) => {
+    const bb = svg.getBoundingClientRect(), px = (ev.clientX - bb.left) * (W / bb.width), i = frameAt(clamp(((px - left) / pw) * RUN_END, 0, RUN_END));
+    hover.setAttribute('x1', x(i * DT)); hover.setAttribute('x2', x(i * DT)); hover.setAttribute('visibility', 'visible');
+    showTip(`<b>${(i * DT).toFixed(2)} s</b>` + series.map((sr) => `<div class="row"><i style="background:var(--w-${sr.w.slot})"></i><b>${escapeHtml(sr.st[i] === 0 ? '—' : fmtValue(sr.raw[i], { kind: sr.w.type }))}</b> ${escapeHtml(sr.w.label)} · ${TAG_TEXT[sr.st[i]]}</div>`).join(''), ev);
+  };
+  hit.addEventListener('pointermove', readout); hit.addEventListener('pointerenter', readout);
+  hit.addEventListener('pointerleave', () => { hover.setAttribute('visibility', 'hidden'); hideTip(); });
+  side.watchBox.replaceChildren(svg);
+  side.watchLegend.replaceChildren(...series.map((sr) => el('span', { class: 'wl' }, el('i', { class: 'line', style: `background:var(--w-${sr.w.slot})` }), sr.w.label,
+    el('button', { type: 'button', 'aria-label': `Stop watching ${sr.w.label}`, title: 'Stop watching', onclick: () => toggleWatch(sr.w.sel, sr.w.port, sr.w.label, { kind: sr.w.type, values: sr.w.values }) }, '×'))),
+  el('span', { text: 'solid: computed this tick, or kept and current · dashed: stale, a tick late, or not what the node ran with now · a gap: not kept' }));
 }
 
 // ---- the cost of each tick -----------------------------------------------------------
@@ -2696,6 +3168,8 @@ function renderSide(side, at) {
   renderWork(side, i, at);
   f.c.forEach((v, j) => { side.valueCells[j].textContent = v.toFixed(2); });
   liveRep(side, i);
+  renderInspector(side, i);
+  if (side.watchX) { const wx = side.watchX(f.t); for (const ln of side.watchNow) { ln.setAttribute('x1', wx); ln.setAttribute('x2', wx); } }
 }
 
 // ---- the shared view controls ----------------------------------------------------------
@@ -2749,6 +3223,38 @@ function buildGlance() {
   // One row at a time, after the page has drawn: a build takes a moment to run 40 s at 100 Hz.
   let k = 0;
   const next = () => { if (k < rows.length) { fillRow(rows[k++]); setTimeout(next, 0); } };
+  setTimeout(next, 0);
+  return () => { for (const r of rows) r.tr.classList.toggle('picked', r.impl.id === S.pick.a || r.impl.id === S.pick.b); };
+}
+// ---- inspecting values, at a glance -------------------------------------------------------
+// What each build keeps of the values its nodes exchange, from the code of each pull request, and what an inspector
+// reaching it would find over the run. Filled one implementation at a time, after the glance.
+const INSPECT_ROWS = {
+  reference: { statuses: 'none: no tree', reach: 'nothing: its fields are known only to its author; instrument the code', stale: 'no' },
+  foil: { statuses: 'none: no tree', reach: 'as the reference', stale: 'no' },
+  compute: { statuses: 'kept, private', reach: 'detached_output; observe_detached runs a node at every tick to keep it current', stale: 'privately: its arguments against its sources' },
+  full: { statuses: 'kept, and each call’s: detached_status', reach: 'as #396, with detached_status and a trace line per call', stale: 'as #396, and a failed call by its status' },
+  inc: { statuses: 'kept, private', reach: 'none outside the tree: cells, versions and the dirty bit are internal', stale: 'privately: a dirty bit' },
+  macro: { statuses: 'kept, private', reach: 'less than #404: placed nodes leave observe_detached and detached_outputs', stale: 'privately: a dirty bit' },
+  control: { statuses: 'its out port, typed Status', reach: 'eval_all: every port with its type and shape; get_outputs_delta the changes', stale: 'its code: by absence; the bench’s cache: by its marks' },
+};
+function buildInspectGlance() {
+  const head = ['implementation', 'outputs kept', 'stale among them', 'inputs: what it ran with', 'store keys a tick apart', 'statuses', 'tells stale apart', 'what an inspector reaches'];
+  const pct = (x) => (x === null ? '—' : `${(x * 100).toFixed(x > 0 && x < 0.1 ? 1 : 0)}%`);
+  const rows = IMPLS.map((impl) => { const info = INSPECT_ROWS[impl.design ? impl.design.strategy : impl.id], cells = [0, 1, 2, 3].map(() => el('td', { text: '…' })); return { impl, cells, tr: el('tr', {}, el('td', { text: impl.name }), cells, el('td', { class: 'text', text: info.statuses }), el('td', { class: 'text', text: info.stale }), el('td', { class: 'text', text: info.reach })) }; });
+  const box = el('section', { class: 'glance inspect-glance', 'aria-label': 'Inspecting values, at a glance' },
+    el('h2', { text: 'Inspecting values, at a glance' }),
+    el('p', { text: 'What an inspector finds of the values the motion graph’s nodes exchange, over the whole run: of the node outputs at every tick, how many the build keeps, and how many of those are stale, kept from a run whose inputs have since changed; of their inputs, how many show what the node ran with; of the store keys the graph reads, how many ticks the graph and the store hold two values. The rest is from the code of each pull request: who keeps statuses, whether a stale value can be told from a current one, and what an inspector outside the executor can reach.' }),
+    el('p', { text: 'No design passes node values by publish and subscribe: each keeps them, in a cache, a cell or a port, for its next tick to read. The store is the only push channel, its subscriptions and the bridge’s, and it carries store keys, never a node’s inputs or outputs.' }),
+    el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h, j) => el('th', { scope: 'col', class: j > 4 ? 'text' : '', text: h })))), el('tbody', {}, rows.map((r) => r.tr)))));
+  document.querySelector('.glance').after(box);
+  let k = 0;
+  const next = () => {
+    if (k >= rows.length) return;
+    const r = rows[k++], s = inspectionStats(recordingFor(r.impl.id));
+    [pct(s.outKept), pct(r.impl.design ? s.outStale : null), pct(s.inRanWith), pct(s.keysApart)].forEach((t, j) => { r.cells[j].textContent = t; });
+    setTimeout(next, 0);
+  };
   setTimeout(next, 0);
   return () => { for (const r of rows) r.tr.classList.toggle('picked', r.impl.id === S.pick.a || r.impl.id === S.pick.b); };
 }
@@ -2865,7 +3371,7 @@ function loop(now) {
   }
   requestAnimationFrame(loop);
 }
-function rebuildCharts() { for (const key of ['a', 'b']) { buildStrip(sides[key]); buildPlots(sides[key]); buildCost(sides[key]); } buildTimeline(); }
+function rebuildCharts() { for (const key of ['a', 'b']) { buildStrip(sides[key]); buildPlots(sides[key]); buildCost(sides[key]); buildWatch(sides[key]); } buildTimeline(); }
 let resizeTimer = null, lastWidth = 0;
 new ResizeObserver(() => {
   const w = document.querySelector('.traces').getBoundingClientRect().width;
@@ -2879,7 +3385,8 @@ buildAssets();
 mount('a'); mount('b'); mount('a', true);
 mountAssets();
 markGlance = buildGlance(); markGlance();
-for (const key of ['a', 'b']) sides[key].pick.addEventListener('change', () => markGlance());
+const markInspect = buildInspectGlance(); markInspect();
+for (const key of ['a', 'b']) sides[key].pick.addEventListener('change', () => { markGlance(); markInspect(); });
 buildTimeline();
 render();
 requestAnimationFrame(loop);
