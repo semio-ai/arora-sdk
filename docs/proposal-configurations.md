@@ -722,8 +722,11 @@ not committed, after a failed pointer write, skips to Commit and replies
    against its own, before fetching anything else.
 2. **Fetch.** The device fetches, through its source, each artifact of the
    configuration's pins that it does not hold, verified against the pin's
-   hash, and loads the records the releases carry into its registry. Every
-   reference the configuration makes must then resolve there.
+   hash, and loads the records the releases carry into a candidate registry
+   layered over its own. Every reference the configuration makes must then
+   resolve there. Swap makes the candidate's records the device's; a
+   refusal drops them, so a refused apply leaves the registry as it was. The
+   verified blobs stay in the cache either way.
 3. **Diff.** Against the running configuration, each module is *kept* (same
    id, version and executable hash), *reloaded* (same id, anything else
    changed), *unloaded* or *loaded*; each behavior is kept, replaced, halted
@@ -749,8 +752,9 @@ not committed, after a failed pointer write, skips to Commit and replies
    running as if nothing changed: its next call reaches the new instance of a
    reloaded module. A command from a bridge that is in flight to a module
    being reloaded or unloaded is interrupted, and its caller gets an error. If
-   an instance fails to start, the new instances are dropped, the new
-   generation is removed, and nothing has changed.
+   an instance fails to start, the new instances are dropped, the
+   generation this request staged is removed unless `current` names it, and
+   nothing has changed.
 7. **Commit.** The device writes the new hash to `configuration/current.new`
    and renames it over the pointer file `configuration/current`: replacing a
    file by rename is atomic and repeatable, so every apply commits the same
