@@ -311,7 +311,7 @@ pub struct Behavior {
     pub name: String,
     pub graph_type: String,          // "behavior-tree"
     pub graph_version: Version,      // the format's version
-    pub graph: Graph,
+    pub graph: Vec<u8>,              // the graph, serialized as its format says
     pub dependencies: Vec<FrozenReference>,  // the module records it calls
 }
 
@@ -333,26 +333,35 @@ pub struct Configuration {
   it, with the existing `Freeze` and `Resolver`, and records the pin of each
   release it draws from. A device applies only frozen configurations, so a
   device and the client that sent the configuration run the same records.
+- **A behavior's graph is bytes in its format.** The record names the format
+  (`graph_type`, `graph_version`) and the interpreter that runs it parses the
+  graph, so `arora-types` holds no graph model and depends on no interpreter
+  crate: `arora-behavior` already depends on `arora-types`, and the reverse
+  would be a cycle. Another behavior language is another `graph_type`, not
+  another record kind.
 - **Freezing checks the behaviors against the modules.** Each function a
-  behavior calls must be an export of a module record the configuration pins,
-  with a matching signature. The device does not repeat this check when it
-  applies or reloads: a configuration carries both sides, and is checked where
-  it is made.
+  behavior calls must be an export of the module version the configuration
+  binds (below), with a matching signature. The device does not repeat this
+  check for the behaviors a configuration carries: it carries both sides, and
+  is checked where it is made. A behavior the device keeps running, with its
+  live edits, is checked at apply (3.6, Prepare).
 - **The record set is closed.** Every reference reachable from the
   configuration resolves to a record in the `record` artifact of a release
   the configuration pins. `packages` is the configuration's lock: freezing
   writes one pin per package it draws a record or an artifact from, and a
   device fetches exactly those.
-- **One version of each type is bound for the whole configuration.** A
-  module record pins the type versions it was built against, and its
-  dependencies state the ranges it accepts, each including the version it
-  pins. Freezing picks, for each type, the newest version in every range,
-  and records it in the configuration's `types`. On the device, a frozen
-  reference to that type resolves to the bound version, whatever version it
-  pins: signatures, the closure check and the method index all use the
-  binding, which is in the pinned version's range by construction, and no
-  published record changes. A configuration where no version is in every
-  range is refused, naming the type and the modules that disagree.
+- **One version of each package is bound for the whole configuration.** A
+  record pins the versions it was built against: a module the types it
+  names, a behavior the modules it calls. Its dependencies state the ranges
+  it accepts, each including the version it pins. Freezing picks, for each
+  package, the newest version in every range, and records it in the
+  configuration's `types` or `modules`. On the device, a frozen reference
+  resolves to the bound version, whatever version it pins: signatures, the
+  closure check and the method index all use the binding, which is in the
+  pinned version's range by construction, and no published record changes.
+  So a module's patch release reaches a configuration without a new release
+  of the behaviors that call it. A configuration where no version is in
+  every range is refused, naming the package and the records that disagree.
 
 **A release carries its record.** A release of a record kind carries the
 frozen record as the artifact `record`, beside its other artifacts: for a
@@ -512,6 +521,13 @@ pub struct Pin {
   `header` and one executable per executor. The record is then content-hashed
   and verified like every other artifact, and a source needs no record-shaped
   call. A model, a face or an animation has no `record` artifact.
+- **A device creates the scope folders its records need.** `arora-registry`
+  places a record under its parent folder, and a record's parent is its
+  scope's id. Loading a record whose scope folder is absent first adds that
+  folder, named by the id itself: a device resolves by id, never by a
+  folder's name, so the scope's handle, which can change, is not needed. A
+  release made before a move installs under the scope id it was published
+  with, from its pin alone, and no registry publishes folders.
 - **The resolver verifies, and only the resolver.** `arora-index`'s resolver
   selects a release (Studio's rules: the newest non-deprecated version in
   range that has the requested artifact), checks the pinned hash before a
@@ -665,7 +681,7 @@ pub enum ConfigurationOutcome {
 }
 
 pub enum ConfigurationStage {
-    Requirements, Resolve, Fetch, Verify, Prepare, Stage, Swap, Busy, Replaced, Restart,
+    Requirements, Resolve, Fetch, Verify, Prepare, Stage, Swap, Commit, Busy, Replaced, Restart,
 }
 ```
 
@@ -695,8 +711,10 @@ router can grant it apart from calls.
 
 The device applies one configuration at a time; a second request while one is
 being applied is refused at `Busy`. A request for the configuration already
-running, by hash, changes nothing and replies `Applied`, so a client that
-lost a reply can retry safely.
+running and committed, by hash, changes nothing and replies `Applied`, so a
+client that lost a reply can retry safely. A request for the one running but
+not committed, after a failed pointer write, skips to Commit and replies
+`Applied` only once it succeeds.
 
 1. **Requirements.** For a published configuration it does not hold, the
    device first fetches the configuration's own `record` artifact, verified
@@ -716,7 +734,11 @@ lost a reply can retry safely.
    compiled modules it already has (instantiating a precompiled wasm module
    costs about 0.9 M instructions, compiling it about 1.5 G), builds the new
    method index from the module records (2.1), and lowers each new behavior
-   against it. A failure here changes nothing.
+   against it. It also checks each behavior that is kept as it runs, live
+   edits included, against the new index, without touching its state: a
+   kept behavior that calls a function the new configuration drops or
+   changes refuses the apply here, naming the behavior and the function. A
+   failure here changes nothing.
 5. **Stage.** The device writes durably, to a generation directory of its
    own, `<device dir>/configuration/<hash>/`, everything a restart needs:
    the configuration's pin and record, or, inline, the configuration and its
@@ -735,13 +757,15 @@ lost a reply can retry safely.
    way. It then removes the previous generation, whose hash differs from the
    new one (3.6's same-hash rule), and replies `Applied`.
    `Applied` therefore always means the configuration runs and a restart
-   runs it again. At start, the device runs the generation `current` names;
-   any other generation is one that never committed, which it reports as
-   refused with stage `Stage`, so a client that got no reply finds out, and
-   removes. Should the pointer write itself fail, the device keeps running
-   the new configuration, reports the failure in
-   `arora/configuration/refused`, and returns to the generation `current`
-   still names at its next start.
+   runs it again. At start, the device runs the generation `current` names
+   and removes every other one. Only `current` says what committed, so a
+   leftover generation, from an apply interrupted before its commit or after
+   it, reports nothing; a client that got no reply reads
+   `DescribeConfiguration`. Should the pointer write itself fail, the device
+   keeps running the new configuration, reports the failure in
+   `arora/configuration/refused` with stage `Commit`, and returns to the
+   generation `current` still names at its next start unless a retry
+   commits.
 
 | Kept | Changed |
 |---|---|
