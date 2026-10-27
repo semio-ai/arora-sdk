@@ -371,6 +371,15 @@ hashes. A module's published form is therefore one package whose releases
 carry the module record, the header and the executables; each type it names
 is a package of its own, which the module's release depends on.
 
+**One header, completed per executable.** The published header holds what
+every executable shares: name, version, exports, imports. A header's
+`executor` and `executable_mime` belong to one executable, so the device
+sets them from the artifact key it selects before loading: `wasm` gives the
+WebAssembly executor and `application/wasm`, `native/<triple>` the native
+executor and that target's shared-library type. The bytes and the header
+`Engine::load_module` receives therefore always agree, whichever target a
+device runs.
+
 **A release is immutable.** A release is a package's version: the pair
 (package id, version) names one set of artifact hashes, and so one frozen
 record, forever. New content is a new version. A release can be deprecated,
@@ -751,18 +760,26 @@ not committed, after a failed pointer write, skips to Commit and replies
    the configuration and its records, sealed as private artifacts are. A failure here, such as a full disk, changes nothing.
 6. **Swap, between two steps.** The device instantiates every new and changed
    module before dropping any old instance, then reloads, unloads and loads,
-   and starts, replaces or halts behaviors. A behavior that is kept keeps
+   and starts, replaces or halts behaviors. Instantiation is isolated: a new
+   instance's host calls during it reach no live module, key or HAL
+   component, and fail its start instead, so dropping the new instances
+   undoes everything they did. A module acts on the device from its first
+   step after the swap. A behavior that is kept keeps
    running as if nothing changed: its next call reaches the new instance of a
    reloaded module. A command from a bridge that is in flight to a module
    being reloaded or unloaded is interrupted, and its caller gets an error. If
    an instance fails to start, the new instances are dropped, the
    generation this request staged is removed unless `current` names it, and
    nothing has changed.
-7. **Commit.** The device writes the new hash to `configuration/current.new`
-   and renames it over the pointer file `configuration/current`: replacing a
-   file by rename is atomic and repeatable, so every apply commits the same
-   way. It then removes the previous generation, whose hash differs from the
-   new one (3.6's same-hash rule), and replies `Applied`.
+7. **Commit.** The device writes the new hash to `configuration/current.new`,
+   syncs it, renames it over the pointer file `configuration/current`, and
+   syncs the directory: replacing a file by rename is atomic and repeatable,
+   so every apply commits the same way, and the two syncs make the new
+   pointer survive a power loss. Only then does it remove the previous
+   generation, whose hash differs from the new one (3.6's same-hash rule),
+   and reply `Applied`; Stage syncs the generation directory the same way.
+   A failed sync is a failed pointer write (below), and keeps the previous
+   generation.
    `Applied` therefore always means the configuration runs and a restart
    runs it again. At start, the device runs the generation `current` names
    and removes every other one. Only `current` says what committed, so a
