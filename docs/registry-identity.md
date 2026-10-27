@@ -200,12 +200,12 @@ dependency, and that is what the package id adds.
 |---|---|---|
 | `arora-registry` | arora-sdk | Records in memory at runtime; the `RegistrySource` trait and its types |
 | `arora-index` | arora-sdk | Asset management over any source: resolution, verification, cache, `DirSource` |
-| `arora` | arora-sdk | Runs a device (`arora run`), and dispatches the package verbs to `arora-pkg` and unknown verbs to `arora-<verb>` ([configurations](proposal-configurations.md) 3.11) |
-| `arora-pkg` | arora-sdk | The package verbs: `add`, `install`, `publish`, `deprecate`, `version`, `vendor`, `login`; folder registries and moves. It reaches Studio through the programs its user configuration names |
+| `arora` | arora-sdk | Runs a device (`arora run`), signs in and enrolls devices through a provider (`arora auth login semio`), and hands the package verbs to `arora-pkg` ([configurations](proposal-configurations.md) 3.11) |
+| `arora-pkg` | arora-sdk | The package verbs: `add`, `install`, `show`, `publish`, `deprecate`, `version`, `vendor`; folder registries and moves. It reaches Studio through the provider its user configuration names |
 | `semio-studio-session` | studio-bridge | Sign-in to Studio, device enrollment, the session and its credential |
 | `semio-studio-assets` | studio-bridge | Studio's `RegistrySource`: reads Studio's packages, publishes through the endpoint |
 | `arora-studio-bridge-client` | studio-bridge | The device's live connection to Studio, on the same session |
-| `semio` | semio-cli | People, projects, devices and packages on Studio |
+| `arora-semio` | semio-cli | Studio's provider: fills the sign-in, registry, devices and tokens roles behind `arora`'s verbs |
 | Rules and endpoint | semio_studio | Names, package ids, scopes, releases |
 
 ## 8. What changes, by repository
@@ -243,10 +243,9 @@ dependency, and that is what the package id adds.
 | Artifact keys | `record`, `header`, `wasm` and `native/<triple>`, as #616's S5a lists. |
 | Scope UUIDs | Bound to their account; `@arora`, `@vizij` and `@semio` held by Semio's accounts with their fixed ids. |
 
-**semio-cli and `arora-pkg`**: publish through the endpoint with a publish
-token; `arora-pkg` also binds ids in folder registries and writes the alias a
-move leaves. `semio` installs `arora-semio`, `arora-credential-semio` and
-`arora-registry-semio`, through which `arora` reaches Studio.
+**`arora-pkg` and `arora-semio`**: `arora publish` reaches the endpoint
+through `arora-semio`'s registry role, with a publish token; `arora-pkg` also
+binds ids in folder registries and writes the alias a move leaves.
 
 ## 9. Studio's publish endpoint
 
@@ -271,7 +270,7 @@ today's project rule, which stops someone with view access to a project from
 publishing its content as their own.
 
 - A package created without a project has no source asset, so its releases
-  come from CI, `arora publish` or `semio package publish`. Studio's release dialog says so instead of offering
+  come from CI or `arora publish`. Studio's release dialog says so instead of offering
   a release from a project.
 - Until STUDIO-402 lands, a model or face release needs its root: a model's
   file supplies one; a face publish sends it.
@@ -304,7 +303,7 @@ PRs 1 and 2 deploy together, so no deploy runs with two publish paths. Both
 change the security rules, so each gets Studio's two independent reviews.
 Outside semio_studio, `semio-studio-assets` publishes through the endpoint
 instead of Firestore's REST API, and `semio-studio-session` keeps the token
-for `semio`'s credential provider; both are small.
+for `arora-semio`'s sign-in role; both are small.
 
 ## 10. Running your own registry
 
@@ -383,9 +382,10 @@ lab = "https://lab.example.org/arora/"
 ```
 
 **6. Keep packages private (optional).** Put the host behind
-authentication, and name a credential provider in the user's own
-`~/.config/arora/config.toml`, never in a project's file; `arora login
---registry lab` runs it. A device fetches with its own credential.
+authentication, and name its provider in the user's own
+`~/.config/arora/config.toml`, never in a project's file: `provider = "lab"`,
+an `arora-lab` program on `PATH` that fills the sign-in role. `arora auth
+login lab` runs it. A device fetches with its own credential.
 
 **7. Look after it.**
 
