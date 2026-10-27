@@ -448,6 +448,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-graphics-types"
+version = "1.0.0"
+dependencies = [
+ "arora-geometry",
+ "arora-types",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "arora-hal"
 version = "4.3.0"
 dependencies = [
