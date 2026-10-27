@@ -10,10 +10,12 @@ All notable changes to `arora`. The format follows
 
 - `operator::EnrollmentCode` and `Operator::show_enrollment_code`: an operator
   shows the code that enrolls the device with Semio Studio, until the next
-  call replaces or clears it. The default shows nothing, as the run's log says
-  each code. The terminal UI shows the code in its prompt line, with Studio's
-  page approving it when the Studio client knows Studio's web address
-  (`STUDIO_URL`, else the one baked into it).
+  call replaces or clears it, and returns whether it shows the code. The
+  default shows nothing and returns `false`: a code no operator shows goes to
+  standard error when the run's log shows no info lines. The terminal UI
+  shows the code in its prompt line, with Studio's page approving it when the
+  Studio client knows Studio's web address (`STUDIO_URL`, else the one baked
+  into it).
 
 ### Changed
 

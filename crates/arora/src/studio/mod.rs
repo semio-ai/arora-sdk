@@ -60,8 +60,8 @@
 //! - otherwise by code: the run shows a code, which a person enters in Studio,
 //!   choosing the device's owner. Each code is logged, and shown to the
 //!   operator under the terminal UI ([`Operator::show_enrollment_code`]);
-//!   with no operator and a log showing no info lines — the headless log's
-//!   default without `RUST_LOG` — it goes to standard error. It comes with
+//!   when no operator shows it and the log shows no info lines — the
+//!   headless log's default without `RUST_LOG` — it goes to standard error. It comes with
 //!   the Studio page approving it when the client knows Studio's web address
 //!   (`STUDIO_URL`, else the one baked into `arora-studio-bridge-client`). A
 //!   code that expires undecided is replaced by another; the run waits for a
@@ -691,18 +691,17 @@ impl Codes<'_> {
 
     /// [`show`](Self::show), with `logged` whether the log shows info lines,
     /// and `console` where a code goes that nothing else shows. The run waits
-    /// on a person entering the code, so someone must see it: with no
-    /// operator, and a log showing no info lines — the headless log's default
-    /// without `RUST_LOG` — it goes to `console`.
+    /// on a person entering the code, so someone must see it: when no
+    /// operator shows it, and the log shows no info lines — the headless
+    /// log's default without `RUST_LOG` — it goes to `console`.
     fn show_on(&self, code: &EnrollmentCode, logged: bool, console: &mut dyn std::io::Write) {
         let line = code_line(code);
         info!("{line}");
-        match self.operator {
-            Some(operator) => operator.show_enrollment_code(Some(code)),
-            None if !logged => {
-                let _ = writeln!(console, "{line}");
-            }
-            None => {}
+        let shown = self
+            .operator
+            .is_some_and(|operator| operator.show_enrollment_code(Some(code)));
+        if !shown && !logged {
+            let _ = writeln!(console, "{line}");
         }
     }
 }
@@ -923,8 +922,9 @@ mod tests {
             }
         }
 
-        fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) {
+        fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
             self.shown.lock().unwrap().push(code.cloned());
+            true
         }
     }
 
@@ -1117,6 +1117,36 @@ mod tests {
         assert_eq!(
             operator.shown().first(),
             Some(&Some(code("BCDF-GHJK", None)))
+        );
+    }
+
+    #[test]
+    fn a_code_an_operator_does_not_show_goes_to_the_console() {
+        /// An operator keeping the default enrollment-code hook.
+        struct Silent;
+
+        #[async_trait]
+        impl Operator for Silent {
+            async fn ask_text(&self, _label: &str, _required: bool) -> Option<String> {
+                None
+            }
+
+            async fn decide_access(&self, _request: &AccessRequestSummary) -> AccessRuling {
+                AccessRuling {
+                    decision: AccessDecision::Rejected,
+                    remember: false,
+                }
+            }
+        }
+
+        let mut console = Vec::new();
+        Codes {
+            operator: Some(&Silent),
+        }
+        .show_on(&code("BCDF-GHJK", None), false, &mut console);
+        assert_eq!(
+            String::from_utf8(console).unwrap(),
+            "Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio\n"
         );
     }
 
