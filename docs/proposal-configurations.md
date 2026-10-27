@@ -45,9 +45,10 @@ In short:
   share lives in the scope it states, published once there. Its owner
   declares a scope's id in code; where records are published or exchanged,
   the store's ownership of the scope decides.
-- **Two commands.** `arora` runs a device and, through `arora-pkg`, manages
-  its project's packages; `semio` is Studio for a person, a project, a device
-  or CI, and adds `arora semio …` when installed (3.11).
+- **One command.** `arora` runs a device and, through `arora-pkg`, manages
+  its project's packages. It reaches Studio by naming semio as the provider
+  (`arora auth login semio`); a provider fills roles behind `arora`'s verbs
+  and adds none (3.11).
 - **Three parties, three kinds of access.** An author signs in to publish.
   Whoever deploys a configuration of public packages needs no account. A
   device resolves as itself, and may be enrolled with a Studio account that
@@ -90,11 +91,11 @@ In short:
 | `arora-registry-remote` 1.0 | arora-sdk | `RemoteRegistry` reads records from semio-db through `semio-client`; `RemoteCachedRegistry` puts a `LocalRegistry` in front of it as a cache. Reads the semio-cli login file. | `arora-cli`, `arora-module-cli` | Merged, private; over semio-db |
 | semio-record | semio-record | A record vocabulary over `arora-types`' references and freezing: record kinds — users, organizations, folders, modules, structures, enumerations, animations, scenes — with private, public, unfrozen and frozen facets, the actions that build them, and access control lists. | semio-db and its clients; a newer store client | Maintained, reused |
 | semio-db, semio-client, semio-store-rpc | separate repos | GraphQL record store on ScyllaDB: records by id and version, semver tags with a `yanked` flag, a folder tree rooted at its user and organization records, path-to-id names; a WebSocket blob store; their client. | semio-cli, `arora-registry-remote` | Deprecated |
-| semio-cli | semio-cli | `semio`: resolves, fetches, shows and publishes Studio's assets through the Studio source; signs in by a code a person approves and enrolls devices ([semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11)). Its record commands over semio-db remain. | Developers | Maintained |
+| semio-cli | semio-cli | `semio`: resolves, fetches, shows and publishes Studio's assets through the Studio source; signs in by a code a person approves and enrolls devices ([semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11)). Its record commands over semio-db remain. | Developers | Maintained; ships `arora-semio`, Studio's provider, and keeps only `semio db …` (3.11) |
 | `arora-cli` 0.1 | arora-sdk, `crates/arora-cli` | Loads modules from headers and executables, calls a function a YAML file describes, repeats and times it; fills its registry from record directories or from semio-db through `arora-registry-remote`. The integration tests drive it. | Developers, the integration tests | Merged, unpublished; becomes `arora call` (3.11) |
-| `arora-index` | arora-sdk, `crates/arora-index` | Resolves an asset `{scopedName, range}` to a release with Studio's selection rules, through an object-safe `Source` trait; verifies each artifact by SHA-256 before use; content-addressed cache with sealed private blobs and `resolved.json`; `resolve_with_fallback`; `DirSource`, a local directory; `build::models_with(source)`. Its pins hold no package id, and `fetch` finds a release only under the pin's exact name. | Nothing yet | [#360](https://github.com/semio-ai/arora-sdk/pull/360), open, `publish = false` |
-| Studio source | studio-bridge, `index-source` (to ship as `semio-studio-assets`) | `StudioSource` implements `arora-index`'s `Source` over Firestore and Storage REST: follows a name's claim or alias to its package and lists its releases, fetches artifacts, plans and makes Studio's publish writes. | semio-cli | [studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109), open |
-| `semio-studio-session` | studio-bridge | Sign-in to Studio by a code a person approves, device enrollment by code or token, a session that renews its ID tokens, and the credential kept encrypted in a directory. One crate for the device client, the TUI and `semio`. | The device client, the TUI, `semio` | [studio-bridge#114](https://github.com/semio-ai/studio-bridge/pull/114), open |
+| `arora-index` | arora-sdk, `crates/arora-index` | Resolves an asset `{scopedName, range}` to a release with Studio's selection rules, through an object-safe `Source` trait; verifies each artifact by SHA-256 before use; content-addressed cache with sealed private blobs and `resolved.json`; `resolve_with_fallback`; `DirSource`, a local directory; `build::models_with(source)`. Its pins hold no package id, and `fetch` finds a release only under the pin's exact name. | Nothing yet | Drafted in [#360](https://github.com/semio-ai/arora-sdk/pull/360), closed unmerged; the starting point of stage 3 |
+| Studio source | studio-bridge, `index-source` (to ship as `semio-studio-assets`) | `StudioSource` implements `arora-index`'s `Source` over Firestore and Storage REST: follows a name's claim or alias to its package and lists its releases, fetches artifacts, plans and makes Studio's publish writes. | semio-cli | Drafted in [studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109), closed unmerged; the starting point of `semio-studio-assets` |
+| `semio-studio-session` | studio-bridge | Sign-in to Studio by a code a person approves, device enrollment by code or token, a session that renews its ID tokens, and the credential kept encrypted in a directory. One crate for the device client, the TUI and `arora-semio`. | The device client, the TUI, `arora-semio` | [studio-bridge#114](https://github.com/semio-ai/studio-bridge/pull/114), open |
 | `feat/type-registry` | arora-sdk branch | Emitted `records/` and a `records.json` id→name index per module; a wasm `Registry` in `arora-web` resolving ids to names. | Nothing | Unmerged; the crate it changes no longer exists |
 | Module directories | `arora`, `module_dir` | A device loads every `<device dir>/modules/*/` (a `header.json` beside one artifact) at start, and each `--module` directory. | The `arora` runner | Merged |
 | Guest module indexing | `arora`, `module_discovery` | A guest module whose module record the device's registry holds (`AroraBuilder::with_registry`, or `records/` in its module directory) has every export indexed with the record's frozen signature, checked against the header. Without a record, an export joins the method index only when its parameters and return are primitives or optional scalar primitives; a module loaded or reloaded on a running device is indexed from its header. `with_declared_module` indexes every export from a Rust declaration. | Every device | Merged (records: arora 13.1) |
@@ -144,7 +145,7 @@ reloaded on a running device is still indexed from its header (4.3).
 | Package identity | Studio's `publishedAssets/{id}` behind name claims and aliases; `arora-index`'s name-only pins | The registry, which binds a package id at first publish ([registry identity](registry-identity.md)) | Studio already keeps a package's id across a transfer; carrying it in releases, aliases and pins lets every client tell a reused name from the package it pinned, and follow a package to another registry. |
 | Holding records in a process | `arora-registry`'s `LocalRegistry`; the `feat/type-registry` `Registry`; `arora-index`'s `resolved.json` | `arora-registry` | One registry for authoring (tag, freeze) and for devices (exact lookup). A record carries its name, so the `records.json` index is not needed. `ty::low::TypeRegistry` stays on the header vocabulary's axis ([design note](design_decisions.md#two-type-vocabularies-two-axes)). |
 | Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through the `RegistrySource` trait in `arora-registry`, one implementation per backend (3.3) | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. `arora-index`'s selection, verification and sealing work over any source; the Studio source is Semio's `semio-studio-assets`. |
-| Connecting to Studio, credentials | `arora-index`'s `TokenSource`; the Studio source's `/tool-login` sign-in; studio-bridge's client | Semio's `semio-studio-session`, which the bridge client, the Studio source and `semio` all use | Arora works without Studio. Sign-in is one Semio crate; the bridge client keeps the device's credentials in its directory. |
+| Connecting to Studio, credentials | `arora-index`'s `TokenSource`; the Studio source's `/tool-login` sign-in; studio-bridge's client | Semio's `semio-studio-session`, which the bridge client, the Studio source and `arora-semio` all use | Arora works without Studio. Sign-in is one Semio crate; the bridge client keeps the device's credentials in its directory. |
 | The device's cache directory | `arora-index`'s `<device dir>/assets/`; the Studio Bridge client's directory; `<device dir>/modules/` | One cache, in the device directory, shared with the bridge client | Two cache roots for one device drift. Operator-installed `modules/` stays a separate, unverified input. |
 | Publishing | semio-cli (semio-db, then Studio through the Studio source); Studio's web publishing | The store's backend, through one publish path per backend | Records are published where they are read, and the backend decides at publication who owns a scope (2.2) and which package an id names (3.3). On Studio that path is its publish endpoint, the web app's included. |
 | Release selection | `arora-registry`'s `resolve_tag`; `arora-index`; Studio's `resolveDependency` | `arora-index`'s resolver, with the source supplying releases and metadata | One rule for a range: the newest non-deprecated version that satisfies it and has the requested artifact, as Studio's `resolveDependency`. |
@@ -549,7 +550,7 @@ pub struct Pin {
   binds names and package ids, checks that the publishing account owns the
   scope of every record's `parent`, records that account on the release, and
   hashes each artifact before it writes the release. On Studio, that path is
-  its publish endpoint, for the web app, `semio` and `arora publish` alike.
+  its publish endpoint, for the web app and `arora publish` alike.
 - **Where it lives.** What records embed — `PackageId`, `Kind`,
   `Dependency` and `Pin`, which a configuration record carries — is in
   `arora-types`, beside the records. The trait and the types only sources use
@@ -850,12 +851,10 @@ with native modules changes them, by restarting.
 
 ### 3.11 Commands
 
-People reach all of this through two commands: `arora`, which is open, and
-`semio`, which is Semio's and installed only by those who choose Studio.
-
-**`arora` runs a device, and its verbs manage a project.** With no verb,
-`arora` runs, as devices, service units and scripts start it today, so
-nothing breaks.
+A person types one command, `arora`. It runs a device, and its verbs manage a
+project, sign in and enroll devices, reaching Studio by naming semio as the
+provider. With no verb, `arora` runs, as devices, service units and scripts
+start it today, so nothing breaks.
 
 ```text
 $ arora -h
@@ -868,100 +867,96 @@ Running
                     emulated HAL when there is no hardware
   call <FILE>       Call a loaded module's function as a YAML file describes,
                     with --repeat N and --benchmark
-  pair <ROBOT>      Pair with a robot over the open local bridge
+
+Account and devices
+  auth login <PROVIDER>             Sign in through a provider, e.g. semio
+  auth status [<PROVIDER>]          Show who is signed in
+  auth logout <PROVIDER>            Forget the credential
+  device enroll <PROVIDER>          Enroll this device by code or enrollment
+                                    token; keep its credential in the
+                                    device directory
+  device list <PROVIDER>            List the devices you manage
+  device revoke <PROVIDER> <DEVICE> Revoke a device
+  token create <PROVIDER>           Create a publish token for CI (shown once)
+  token list <PROVIDER>             List publish tokens
+  token revoke <PROVIDER> <TOKEN>   Revoke a publish token
 
 Packages (arora-pkg)
   init              Start a project (arora.toml)
   add <PKG@RANGE>   Depend on a package, e.g. @arora/animation@^3
   install           Resolve, verify and fetch what the project depends on
   update            Move dependencies to the newest versions in range
+  show <PKG>        Show a package, its releases and dependencies
   build             Build the project's modules and records
   version <PKG>     Diff a package's interface against its last release
   publish <PKG>     Publish a release to the registry its scope maps to
   deprecate <PKG@V> Mark a release deprecated
   vendor            Copy every pinned artifact into the project
-  login             Sign in to a registry through its credential provider
 
 Run options
       --module <DIR>   Load a module directory besides the device directory's
       --groot <FILE>   Install a Groot behavior tree as the device's behavior
       --open           Let any bridge write any key with no meta of its own
-      --studio         Connect to Semio Studio (builds with Studio support)
+      --studio         Connect to Semio Studio (Semio's runner build)
       --no-studio      Serve the open local bridge only
 
-Other commands on PATH (arora-<name>):
-  semio             Semio Studio's verbs, installed with semio
+Providers (arora-<provider> on PATH) fill roles behind these verbs.
 ```
 
 - **`arora run PROJECT`** freezes the project's configuration and applies it
   at start, as `--configuration` does (3.8).
-- **The package verbs are a separate binary, `arora-pkg`**, which `arora`
-  hands each of them to, so the runtime built for robots carries no range
-  resolution, publishing or sign-in code: it keeps only what a device needs,
-  fetching and verifying what its configuration pins, with its own
-  credential. Without `arora-pkg` installed,
-  `arora add` says how to install it. It reaches registries through
-  `RegistrySource` implementations (3.3) and credential providers named in
-  the user's `~/.config/arora/config.toml`, never in a project's file, and
-  links no Studio code.
-- **An unknown verb runs `arora-<verb>` from `PATH`**, as cargo and git do.
-  That is how `semio`'s verbs appear as `arora semio …` for those who
-  installed it, and leave no trace for those who did not.
 - **`arora call`** is what `arora-cli` 0.1 does today: load modules, call a
   function a YAML file describes, repeat and time it. Its semio-db options
   are dropped (semio_studio#616 D10), the integration tests drive `arora
   call` instead, and the `arora-cli` crate retires.
+- **The package verbs are a separate binary, `arora-pkg`**, which `arora`
+  hands each of them to. A robot build leaves it out and keeps `run`, `auth`
+  and `device`, so the runtime carries no range resolution or publishing
+  code: it keeps only what a device needs, fetching and verifying what its
+  configuration pins, with its own credential. Without `arora-pkg` installed,
+  `arora add` says how to install it. It reaches registries through
+  `RegistrySource` implementations (3.3), configured in the user's
+  `~/.config/arora/config.toml`, never in a project's file, and links no
+  Studio code.
+- **Package verbs never name a provider.** Each scope maps to one registry,
+  so `install`, `show` and `publish` reach Studio through the registry
+  `@semio`, or any scope a project maps to Studio, routes to.
 - **Device-specific runners**, such as Vizij's and the HAL runners, stay
   plain runners: they call `run_with_hal` and take no verbs.
 
-**`semio` is Studio, for a person, a project, a device or CI.**
+**Providers fill roles behind `arora`'s verbs, and add none.** A provider is
+a program on `PATH`, `arora-<provider>`, that `arora` starts and speaks a
+protocol with, as git does with `git-remote-<name>`, docker with
+`docker-credential-<name>` and Cargo with its credential providers. The verbs
+stay `arora`'s, so its surface is the same whatever is installed, and an
+unknown verb is an error.
 
-```text
-$ semio -h
-Usage: semio <COMMAND>
-
-Account
-  auth login        Sign in by a code you approve on Studio, from any device
-  auth status       Show who is signed in
-  auth logout       Forget the session
-
-Devices
-  device enroll     Enroll a device with Studio, by code or enrollment token,
-                    and save its credential in the device directory
-  device list       List your and your organizations' devices
-  device revoke     Revoke a device
-
-Projects
-  link <PROJECT>    Tie the working directory to a Studio project
-  sync              Bring the linked project's content up to date
-  run [PROJECT]     Run the device bound to the linked project's Studio
-                    session
-
-Packages
-  package resolve   Resolve a Studio package to a release
-  package fetch     Fetch and verify its artifacts
-  package show      Show a package, its releases and dependencies
-  package publish   Publish a release through Studio's publish endpoint
-  token create      Create a publish token for CI (shown once)
-  token list        List publish tokens
-  token revoke      Revoke a publish token
-
-Legacy
-  db …              The semio-db record commands, deprecated
-```
-
-- **Sign-in and enrollment** are `semio-studio-session`
+- **A provider on its own is an argument:** `arora auth login semio`,
+  `arora device enroll semio`, `arora token create semio`.
+- **A target inside a provider is `provider:target`.** The remote role
+  (`arora link semio:<project>`, `arora sync`) and the session role (`arora
+  run my-robot --session semio:<project>`) take that form once they are
+  defined.
+- **The roles:** sign-in, registry, devices and tokens are defined
+  (semio_studio#616); remote and session are defined the same way when their
+  functionality lands. A provider fills the roles it supports. A registry
+  entry in the user's config names its provider (`provider = "semio"`); an
+  `https://` index or a `dir:` registry needs none.
+- **Studio's provider is `arora-semio`**, from semio-cli. Sign-in and
+  enrollment go through `semio-studio-session`
   ([studio-bridge#114](https://github.com/semio-ai/studio-bridge/pull/114)),
-  the one crate the device client, the TUI and `semio` share; the package
-  commands go through `semio-studio-assets`.
-- **`semio` installs three programs for `arora`**: `arora-semio`, its verbs
-  as `arora semio …`; `arora-credential-semio`, the credential provider
-  `arora login --registry semio` calls; and `arora-registry-semio`, the
-  registry adapter built on `semio-studio-assets`.
-- **Today** `semio` has `auth`, the package commands as `semio asset …`, and
-  the semio-db commands at its top level;
-  [semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11) adds sign-in
-  by code and `device enroll`. The rest is to build.
+  the one crate the device client and the TUI share; the registry role goes
+  through `semio-studio-assets`. Semio's runner build (`--studio`) still
+  enrolls itself at start
+  ([#423](https://github.com/semio-ai/arora-sdk/pull/423)).
+- **A verb with no general meaning under `arora` is a `semio` verb**, in
+  semio-cli's `semio` command, never `arora semio …`. Today that is only the
+  deprecated semio-db commands, `semio db …`, which retire with semio-db.
+
+**The help lists what is built or decided.** Verbs for the workflows still
+to decide come with them and follow the same pattern: running one entity of
+a project (`arora run <entity> [<behavior>]`), deploying and Arora's own
+sessions, pairing with a robot, and choosing a robot's hardware components.
 
 ---
 
@@ -1021,14 +1016,14 @@ records and artifacts through its own source, as itself.
 
 ## 5. How this composes with `arora-index`
 
-`arora-index` ([#360](https://github.com/semio-ai/arora-sdk/pull/360)) is
-the client over `RegistrySource` (3.3), and the Studio source is one
+`arora-index`, drafted in
+[#360](https://github.com/semio-ai/arora-sdk/pull/360), is the client over `RegistrySource` (3.3), and the Studio source is one
 implementation of it: Semio's `semio-studio-assets`, from
 [studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109)'s
-`StudioSource` and publish path. Converging on the one trait changes them as
-follows:
+`StudioSource` and publish path. Converging on the one trait changes those
+drafts as follows:
 
-| Today | Converged |
+| Drafted | Converged |
 |---|---|
 | `arora_index::Source` with `releases(scoped_name, kind)` and `fetch(release, key)` | `arora_registry::RegistrySource` with `releases(package, kind)` and `artifact(release, key)`; the resolver looks up by name |
 | `Release` and `ResolvedRef` keyed by scoped name, no id | `Release`, `Dependency` and `Pin` keep the name and add the package id; the pin keeps the name it was requested under |
@@ -1089,11 +1084,11 @@ Each stage lands on its own.
 5. **The bridge operations** (3.5, 3.10): `arora-bridge` 7, the studio-bridge
    chain with the Studio source, the router grant, protocol revision 3, and
    Studio's apply.
-6. **Commands** (3.11). `arora`'s verbs and its dispatch to `arora-pkg` and
-   `arora-<verb>`; `arora call` replacing `arora-cli`, with the integration
-   tests moved onto it; `semio`'s `link`, `sync`, `run`, `device` and
-   `token`, and the three programs it installs for `arora`. Independent of
-   the other stages except that `arora-pkg` publishes and installs through
+6. **Commands** (3.11). `arora`'s verbs, its dispatch to `arora-pkg`, and
+   the provider protocol behind `auth`, `device`, `token` and registries;
+   `arora call` replacing `arora-cli`, with the integration tests moved onto
+   it; `arora-semio`, Studio's provider, in semio-cli. Independent of the
+   other stages except that `arora-pkg` publishes and installs through
    stage 3's trait.
 7. **Behaviors as named branches**, once the behavior module of
    [behavior languages](proposal-behavior-languages.md) lands; until then a
@@ -1319,25 +1314,39 @@ payload, bypass the hash a pin carries, and let a claimant hand a
 device bytes its owner is not entitled to. The device's own source and cache
 make the result the same whoever sent the request, and let it restart offline.
 
-### One `arora` command, its package verbs a separate binary
+### One `arora` command, its package verbs a separate binary, providers behind its verbs
 
 A person runs a device and manages its project with one command, as `go`,
 `deno` and `cargo` do, so `arora add` and `arora publish` explain themselves
 next to `arora run`. The package verbs live in `arora-pkg`, which `arora`
-hands them to, because a robot's runtime should carry no range
-resolution, publishing or sign-in code it never uses; it keeps the fetch and
-verification its configuration needs, and its own credential. Unknown verbs run
-`arora-<verb>` from `PATH`, which lets Semio add `arora semio …` without
-Arora shipping anything that reaches Semio.
+hands them to, because a robot's runtime should carry no range resolution or
+publishing code it never uses; it keeps `run`, `auth` and `device`, the fetch
+and verification its configuration needs, and its own credential.
+
+Studio is a provider, not a command: `arora auth login semio`, `arora device
+enroll semio`, and package verbs that reach it through the registry a scope
+maps to. `arora`'s verbs are arora's, and a provider program fills roles
+behind them, as git remote helpers, docker credential helpers and Cargo's
+credential providers do. So `arora`'s surface, its help and what a script may
+call, is the same on every machine, and Arora ships nothing that reaches
+Semio until a user installs `arora-semio` and names it.
 
 ### Alternatives considered
 
+- **Extensions that add verbs** (`arora semio link`, through `arora-<verb>`
+  on `PATH`, as cargo and git run external subcommands). `arora`'s surface
+  would then depend on what is installed, and a provider's verbs would
+  shadow or pre-empt verbs `arora` defines later. A verb with no general
+  meaning under `arora` is a verb of the provider's own command, `semio …`.
+- **A separate `semio` command for Studio's sign-in, devices and packages.**
+  It duplicates `arora`'s verbs with Studio's name in front, and gives a
+  person two tools for one task depending on where a package is published.
 - **A project tool under a name of its own** (`arora-cli`, a short coined
   name). `arora-cli` already names the 2022 module runner, whose work is
   running modules, `arora`'s; a coined name has to be learnt and explained,
   where `arora add` reads as what it does.
 - **Every verb compiled into `arora`.** The runtime built for robots, NAO
-  included, would carry range resolution, publishing and sign-in code.
+  included, would carry range resolution and publishing code.
 - **A Studio asset vocabulary in arora-sdk** (asset types, resolved
   references, a Studio resolver as a crate of its own). It duplicates records
   and their registry, and puts Studio's protocol in a runtime that works
