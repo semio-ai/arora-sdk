@@ -409,6 +409,10 @@ download it and open it in a browser.
   sides: the conversation, attention and reply run, or one of the seven motion
   groups; or Full, every part at once, the three trees above the whole motion
   graph. Each is drawn as a graph, as a live outline, or as its stored form.
+  A Vizij graph file holds flat lists of nodes and edges, so #257's stored
+  form writes the edges as indentation: each node under the node it is wired
+  into, after the input it feeds. A node wired into several sits under the
+  first, and each of the others names it on a line of its own.
   A node's colour is what the tick did with it, by the design's rule: blue,
   re-evaluated or ticked; amber, visited to collect its data and kept (a
   detached node comparing its arguments, a tree node whose cached status its

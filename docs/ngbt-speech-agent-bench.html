@@ -1789,6 +1789,8 @@ function treeLines(node, opts = {}, pad = '') {
   walk(node, pad);
   return out;
 }
+// A Vizij graph file holds flat lists of nodes and edges; #257's stored form writes the edges as indentation.
+const VIZIJ_NESTED = 'stored as flat lists of nodes and edges; written out, each node sits under the node it is wired into';
 // The stored form of one part: the lines of the file, each tied to what it names.
 function storedLines(design, part, opt = {}) {
   const S = design ? design.strategy : 'reference', out = [], push = (text, id) => out.push({ text, id });
@@ -1829,29 +1831,46 @@ function storedLines(design, part, opt = {}) {
       // The motion is one Vizij graph, shown a group at a time: a value from another group comes by wire, in the same
       // tick. Split into graphs joined by store keys, each hop would cost a tick: the eyes would follow last tick's head.
       push(`graph motion · its ${group[1].toLowerCase()} nodes; the motion is one graph, shown a group at a time · every node keeps its output until a node it reads changes and marks it; a tick runs only the marked nodes`);
-      push('nodes');
-      const ext = new Set(); for (const n of nodes) for (const r of refsOf(n)) if (NODE.get(r).group !== part) ext.add(r);
-      for (const r of ext) { const n = NODE.get(r); push(`  ${r.padEnd(13)} ${n.group === 'inputs' ? `input        path: ${n.key}` : `${fname(n).padEnd(28)} in the ${n.group} group, wired in`}`, r); }
-      for (const n of nodes) push(`  ${n.id.padEnd(13)} ${fname(n).padEnd(28)} ${paramText(n).join(', ')}   cached`, n.id);
-      for (const n of sinks) push(`  ${(n.id + '_out').padEnd(13)} output       path: ${SINK_OF.get(n.id)}`, n.id);
-      push('edges');
-      for (const n of nodes) refsOf(n).forEach((r) => push(`  ${r} → ${n.id}`, n.id));
-      for (const n of sinks) push(`  ${n.id} → ${n.id}_out.in`, n.id);
+      push(`  ${VIZIJ_NESTED}; a node wired into several sits under the first, and the others name it on a line of their own`);
+      // Written from the group's outputs, and the nodes only other groups read, down to what each reads.
+      const readers = (id) => FUNCS.filter((m) => refsOf(m).includes(id));
+      const others = (id) => [...new Set(readers(id).map((m) => m.group).filter((g) => g !== part))];
+      const describe = (n) => {
+        if (n.group === 'inputs') return `input   path: ${n.key}`;
+        if (n.group !== part) return `${fname(n)}   in the ${n.group} group, wired in`;
+        const out = others(n.id);
+        return [fname(n), ...(n.params && Object.keys(n.params).length ? [paramText(n).join(', ')] : []), 'cached', ...(out.length ? [`wired into the ${out.join(' and ')} group${out.length > 1 ? 's' : ''}`] : [])].join('   ');
+      };
+      const rows = [], under = new Map();
+      const walk = (id, depth, reader) => {
+        if (under.has(id)) { rows.push({ depth, name: id, text: `↑ listed under ${under.get(id)}`, id }); return; }
+        under.set(id, reader);
+        const n = NODE.get(id);
+        rows.push({ depth, name: id, text: describe(n), id });
+        if (n.group === part) for (const r of refsOf(n)) walk(r, depth + 1, id);
+      };
+      for (const n of nodes.filter((x) => SINK_OF.has(x.id) || !readers(x.id).some((m) => m.group === part))) {
+        if (!SINK_OF.has(n.id)) { walk(n.id, 0, null); continue; }
+        rows.push({ depth: 0, name: `${n.id}_out`, text: `output   path: ${SINK_OF.get(n.id)}`, id: n.id });
+        walk(n.id, 1, `${n.id}_out`);
+      }
+      const width = Math.max(...rows.map((r) => 2 * r.depth + r.name.length)) + 3;
+      for (const r of rows) push(`  ${('  '.repeat(r.depth) + r.name).padEnd(width)}${r.text}`, r.id);
     }
     return out;
   }
   const tree = TREES[part];
   if (S === 'control') {
     push(`graph ${part} · control nodes tick what is wired into their child_N inputs; actions and their inputs are lazy`);
-    push('nodes');
+    push(`  ${VIZIJ_NESTED}, after the input it feeds`);
     const kinds = { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'control: repeat', foreach: 'control: for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'constant', action: 'action' };
-    const walk = (n) => { push(`  ${String(n.uid).padStart(3)} ${kinds[n.k].padEnd(18)} ${n.k === 'action' ? `function: ${n.fn}` : n.k === 'check' ? `reads: ${n.key}` : n.k === 'set' ? `path: ${n.key}` : n.k === 'running' ? 'value: Running' : ''}   ${n.label}   ${n.k === 'action' || n.k === 'check' ? 'lazy' : ''}`, n.uid); n.children.forEach(walk); };
-    walk(tree);
-    if (part === 'reply') push(`  prompt ${'@pip/agent.prompt'.padEnd(18)} lazy, with an argument cache: read by llm, it runs when its arguments change`, 'prompt');
-    push('edges');
-    const edges = (n) => n.children.forEach((c, k) => { push(`  ${c.uid} → ${n.uid}.child_${k}`, c.uid); edges(c); });
-    edges(tree);
-    if (part === 'reply') push('  prompt → llm.prompt', 'prompt');
+    const walk = (n, pad, input) => {
+      const detail = n.k === 'action' ? `function: ${n.fn}` : n.k === 'check' ? `reads: ${n.key}` : n.k === 'set' ? `path: ${n.key}` : n.k === 'running' ? 'value: Running' : '';
+      push(`${pad}${input ? `${input}: ` : ''}${n.uid} ${kinds[n.k]}${detail ? `   ${detail}` : ''}   ${n.label}${n.k === 'action' || n.k === 'check' ? '   lazy' : ''}`, n.uid);
+      if (n.prompt) push(`${pad}  prompt: prompt @pip/agent.prompt   lazy, with an argument cache: it runs when its arguments change`, 'prompt');
+      n.children.forEach((c, k) => walk(c, pad + '  ', `child_${k}`));
+    };
+    walk(tree, '  ', '');
     return out;
   }
   const head = { conversation: 'Conversation, a subtree under the root PARALLEL', attention: 'Attention, a subtree under the root PARALLEL', reply: 'ReplyRun, a task run the conversation spawns; it outlives its branch, and {reply/held} gates what it shows' }[part];
