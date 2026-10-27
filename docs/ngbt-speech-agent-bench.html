@@ -204,6 +204,8 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .view pre span.st-S::after { content: "   ✓"; color: var(--good-ink); }
 .view pre span.st-F::after { content: "   ✗"; color: var(--bad-ink); }
 .view pre span.dim { color: var(--faint); }
+.view pre i.cmt { font-style: normal; color: var(--muted); }
+.view pre span.dim i.cmt { color: inherit; }
 .graph text { font-family: var(--f-mono); }
 .g-node { cursor: grab; touch-action: none; }
 .graph.dragging, .graph.dragging .g-node { cursor: grabbing; }
@@ -1732,6 +1734,17 @@ const PROMPT_ARGS = ['persona', 'tools', '@emotion', '{reply/memories}', '{reply
 let treeIds = 0;
 const TREE_NODE = new Map();
 for (const root of [TREES.conversation, TREES.attention, TREES.reply]) (function number(n) { n.uid = ++treeIds; TREE_NODE.set(n.uid, n); n.children.forEach(number); })(root);
+// Each node's name, as its author would write it, in the order the tree lists its nodes.
+const TREE_NAMES = {
+  conversation: ['conversation', 'listen_branch', 'is_listening', 'listen', 'judge_branch', 'is_judging', 'judge', 'reply_branch', 'has_reply_run', 'speak_or_think', 'speak_branch', 'is_audio_ready', 'play', 'think_branch', 'show_thinking', 'await_sentence', 'idle'],
+  attention: ['attention', 'someone_there', 'is_face_visible', 'set_present', 'cooldown', 'was_seen_lately', 'set_lost', 'set_nobody'],
+  reply: ['reply_run', 'turn', 'context', 'rag', 'recall', 'answer_loop', 'llm', 'tool_round', 'tool', 'filler', 'each_sentence', 'tts', 'remember'],
+};
+for (const [part, names] of Object.entries(TREE_NAMES)) {
+  const nodes = []; (function list(n) { nodes.push(n); n.children.forEach(list); })(TREES[part]);
+  if (nodes.length !== names.length) throw new Error(`${part}: ${nodes.length} nodes, ${names.length} names`);
+  nodes.forEach((n, i) => { n.name = names[i]; });
+}
 // The leaf each polled wait is: the conversation’s by its function, the reply run’s by its call.
 const POLL_UID = {};
 (function walk(n) { if (n.k === 'action') POLL_UID[n.fn.split('.').pop()] = n.uid; if (n.k === 'running') POLL_UID.idle = n.uid; n.children.forEach(walk); })(TREES.conversation);
@@ -1756,33 +1769,76 @@ function treeStatus(part, f, laneOn) {
 }
 
 // ---- how each design writes the example down ------------------------------------------
-const fname = (n) => (n.module === '@arora/dataflow' ? n.kind.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() : `${n.module}.${n.kind.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}`);
+// One notation in every form: {key} a store key, {.name} a tree-local cell, @name a node's output, `name:` before a
+// node its name, a target and `=` before a call what its output is bound to, #name a macro, and // a comment.
+const NOTATION = 'Notation: {key} is a store key, {.name} a tree-local cell, @name a node’s output; name: names a node, and a key or cell before = takes a call’s output; #name is a macro, // a comment.';
+const fnText = (fn) => fn.replace(/^@[\w-]+\//, '');
+const fname = (n) => (n.module === '@arora/dataflow' ? n.kind.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() : `${fnText(n.module)}.${n.kind.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}`);
 const lit = (x) => (typeof x === 'number' ? String(+x.toFixed(4)) : typeof x === 'string' ? `"${x}"` : String(x));
 const paramText = (n) => Object.entries(n.params).map(([k, v]) => `${k}: ${typeof v === 'number' ? +v.toFixed(4) : `"${v}"`}`);
+// How a form names what a node reads: refs, a detached node or a store key; cells, a tree-local cell or the key a
+// sink binds; wired, the node it is wired from, store inputs included; code, a variable or a store key.
 function refText(x, style) {
   if (typeof x !== 'string' || x[0] !== '@') return lit(x);
   const n = NODE.get(x.slice(1));
-  if (n.group === 'inputs') return style === 'graph' ? n.id : `{${n.key}}`;
+  if (style === 'wired') return `@${n.id}`;
+  if (n.group === 'inputs') return `{${n.key}}`;
   if (style === 'cells') return SINK_OF.has(n.id) ? `{${SINK_OF.get(n.id)}}` : `{.${n.id}}`;
-  if (style === 'graph') return n.id;
-  return `@${n.id}`;
+  return style === 'code' ? n.id : `@${n.id}`;
 }
 const callText = (n, style) => `${fname(n)}(${[...n.args.map((x) => refText(x, style)), ...paramText(n)].join(', ')})`;
 const groupNodes = (g) => FUNCS.filter((n) => n.group === g);
 const groupSinks = (g) => groupNodes(g).filter((n) => SINK_OF.has(n.id));
+const readersOf = (id) => FUNCS.filter((m) => refsOf(m).includes(id));
+const otherReaders = (id, part) => [...new Set(readersOf(id).map((m) => m.group).filter((g) => g !== part))];
+const groupsText = (gs) => `the ${gs.join(' and ')} group${gs.length > 1 ? 's' : ''}`;
+// A group's outputs, and the nodes only other groups read: the nodes each one is computed from.
+const groupRoots = (part) => groupNodes(part).filter((n) => SINK_OF.has(n.id) || !readersOf(n.id).some((m) => m.group === part));
+// A motion group as chains, for a form that lists its nodes flat: one per root, the nodes no earlier chain listed in
+// data order, and the nodes it reads that an earlier chain listed.
+function groupChains(part) {
+  const listed = new Set(), chains = [];
+  for (const root of groupRoots(part)) {
+    if (listed.has(root.id)) continue;
+    const own = [], earlier = new Set();
+    const visit = (n) => {
+      listed.add(n.id);
+      for (const r of refsOf(n)) {
+        if (NODE.get(r).group !== part) continue;
+        if (!listed.has(r)) visit(NODE.get(r)); else if (!own.includes(NODE.get(r))) earlier.add(r);
+      }
+      own.push(n);
+    };
+    visit(root);
+    chains.push({ root, nodes: own, earlier: [...earlier] });
+  }
+  return chains;
+}
+// A chain's comment lines: what it computes, and what it reads from the chains above.
+function chainHead(part, chain, style, pad) {
+  const ref = (id) => refText('@' + id, style), r = chain.root;
+  const lines = [`${pad}// ${SINK_OF.has(r.id) ? `{${SINK_OF.get(r.id)}}` : `${ref(r.id)}, read by ${groupsText(otherReaders(r.id, part))}`}`];
+  if (chain.earlier.length) lines.push(`${pad}// also reads ${chain.earlier.map(ref).join(', ')}, listed above`);
+  return lines;
+}
 const treeGlyph = { fallback: 'FALLBACK', seq: 'SEQUENCE', parallel: 'PARALLEL', repeat: 'REPEAT', foreach: 'FOR EACH', taskrun: 'TASK RUN' };
+// Commentary in a form is a // comment, so it never reads as part of the file.
+const cmt = (text) => (text ? `   // ${text}` : '');
+// A node's label, as a comment, when its name does not already say it.
+const said = (n) => (n.label && !n.name.replace(/_/g, ' ').includes(n.label.replace(/\?$/, '')) ? n.label : '');
 function treeLines(node, opts = {}, pad = '') {
   const out = [];
   const walk = (n, p) => {
+    const head = `${p}${n.name}: `;
     let line;
-    if (n.k === 'check') line = `${p}Truthy({${n.key}})   ${n.label}`;
-    else if (n.k === 'set') line = `${p}{${n.key}} = ${n.value ? `"${n.value}"` : '…'}   ${n.label}`;
-    else if (n.k === 'running') line = `${p}RUNNING   ${n.label}`;
+    if (n.k === 'check') line = `${head}Truthy({${n.key}})${cmt(said(n))}`;
+    else if (n.k === 'set') line = `${head}{${n.key}} = ${n.value ? `"${n.value}"` : '…'}${cmt(said(n))}`;
+    else if (n.k === 'running') line = `${head}RUNNING${cmt(said(n))}`;
     else if (n.k === 'action') {
       const args = n.args.map((a) => (a === '@prompt' && opts.prompt ? opts.prompt : a)).join(', ');
-      line = `${p}${n.fn}(${args})${n.out ? ` → {${n.out}}` : ''}${n.note ? `   ${n.note}` : ''}`;
+      line = `${head}${n.out ? `{${n.out}} = ` : ''}${fnText(n.fn)}(${args})${cmt(n.note)}`;
       if (n.prompt && opts.beforeLlm) out.push({ uid: n.uid, text: `${p}${opts.beforeLlm}` });
-    } else line = `${p}${treeGlyph[n.k]}   ${n.label}`;
+    } else line = `${head}${treeGlyph[n.k]}${cmt(said(n))}`;
     out.push({ uid: n.uid, text: line });
     n.children.forEach((c) => walk(c, p + '  '));
   };
@@ -1791,107 +1847,113 @@ function treeLines(node, opts = {}, pad = '') {
 }
 // A Vizij graph file holds flat lists of nodes and edges; #257's stored form writes the edges as indentation.
 const VIZIJ_NESTED = 'stored as flat lists of nodes and edges; written out, each node sits under the node it is wired into';
+const PROMPT_CALL = `agent.prompt(${PROMPT_ARGS.join(', ')})`;
 // The stored form of one part: the lines of the file, each tied to what it names.
 function storedLines(design, part, opt = {}) {
   const S = design ? design.strategy : 'reference', out = [], push = (text, id) => out.push({ text, id });
-  if (part === 'full') { for (const p of PARTS) { if (out.length) push(''); push(`— ${p.label} —`); out.push(...storedLines(design, p.id, opt)); } return out; }
+  if (part === 'full') { for (const p of PARTS) { if (out.length) push(''); push(`// — ${p.label} —`); out.push(...storedLines(design, p.id, opt)); } return out; }
   const group = MOTION_GROUPS.find(([g]) => g === part);
   // The values a motion group reads from another group, each with its line, so the views show it ran or was kept.
   const fromOthers = group ? [...new Set(groupNodes(part).flatMap(refsOf))].filter((r) => NODE.get(r).group !== 'inputs' && NODE.get(r).group !== part) : [];
-  const reads = (say) => fromOthers.forEach((r) => push(`  ${say(r, NODE.get(r).group)}`, r));
+  const reads = (pad, say) => fromOthers.forEach((r) => push(`${pad}// ${say(r, NODE.get(r).group)}`, r));
+  // A group listed flat, chain by chain, each node written by `line`.
+  const chained = (style, pad, line) => { for (const c of groupChains(part)) { chainHead(part, c, style, pad).forEach((t) => push(t)); for (const n of c.nodes) push(`${pad}${line(n)}`, n.id); } };
   if (!design) {
-    if (group) { push(`reference · ${group[1].toLowerCase()}: bespoke functions, each computed when what it follows from changed`); reads((r, g) => `reads ${r}, computed with the ${g} group`); for (const n of groupNodes(part)) push(`  ${n.id} = ${callText(n, 'refs')}${SINK_OF.has(n.id) ? `   → {${SINK_OF.get(n.id)}}` : ''}`, n.id); }
-    else { push(`reference · ${part}: an explicit state machine on an event loop; the tree below is the same logic`); treeLines(TREES[part]).forEach((l) => push(`  ${l.text}`, l.uid)); }
+    if (group) {
+      push(`// reference · ${group[1].toLowerCase()}: bespoke functions, each computed when what it follows from changed`);
+      reads('', (r, g) => `reads ${r}, computed with the ${g} group`);
+      chained('code', '', (n) => `${SINK_OF.has(n.id) ? `{${SINK_OF.get(n.id)}} = ` : ''}${n.id} = ${callText(n, 'code')}`);
+    } else { push(`// reference · ${part}: an explicit state machine on an event loop; the tree below is the same logic`); treeLines(TREES[part]).forEach((l) => push(l.text, l.uid)); }
     return out;
   }
   if (group) {
-    const nodes = groupNodes(part), sinks = groupSinks(part);
+    const sinks = groupSinks(part);
     if (S === 'compute' || S === 'full') {
-      push(`detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''} · ${group[1].toLowerCase()}`);
-      reads((r, g) => `reads @${r}, a detached node of the ${g} group`);
-      for (const n of nodes) push(`  ${n.id}: ${SINK_OF.has(n.id) ? `{${SINK_OF.get(n.id)}} = ` : ''}${callText(n, 'refs')}`, n.id);
-      if (sinks.length) push(`  sinks: ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')} publish after the tree, when their value changed`);
+      push(`// detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''} · ${group[1].toLowerCase()}`);
+      reads('', (r, g) => `reads @${r}, a detached node of the ${g} group`);
+      chained('refs', '', (n) => `${n.id}: ${SINK_OF.has(n.id) ? `{${SINK_OF.get(n.id)}} = ` : ''}${callText(n, 'refs')}`);
+      if (sinks.length) push(`// sinks: ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')} publish after the tree, when their value changed`);
     } else if (S === 'inc') {
-      push(`PARALLEL   ◇ node graph: ${group[1].toLowerCase()} · a branch of the root PARALLEL, after the statechart`);
-      reads((r, g) => `reads ${refText('@' + r, 'cells')}, a cell the ${g} group's shape writes`);
-      for (const n of nodes) push(`  ${refText('@' + n.id, 'cells')} = ${callText(n, 'cells')}   _on_change`, n.id);
+      push(`PARALLEL${cmt(`◇ node graph: ${group[1].toLowerCase()} · a branch of the root PARALLEL, after the statechart`)}`);
+      reads('  ', (r, g) => `reads ${refText('@' + r, 'cells')}, a ${SINK_OF.has(r) ? 'key' : 'cell'} the ${g} group's shape writes`);
+      chained('cells', '  ', (n) => `${refText('@' + n.id, 'cells')} = ${callText(n, 'cells')}   _on_change`);
       push('  RUNNING');
     } else if (S === 'macro') {
-      push(`authored · macro #${part}${sinks.length ? `, publishing ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')}` : ''}`);
-      reads((r, g) => `reads @${r}, from macro #${g}`);
-      for (const n of nodes) push(`  ${n.id}: ${callText(n, 'refs')}`, n.id);
+      push(`// authored · macro #${part}${sinks.length ? `, publishing ${sinks.map((n) => `{${SINK_OF.get(n.id)}}`).join(', ')}` : ''}`);
+      reads('', (r, g) => `reads @${r}, from macro #${g}`);
+      chained('refs', '', (n) => `${n.id}: ${callText(n, 'refs')}`);
       push('');
-      push(`executed · placed when loaded: ${sinks.length ? 'the group publishes a sink, so it anchors at the root' : 'its readers publish sinks, so it anchors at the root'}`);
-      push('WITH   the root: macros before the tree');
-      push(`  PARALLEL   #${part}, in data order`);
-      for (const n of nodes) push(`    ${refText('@' + n.id, 'cells')} = ${callText(n, 'cells')}   _on_change`, n.id);
-      push('  ⋯   the statechart, the tree’s body');
-      for (const n of sinks) push(`Copy({.${n.id}} → {${SINK_OF.get(n.id)}})`, n.id);
+      push(`// executed · placed when loaded: ${sinks.length ? 'the group publishes a sink, so it anchors at the root' : 'its readers publish sinks, so it anchors at the root'}`);
+      push(`WITH${cmt('the root: macros before the tree')}`);
+      push(`  PARALLEL${cmt(`#${part}, in data order`)}`);
+      chained('cells', '    ', (n) => `${refText('@' + n.id, 'cells')} = ${callText(n, 'cells')}   _on_change`);
+      push(`  ⋯${cmt('the statechart, the tree’s body')}`);
+      for (const n of sinks) push(`{${SINK_OF.get(n.id)}} = Copy({.${n.id}})`, n.id);
     } else {
       // The motion is one Vizij graph, shown a group at a time: a value from another group comes by wire, in the same
       // tick. Split into graphs joined by store keys, each hop would cost a tick: the eyes would follow last tick's head.
-      push(`graph motion · its ${group[1].toLowerCase()} nodes; the motion is one graph, shown a group at a time · every node keeps its output until a node it reads changes and marks it; a tick runs only the marked nodes`);
-      push(`  ${VIZIJ_NESTED}; a node wired into several sits under the first, and the others name it on a line of their own`);
+      push(`// graph motion · its ${group[1].toLowerCase()} nodes; the motion is one graph, shown a group at a time`);
+      push('// every node keeps its output until a node it reads changes and marks it; a tick runs only the marked nodes');
+      push(`// ${VIZIJ_NESTED};`);
+      push('// a node wired into several sits under the first, and a comment names it under the others');
       // Written from the group's outputs, and the nodes only other groups read, down to what each reads.
-      const readers = (id) => FUNCS.filter((m) => refsOf(m).includes(id));
-      const others = (id) => [...new Set(readers(id).map((m) => m.group).filter((g) => g !== part))];
-      const describe = (n) => {
-        if (n.group === 'inputs') return `input   path: ${n.key}`;
-        if (n.group !== part) return `${fname(n)}   in the ${n.group} group, wired in`;
-        const out = others(n.id);
-        return [fname(n), ...(n.params && Object.keys(n.params).length ? [paramText(n).join(', ')] : []), 'cached', ...(out.length ? [`wired into the ${out.join(' and ')} group${out.length > 1 ? 's' : ''}`] : [])].join('   ');
-      };
-      const rows = [], under = new Map();
-      const walk = (id, depth, reader) => {
-        if (under.has(id)) { rows.push({ depth, name: id, text: `↑ listed under ${under.get(id)}`, id }); return; }
-        under.set(id, reader);
+      const under = new Map();
+      const walk = (id, pad, reader) => {
         const n = NODE.get(id);
-        rows.push({ depth, name: id, text: describe(n), id });
-        if (n.group === part) for (const r of refsOf(n)) walk(r, depth + 1, id);
+        if (n.group !== 'inputs' && n.group !== part) { push(`${pad}// @${id}: ${fname(n)}, in the ${n.group} group, wired in`, id); return; }
+        if (under.has(id)) { push(`${pad}// @${id}: listed above, under @${under.get(id)}`, id); return; }
+        under.set(id, reader);
+        if (n.group === 'inputs') { push(`${pad}${id}: input({${n.key}})`, id); return; }
+        const others = otherReaders(id, part);
+        push(`${pad}${id}: ${callText(n, 'wired')}${cmt(['cached', ...(others.length ? [`wired into ${groupsText(others)}`] : [])].join(' · '))}`, id);
+        for (const r of refsOf(n)) walk(r, pad + '  ', id);
       };
-      for (const n of nodes.filter((x) => SINK_OF.has(x.id) || !readers(x.id).some((m) => m.group === part))) {
-        if (!SINK_OF.has(n.id)) { walk(n.id, 0, null); continue; }
-        rows.push({ depth: 0, name: `${n.id}_out`, text: `output   path: ${SINK_OF.get(n.id)}`, id: n.id });
-        walk(n.id, 1, `${n.id}_out`);
+      for (const n of groupRoots(part)) {
+        if (!SINK_OF.has(n.id)) { walk(n.id, '', null); continue; }
+        push(`${n.id}_out: {${SINK_OF.get(n.id)}} = output(@${n.id})`, n.id);
+        walk(n.id, '  ', `${n.id}_out`);
       }
-      const width = Math.max(...rows.map((r) => 2 * r.depth + r.name.length)) + 3;
-      for (const r of rows) push(`  ${('  '.repeat(r.depth) + r.name).padEnd(width)}${r.text}`, r.id);
     }
     return out;
   }
   const tree = TREES[part];
   if (S === 'control') {
-    push(`graph ${part} · control nodes tick what is wired into their child_N inputs; actions and their inputs are lazy`);
-    push(`  ${VIZIJ_NESTED}, after the input it feeds`);
-    const kinds = { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'control: repeat', foreach: 'control: for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'constant', action: 'action' };
-    const walk = (n, pad, input) => {
-      const detail = n.k === 'action' ? `function: ${n.fn}` : n.k === 'check' ? `reads: ${n.key}` : n.k === 'set' ? `path: ${n.key}` : n.k === 'running' ? 'value: Running' : '';
-      push(`${pad}${input ? `${input}: ` : ''}${n.uid} ${kinds[n.k]}${detail ? `   ${detail}` : ''}   ${n.label}${n.k === 'action' || n.k === 'check' ? '   lazy' : ''}`, n.uid);
-      if (n.prompt) push(`${pad}  prompt: prompt @pip/agent.prompt   lazy, with an argument cache: it runs when its arguments change`, 'prompt');
-      n.children.forEach((c, k) => walk(c, pad + '  ', `child_${k}`));
+    push(`// graph ${part} · control nodes tick what is wired into their child_0, child_1, … inputs, in order`);
+    push('// a call is an action node; actions and their inputs are lazy');
+    push(`// ${VIZIJ_NESTED}`);
+    const kinds = { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'repeat', foreach: 'for_each', taskrun: 'sequence' };
+    const walk = (n, pad) => {
+      const lazy = (text) => cmt([text, 'lazy'].filter(Boolean).join(' · '));
+      const line = n.k === 'action' ? `${n.out ? `{${n.out}} = ` : ''}${fnText(n.fn)}(${n.args.join(', ')})${lazy(n.note)}`
+        : n.k === 'check' ? `condition({${n.key}})${lazy(said(n))}`
+        : n.k === 'set' ? `{${n.key}} = output(${n.value ? `"${n.value}"` : '…'})${cmt(said(n))}`
+        : n.k === 'running' ? `constant(Running)${cmt(said(n))}` : `${kinds[n.k]}${cmt(said(n))}`;
+      push(`${pad}${n.name}: ${line}`, n.uid);
+      if (n.prompt) push(`${pad}  prompt: ${PROMPT_CALL}${cmt('lazy, with an argument cache: it runs when its arguments change')}`, 'prompt');
+      n.children.forEach((c) => walk(c, pad + '  '));
     };
-    walk(tree, '  ', '');
+    walk(tree, '');
     return out;
   }
   const head = { conversation: 'Conversation, a subtree under the root PARALLEL', attention: 'Attention, a subtree under the root PARALLEL', reply: 'ReplyRun, a task run the conversation spawns; it outlives its branch, and {reply/held} gates what it shows' }[part];
-  push(`tree, held from its root · ${head}`);
+  push(`// tree, held from its root · ${head}`);
   if (part === 'reply' && S === 'inc') {
-    treeLines(tree, { prompt: '{.prompt}', beforeLlm: `{.prompt} = @pip/agent.prompt(${PROMPT_ARGS.join(', ')})   _on_change` }, '  ').forEach((l) => push(l.text, l.uid));
+    treeLines(tree, { prompt: '{.prompt}', beforeLlm: `prompt: {.prompt} = ${PROMPT_CALL}   _on_change` }).forEach((l) => push(l.text, l.uid));
   } else if (part === 'reply' && S === 'macro') {
-    treeLines(tree, { prompt: '#prompt' }, '  ').forEach((l) => push(l.text, l.uid));
+    treeLines(tree, { prompt: '#prompt' }).forEach((l) => push(l.text, l.uid));
     push('');
-    push('authored · macro #prompt, read by llm');
-    push(`  prompt: @pip/agent.prompt(${PROMPT_ARGS.join(', ')})`, 'prompt');
-    push('executed · placed before its reader: WITH[ PARALLEL[ {.prompt} on change ], llm ]', 'prompt');
+    push('// authored · macro #prompt, read by llm');
+    push(`prompt: ${PROMPT_CALL}`, 'prompt');
+    push('// executed · placed before its reader: WITH[ PARALLEL[ {.prompt} on change ], llm ]', 'prompt');
   } else {
-    treeLines(tree, {}, '  ').forEach((l) => push(l.text, l.uid));
+    treeLines(tree).forEach((l) => push(l.text, l.uid));
     if (part === 'reply') {
       push('');
-      push(`detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''}`);
-      push(`  prompt: @pip/agent.prompt(${PROMPT_ARGS.join(', ')})   read by llm; runs only when its arguments changed`, 'prompt');
+      push(`// detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''}`);
+      push(`prompt: ${PROMPT_CALL}${cmt('read by llm; runs only when its arguments changed')}`, 'prompt');
     }
   }
-  if (S === 'inc' && part !== 'reply') push('  a clean branch answers from its cache; a waiting leaf stays clean until its call completes');
+  if (S === 'inc' && part !== 'reply') push('// a clean branch answers from its cache; a waiting leaf stays clean until its call completes');
   return out;
 }
 // The whole motion graph in one drawing: every function, the store keys it reads, the channels it writes.
@@ -2146,7 +2208,7 @@ function repNote(design, part, tab) {
 function buildRep(side) {
   const design = side.rec.design || null, part = S.part, tab = S.tab;
   side.repTitle.textContent = `${partLabel(part)} · ${TABS.find(([k]) => k === tab)[1].toLowerCase()}`;
-  side.repNote.textContent = repNote(design, part, tab) + (isMotion(part) && tab !== 'stored' ? ' Nothing here waits, so nothing is polled: the waits are in the conversation and the reply run, and the chip under each robot lists them.' : '');
+  side.repNote.textContent = repNote(design, part, tab) + (isMotion(part) && tab !== 'stored' ? ' Nothing here waits, so nothing is polled: the waits are in the conversation and the reply run, and the chip under each robot lists them.' : '') + (tab === 'graph' ? '' : ` ${NOTATION}`);
   side.repKey = `${side.rec.impl.id}|${part}|${tab}`;
   side.repLines = null; side.gnodes = null; side.gedges = null;
   side.view.classList.toggle('full', part === 'full');
@@ -2155,9 +2217,11 @@ function buildRep(side) {
   else {
     side.resetLayout.hidden = true;
     const opt = side.rec.opt || {}, outlineOf = (p) => (isMotion(p) ? storedLines(design, p, opt) : treeLines(TREES[p]).map((l) => ({ text: l.text, id: l.uid })));
-    const lines = tab !== 'outline' ? storedLines(design, part, opt) : part === 'full' ? PARTS.flatMap((p, k) => [...(k ? [{ text: '' }] : []), { text: `— ${p.label} —` }, ...outlineOf(p.id)]) : outlineOf(part);
+    const lines = tab !== 'outline' ? storedLines(design, part, opt) : part === 'full' ? PARTS.flatMap((p, k) => [...(k ? [{ text: '' }] : []), { text: `// — ${p.label} —` }, ...outlineOf(p.id)]) : outlineOf(part);
     const pre = el('pre');
-    side.repLines = lines.map((l) => { const span = el('span', { text: l.text || ' ' }); pre.append(span); return { span, id: l.id }; });
+    // A line's // comment is muted, so the file's own text stands out.
+    const lineSpan = (text) => { const at = text.search(/(^|\s)\/\/ /); if (at < 0) return el('span', { text: text || ' ' }); const cut = text[at] === '/' ? at : at + 1; return el('span', {}, text.slice(0, cut), el('i', { class: 'cmt', text: text.slice(cut) })); };
+    side.repLines = lines.map((l) => { const span = lineSpan(l.text); pre.append(span); return { span, id: l.id }; });
     if (tab === 'stored') side.repLines = null;
     side.view.replaceChildren(pre);
   }

@@ -409,10 +409,19 @@ download it and open it in a browser.
   sides: the conversation, attention and reply run, or one of the seven motion
   groups; or Full, every part at once, the three trees above the whole motion
   graph. Each is drawn as a graph, as a live outline, or as its stored form.
-  A Vizij graph file holds flat lists of nodes and edges, so #257's stored
-  form writes the edges as indentation: each node under the node it is wired
-  into, after the input it feeds. A node wired into several sits under the
-  first, and each of the others names it on a line of its own.
+  Every stored form uses one notation: `{key}` a store key, `{.name}` a
+  tree-local cell, `@name` a node's output, `name:` a node's name, a key or
+  cell before `=` what a call's output is bound to, `#name` a macro, and
+  `// …` a comment. Every tree node has a name, as its author would write
+  it (`listen_branch`, `is_listening`), and a function is named by its
+  module (`agent.llm` for `@pip/agent`'s `llm`). A motion group is listed
+  output by output: the nodes each output needs, under a comment naming it,
+  and a comment for what it reads from an output above. A Vizij graph file
+  holds flat lists of nodes and edges, so #257's stored form writes the
+  edges as indentation, each node under the node it is wired into. A node
+  wired into several sits under the first, and a comment names it under the
+  others. The other designs cannot nest: in a tree file, indentation is the
+  tree, and in a group of leaves their order is the order they run.
   A node's colour is what the tick did with it, by the design's rule: blue,
   re-evaluated or ticked; amber, visited to collect its data and kept (a
   detached node comparing its arguments, a tree node whose cached status its
