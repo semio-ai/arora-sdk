@@ -552,9 +552,12 @@ pub struct Pin {
   needs to authenticate, as the device, as a person or as nobody, from a
   credential provider. No call passes a token.
 - **A device's registry is a `LocalRegistry` in front of a source**, the
-  shape `RemoteCachedRegistry` has today. It persists under the device
-  directory (records in the `records/` layout, artifacts by content hash), in
-  the directory the bridge client already uses, not a second cache root.
+  shape `RemoteCachedRegistry` has today. What persists is the cache of
+  verified artifacts, by content hash and sealed when private, in the
+  directory the bridge client already uses, not a second cache root. The
+  registry itself is memory only: at start the device rebuilds it from the
+  `record` artifacts its committed configuration pins, so no record has an
+  unsealed copy on disk.
 - **Implementations:** a local directory (`DirSource`, no network) and a
   static host over HTTPS, which share one layout: `index/<scope>/<name>.json`
   holds a package's id, or the alias a move left, and every release, and
@@ -744,8 +747,8 @@ not committed, after a failed pointer write, skips to Commit and replies
    failure here changes nothing.
 5. **Stage.** The device writes durably, to a generation directory of its
    own, `<device dir>/configuration/<hash>/`, everything a restart needs:
-   the configuration's pin and record, or, inline, the configuration and its
-   records. A failure here, such as a full disk, changes nothing.
+   the configuration's pin, its record being a cached artifact, or, inline,
+   the configuration and its records, sealed as private artifacts are. A failure here, such as a full disk, changes nothing.
 6. **Swap, between two steps.** The device instantiates every new and changed
    module before dropping any old instance, then reloads, unloads and loads,
    and starts, replaces or halts behaviors. A behavior that is kept keeps
