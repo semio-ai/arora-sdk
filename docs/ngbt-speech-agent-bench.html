@@ -16,6 +16,7 @@
   --bg: #eef0eb; --panel: #fdfdfb; --panel-2: #e6e9e2; --ink: #191c1a; --muted: #555c57; --faint: #858c86;
   --line: #d3d7cf; --grid: #e6e9e3;
   --robot: #e3e6e0; --robot-edge: #b4b9b0; --robot-shade: #cfd3cb; --screen: #131b21; --glow: #4fc9df; --ghost: #c2562a;
+  --person: #d3d6d9; --person-edge: #a3a9ae; --person-shirt: #9fb4cc; --person-hair: #575c61; --person-ink: #26292c;
   --run-1: #2a78d6; --run-2: #eb6834; --run-3: #1baf7a; --run-x: #8b928c;
   --good: #0ca30c; --bad: #d03b3b; --good-ink: #1d7a1d; --bad-ink: #b42e2e;
   --poll: #6fd25a; --poll-fill: #e4f8dc; --poll-ink: #2f7a20;
@@ -28,6 +29,7 @@
   --bg: #111315; --panel: #1b1e21; --panel-2: #262a2e; --ink: #e6e9e4; --muted: #a6aea8; --faint: #7a817c;
   --line: #31363a; --grid: #262a2e;
   --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
+  --person: #737a80; --person-edge: #8d949a; --person-shirt: #46607e; --person-hair: #2a2d30; --person-ink: #141618;
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
   --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
@@ -38,6 +40,7 @@
   --bg: #111315; --panel: #1b1e21; --panel-2: #262a2e; --ink: #e6e9e4; --muted: #a6aea8; --faint: #7a817c;
   --line: #31363a; --grid: #262a2e;
   --robot: #3a4146; --robot-edge: #5a636b; --robot-shade: #31373c; --screen: #06080a; --glow: #6fe3f5; --ghost: #ff8a5c;
+  --person: #737a80; --person-edge: #8d949a; --person-shirt: #46607e; --person-hair: #2a2d30; --person-ink: #141618;
   --run-1: #3987e5; --run-2: #d95926; --run-3: #199e70; --run-x: #7a817c;
   --good: #0ca30c; --bad: #e05252; --good-ink: #4cc94c; --bad-ink: #ff8080;
   --poll: #8fe27c; --poll-fill: #1f3a1b; --poll-ink: #a8f096;
@@ -85,7 +88,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .offset-pick select { min-height: 26px; padding: 2px 6px; font-size: 12px; }
 .impl-note { margin: 0; font-size: 12px; color: var(--muted); }
 .robot-box { display: flex; justify-content: center; }
-.robot { width: 100%; max-width: 300px; height: auto; display: block; }
+.robot { width: 100%; max-width: 392px; height: auto; display: block; }
 .r-body { fill: var(--robot); stroke: var(--robot-edge); stroke-width: 2; }
 .r-shade { fill: var(--robot-shade); }
 .r-shadow { fill: var(--ink); opacity: .1; }
@@ -95,6 +98,15 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .r-spark { fill: var(--screen); opacity: .55; }
 .ghost { fill: none; stroke: var(--ghost); stroke-width: 1.6; stroke-dasharray: 5 4; }
 .ghost * { fill: none; stroke: var(--ghost); }
+/* Sam, beside the robot: faint and stepped aside when away, the back of the head while the face is lost */
+.sam { transition: opacity .35s ease, transform .35s ease; }
+.sam.away { opacity: .14; transform: translateX(18px); }
+.p-head { fill: var(--person); stroke: var(--person-edge); stroke-width: 2; }
+.p-shirt { fill: var(--person-shirt); stroke: var(--person-edge); stroke-width: 2; }
+.p-hair { fill: var(--person-hair); }
+.p-ink { fill: var(--person-ink); }
+.p-voice path { fill: none; stroke: var(--muted); stroke-width: 3.5; stroke-linecap: round; }
+@media (prefers-reduced-motion: reduce) { .sam { transition: none; } }
 .captions { display: grid; gap: 4px; min-height: 3.6em; }
 .cap { margin: 0; font-size: 13px; line-height: 1.35; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; }
 .cap .who { font: 500 10.5px/1.9 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
@@ -2081,7 +2093,20 @@ const other = (side) => sides[side.key === 'a' ? 'b' : 'a'];
 function robotMarkup(id) {
   const arm = '<rect x="-10" y="-6" width="20" height="70" rx="10"/><circle cx="0" cy="68" r="12"/>';
   const face = (main) => `<g data-k="eye"><ellipse ${main ? 'class="r-glow"' : ''} cx="0" cy="0" rx="13" ry="16"/>${main ? '<circle class="r-spark" cx="0" cy="0" r="3.4"/>' : ''}</g><g data-k="eye"><ellipse ${main ? 'class="r-glow"' : ''} cx="0" cy="0" rx="13" ry="16"/>${main ? '<circle class="r-spark" cx="0" cy="0" r="3.4"/>' : ''}</g><path data-k="mouth" ${main ? 'class="r-mouth"' : ''} d=""/>`;
-  return `<svg class="robot" viewBox="0 0 360 380" role="img" aria-label="Pip, a desktop robot with one arm and a face screen">
+  // Sam's voice: three arcs from the mouth, toward Pip.
+  const arc = (r) => { const dx = (r * Math.cos(0.45)).toFixed(1), dy = (r * Math.sin(0.45)).toFixed(1); return `<path d="M ${405 - dx} ${223 - dy} A ${r} ${r} 0 0 0 ${405 - dx} ${223 + +dy}"/>`; };
+  const sam = `<g data-k="sam" class="sam">
+    <ellipse class="r-shadow" cx="405" cy="362" rx="58" ry="7"/>
+    <path class="p-shirt" d="M 357 356 V 302 Q 357 264 405 264 Q 453 264 453 302 V 356 Z"/>
+    <rect class="p-head" x="395" y="228" width="20" height="40" rx="6"/>
+    <circle class="p-head" cx="405" cy="205" r="31"/>
+    <g data-k="sam-face"><path class="p-hair" d="M 374 205 A 31 31 0 0 1 436 205 C 427 191 417 186 405 188 C 393 186 383 191 374 205 Z"/>
+      <circle class="p-ink" cx="394" cy="209" r="2.6"/><circle class="p-ink" cx="416" cy="209" r="2.6"/>
+      <ellipse data-k="sam-mouth" class="p-ink" cx="405" cy="223" rx="6" ry="1.3"/></g>
+    <circle data-k="sam-back" class="p-hair" cx="405" cy="205" r="31"/>
+    <g data-k="sam-voice" class="p-voice">${[44, 56, 68].map(arc).join('')}</g>
+  </g>`;
+  return `<svg class="robot" viewBox="0 0 470 380" role="img" aria-label="Pip, a desktop robot with one arm and a face screen, and Sam beside it">
     <ellipse class="r-shadow" cx="180" cy="362" rx="125" ry="9"/>
     <rect class="r-body" x="88" y="304" width="184" height="52" rx="24"/>
     <rect class="r-shade" x="104" y="336" width="152" height="10" rx="5"/>
@@ -2094,7 +2119,22 @@ function robotMarkup(id) {
       <clipPath id="clip-${id}"><rect x="111" y="85" width="138" height="108" rx="26"/></clipPath>
       <g clip-path="url(#clip-${id})"><g data-k="face">${face(true)}</g></g></g>
     <g data-k="ghost-head" class="ghost"><rect x="94" y="68" width="172" height="142" rx="36"/><g data-k="ghost-face">${face(false)}</g></g>
+    ${sam}
   </svg>`;
+}
+// Sam at a moment of the script: here from the face's arrival to its leaving, the face lost in between, and the voice.
+function samAt(t) {
+  return { here: t >= SCRIPT.faceAppears && t < SCRIPT.faceLeaves, face: faceAt(t).visible, voice: SCRIPT.user.find((u) => t >= u.from - 1e-9 && t < u.to - 1e-9) || null };
+}
+const samText = (s) => (!s.here ? 'not here' : s.face ? 'in view' : 'face lost');
+function poseSam(r, t) {
+  const s = samAt(t);
+  r.g.classList.toggle('away', !s.here);
+  r.face.style.display = s.here && !s.face ? 'none' : ''; r.back.style.display = s.here && !s.face ? '' : 'none';
+  r.voice.style.display = s.voice ? '' : 'none';
+  // Words move the mouth; a cough holds it open.
+  r.mouth.setAttribute('ry', (1.3 + 3.6 * (s.voice ? (s.voice.text ? Math.abs(Math.sin(2 * Math.PI * 3.2 * t)) : 0.8) : 0)).toFixed(2));
+  if (s.voice) r.arcs.forEach((a, k) => { a.style.opacity = (0.3 + 0.35 * (1 + Math.sin(2 * Math.PI * 1.6 * t - 1.1 * k))).toFixed(2); });
 }
 function robotRefs(svg, prefix = '') {
   const q = (k) => svg.querySelector(`[data-k="${prefix}${k}"]`);
@@ -2140,6 +2180,8 @@ function buildSide(key) {
   stage.append(el('div', { class: 'side-head' }, pick, el('label', { class: 'ghost-toggle', for: `ghost-${key}` }, ghost, 'reference ghost'), el('label', { class: 'ghost-toggle offset-pick', for: `offset-${key}`, title: 'Show this side this many frames after the timeline, to line up a design that runs a tick late' }, 'offset', offset)), note, box, el('div', { class: 'captions' }, capUser, capRobot), chips);
   const side = sides[key] = { key, stage, trace, pick, ghost, note, svg, main: robotRefs(svg), shade: robotRefs(svg, 'ghost-'), ghostArm: svg.querySelector('[data-k="ghost-arm"]'), ghostHead: svg.querySelector('[data-k="ghost-head"]'), capUser, capRobot, chips, label };
   side.shade.arm = side.ghostArm; side.shade.head = side.ghostHead;
+  const q = (k) => svg.querySelector(`[data-k="${k}"]`);
+  side.sam = { g: q('sam'), face: q('sam-face'), back: q('sam-back'), mouth: q('sam-mouth'), voice: q('sam-voice'), arcs: [...q('sam-voice').children] };
 }
 
 function mount(key, costOnly = false) {
@@ -2621,11 +2663,13 @@ function renderSide(side, at) {
   const showGhost = S.ghost[side.key] && S.pick[side.key] !== 'reference';
   side.ghostArm.style.display = side.ghostHead.style.display = showGhost ? '' : 'none';
   if (showGhost) poseRobot(side.shade, recordingFor('reference').frames[at].c);
-  const capKey = `${f.user}|${f.robot ? `${f.robot.text}|${f.robot.word}|${f.robot.paused}` : ''}`;
+  poseSam(side.sam, f.t);
+  const samNow = samText(samAt(f.t));
+  const capKey = `${f.user}|${samNow}|${f.robot ? `${f.robot.text}|${f.robot.word}|${f.robot.paused}` : ''}`;
   if (capKey !== side.capKey) {
     side.capKey = capKey;
     const u = side.capUser.querySelector('.said'), r = side.capRobot.querySelector('.said');
-    u.textContent = f.user || '…'; side.capUser.classList.toggle('quiet', !f.user);
+    u.textContent = f.user || samNow; side.capUser.classList.toggle('quiet', !f.user);
     r.replaceChildren();
     if (f.robot) {
       if (f.robot.paused) r.append(el('span', { class: 'k', text: '(paused) ' }));

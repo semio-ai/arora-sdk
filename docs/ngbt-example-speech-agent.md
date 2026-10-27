@@ -400,7 +400,8 @@ download it and open it in a browser.
 - **Each side.** A frame offset, which starts at the design's lag, shows a
   design that runs a tick late at the same moment of its execution as the other
   side; the reference's ghost stays on the timeline. The robot, with a dashed
-  ghost of the reference; live
+  ghost of the reference, and Sam beside it: away, in view, speaking, or turned
+  away while the face is lost; live
   captions; the states; what it said; the service strip; the channels; the
   cost of each tick, charted as µs, node ticks, executions or checks, with
   this tick's work by area; and the scorecard. A failed check jumps to its
