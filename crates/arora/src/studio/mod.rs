@@ -137,13 +137,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use arora_bridge::Bridge;
 use arora_hal::HalDescription;
+use arora_studio_bridge_client::auth::{DeviceDescription, Error as AuthError, PendingSignIn};
 use arora_studio_bridge_client::credentials::DeviceCredentials;
 use arora_studio_bridge_client::error::Error as ClientError;
 use arora_studio_bridge_client::firestore_support::options::{
     FirebaseEmulatorOptions, FirebaseOptions,
-};
-use arora_studio_bridge_client::session::{
-    DeviceDescription, Error as SessionError, PendingSignIn,
 };
 use arora_studio_bridge_client::studio::{self as enrollment, EnrollWith, ENROLLMENT_TOKEN_VAR};
 use arora_studio_bridge_client::zenoh::ZenohDeviceClient;
@@ -555,7 +553,7 @@ where
 /// project's.
 fn connection_error(error: ClientError, credentials: &Path) -> anyhow::Error {
     let context = match &error {
-        ClientError::Studio(SessionError::WrongProject { .. }) => format!(
+        ClientError::Studio(AuthError::WrongProject { .. }) => format!(
             "the device's Studio credential in {} is another Firebase project's than the one \
              this run reaches, so the device does not enroll again over it: point the run at \
              that project (the FIREBASE_* variables), or delete that directory to enroll the \
@@ -1050,7 +1048,7 @@ mod tests {
 
     #[test]
     fn a_credential_of_another_project_fails_without_enrolling() {
-        let wrong_project = SessionError::WrongProject {
+        let wrong_project = AuthError::WrongProject {
             project: "studio".to_string(),
             audience: "studio-staging".to_string(),
         };
@@ -1060,7 +1058,7 @@ mod tests {
         assert!(
             matches!(
                 error.downcast_ref::<ClientError>(),
-                Some(ClientError::Studio(SessionError::WrongProject { .. }))
+                Some(ClientError::Studio(AuthError::WrongProject { .. }))
             ),
             "{error:?}"
         );
