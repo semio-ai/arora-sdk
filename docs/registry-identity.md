@@ -122,7 +122,7 @@ it, and indexes the record by its UUID.
 | A deployer | Resolves, freezes and applies a configuration | Not for public packages; as a person or a tool for private ones |
 | A device | Fetches what its configuration pins, and runs it | Not for public packages. For private ones and for the Studio Bridge, as itself, after an enrollment that ties it to the account that manages it |
 
-One sign-in crate serves them all, `semio-studio-session`, without merging
+One sign-in crate serves them all, `semio-studio-auth`, without merging
 their rights: a tool's session carries the `tool` claim, a device's the
 `device` claim and its id.
 
@@ -202,7 +202,7 @@ dependency, and that is what the package id adds.
 | `arora-index` | arora-sdk | Asset management over any source: resolution, verification, cache, `DirSource` |
 | `arora` | arora-sdk | Runs a device (`arora run`), signs in and enrolls devices through a provider (`arora auth login semio`), and hands the package verbs to `arora-pkg` ([configurations](proposal-configurations.md) 3.11) |
 | `arora-pkg` | arora-sdk | The package verbs: `add`, `install`, `show`, `publish`, `deprecate`, `version`, `vendor`; folder registries and moves. It reaches Studio through the provider its user configuration names |
-| `semio-studio-session` | studio-bridge | Sign-in to Studio, device enrollment, the session and its credential |
+| `semio-studio-auth` | studio-bridge | Sign-in to Studio, device enrollment, the session and its credential |
 | `semio-studio-assets` | studio-bridge | Studio's `RegistrySource`: reads Studio's packages, publishes through the endpoint |
 | `arora-studio-bridge-client` | studio-bridge | The device's live connection to Studio, on the same session |
 | `arora-semio` | semio-cli | Studio's provider: fills the sign-in, registry, devices and tokens roles behind `arora`'s verbs |
@@ -229,7 +229,7 @@ dependency, and that is what the package id adds.
 | Item | Change |
 |---|---|
 | `semio-studio-assets` | Reads public packages with no token and private ones with the caller's credential: a name through claims and aliases, then the package, its releases and its bytes. Reports `packageId`, the scope the release recorded, and dependencies with their names and ids. Publishes through the endpoint. Does not carry `contentId`. |
-| `semio-studio-session` | Unchanged by identity: it signs authors, tools and devices in. |
+| `semio-studio-auth` | Unchanged by identity: it signs authors, tools and devices in. |
 
 **semio_studio**
 
@@ -309,7 +309,7 @@ and UI PRs, and the published-asset transfer.
 PRs 1 and 2 deploy together, so no deploy runs with two publish paths. Both
 change the security rules, so each gets Studio's two independent reviews.
 Outside semio_studio, `semio-studio-assets` publishes through the endpoint
-instead of Firestore's REST API, and `semio-studio-session` keeps the token
+instead of Firestore's REST API, and `semio-studio-auth` keeps the token
 for `arora-semio`'s sign-in role; both are small.
 
 ## 10. Running your own registry
