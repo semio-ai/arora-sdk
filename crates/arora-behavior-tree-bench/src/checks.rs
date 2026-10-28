@@ -132,6 +132,40 @@ mod tests {
         assert_eq!(run.written.len(), 53);
     }
 
+    /// A replay whose length is a whole number of clock steps starts every
+    /// interval at the same phase, so its quantized readings never average out.
+    #[test]
+    fn a_replay_locked_to_the_clock_step_leaves_the_mean_unresolved() {
+        struct Locked(Cell<f64>);
+        impl Clock for Locked {
+            fn now(&self) -> f64 {
+                (self.0.get() / 100.0).floor() * 100.0
+            }
+            fn step_us(&self) -> f64 {
+                100.0
+            }
+            fn tick_finished(&self) {
+                self.0.set(self.0.get() + 1.0);
+            }
+        }
+        let workload = Scenario::Settled.workload(1, 99, 100);
+        let clock = Locked(Cell::new(0.0));
+        let run =
+            measure::replay_adaptive(&workload, forms::FORMS[0], false, &clock, 5000.0).unwrap();
+        assert!(
+            run.replay_us.iter().all(|&x| x == 100.0),
+            "{:?}",
+            run.replay_us
+        );
+        assert!(run.mean_us.is_nan(), "{}", run.mean_us);
+        // The same workload on a clock whose phase moves resolves its mean.
+        let clock = Locked(Cell::new(13.0));
+        let shifted = Scenario::Settled.workload(1, 99, 113);
+        let run =
+            measure::replay_adaptive(&shifted, forms::FORMS[0], false, &clock, 5000.0).unwrap();
+        assert!(run.mean_us.is_finite());
+    }
+
     #[test]
     fn wrong_form_is_rejected_alone_and_with_reference() {
         let mut scatter = crate::synthetic::json();

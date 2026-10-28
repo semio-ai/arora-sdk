@@ -44,9 +44,9 @@ pub fn workload_table(workload: &Workload, rows: &[Measurement]) -> String {
     for m in rows {
         let s = &m.summary;
         out += &format!(
-            "| {} | {:.3} | {} | {} | {} | {} | {:.3} | {:.3} |",
+            "| {} | {} | {} | {} | {} | {} | {:.3} | {:.3} |",
             m.form,
-            s.mean,
+            time(Some(s.mean).filter(|x| x.is_finite())),
             time(s.p50),
             time(s.p95),
             time(s.p99),
@@ -70,10 +70,10 @@ pub fn scale_rows(n: usize, scenario: Scenario, rows: &[Measurement]) -> String 
         .map(|m| {
             let s = &m.summary;
             format!(
-                "| {n} | {} | {} | {:.3} | {} | {} | {} | {} | {:.3} | {:.3} | {} |\n",
+                "| {n} | {} | {} | {} | {} | {} | {} | {} | {:.3} | {:.3} | {} |\n",
                 scenario.name(),
                 m.form,
-                s.mean,
+                time(Some(s.mean).filter(|x| x.is_finite())),
                 time(s.p50),
                 time(s.p95),
                 time(s.p99),

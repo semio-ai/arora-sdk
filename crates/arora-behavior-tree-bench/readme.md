@@ -29,7 +29,11 @@ step. Coarse clocks time all measured ticks of each replay as one interval, with
 two clock reads, and divide by the measured tick count. A pilot fixes the number
 of replays before collecting a sample, targeting 50 clock steps of total measured
 work. The pilot estimate does not guarantee that budget in subsequent replays.
-The coarse mean averages interval means across replays and samples. Per-tick
+The coarse mean averages interval means across replays and samples; a quantized
+reading's error averages out only when the intervals start at varying points
+within a clock step. When the pilot's and every replay's readings are identical
+and span fewer than 20 steps, the replay's length is locked to the step and the
+mean is unresolved, as are any quantiles of sample means that include it. Per-tick
 quantiles, maximum, time bins and phase means are unresolved: JSON uses `null`,
 tables print `unresolved`, and numeric C rows use NaN.
 
@@ -151,6 +155,7 @@ Only these host stand-ins are needed:
 | `wander` | `t`, `gap_min`, `gap_max`, `salt`, `low`, `high`, mutable `out`, mutable `state`; emits a random level after seeded random gaps; Running | noise samples do not retain a random-gap schedule and held output across calls |
 
 Host numeric parameters are f64; initialize each private `state` with `()`.
+A saved state the action did not write, other than three numbers, is a tick error.
 The actions restart after a missed tick (a time gap greater than `1.5 * dt`).
 Random choices are deterministic functions of time and salt; [host.rs](src/host.rs)
 defines the hash. Outputs are written only when changed.

@@ -117,7 +117,12 @@ impl Bridge {
         };
         let t = number("t");
         let mut state = match get("state") {
-            Some(Value::ArrayF64(v)) => v.clone(),
+            Some(Value::ArrayF64(v)) if v.len() == 3 => v.clone(),
+            Some(Value::ArrayF64(v)) => {
+                return Err(CallError::Generic {
+                    message: format!("a saved state holds 3 numbers, not {}", v.len()),
+                })
+            }
             _ => vec![f64::NAN; 3],
         };
         let restart = state[0].is_nan() || t - state[0] > self.gap;

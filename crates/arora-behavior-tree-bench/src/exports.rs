@@ -350,10 +350,18 @@ pub extern "C" fn bench_measure(
     let summary = measure::summarize(&workload, &runs);
     let mut means: Vec<_> = runs.iter().map(|r| r.mean_us).collect();
     means.sort_by(f64::total_cmp);
+    // One unresolved sample leaves the quantiles unresolved.
+    let quantile = |p| {
+        if means.iter().any(|x| x.is_nan()) {
+            f64::NAN
+        } else {
+            measure::quantile(&means, p)
+        }
+    };
     ROW.set([
-        measure::quantile(&means, 0.5),
-        measure::quantile(&means, 0.25),
-        measure::quantile(&means, 0.75),
+        quantile(0.5),
+        quantile(0.25),
+        quantile(0.75),
         summary.calls,
         summary.dispatches,
         (h >> 32) as f64,

@@ -326,6 +326,16 @@ pub fn replay_adaptive(
     }
     result.repetitions = repetitions;
     result.mean_us /= repetitions as f64;
+    // A quantized interval's error averages out only when the intervals start
+    // at varying points within a clock step. Readings that never vary, from
+    // the pilot through every replay, over fewer than 20 steps, mean the
+    // replay's length is locked to the step: the mean is unresolved.
+    if mode == TimingMode::Replay {
+        let first = pilot.replay_us[0];
+        if first < 20.0 * clock.step_us() && result.replay_us.iter().all(|&x| x == first) {
+            result.mean_us = f64::NAN;
+        }
+    }
     for time in &mut result.times {
         *time /= repetitions as f64;
     }

@@ -494,6 +494,27 @@ fn lowering_errors_name_the_form_without_panicking() {
     }
 }
 
+#[test]
+fn a_malformed_saved_state_is_a_tick_error() {
+    let mut raw = synthetic::json();
+    raw["text"] =
+        "hold(t: {arora/time}, duration: 0, value: 1, out: {target}, state: f64[])".into();
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    for form in FORMS {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            measure::measure(&workload, &[*form], 1, &Monotonic::default())
+        }));
+        let error = outcome
+            .expect("a malformed state must not panic")
+            .err()
+            .expect("a malformed state must fail");
+        assert!(
+            error.contains("a saved state holds 3 numbers, not 0"),
+            "{error}"
+        );
+    }
+}
+
 /// NaN payloads/signs cannot create disagreements for equal float values,
 /// including specialized float arrays and heterogeneous arrays.
 #[test]
