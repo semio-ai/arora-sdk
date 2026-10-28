@@ -60,13 +60,51 @@ pub(super) fn of(device: &Device, store: Option<&Path>) -> Result<DeviceCredenti
         }
         Credential::Store { identity_file } => {
             let store = store_at(store)?;
-            // A file gone, its identity is wherever it migrated to.
-            if let Some(file) = identity_file.as_ref().filter(|file| file.is_file()) {
-                identity_file_dir(file, &identity_key_dirs(Some(&store)))?;
-            }
-            in_store(&store, device.name(), device.dir())
+            identified_in_store(
+                &store,
+                device.name(),
+                device.dir(),
+                identity_file.as_deref(),
+            )
         }
     }
+}
+
+/// The Studio credentials of the device `name` in `store`, as [`in_store`]
+/// gives them, the deprecated `IDENTITY_FILE` migrated first when the store
+/// holds no credential for the name. A name holding one needs nothing from
+/// the file (enrolled with `semio device enroll`, say), so a file whose key
+/// is gone cannot stop it connecting.
+fn identified_in_store(
+    store: &DeviceStore,
+    name: &str,
+    device_dir: &Path,
+    identity_file: Option<&Path>,
+) -> Result<DeviceCredentials> {
+    // A file gone, its identity is wherever it migrated to.
+    if let Some(file) = identity_file.filter(|file| file.is_file()) {
+        if holds_credential(store, name)? {
+            warn!(
+                "{} is no longer read, and can be removed: the device {name} has its credential \
+                 in Semio's device store",
+                file.display()
+            );
+        } else {
+            identity_file_dir(file, &identity_key_dirs(Some(store)))?;
+        }
+    }
+    in_store(store, name, device_dir)
+}
+
+/// Whether `store` holds a readable credential for the device `name`.
+fn holds_credential(store: &DeviceStore, name: &str) -> Result<bool> {
+    device_dir::check_name(name)?;
+    let dir = store.dir(&DeviceName::new(name)?);
+    // `in_dir` would create a directory that is not there.
+    Ok(dir.is_dir()
+        && DeviceCredentials::in_dir(&dir)?
+            .refresh_token()
+            .is_ok_and(|token| token.is_some()))
 }
 
 /// The store under `root`, else the default one.
@@ -537,6 +575,26 @@ mod tests {
 
         assert_eq!(credentials.refresh_token().unwrap(), Some("t".to_string()));
         assert!(!dir.join(STUDIO_DIR).exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_name_the_store_holds_a_credential_for_skips_the_identity_file() {
+        let root = scratch("file-skipped");
+        let (file, key_dir) = identity_file_layout(&root, "old");
+        // Its key gone, the file can no longer migrate.
+        fs::remove_dir_all(&key_dir).unwrap();
+        let store = DeviceStore::at(root.join("store"));
+        holding(&store.dir(&DeviceName::new("bench").unwrap()), "enrolled");
+        let device_dir = device_dir::of_identity_file(&file);
+
+        let credentials = identified_in_store(&store, "bench", &device_dir, Some(&file)).unwrap();
+
+        assert_eq!(
+            credentials.refresh_token().unwrap(),
+            Some("enrolled".to_string())
+        );
+        assert!(!device_dir.exists(), "the file does not migrate");
         fs::remove_dir_all(&root).unwrap();
     }
 

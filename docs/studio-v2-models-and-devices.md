@@ -169,7 +169,7 @@ The parts are independent, except where this table names a dependency:
 - The device gets a credential that marks it as a device. The rules can then limit a device to device paths and to content reads. Studio can revoke the credential.
 - This part replaces the device account and self-registration. It changes the sign-in and the registration of the bridge client. It keeps the bridge and its connection.
 - No part of model resolution (2.2) waits for this part.
-- **arora-sdk side:** arora 16 enrolls a device that is not enrolled. It shows the code in the terminal UI and in the headless log, or redeems the enrollment token in `STUDIO_ENROLLMENT_TOKEN`, and keeps the credential in the device directory. Giving the credential to the resolver remains: the bridge and the resolver take it through one token-source interface.
+- **arora-sdk side:** arora 16 enrolls a device that is not enrolled. It shows the code in the terminal UI and in the headless log, or redeems the enrollment token in `STUDIO_ENROLLMENT_TOKEN`. The credential is kept under the device's local name in Semio's device store (`<data_local_dir>/semio/devices/<name>/`, or `SEMIO_DEVICE_STORE`), apart from the device directory; a device given only the deprecated `DEVICE_DIR` keeps it in that directory's `studio/`. Giving the credential to the resolver remains: the bridge and the resolver take it by the device's name, through one token-source interface.
 - **The bridge client**: `arora-studio-bridge-client` 11 enrolls the device and signs it in, through `semio-studio-auth`.
 
 ### 2.2 Model resolution in a Semio client
