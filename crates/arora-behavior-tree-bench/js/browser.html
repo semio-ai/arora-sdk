@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Arora behavior-tree benchmarks</title>
+<style>body { font: 16px system-ui; margin: 2rem; max-width: 90rem } pre { overflow: auto; font-size: 13px } button, input { font: inherit; margin: .5rem } </style>
+<h1>Behavior-tree benchmarks</h1>
+<p>Runs the synthetic workload and six scale scenarios at N=100. Choose a workload JSON to measure it in place of the synthetic one. Each form must agree with detached before its times are compared.</p>
+<input type="file" id="workload" accept=".json"><button id="run">Run benchmarks</button>
+<button id="save" disabled>Save raw results</button>
+<pre id="output">Serve the workspace root over HTTP. See the crate README for build commands.</pre>
+<script type="module">
+import { loadBenchWasm, workloadTable, scaleHeader, scaleRow } from './bench-wasm.mjs';
+const output = document.querySelector('#output'), run = document.querySelector('#run'), save = document.querySelector('#save');
+let results;
+const yieldBetween = () => new Promise(resolve => setTimeout(resolve, 0));
+run.onclick = async () => {
+  run.disabled = true; save.disabled = true; output.textContent = 'Loading…';
+  try {
+    const wasm = await loadBenchWasm(await (await fetch('../../../target/wasm32-wasip1/release/arora_behavior_tree_bench.wasm')).arrayBuffer());
+    output.textContent = JSON.stringify(wasm.clock, null, 2) + '\n';
+    const file = document.querySelector('#workload').files[0];
+    const text = file ? await file.text() : await (await fetch('../../../target/bench-synthetic.json')).text();
+    const record = await wasm.loadWorkload(text).measureAll({ samples: 7, yieldBetween });
+    results = { schema: 1, clock: wasm.clock, tests: { workload: { kind: 'workload', size: 0, record } } };
+    if (Object.values(record.forms).some(r => r.differing)) throw new Error('workload forms disagree');
+    output.textContent += workloadTable(record) + '\n\n' + scaleHeader + '\n';
+    for (const scenario of wasm.scenarios) {
+      const record = await wasm.loadScale(100, scenario).measureAll({ samples: 7, yieldBetween });
+      results.tests[scenario + '/100'] = { kind: 'scale', size: 100, record };
+      for (const [form, row] of Object.entries(record.forms)) {
+        if (row.differing) throw new Error(`${scenario}/${form}: writes differ from detached`);
+        output.textContent += scaleRow(100, scenario, form, row) + '\n';
+      }
+    }
+    save.disabled = false;
+  } catch (error) { output.textContent += '\n' + error.stack; }
+  finally { run.disabled = false; }
+};
+save.onclick = () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(results)], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'bench-browser.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+</script>

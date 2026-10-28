@@ -20,6 +20,7 @@ arora-sdk/
 │   ├── arora-animation        keyframe clips, exact evaluation, players on the
 │   │                          device clock (no runtime dependency)
 │   ├── arora-behavior-tree         behavior-tree interpreter
+│   ├── arora-behavior-tree-bench   unpublished native/WASI executor benchmarks
 │   ├── arora-behavior-tree-types       BT primitive types
 │   ├── arora-behavior-tree-types-yaml  same types serialised as YAML records
 │   ├── arora-bridge           Bridge seam, client conventions + in-process FakeBridge
@@ -331,6 +332,10 @@ baseline collection of nodes as a wasm guest.
 The runtime registers each node as a host callable and ticks children through
 the engine's **indirect dispatch** path. See [`dispatch.md`](dispatch.md) for
 how direct and indirect dispatch work and how behavior trees use them.
+
+The unpublished [`arora-behavior-tree-bench`](../crates/arora-behavior-tree-bench/readme.md)
+crate supplies workload and scale benchmarks, one form registry, native and WASI
+harnesses, and tools for comparing revisions with tick-for-tick agreement checks.
 
 ## CI
 
