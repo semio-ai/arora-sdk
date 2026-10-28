@@ -330,12 +330,20 @@ fn any_text_is_read_to_its_end() {
                 "{text:?}: {diagnostic:?}"
             );
         }
-        let formatted = format(&parsed.document, &functions);
-        assert_eq!(
-            format(&parse(&formatted).document, &functions),
-            formatted,
-            "{text:?}"
-        );
+        match format(&parsed, &functions) {
+            Ok(formatted) => assert_eq!(
+                format(&parse(&formatted), &functions),
+                Ok(formatted),
+                "{text:?}"
+            ),
+            Err(errors) => assert_eq!(
+                errors,
+                self::errors(&parsed.diagnostics)
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            ),
+        }
     }
 }
 
@@ -416,7 +424,7 @@ cm: clamp(lo: 0.0, x: mul(b: 100, a: {sensor/distance}))
 # the end
 ";
     let functions = index();
-    let formatted = format(&parsed(text), &functions);
+    let formatted = format(&parse(text), &functions).unwrap();
     assert_eq!(
         formatted,
         "\
@@ -433,9 +441,9 @@ cm: clamp(x: mul(a: {sensor/distance}, b: 100), lo: 0.0)
 # the end
 "
     );
-    assert_eq!(format(&parsed(&formatted), &functions), formatted);
-    let example = format(&parsed(EXAMPLE), &functions);
-    assert_eq!(format(&parsed(&example), &functions), example);
+    assert_eq!(format(&parse(&formatted), &functions), Ok(formatted));
+    let example = format(&parse(EXAMPLE), &functions).unwrap();
+    assert_eq!(format(&parse(&example), &functions), Ok(example));
 }
 
 // Resolution.
@@ -658,7 +666,7 @@ fn unknown_and_ambiguous_names_are_errors_at_the_name() {
 /// a module call, are warned about.
 #[test]
 fn natives_are_seeded_and_omissions_warned() {
-    let text = "sequence_star\n  below(x: 1)\n\nfallback\n  succeed\n";
+    let text = "sequence_star\n  equal(a: 1u8)\n  below(x: 1)\n\nfallback\n  succeed\n";
     let loaded = resolve(&parsed(text), &index());
     assert_eq!(
         *link(&loaded.graph, v5("root"), SEQ_STAR_CURRENT_INDEX_PARAM_ID),
@@ -672,7 +680,9 @@ fn natives_are_seeded_and_omissions_warned() {
             at(text, diagnostic.span)
         })
         .collect();
-    assert_eq!(warnings, ["below(x: 1)", "fallback"]);
+    // A module function's unstated parameter is passed `()` or `None`,
+    // which it may mean: no warning.
+    assert_eq!(warnings, ["equal(a: 1u8)", "fallback"]);
 }
 
 /// The natives list their names, parameters and types, for a palette.
@@ -994,4 +1004,508 @@ fn a_text_with_an_error_does_not_load() {
         Ok(_) => panic!("the text does not load"),
     };
     assert!(error.contains("2:13: no node is named `nobody`"), "{error}");
+}
+
+// Bounds and edge cases.
+//================================================================
+
+/// Run `read` on a thread with a small stack: 256 KiB, a quarter of a wasm
+/// module's default, in a release build, which the editor's wasm is. A debug
+/// build's frames are about five times a release build's, and its stack is
+/// sized alike.
+fn on_a_small_stack(read: impl FnOnce() + Send + 'static) {
+    let stack = if cfg!(debug_assertions) { 5 } else { 1 } * 256 * 1024;
+    std::thread::Builder::new()
+        .stack_size(stack)
+        .spawn(read)
+        .expect("a thread")
+        .join()
+        .expect("no stack overflow");
+}
+
+/// Whether `diagnostics` report a nesting past [`MAX_DEPTH`].
+fn too_deep(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("nest at most"))
+}
+
+/// Expressions and blocks nested past the limit are reported, and parsing,
+/// resolving and formatting stay within a small stack.
+#[test]
+fn nesting_past_the_limit_is_reported_on_a_small_stack() {
+    let past = MAX_DEPTH + 1;
+    let texts = [
+        format!("f(a: {}1{})\n", "some(".repeat(past), ")".repeat(past)),
+        format!("f(a: {}1{})\n", "[".repeat(past), "]".repeat(past)),
+        format!("{}1{}\n", "f(a: ".repeat(past), ")".repeat(past)),
+        format!("f(a: {{x}}{})\n", "[a]".repeat(20_000)),
+        (0..3_000)
+            .map(|depth| format!("{}sequence\n", " ".repeat(depth)))
+            .collect::<String>(),
+    ];
+    for text in texts {
+        on_a_small_stack(move || {
+            let parsed = parse(&text);
+            assert!(too_deep(&parsed.diagnostics), "{:?}", parsed.diagnostics);
+            let span = parsed
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.message.contains("nest at most"))
+                .unwrap()
+                .span;
+            assert!(text.get(span.start..span.end).is_some());
+            resolve(&parsed.document, &index());
+            assert!(format(&parsed, &index()).is_err());
+        });
+    }
+}
+
+/// A document built deeper than the limit, not by the parser, is refused by
+/// resolution and formatting alike.
+#[test]
+fn a_document_built_too_deep_is_refused() {
+    on_a_small_stack(|| {
+        let mut value = Expr {
+            span: Span::default(),
+            kind: ExprKind::None,
+        };
+        for _ in 0..300 {
+            value = Expr {
+                span: Span::default(),
+                kind: ExprKind::Some {
+                    value: Box::new(value),
+                },
+            };
+        }
+        let mut document = parsed("equal(a: none, b: true)\n");
+        document.nodes[0].call.arguments[0].value = value;
+        assert!(too_deep(&resolve(&document, &index()).diagnostics));
+        let parsed = Parsed {
+            document,
+            diagnostics: Vec::new(),
+        };
+        assert!(too_deep(&format(&parsed, &index()).unwrap_err()));
+    });
+}
+
+/// A text with errors is not formatted: its document does not hold what did
+/// not parse.
+#[test]
+fn a_text_with_errors_is_not_formatted() {
+    let text = "sequence\n  ) oops\n    succeed\n  below(x: , limit: 2)\n";
+    let parsed = parse(text);
+    assert_eq!(
+        format(&parsed, &index()),
+        Err(errors(&parsed.diagnostics).into_iter().cloned().collect())
+    );
+}
+
+/// A selection's path runs to the first `]` on its line, whatever it holds;
+/// one with no `]` is reported.
+#[test]
+fn a_path_holds_any_character_up_to_its_bracket() {
+    let text = "f(\n    a: {x}[a#b(c\"d],\n    b: @n.p[(],\n)\n";
+    let document = parsed(text);
+    let arguments = &document.nodes[0].call.arguments;
+    assert_eq!(arguments.len(), 2);
+    let paths: Vec<&str> = arguments
+        .iter()
+        .map(|argument| match &argument.value.kind {
+            ExprKind::Select { path, .. } => path.as_str(),
+            other => panic!("a selection, not {other:?}"),
+        })
+        .collect();
+    assert_eq!(paths, ["a#b(c\"d", "("]);
+
+    let parsed = parse("f(a: {x}[a)\nsucceed\n");
+    assert!(parsed
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("ends with `]`")));
+    assert_eq!(parsed.document.nodes.len(), 2);
+}
+
+/// Comments inside a call broken over lines stay after the arguments they
+/// follow.
+#[test]
+fn comments_in_a_broken_call_stay_with_their_arguments() {
+    let text = "below(\n    limit: 2,  # the limit\n    # read from the store\n    x: {d},\n)\n";
+    let formatted = format(&parse(text), &index()).unwrap();
+    assert_eq!(
+        formatted,
+        "below(\n    x: {d},\n    limit: 2,  # the limit\n    # read from the store\n)\n"
+    );
+    assert_eq!(format(&parse(&formatted), &index()), Ok(formatted.clone()));
+}
+
+/// A byte order mark is no part of the text, and a lone `\r` ends a line.
+#[test]
+fn a_byte_order_mark_and_a_carriage_return_are_read() {
+    for text in ["\u{FEFF}sequence\n  succeed\n", "sequence\r  succeed\r"] {
+        let document = parsed(text);
+        assert_eq!(document.nodes.len(), 1, "{text:?}");
+        assert_eq!(document.nodes[0].call.function.name.text, "sequence");
+        assert_eq!(document.nodes[0].children.len(), 1);
+    }
+}
+
+/// A finite number past its type's range is refused, not made infinite.
+#[test]
+fn a_number_past_its_range_is_refused() {
+    for (text, refused) in [
+        ("clamp(x: 1e999f64, lo: 0)\n", "1e999f64"),
+        ("clamp(x: 1e999, lo: 0)\n", "1e999"),
+    ] {
+        let loaded = resolve(&parsed(text), &index());
+        let errors = errors(&loaded.diagnostics);
+        assert_eq!(errors.len(), 1, "{text}");
+        assert_eq!(at(text, errors[0].span), refused);
+        assert!(errors[0].message.contains("range"));
+    }
+    let loaded = loaded("clamp(x: 1e300, lo: -inf)\n");
+    assert_eq!(
+        *link(&loaded.graph, v5("root"), CLAMP_X),
+        LinkSource::Literal(Value::F64(1e300))
+    );
+    assert_eq!(
+        crate::display::literal(&Value::F64(1e300)),
+        "1e300f64",
+        "shown in its shortest form"
+    );
+}
+
+/// `\u{…}` holds hex digits only.
+#[test]
+fn a_unicode_escape_holds_hex_digits() {
+    let parsed = parse("f(a: \"\\u{+41}\")\n");
+    assert_eq!(parsed.diagnostics.len(), 1);
+    assert!(parsed.diagnostics[0].message.contains("\\u{…}"));
+}
+
+/// Two nodes writing one store key are warned about, each at its line, with
+/// the one that wins; running the text, that one's value is the key's.
+#[test]
+fn two_nodes_writing_one_key_are_warned_about() {
+    let text = "succeed\n\na: {out} = mul(a: 1, b: 2)\nb: {out} = mul(a: 1, b: 3)\n";
+    let loaded = resolve(&parsed(text), &index());
+    let warnings: Vec<(&str, &str)> = loaded
+        .diagnostics
+        .iter()
+        .map(|diagnostic| (at(text, diagnostic.span), diagnostic.message.as_str()))
+        .collect();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    let (winner, value) = if v5("a") > v5("b") {
+        ("a", 2.0)
+    } else {
+        ("b", 3.0)
+    };
+    for (line, message) in &warnings {
+        if line.starts_with(winner) {
+            assert!(message.contains("this node publishes it last"), "{message}");
+        } else {
+            assert!(
+                message.contains(&format!("`{winner}` publishes it last")),
+                "{message}"
+            );
+        }
+    }
+    let store = store_with(&[]);
+    let tree = tree(&store, text);
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    runtime.tick().unwrap();
+    assert_eq!(get(&store, "out"), Some(Value::F64(value)));
+}
+
+/// `@n.p = f(…)` writes the return value into `n`'s input `p`, which then
+/// reads the node: the reader ticks with it.
+#[test]
+fn a_return_value_written_to_an_input_feeds_it() {
+    let text = "r: below(x: 1000, limit: 30)\n\nfeed: @r.x = mul(a: {in}, b: 2)\n";
+    let loaded = loaded(text);
+    assert_eq!(
+        *link(&loaded.graph, v5("feed"), _RET_PARAM_ID),
+        LinkSource::Port(Port::new(v5("r"), BELOW_X))
+    );
+    let store = store_with(&[("in", 10.0)]);
+    let tree = tree(&store, text);
+    let mut engine = Engine::default();
+    let calls = engine.calls.clone();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    assert_eq!(runtime.tick().unwrap(), Status::Success, "20 is below 30");
+    let read = calls
+        .borrow()
+        .iter()
+        .find(|(name, _)| *name == "below")
+        .map(|(_, args)| args[&BELOW_X].clone());
+    assert_eq!(read, Some(Value::F64(20.0)));
+}
+
+/// What lowering refuses is an error where it is written: a reference to no
+/// node, a detached node's port that is no output, a cycle of detached
+/// nodes, a node reading its own output. A tree node's argument is read.
+#[test]
+fn what_lowering_refuses_is_an_error_where_written() {
+    for (text, refused) in [
+        (
+            "below(x: @00000000-0000-4000-8000-0000000000ee, limit: 1)\n",
+            vec!["00000000-0000-4000-8000-0000000000ee"],
+        ),
+        (
+            "below(x: @m.a, limit: 1)\n\nm: mul(a: 1, b: 2)\n",
+            vec!["a"],
+        ),
+        (
+            "below(x: @a, limit: 1)\n\na: add(a: @b, b: 1)\nb: add(a: @a, b: 1)\n",
+            vec!["a: add(a: @b, b: 1)", "b: add(a: @a, b: 1)"],
+        ),
+        (
+            "succeed\n\ne: add(a: @e, b: 1)\n",
+            vec!["e: add(a: @e, b: 1)"],
+        ),
+    ] {
+        let loaded = resolve(&parsed(text), &index());
+        let errors: Vec<&str> = errors(&loaded.diagnostics)
+            .iter()
+            .map(|error| at(text, error.span))
+            .collect();
+        assert_eq!(errors, refused, "{text}: {:?}", loaded.diagnostics);
+    }
+    loaded("sequence\n  t: below(x: 1, limit: 4)\n  below(x: @m, limit: 100)\n\nm: mul(a: @t.limit, b: 10)\n");
+    loaded("below(x: @s.state, limit: 1)\n\ns: smooth(x: 1, alpha: 1, state: 0)\n");
+}
+
+/// A name given twice is reported at both nodes.
+#[test]
+fn a_name_given_twice_is_reported_at_both() {
+    let text = "sequence\n  n: succeed\n  n: fail\n";
+    let loaded = resolve(&parsed(text), &index());
+    let mut names: Vec<usize> = errors(&loaded.diagnostics)
+        .iter()
+        .map(|error| error.span.start)
+        .collect();
+    names.sort();
+    assert_eq!(names, [11, 24]);
+}
+
+/// A call in `some(…)` is told that `some(…)` holds literals.
+#[test]
+fn some_holds_literals() {
+    let text = "clamp(x: 1, lo: 0, hi: some(mul(a: 1, b: 2)))\n";
+    let loaded = resolve(&parsed(text), &index());
+    assert!(errors(&loaded.diagnostics)[0].message.contains("`some(…)`"));
+}
+
+/// An error's column counts characters.
+#[test]
+fn an_error_column_counts_characters() {
+    let text = "sequence\n  set_string(variable: {\"é\"}, value: @nobody)\n";
+    let error = match load_behavior_tree_text(text, &index(), &|_| None) {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("the text does not load"),
+    };
+    let column = text.lines().nth(1).unwrap().find("nobody").unwrap();
+    let column = text.lines().nth(1).unwrap()[..column].chars().count() + 1;
+    assert!(
+        error.contains(&format!("2:{column}: no node is named")),
+        "{error}"
+    );
+}
+
+/// Whatever the keys, node names, function and parameter names, a tree's
+/// display reads back to its graph: a key is quoted when it needs it, and a
+/// name that is not written as a name as it is shows as the id.
+#[test]
+fn a_display_reads_back_whatever_the_names() {
+    use arora_behavior::graph::{Link, Node as GraphNode};
+    let keys = [
+        "a}b",
+        "a b",
+        "=x",
+        "line\nbreak",
+        "x # y",
+        "",
+        "\"q\"",
+        "é/ü",
+        "{x}",
+        "tab\there",
+        ".local key",
+        "00000000-0000-4000-8000-0000000000ab",
+        "plain/key",
+        "a\\b",
+    ];
+    let names = [
+        "my node",
+        "a:b",
+        "x-y",
+        "équipe",
+        "inf",
+        "NaN",
+        "true",
+        "some",
+        "ok_name",
+        "00000000-0000-4000-8000-0000000000cd",
+        "fine",
+    ];
+    let (first, second, other) = (
+        Uuid::from_u128(0xAA00),
+        Uuid::from_u128(0xBB00),
+        Uuid::from_u128(0xCC00),
+    );
+    let mut functions = index();
+    let mut add = |module: Uuid, id: u128, name: &str, parameter_name: &str| {
+        let parameter_id = Uuid::from_u128(id + 1);
+        let (id, function) = function(
+            module,
+            Uuid::from_u128(id),
+            name,
+            vec![(parameter_id, parameter(parameter_name, f64_ty(), false))],
+        );
+        functions.insert(id, function);
+        (id, parameter_id)
+    };
+    let (shadowed, shadowed_p) = add(first, 0xAA01, "sequence", "inf");
+    let (spaced, spaced_p) = add(second, 0xBB01, "my fn", "a b");
+    let (twin, twin_p) = add(other, 0xCC01, "mul", "a");
+
+    for (index, key) in keys.iter().enumerate() {
+        let name = |offset: usize| names[(index + offset) % names.len()];
+        let id = |offset: usize| {
+            if is_name(name(offset)) {
+                v5(name(offset))
+            } else {
+                Uuid::from_u128(0x1000 + offset as u128)
+            }
+        };
+        let variable = gen_uuid_from_str(key);
+        let node = |id: Uuid, function: Uuid| GraphNode {
+            id,
+            function,
+            ..GraphNode::default()
+        };
+        let mut graph = Graph::empty();
+        graph.root = Some(id(0));
+        graph.nodes.insert(id(0), node(id(0), shadowed));
+        graph.nodes.insert(id(1), node(id(1), spaced));
+        graph.nodes.insert(id(2), node(id(2), twin));
+        graph.variables.insert(variable, key.to_string());
+        graph.links = vec![
+            Link::new(Port::new(id(0), shadowed_p), LinkSource::Variable(variable)),
+            Link::new(
+                Port::new(id(1), spaced_p),
+                LinkSource::Port(Port::new(id(2), _RET_PARAM_ID)),
+            ),
+            Link::new(
+                Port::new(id(1), _RET_PARAM_ID),
+                LinkSource::Variable(variable),
+            ),
+            Link::new(
+                Port::new(id(2), twin_p),
+                LinkSource::Literal(Value::F64(1e300)),
+            ),
+        ];
+        let tree = build_behavior_tree(&graph, &|_| None).expect("the tree builds");
+        let node_names: HashMap<Uuid, String> = (0..3)
+            .map(|offset| (id(offset), name(offset).to_string()))
+            .collect();
+        let shown = tree
+            .display(Names {
+                functions: Some(&functions),
+                variables: Some(&graph.variables),
+                nodes: Some(&node_names),
+            })
+            .to_string();
+        let parsed = parse(&shown);
+        assert_eq!(parsed.diagnostics, [], "{shown}");
+        let read = resolve(&parsed.document, &functions);
+        assert_eq!(
+            errors(&read.diagnostics),
+            Vec::<&Diagnostic>::new(),
+            "{shown}"
+        );
+        let shape = |graph: &Graph| {
+            let mut nodes: Vec<(Uuid, Uuid, Option<Vec<Uuid>>)> = graph
+                .nodes
+                .values()
+                .map(|node| (node.id, node.function, node.children.clone()))
+                .collect();
+            nodes.sort();
+            (
+                nodes,
+                sorted(graph.clone()).links,
+                graph.variables.clone(),
+                graph.root,
+            )
+        };
+        assert_eq!(shape(&read.graph), shape(&graph), "{shown}");
+    }
+}
+
+/// Dotted parameter names, as `@arora/dataflow` declares its nodes'
+/// parameters (`param.half_life`), resolve, read through ports, and show and
+/// read back; a module function's unstated parameters are not warned about.
+#[test]
+fn a_dataflow_node_reads_back() {
+    let functions = arora_dataflow_nodes::functions::function_index();
+    let text = "\
+below(x: 1, limit: @d.state[0])
+
+d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, t: {arora/time}, state: ())
+s: spring(in: @d, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}, state: ())
+";
+    let mut index = index();
+    index.extend(
+        functions
+            .iter()
+            .map(|(id, function)| (*id, function.clone())),
+    );
+    let loaded = resolve(&parsed(text), &index);
+    assert_eq!(loaded.diagnostics, [], "{:?}", loaded.diagnostics);
+    let damp = &loaded.graph.nodes[&v5("d")];
+    let half_life = parameter_named(&index[&damp.function], "param.half_life");
+    assert_eq!(
+        *link(&loaded.graph, v5("d"), half_life),
+        LinkSource::Literal(Value::F32(0.12))
+    );
+
+    let tree = build_behavior_tree(&loaded.graph, &|_| None).unwrap();
+    let node_names: HashMap<Uuid, String> = loaded
+        .nodes
+        .iter()
+        .filter_map(|node| Some((node.id, node.name.clone()?)))
+        .collect();
+    let shown = tree
+        .display(Names {
+            functions: Some(&index),
+            variables: Some(&loaded.graph.variables),
+            nodes: Some(&node_names),
+        })
+        .to_string();
+    assert!(shown.contains("param.half_life: 0.12f32"), "{shown}");
+    let read = resolve(&parsed(&shown), &index);
+    assert_eq!(
+        errors(&read.diagnostics),
+        Vec::<&Diagnostic>::new(),
+        "{shown}"
+    );
+    assert_eq!(sorted(read.graph), sorted(loaded.graph), "{shown}");
+
+    let port = parse("below(x: @d.param.half_life, limit: 1)\n");
+    let ExprKind::Port { parameter, .. } = &port.document.nodes[0].call.arguments[0].value.kind
+    else {
+        panic!("a port");
+    };
+    assert_eq!(parameter.as_ref().unwrap().text, "param.half_life");
+}
+
+/// The parameter of `function` named `name`.
+fn parameter_named(function: &arora_behavior::ModuleFunction, name: &str) -> Uuid {
+    *function
+        .function
+        .parameters
+        .iter()
+        .find(|(_, parameter)| parameter.name == name)
+        .unwrap_or_else(|| panic!("a parameter {name}"))
+        .0
 }

@@ -68,6 +68,7 @@ use arora_types::value::Value;
 use uuid::Uuid;
 
 use crate::schema::{CallExpression, Expression, Node, _RET_PARAM_ID};
+use crate::text::{is_name, is_parameter_name};
 use crate::BehaviorTree;
 
 /// The width past which `{:#}` breaks a call over several lines.
@@ -94,11 +95,49 @@ impl<'a> Names<'a> {
         }
     }
 
+    /// A node's name, when it is written as a name as it is; its id
+    /// otherwise.
     fn node(&self, id: Uuid) -> String {
+        self.label(id).unwrap_or_else(|| id.to_string())
+    }
+
+    /// A node's name, when [`Names::nodes`] has one that is written as a
+    /// name as it is.
+    fn label(&self, id: Uuid) -> Option<String> {
         self.nodes
             .and_then(|nodes| nodes.get(&id))
+            .filter(|name| is_name(name))
             .cloned()
-            .unwrap_or_else(|| id.to_string())
+    }
+
+    /// The text naming a function: its name, `<module>::name` when the name
+    /// alone names a native or another module's function, or its id when its
+    /// name is not written as a name as it is, or names another function of
+    /// its module too.
+    fn head(&self, function: &ModuleFunction) -> String {
+        let name = &function.function_name;
+        if crate::text::native(function.function_id).is_some() {
+            return name.clone();
+        }
+        let others: Vec<&ModuleFunction> = self
+            .functions
+            .into_iter()
+            .flat_map(|functions| functions.values())
+            .filter(|other| {
+                other.function_name == *name && other.function_id != function.function_id
+            })
+            .collect();
+        if !is_name(name)
+            || others
+                .iter()
+                .any(|other| other.module_id == function.module_id)
+        {
+            function.function_id.to_string()
+        } else if !others.is_empty() || crate::text::native_named(name).is_some() {
+            format!("{}::{name}", function.module_id)
+        } else {
+            name.clone()
+        }
     }
 
     /// A parameter's name, from whichever function has it: parameter ids
@@ -113,6 +152,7 @@ impl<'a> Names<'a> {
             )
             .find_map(|function| function.function.parameters.get(&id))
             .map(|parameter| parameter.name.clone())
+            .filter(|name| is_parameter_name(name))
             .unwrap_or_else(|| id.to_string())
     }
 
@@ -123,11 +163,13 @@ impl<'a> Names<'a> {
             .or_else(|| self.functions.and_then(|functions| functions.get(&id)))
     }
 
+    /// A variable: `{key}`, quoted when the key needs it, or `{<uuid>}`
+    /// when it has no name.
     fn variable(&self, id: Uuid) -> String {
-        self.variables
-            .and_then(|variables| variables.get(&id))
-            .cloned()
-            .unwrap_or_else(|| id.to_string())
+        match self.variables.and_then(|variables| variables.get(&id)) {
+            Some(key) => crate::text::variable(key),
+            None => format!("{{{id}}}"),
+        }
     }
 }
 
@@ -210,7 +252,7 @@ impl Form {
 fn node_text(node: &Node, names: &Names, form: Form) -> String {
     let signature = names.function(node.function);
     let label = match names.nodes.and_then(|nodes| nodes.get(&node.id)) {
-        Some(name) => format!("{name}: "),
+        Some(_) => format!("{}: ", names.node(node.id)),
         None => String::new(),
     };
     let target = match node.arguments.get(&_RET_PARAM_ID) {
@@ -218,7 +260,7 @@ fn node_text(node: &Node, names: &Names, form: Form) -> String {
         None => label,
     };
     let head = match signature {
-        Some(signature) => signature.function_name.clone(),
+        Some(signature) => names.head(signature),
         None => node.function.to_string(),
     };
     let arguments: Vec<(String, &Expression)> = ordered(&node.arguments, signature)
@@ -404,10 +446,13 @@ pub(crate) fn ordered_by<'e>(
     ordered
 }
 
+/// A parameter's name, or its id when its name is not written as a
+/// parameter's name as it is.
 fn parameter_name(signature: Option<&ModuleFunction>, parameter: Uuid) -> String {
     signature
         .and_then(|signature| signature.function.parameters.get(&parameter))
         .map(|parameter| parameter.name.clone())
+        .filter(|name| is_parameter_name(name))
         .unwrap_or_else(|| parameter.to_string())
 }
 
@@ -432,7 +477,7 @@ fn expression(expression: &Expression, names: &Names, form: Form, indent: usize)
             (Some(value), false) => format!("{{= {}}}", literal(&value)),
             (None, false) => "{=}".to_string(),
         },
-        Expression::VariableId(id) => format!("{{{}}}", names.variable(*id)),
+        Expression::VariableId(id) => names.variable(*id),
         Expression::NodeArgument(port) if port.parameter == _RET_PARAM_ID => {
             format!("@{}", names.node(port.node))
         }
@@ -466,11 +511,15 @@ fn call_expression(call: &CallExpression, names: &Names, form: Form, indent: usi
     let signature = stated_id(&call.function).and_then(|id| names.function(id));
     let module = stated_id(&call.module);
     let head = match signature {
-        Some(signature) if module == Some(signature.module_id) => signature.function_name.clone(),
+        Some(signature) if module == Some(signature.module_id) => names.head(signature),
         Some(signature) => format!(
             "{}::{}",
             id_text(&call.module, names, form, |id| id.to_string()),
-            signature.function_name
+            if is_name(&signature.function_name) {
+                signature.function_name.clone()
+            } else {
+                signature.function_id.to_string()
+            }
         ),
         None => format!(
             "{}::{}",
@@ -538,6 +587,13 @@ pub(crate) fn literal(value: &Value) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     }
+    fn floats<T: Display + std::fmt::Debug + Copy>(elements: &[T]) -> String {
+        elements
+            .iter()
+            .map(|element| float(*element))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
     match value {
         Value::String(text) => format!("{text:?}"),
         Value::Option(None) => "none".to_string(),
@@ -563,8 +619,10 @@ pub(crate) fn literal(value: &Value) -> String {
         Value::ArrayI16(elements) => format!("i16[{}]", list(elements)),
         Value::ArrayI32(elements) => format!("i32[{}]", list(elements)),
         Value::ArrayI64(elements) => format!("i64[{}]", list(elements)),
-        Value::ArrayF32(elements) => format!("f32[{}]", list(elements)),
-        Value::ArrayF64(elements) => format!("f64[{}]", list(elements)),
+        Value::ArrayF32(elements) => format!("f32[{}]", floats(elements)),
+        Value::ArrayF64(elements) => format!("f64[{}]", floats(elements)),
+        Value::F32(value) => format!("{}f32", float(*value)),
+        Value::F64(value) => format!("{}f64", float(*value)),
         Value::Structure(_)
         | Value::Enumeration(_)
         | Value::KeyValue(_)
@@ -574,5 +632,16 @@ pub(crate) fn literal(value: &Value) -> String {
             serde_json::to_string(value).expect("a value has a JSON form")
         ),
         other => other.to_string(),
+    }
+}
+
+/// A float in its shortest form that reads back: with an exponent when that
+/// form has one (`1e300`, `1e-7`), as digits otherwise (`100`, `0.2`).
+fn float<T: Display + std::fmt::Debug>(value: T) -> String {
+    let debug = format!("{value:?}");
+    if debug.contains('e') {
+        debug
+    } else {
+        value.to_string()
     }
 }

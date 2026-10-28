@@ -1383,7 +1383,7 @@ pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeE
 /// binding each variable `resolver` resolves to a store slot, as
 /// [`build_behavior_tree`](graph::build_behavior_tree) does. A text with an
 /// error is refused with every error, each at its `line:column`; warnings do
-/// not stop it.
+/// not stop it. A column counts characters.
 pub fn load_behavior_tree_text(
     source: &str,
     functions: &FunctionIndex,
@@ -1391,24 +1391,35 @@ pub fn load_behavior_tree_text(
 ) -> Result<BehaviorTree, BehaviorTreeError> {
     let parsed = text::parse(source);
     let loaded = text::resolve(&parsed.document, functions);
-    let errors: Vec<String> = parsed
+    let mut errors = parsed
         .diagnostics
         .iter()
         .chain(&loaded.diagnostics)
         .filter(|diagnostic| diagnostic.severity == text::Severity::Error)
+        .peekable();
+    if errors.peek().is_none() {
+        return graph::build_behavior_tree(&loaded.graph, resolver);
+    }
+    // Where each line starts, found once: a line ends at `\n`, `\r\n` or
+    // `\r`.
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(source.char_indices().filter_map(|(at, char)| match char {
+            '\n' => Some(at + 1),
+            '\r' if !source[at + 1..].starts_with('\n') => Some(at + 1),
+            _ => None,
+        }))
+        .collect();
+    let errors: Vec<String> = errors
         .map(|diagnostic| {
-            let before = &source[..diagnostic.span.start.min(source.len())];
-            let line = before.matches('\n').count() + 1;
-            let column = before.len() - before.rfind('\n').map_or(0, |at| at + 1) + 1;
+            let offset = diagnostic.span.start.min(source.len());
+            let line = starts.partition_point(|start| *start <= offset);
+            let column = source[starts[line - 1]..offset].chars().count() + 1;
             format!("{line}:{column}: {}", diagnostic.message)
         })
         .collect();
-    if !errors.is_empty() {
-        return Err(BehaviorTreeError::ParsingError {
-            message: errors.join("; "),
-        });
-    }
-    graph::build_behavior_tree(&loaded.graph, resolver)
+    Err(BehaviorTreeError::ParsingError {
+        message: errors.join("; "),
+    })
 }
 
 // Other helpers

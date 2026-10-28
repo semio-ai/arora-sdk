@@ -16,7 +16,9 @@
 //! - [`parse`] reads a text into a [`Document`], the syntax tree of what was
 //!   written, every part with its [`Span`]. A line that does not parse is
 //!   reported and left out; every other line is in the document.
-//! - [`format()`] writes a document back as text, in its canonical layout.
+//! - [`format()`] writes a parsed text back in its canonical layout. It
+//!   refuses a text with errors: the lines left out of its document would be
+//!   lost.
 //! - [`resolve`] turns a document into the shared
 //!   [`Graph`](arora_behavior::graph::Graph) an interpreter runs, against the
 //!   device's function index and the [`natives`].
@@ -38,9 +40,17 @@ pub use natives::natives;
 pub use parser::{parse, Parsed};
 pub use resolve::{resolve, Loaded, LoadedNode};
 
-pub(crate) use natives::native;
+pub(crate) use format::variable;
+pub(crate) use lexer::{is_name, is_parameter_name};
+pub(crate) use natives::{native, native_named};
 
 use serde::{Deserialize, Serialize};
+
+/// How deep expressions nest, and blocks: a call in an argument, a value in
+/// `some(…)` or in an array, and a selection out of a value are each a
+/// level, and so is each block of children. A text nested deeper is
+/// reported, and no reader goes deeper.
+pub const MAX_DEPTH: usize = 128;
 
 /// A problem found in a text, and where.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -52,6 +62,7 @@ pub struct Diagnostic {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Severity {
     /// The text does not say what to run.
     Error,

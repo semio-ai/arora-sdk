@@ -77,6 +77,9 @@ pub struct Argument {
     pub span: Span,
     pub name: Name,
     pub value: Expr,
+    /// The comments after it, in a call broken over lines.
+    #[serde(default)]
+    pub comments: Vec<Comment>,
 }
 
 /// An identifier or an id, as written.
@@ -101,6 +104,7 @@ pub struct Expr {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ExprKind {
     /// A number, its digits as written and its type suffix if it has one:
     /// `1.5`, `100u8`, `-3i64`.
@@ -137,10 +141,14 @@ pub enum ExprKind {
     Json {
         text: String,
     },
-    /// `{name}`: a store key, or a tree-local variable when it starts with
-    /// `.`.
+    /// `{name}` or `{"name"}`: a store key, or a tree-local variable when
+    /// it starts with `.`.
     Variable {
         name: String,
+    },
+    /// `{<uuid>}`: the variable of that id, which names none.
+    VariableId {
+        value: uuid::Uuid,
     },
     /// `@node`, or `@node.parameter`.
     Port {

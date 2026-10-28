@@ -4,6 +4,10 @@
 //! children are kept, under the node that holds the line. An argument that
 //! does not parse is reported and left out of its call; the rest of the call
 //! is kept.
+//!
+//! Expressions nest, and so do blocks, at most [`MAX_DEPTH`] levels: what is
+//! nested deeper is reported and left out, so that no text runs a reader out
+//! of stack.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +15,7 @@ use super::ast::{
     Argument, Call, Comment, Document, Expr, ExprKind, FunctionName, Name, Node, Span,
 };
 use super::lexer::{tokens, Kind, Token};
-use super::Diagnostic;
+use super::{Diagnostic, MAX_DEPTH};
 
 /// A parsed text: its document, and what is wrong with the text.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -33,6 +37,8 @@ pub fn parse(text: &str) -> Parsed {
         pending: Vec::new(),
         line_end: 0,
         previous: Span::default(),
+        depth: 0,
+        blocks: 0,
     };
     let nodes = parser.block(true);
     parser.peek();
@@ -66,6 +72,10 @@ struct Parser<'s> {
     line_end: usize,
     /// The last token read.
     previous: Span,
+    /// How many expressions hold the one being read.
+    depth: usize,
+    /// How many blocks hold the line being read.
+    blocks: usize,
 }
 
 /// What a line gives its block: a node, or, when the line does not parse,
@@ -194,6 +204,25 @@ impl<'s> Parser<'s> {
         }
     }
 
+    /// Skip the block after an `Indent`, with the blocks it holds, up to and
+    /// with its `Dedent`.
+    fn skip_block(&mut self) {
+        let mut depth = 1usize;
+        loop {
+            match self.bump().kind {
+                Kind::Indent => depth += 1,
+                Kind::Dedent => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return;
+                    }
+                }
+                Kind::Eof => return,
+                _ => {}
+            }
+        }
+    }
+
     // Lines and blocks.
     //================================================================
 
@@ -226,9 +255,18 @@ impl<'s> Parser<'s> {
         nodes
     }
 
-    /// The block after an `Indent`, and its `Dedent`.
+    /// The block after an `Indent`, and its `Dedent`. A block nested deeper
+    /// than [`MAX_DEPTH`] is reported and left out.
     fn children(&mut self) -> Vec<Node> {
+        if self.blocks >= MAX_DEPTH {
+            let span = self.peek().span;
+            self.error(format!("blocks nest at most {MAX_DEPTH} levels deep"), span);
+            self.skip_block();
+            return Vec::new();
+        }
+        self.blocks += 1;
         let children = self.block(false);
+        self.blocks -= 1;
         self.eat(Kind::Dedent);
         children
     }
@@ -238,10 +276,7 @@ impl<'s> Parser<'s> {
         let start = comments
             .first()
             .map_or_else(|| self.peek().span.start, |comment| comment.span.start);
-        let blank_before = self.text[self.line_end.min(start)..start]
-            .matches('\n')
-            .count()
-            >= 2;
+        let blank_before = line_breaks(&self.text[self.line_end.min(start)..start]) >= 2;
         let head = self.head();
         if head.is_ok() && !self.at_line_end() {
             let span = self.peek().span;
@@ -265,14 +300,25 @@ impl<'s> Parser<'s> {
                 return Line::Orphans(orphans);
             }
         };
-        // A comment inside a call broken over lines goes above the node; the
-        // comment after its last token stays at the end of its line.
+        // The comment after the node's last token ends its line. A comment
+        // inside its call, broken over lines, follows the argument written
+        // before it, or the first; one before the call goes above the node.
+        let mut head = head;
         let mut comment = None;
         for found in std::mem::take(&mut self.pending) {
-            if found.span.start >= head.span.end && comment.is_none() {
+            let start = found.span.start;
+            if start >= head.span.end && comment.is_none() {
                 comment = Some(found);
-            } else {
-                comments.push(found);
+                continue;
+            }
+            let arguments = &mut head.call.arguments;
+            let after = arguments
+                .iter()
+                .rposition(|argument| argument.span.start <= start)
+                .or((!arguments.is_empty() && start > head.call.span.start).then_some(0));
+            match after {
+                Some(index) => arguments[index].comments.push(found),
+                None => comments.push(found),
             }
         }
         let children = if self.eat(Kind::Indent).is_some() {
@@ -304,7 +350,10 @@ impl<'s> Parser<'s> {
         } else {
             None
         };
-        let target = if matches!(self.peek().kind, Kind::Variable | Kind::At) {
+        let target = if matches!(
+            self.peek().kind,
+            Kind::Variable | Kind::QuotedVariable | Kind::At
+        ) {
             let target = self.expression()?;
             self.expect(
                 Kind::Equals,
@@ -441,10 +490,7 @@ impl<'s> Parser<'s> {
     fn argument(&mut self) -> Parse<Argument> {
         let token = self.peek();
         let name = match token.kind {
-            Kind::Ident | Kind::Uuid => {
-                self.bump();
-                self.name(token)
-            }
+            Kind::Ident | Kind::Uuid => self.parameter_name(),
             Kind::LParen => {
                 return self.fail(
                     "a computed parameter is shown by the display only: name the parameter"
@@ -466,189 +512,76 @@ impl<'s> Parser<'s> {
             span: name.span.to(value.span),
             name,
             value,
+            comments: Vec::new(),
         })
     }
 
     // Expressions.
     //================================================================
 
-    /// A value, then any selections out of it: `source[path]`.
+    /// A value, then any selections out of it: `source[path]`. Each value
+    /// and each selection holding it is a level of nesting.
     fn expression(&mut self) -> Parse<Expr> {
-        let mut expression = self.primary()?;
-        while let Some(open) = self.eat(Kind::LBracket) {
-            let mut depth = 0usize;
-            let close = loop {
-                if self.at_line_end() {
-                    // The layout reports the unclosed `[`.
-                    return Err(());
-                }
-                let token = self.bump();
-                match token.kind {
-                    Kind::LBracket => depth += 1,
-                    Kind::RBracket if depth == 0 => break token,
-                    Kind::RBracket => depth -= 1,
-                    _ => {}
-                }
-            };
-            let path = self.text[open.span.end..close.span.start]
+        if self.depth >= MAX_DEPTH {
+            let span = self.peek().span;
+            return self.fail(
+                format!("expressions nest at most {MAX_DEPTH} levels deep"),
+                span,
+            );
+        }
+        self.depth += 1;
+        let mut levels = 1;
+        let mut expression = self.primary();
+        while let (Ok(source), true) = (&expression, self.at(Kind::Path)) {
+            let token = self.bump();
+            if self.depth + levels > MAX_DEPTH {
+                expression = self.fail(
+                    format!("expressions nest at most {MAX_DEPTH} levels deep"),
+                    token.span,
+                );
+                break;
+            }
+            levels += 1;
+            let text = self.text(token.span);
+            let path = text[1..]
+                .strip_suffix(']')
+                .unwrap_or(&text[1..])
                 .trim()
                 .to_string();
             if path.is_empty() {
                 self.error(
                     "a selection names the path it reads: `source[path]`".to_string(),
-                    open.span.to(close.span),
+                    token.span,
                 );
             }
-            expression = Expr {
-                span: expression.span.to(close.span),
+            let span = source.span.to(token.span);
+            let source = expression.expect("a value");
+            expression = Ok(Expr {
+                span,
                 kind: ExprKind::Select {
-                    source: Box::new(expression),
+                    source: Box::new(source),
                     path,
                 },
-            };
+            });
         }
-        Ok(expression)
+        self.depth -= 1;
+        expression
     }
 
+    /// One value. Each kind is read by a function of its own, so that the
+    /// frame each level of nesting takes stays small.
     fn primary(&mut self) -> Parse<Expr> {
         let token = self.peek();
-        let expr = |kind, span| Ok(Expr { span, kind });
         match token.kind {
-            Kind::Number => {
-                self.bump();
-                let text = self.text(token.span);
-                let suffix = SUFFIXES.iter().find(|suffix| text.ends_with(*suffix));
-                let kind = ExprKind::Number {
-                    text: text[..text.len() - suffix.map_or(0, |suffix| suffix.len())].to_string(),
-                    suffix: suffix.map(|suffix| suffix.to_string()),
-                };
-                expr(kind, token.span)
-            }
-            Kind::String => {
-                self.bump();
-                let value = self.string(token)?;
-                expr(ExprKind::String { value }, token.span)
-            }
-            Kind::Variable => {
-                self.bump();
-                let text = self.text(token.span);
-                let name = text[1..text.len() - 1].trim();
-                if name.starts_with('=') {
-                    return self.fail(
-                        "`{= …}` is an anonymous cell, which the display shows with the value \
-                         it holds: a text binds a variable `{key}` or a literal"
-                            .to_string(),
-                        token.span,
-                    );
-                }
-                if name.is_empty() || name.contains(char::is_whitespace) {
-                    return self.fail(
-                        "a variable is a store key `{path/key}` or a tree-local `{.name}`"
-                            .to_string(),
-                        token.span,
-                    );
-                }
-                let name = name.to_string();
-                expr(ExprKind::Variable { name }, token.span)
-            }
-            Kind::At => {
-                self.bump();
-                let node = self.reference("expected a node name after `@`")?;
-                let parameter = if self.eat(Kind::Dot).is_some() {
-                    Some(self.reference("expected a parameter name after `.`")?)
-                } else {
-                    None
-                };
-                let end = parameter.as_ref().map_or(node.span, |name| name.span);
-                expr(ExprKind::Port { node, parameter }, token.span.to(end))
-            }
-            Kind::LParen => {
-                self.bump();
-                let close = self.expect(Kind::RParen, "expected `)`: `()` is the unit value")?;
-                expr(ExprKind::Unit, token.span.to(close.span))
-            }
-            Kind::LBracket => {
-                self.bump();
-                let (elements, close) = self.elements()?;
-                expr(
-                    ExprKind::Array {
-                        element: None,
-                        elements,
-                    },
-                    token.span.to(close),
-                )
-            }
-            Kind::Ident => {
-                let second = self.peek_second();
-                match (self.text(token.span), second) {
-                    ("true", _) | ("false", _) => {
-                        self.bump();
-                        let value = self.text(token.span) == "true";
-                        expr(ExprKind::Bool { value }, token.span)
-                    }
-                    ("none", _) => {
-                        self.bump();
-                        expr(ExprKind::None, token.span)
-                    }
-                    ("some", Kind::LParen) => {
-                        self.bump();
-                        self.bump();
-                        let value = Box::new(self.expression()?);
-                        let close = self.expect(Kind::RParen, "expected `)` after `some(…`")?;
-                        expr(ExprKind::Some { value }, token.span.to(close.span))
-                    }
-                    ("uuid", Kind::LParen) => {
-                        self.bump();
-                        self.bump();
-                        let id = self.expect(Kind::Uuid, "expected an id in `uuid(…)`")?;
-                        let value =
-                            uuid::Uuid::parse_str(self.text(id.span)).expect("the lexer reads ids");
-                        let close = self.expect(Kind::RParen, "expected `)` after `uuid(…`")?;
-                        expr(ExprKind::Uuid { value }, token.span.to(close.span))
-                    }
-                    ("json", Kind::LParen) => {
-                        self.bump();
-                        self.bump();
-                        let string = self.expect(Kind::String, "expected a string in `json(…)`")?;
-                        let text = self.string(string)?;
-                        let close = self.expect(Kind::RParen, "expected `)` after `json(…`")?;
-                        expr(ExprKind::Json { text }, token.span.to(close.span))
-                    }
-                    (element, Kind::LBracket) if ARRAY_TYPES.contains(&element) => {
-                        let element = element.to_string();
-                        self.bump();
-                        self.bump();
-                        let (elements, close) = self.elements()?;
-                        expr(
-                            ExprKind::Array {
-                                element: Some(element),
-                                elements,
-                            },
-                            token.span.to(close),
-                        )
-                    }
-                    _ => {
-                        let call = self.call(false)?;
-                        let span = call.span;
-                        expr(
-                            ExprKind::Call {
-                                call: Box::new(call),
-                            },
-                            span,
-                        )
-                    }
-                }
-            }
-            Kind::Uuid => {
-                let call = self.call(false)?;
-                let span = call.span;
-                expr(
-                    ExprKind::Call {
-                        call: Box::new(call),
-                    },
-                    span,
-                )
-            }
+            Kind::Number => Ok(self.number(token)),
+            Kind::String => self.string_value(token),
+            Kind::Variable => self.variable(token),
+            Kind::QuotedVariable => self.quoted_variable(token),
+            Kind::At => self.port(token),
+            Kind::LParen => self.unit(token),
+            Kind::LBracket => self.array(token, None),
+            Kind::Ident => self.word(token),
+            Kind::Uuid => self.call_value(),
             Kind::Error => {
                 self.bump();
                 let message = format!("`{}` is not part of the language", self.text(token.span));
@@ -659,6 +592,210 @@ impl<'s> Parser<'s> {
                 self.fail(message, token.span)
             }
         }
+    }
+
+    fn number(&mut self, token: Token) -> Expr {
+        self.bump();
+        let text = self.text(token.span);
+        let suffix = SUFFIXES.iter().find(|suffix| text.ends_with(*suffix));
+        let kind = ExprKind::Number {
+            text: text[..text.len() - suffix.map_or(0, |suffix| suffix.len())].to_string(),
+            suffix: suffix.map(|suffix| suffix.to_string()),
+        };
+        Expr {
+            span: token.span,
+            kind,
+        }
+    }
+
+    fn string_value(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        let value = self.string(token)?;
+        Ok(Expr {
+            span: token.span,
+            kind: ExprKind::String { value },
+        })
+    }
+
+    /// `{key}`, or `{<uuid>}`.
+    fn variable(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        let text = self.text(token.span);
+        let name = text[1..text.len() - 1].trim();
+        if name.starts_with('=') {
+            return self.fail(
+                "`{= …}` is an anonymous cell, which the display shows with the value it \
+                 holds: a text binds a variable `{key}` or a literal"
+                    .to_string(),
+                token.span,
+            );
+        }
+        if name.is_empty() || name.contains(char::is_whitespace) {
+            return self.fail(
+                "a variable is a store key `{path/key}`, a tree-local `{.name}`, or any key \
+                 quoted: `{\"a key\"}`"
+                    .to_string(),
+                token.span,
+            );
+        }
+        let kind = match uuid::Uuid::parse_str(name) {
+            Ok(value) => ExprKind::VariableId { value },
+            Err(_) => ExprKind::Variable {
+                name: name.to_string(),
+            },
+        };
+        Ok(Expr {
+            span: token.span,
+            kind,
+        })
+    }
+
+    /// `{"key"}`.
+    fn quoted_variable(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        // The string between the braces.
+        let quoted = Token {
+            kind: Kind::String,
+            span: Span::new(token.span.start + 1, token.span.end - 1),
+        };
+        let name = self.string(quoted)?;
+        Ok(Expr {
+            span: token.span,
+            kind: ExprKind::Variable { name },
+        })
+    }
+
+    /// `@node`, or `@node.parameter`.
+    fn port(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        let node = self.reference("expected a node name after `@`")?;
+        let parameter = if self.eat(Kind::Dot).is_some() {
+            if !matches!(self.peek().kind, Kind::Ident | Kind::Uuid) {
+                let span = self.peek().span;
+                return self.fail("expected a parameter name after `.`".to_string(), span);
+            }
+            Some(self.parameter_name())
+        } else {
+            None
+        };
+        let end = parameter.as_ref().map_or(node.span, |name| name.span);
+        Ok(Expr {
+            span: token.span.to(end),
+            kind: ExprKind::Port { node, parameter },
+        })
+    }
+
+    /// `()`.
+    fn unit(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        let close = self.expect(Kind::RParen, "expected `)`: `()` is the unit value")?;
+        Ok(Expr {
+            span: token.span.to(close.span),
+            kind: ExprKind::Unit,
+        })
+    }
+
+    /// `[elements]`, its `[` the next token; `element[elements]` when
+    /// `element` states their type, its name `token`.
+    fn array(&mut self, token: Token, element: Option<String>) -> Parse<Expr> {
+        if element.is_some() {
+            self.bump();
+        }
+        self.bump();
+        let (elements, close) = self.elements()?;
+        Ok(Expr {
+            span: token.span.to(close),
+            kind: ExprKind::Array { element, elements },
+        })
+    }
+
+    /// A value that starts with a word: a keyword literal, a typed array or
+    /// a call.
+    fn word(&mut self, token: Token) -> Parse<Expr> {
+        let second = self.peek_second();
+        let text = self.text(token.span);
+        let kind = match (text, second) {
+            ("true", _) | ("false", _) => ExprKind::Bool {
+                value: text == "true",
+            },
+            ("none", _) => ExprKind::None,
+            ("some", Kind::LParen) => return self.some(token),
+            ("uuid", Kind::LParen) => return self.uuid(token),
+            ("json", Kind::LParen) => return self.json(token),
+            (element, Kind::LBracket) if ARRAY_TYPES.contains(&element) => {
+                return self.array(token, Some(element.to_string()))
+            }
+            _ => return self.call_value(),
+        };
+        self.bump();
+        Ok(Expr {
+            span: token.span,
+            kind,
+        })
+    }
+
+    /// `some(value)`.
+    fn some(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        self.bump();
+        let value = Box::new(self.expression()?);
+        let close = self.expect(Kind::RParen, "expected `)` after `some(…`")?;
+        Ok(Expr {
+            span: token.span.to(close.span),
+            kind: ExprKind::Some { value },
+        })
+    }
+
+    /// `uuid(id)`.
+    fn uuid(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        self.bump();
+        let id = self.expect(Kind::Uuid, "expected an id in `uuid(…)`")?;
+        let value = uuid::Uuid::parse_str(self.text(id.span)).expect("the lexer reads ids");
+        let close = self.expect(Kind::RParen, "expected `)` after `uuid(…`")?;
+        Ok(Expr {
+            span: token.span.to(close.span),
+            kind: ExprKind::Uuid { value },
+        })
+    }
+
+    /// `json("…")`.
+    fn json(&mut self, token: Token) -> Parse<Expr> {
+        self.bump();
+        self.bump();
+        let string = self.expect(Kind::String, "expected a string in `json(…)`")?;
+        let text = self.string(string)?;
+        let close = self.expect(Kind::RParen, "expected `)` after `json(…`")?;
+        Ok(Expr {
+            span: token.span.to(close.span),
+            kind: ExprKind::Json { text },
+        })
+    }
+
+    /// A call in an argument.
+    fn call_value(&mut self) -> Parse<Expr> {
+        let call = self.call(false)?;
+        Ok(Expr {
+            span: call.span,
+            kind: ExprKind::Call {
+                call: Box::new(call),
+            },
+        })
+    }
+
+    /// A parameter's name, its next token a name or an id: the words it is
+    /// made of, joined by dots (`param.half_life`).
+    fn parameter_name(&mut self) -> Name {
+        let first = self.bump();
+        let mut name = self.name(first);
+        while self.at(Kind::Dot) && self.peek_second() == Kind::Ident {
+            self.bump();
+            let word = self.bump();
+            name.text.push('.');
+            name.text.push_str(self.text(word.span));
+            name.span = name.span.to(word.span);
+        }
+        name
     }
 
     /// The name or id after `@` or `.`.
@@ -762,6 +899,10 @@ fn unescape(text: &str) -> Result<String, (usize, usize, String)> {
                 let code = rest
                     .strip_prefix('{')
                     .and_then(|rest| rest.split_once('}'))
+                    .filter(|(hex, _)| {
+                        (1..=6).contains(&hex.len())
+                            && hex.chars().all(|digit| digit.is_ascii_hexdigit())
+                    })
                     .and_then(|(hex, _)| u32::from_str_radix(hex, 16).ok().map(|code| (hex, code)));
                 match code.and_then(|(hex, code)| char::from_u32(code).map(|char| (hex, char))) {
                     Some((hex, char)) => {
@@ -788,4 +929,9 @@ fn unescape(text: &str) -> Result<String, (usize, usize, String)> {
         value.push(escaped);
     }
     Ok(value)
+}
+
+/// How many lines break in `text`: at `\n`, `\r\n` or `\r`.
+pub(crate) fn line_breaks(text: &str) -> usize {
+    text.matches('\n').count() + text.matches('\r').count() - text.matches("\r\n").count()
 }

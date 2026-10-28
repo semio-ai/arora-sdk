@@ -1,24 +1,32 @@
 //! Tokens, and the layout that turns indentation into structure.
 //!
-//! `logos` cuts the text into raw tokens. The layout pass then reads the
-//! lines: a line's indentation opens a block (`Indent`) or closes blocks
-//! (`Dedent`), and its end is a `Newline`. A line that is empty or holds only
-//! a comment makes neither. Inside brackets a line continues the one that
-//! opened them, so a call broken over several lines is one node; a bracket
-//! still open when a line comes back to the indentation of the line that
-//! opened it, and does not close it, is unclosed, and the line starts afresh.
+//! `logos` cuts the text into raw tokens. A selection's path, `[…]` right
+//! after a value, is one token: it runs to the first `]` on its line, so it
+//! may hold any other character. The layout pass then reads the lines: a
+//! line's indentation opens a block (`Indent`) or closes blocks (`Dedent`),
+//! and its end is a `Newline`. A line that is empty or holds only a comment
+//! makes neither. Inside brackets a line continues the one that opened them,
+//! so a call broken over several lines is one node; a bracket still open when
+//! a line comes back to the indentation of the line that opened it, and does
+//! not close it, is unclosed, and the line starts afresh.
+//!
+//! A line ends at `\n`, `\r\n` or `\r`. A byte order mark opening the text is
+//! no part of it.
 
 use logos::Logos;
 
 use super::ast::Span;
 use super::Diagnostic;
 
+/// The byte order mark.
+const BOM: char = '\u{FEFF}';
+
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
-#[logos(skip r"[ \t\r\f]+")]
+#[logos(skip r"[ \t\f\u{FEFF}]+")]
 enum Raw {
-    #[token("\n")]
+    #[regex(r"\r\n|\r|\n")]
     Newline,
-    #[regex(r"#[^\n]*", allow_greedy = true)]
+    #[regex(r"#[^\r\n]*", allow_greedy = true)]
     Comment,
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*")]
     Ident,
@@ -29,10 +37,12 @@ enum Raw {
         priority = 4
     )]
     Number,
-    #[regex(r#""([^"\\\n]|\\[^\n])*""#)]
+    #[regex(r#""([^"\\\r\n]|\\[^\r\n])*""#)]
     String,
-    #[regex(r"\{[^}\n]*\}", allow_greedy = true)]
+    #[regex(r#"\{[^}"\r\n]*\}"#, allow_greedy = true)]
     Variable,
+    #[regex(r#"\{"([^"\\\r\n]|\\[^\r\n])*"\}"#)]
+    QuotedVariable,
     #[token("@")]
     At,
     #[token(".")]
@@ -63,7 +73,12 @@ pub(crate) enum Kind {
     Uuid,
     Number,
     String,
+    /// `{key}`.
     Variable,
+    /// `{"key"}`.
+    QuotedVariable,
+    /// A selection's `[path]`.
+    Path,
     At,
     Dot,
     PathSep,
@@ -101,6 +116,7 @@ impl From<Raw> for Kind {
             Raw::Number => Kind::Number,
             Raw::String => Kind::String,
             Raw::Variable => Kind::Variable,
+            Raw::QuotedVariable => Kind::QuotedVariable,
             Raw::At => Kind::At,
             Raw::Dot => Kind::Dot,
             Raw::PathSep => Kind::PathSep,
@@ -115,17 +131,69 @@ impl From<Raw> for Kind {
     }
 }
 
+/// Words that are literals, not names: `true`, `none`, `some(…)`, …
+const RESERVED: [&str; 6] = ["true", "false", "none", "some", "uuid", "json"];
+
+/// Whether `text` is written as a name as it is: one identifier, and no
+/// literal.
+pub(crate) fn is_name(text: &str) -> bool {
+    let mut lexer = Raw::lexer(text);
+    matches!(lexer.next(), Some(Ok(Raw::Ident)))
+        && lexer.span() == (0..text.len())
+        && lexer.next().is_none()
+        && !RESERVED.contains(&text)
+}
+
+/// Whether `text` is written as a parameter's name as it is: names joined by
+/// dots (`param.half_life`).
+pub(crate) fn is_parameter_name(text: &str) -> bool {
+    text.split('.').all(is_name)
+}
+
 /// The tokens of `text`, laid out in lines and blocks, ending with `Eof`.
 pub(crate) fn tokens(text: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec<Token> {
-    let raw: Vec<Token> = Raw::lexer(text)
-        .spanned()
-        .map(|(raw, span)| Token {
-            kind: raw.map_or(Kind::Error, Kind::from),
+    let origin = if text.starts_with(BOM) {
+        BOM.len_utf8()
+    } else {
+        0
+    };
+    let mut raw = Vec::with_capacity(text.len() / 4);
+    let mut lexer = Raw::lexer(text);
+    // The two tokens before the current one, comments aside: a `[` after a
+    // value opens a selection's path.
+    let mut before: [Option<Kind>; 2] = [None, None];
+    while let Some(lexed) = lexer.next() {
+        let span = lexer.span();
+        let mut token = Token {
+            kind: lexed.map_or(Kind::Error, Kind::from),
             span: Span::new(span.start, span.end),
-        })
-        .collect();
+        };
+        if token.kind == Kind::LBracket && selects(before) {
+            let rest = &text[span.end..];
+            let end = rest.find([']', '\r', '\n']).unwrap_or(rest.len());
+            let length = if rest[end..].starts_with(']') {
+                end + 1
+            } else {
+                diagnostics.push(Diagnostic::error(
+                    "a selection's path ends with `]` on its line".to_string(),
+                    Span::new(span.start, span.end + end),
+                ));
+                end
+            };
+            lexer.bump(length);
+            token = Token {
+                kind: Kind::Path,
+                span: Span::new(span.start, span.end + length),
+            };
+        }
+        if token.kind != Kind::Comment {
+            before = [before[1], Some(token.kind)];
+        }
+        raw.push(token);
+    }
     Layout {
         text,
+        origin,
         out: Vec::with_capacity(raw.len() + raw.len() / 4),
         indents: vec![0],
         depth: 0,
@@ -136,8 +204,25 @@ pub(crate) fn tokens(text: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec<Token
     .run(&raw)
 }
 
+/// Whether a `[` after the tokens `before` opens a selection's path: it
+/// follows a value that ends with a token of its own, a variable, a call, an
+/// array, a path or a port.
+fn selects(before: [Option<Kind>; 2]) -> bool {
+    matches!(
+        before,
+        [
+            _,
+            Some(
+                Kind::Variable | Kind::QuotedVariable | Kind::RParen | Kind::RBracket | Kind::Path
+            )
+        ] | [Some(Kind::At | Kind::Dot), Some(Kind::Ident | Kind::Uuid)]
+    )
+}
+
 struct Layout<'a> {
     text: &'a str,
+    /// Where the text starts, past a byte order mark.
+    origin: usize,
     out: Vec<Token>,
     /// The indentation of each open block, the outermost first.
     indents: Vec<usize>,
@@ -244,7 +329,9 @@ impl Layout<'_> {
 
     /// The start of the line holding `offset`.
     fn line_start(&self, offset: usize) -> usize {
-        self.text[..offset].rfind('\n').map_or(0, |at| at + 1)
+        self.text[..offset]
+            .rfind(['\n', '\r'])
+            .map_or(self.origin, |at| at + 1)
     }
 
     /// The indentation of the line whose first token starts at `offset`.

@@ -23,9 +23,20 @@ All notable changes to `arora-behavior-tree`. The format follows
   `load_behavior_tree_yaml`.
 - `BehaviorTree::display`: the tree as text, which `text::parse` reads back
   to the graph it was built from.
+- The text bounds nesting (`text::MAX_DEPTH`, 128 levels of expressions and
+  of blocks), quotes keys a bare `{key}` cannot hold (`{"a key"}`), reads a
+  selection's path up to its `]` whatever it holds, reads dotted parameter
+  names (`param.half_life`), and reports what lowering refuses — a read of a
+  detached node's port that is no output, detached nodes reading one
+  another in a cycle — where it is written. Two nodes writing one store key
+  are warned about, with the one that wins.
 
 ### Changed
 
+- The display shows a node, function or parameter name that the text
+  cannot write as is by its id, a module function whose name alone is
+  ambiguous as `<module>::name`, a key that needs it quoted, and a float in
+  its shortest form that reads back (`1e300f64`).
 - The display names the native nodes (`sequence`, `equal`, `set_string`, …)
   and their parameters, which it showed as ids; shows a node without
   arguments without parentheses; shows a string array as `str[…]`, which

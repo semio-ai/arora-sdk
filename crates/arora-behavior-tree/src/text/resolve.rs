@@ -12,10 +12,14 @@
 //! - A call in an argument is a node of its own that no node holds, read
 //!   through its return value.
 //! - A literal takes its type from the parameter it is given to.
+//! - What lowering refuses is an error here, where it is written: a read of
+//!   a detached node's port that is no output, detached nodes reading one
+//!   another in a cycle. Two nodes writing one store key are warned about,
+//!   with the one that wins.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+use arora_behavior::graph::{source_port, Graph, Io, Link, LinkSource, Node as GraphNode, Port};
 use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_types::data::Key;
 use arora_types::gen_uuid_from_str;
@@ -27,8 +31,9 @@ use uuid::Uuid;
 
 use super::ast::{Call, Document, Expr, ExprKind, FunctionName, Node, Span};
 use super::natives::{native, native_named, seed};
-use super::Diagnostic;
+use super::{Diagnostic, MAX_DEPTH};
 use crate::schema::_RET_PARAM_ID;
+use crate::variable::is_tree_local;
 
 /// The namespace node ids derive in: a node's id is the UUID v5 of its name,
 /// or of its path, under it.
@@ -75,7 +80,8 @@ pub fn resolve(document: &Document, functions: &FunctionIndex) -> Loaded {
         nodes: Vec::new(),
         diagnostics: Vec::new(),
         named: HashMap::new(),
-        ids: HashSet::new(),
+        declared: HashMap::new(),
+        signatures: HashMap::new(),
         slots: HashMap::new(),
     };
     let mut planned = Vec::new();
@@ -84,7 +90,7 @@ pub fn resolve(document: &Document, functions: &FunctionIndex) -> Loaded {
             0 => ("root".to_string(), true),
             index => (format!("detached.{}", index - 1), false),
         };
-        resolver.plan(node, path, None, attached, &mut planned);
+        resolver.plan(node, path, None, attached, 0, &mut planned);
     }
     if document.nodes.is_empty() {
         resolver.diagnostics.push(Diagnostic::warning(
@@ -99,6 +105,8 @@ pub fn resolve(document: &Document, functions: &FunctionIndex) -> Loaded {
     if let Some(root) = planned.first().filter(|root| root.function.is_some()) {
         resolver.graph.root = Some(root.id);
     }
+    resolver.cycles();
+    resolver.shared_keys();
     resolver
         .diagnostics
         .sort_by_key(|diagnostic| diagnostic.span.start);
@@ -238,11 +246,11 @@ struct Planned<'d, 'a> {
     children: Vec<Uuid>,
 }
 
-/// A named node, as a reference to it reads it.
+/// A node of the text, as a reference to it reads it.
 #[derive(Clone, Copy)]
 struct Declared<'a> {
-    id: Uuid,
     function: Option<Found<'a>>,
+    attached: bool,
 }
 
 struct Resolver<'a> {
@@ -250,10 +258,12 @@ struct Resolver<'a> {
     graph: Graph,
     nodes: Vec<LoadedNode>,
     diagnostics: Vec<Diagnostic>,
-    /// The named nodes, by name.
-    named: HashMap<String, Declared<'a>>,
-    /// Every node id given.
-    ids: HashSet<Uuid>,
+    /// The named nodes' ids, and their names' spans, by name.
+    named: HashMap<String, (Uuid, Span)>,
+    /// Every node of the text, by id: the nodes a reference can name.
+    declared: HashMap<Uuid, Declared<'a>>,
+    /// The signature of every graph node, by id, when known.
+    signatures: HashMap<Uuid, &'a ModuleFunction>,
     /// Each function's slots, as [`slots`] gives them.
     slots: HashMap<Uuid, (Vec<Io>, Vec<Io>)>,
 }
@@ -268,22 +278,19 @@ impl<'a> Resolver<'a> {
     }
 
     /// Give `node` and the nodes under it their ids, and find their
-    /// functions.
+    /// functions. Children nested deeper than [`MAX_DEPTH`] are reported and
+    /// left out.
     fn plan<'d>(
         &mut self,
         node: &'d Node,
         path: String,
         parent: Option<Uuid>,
         attached: bool,
+        depth: usize,
         planned: &mut Vec<Planned<'d, 'a>>,
     ) -> Uuid {
-        let id = node_id(node.name.as_ref().map_or(path.as_str(), |name| &name.text));
-        self.claim(
-            id,
-            node.span,
-            node.name.as_ref().map(|name| name.text.as_str()),
-            &path,
-        );
+        let name = node.name.as_ref();
+        let id = node_id(name.map_or(path.as_str(), |name| &name.text));
         let function = match self.functions.find(&node.call.function) {
             Ok(function) => Some(function),
             Err(message) => {
@@ -291,12 +298,26 @@ impl<'a> Resolver<'a> {
                 None
             }
         };
-        if let Some(name) = &node.name {
-            if self.named.contains_key(&name.text) {
+        match name.map(|name| (name, self.named.get(&name.text).copied())) {
+            Some((name, Some((_, first)))) => {
                 self.error(format!("another node is named `{}`", name.text), name.span);
-            } else {
-                self.named
-                    .insert(name.text.clone(), Declared { id, function });
+                self.error(format!("`{}` names another node too", name.text), first);
+            }
+            _ => {
+                if self.declared.contains_key(&id) {
+                    self.error(
+                        format!(
+                            "this node has the id of another node: `{}` is the path or the name \
+                             of both",
+                            name.map_or(path.as_str(), |name| &name.text)
+                        ),
+                        node.span,
+                    );
+                }
+                if let Some(name) = name {
+                    self.named.insert(name.text.clone(), (id, name.span));
+                }
+                self.declared.insert(id, Declared { function, attached });
             }
         }
         let at = planned.len();
@@ -309,6 +330,13 @@ impl<'a> Resolver<'a> {
             function,
             children: Vec::new(),
         });
+        if depth + 1 >= MAX_DEPTH && !node.children.is_empty() {
+            self.error(
+                format!("blocks nest at most {MAX_DEPTH} levels deep"),
+                node.children[0].span,
+            );
+            return id;
+        }
         planned[at].children = node
             .children
             .iter()
@@ -319,25 +347,12 @@ impl<'a> Resolver<'a> {
                     format!("{path}.{index}"),
                     Some(id),
                     attached,
+                    depth + 1,
                     planned,
                 )
             })
             .collect();
         id
-    }
-
-    /// Record that the node at `span` has `id`, reporting a node that has it
-    /// already: a name colliding with another node's path.
-    fn claim(&mut self, id: Uuid, span: Span, name: Option<&str>, path: &str) {
-        if !self.ids.insert(id) && name.is_none_or(|name| !self.named.contains_key(name)) {
-            self.error(
-                format!(
-                    "this node has the id of another node: `{}` is the path or the name of both",
-                    name.unwrap_or(path)
-                ),
-                span,
-            );
-        }
     }
 
     /// Add `plan`'s node to the graph, with its links and the calls in its
@@ -347,19 +362,7 @@ impl<'a> Resolver<'a> {
         let Some(function) = plan.function else {
             return;
         };
-        let signature = match function {
-            Found::Known(signature) => Some(signature),
-            Found::Unknown(id) => {
-                self.warning(
-                    format!(
-                        "function {id} is not in the function index: its arguments are not \
-                         typed, and the node fails when it runs"
-                    ),
-                    node.call.function.span,
-                );
-                None
-            }
-        };
+        let signature = self.signature(function, node.call.function.span);
         let label = node.call.function.name.text.as_str();
         let native = native(function.id());
         if !node.children.is_empty() && native.is_some_and(|native| !native.children) {
@@ -393,9 +396,7 @@ impl<'a> Resolver<'a> {
             parent: plan.parent,
             path: plan.path.clone(),
         });
-        self.node(
-            plan.id, function, signature, children, &node.call, &plan.path,
-        );
+        self.node(plan.id, function, children, &node.call, &plan.path, 0);
         if let Some(target) = &node.target {
             if let Some(source) = self.target(target) {
                 self.graph
@@ -405,22 +406,45 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// The signature of `function`, warning at `span` when it is not known.
+    fn signature(&mut self, function: Found<'a>, span: Span) -> Option<&'a ModuleFunction> {
+        match function {
+            Found::Known(signature) => Some(signature),
+            Found::Unknown(id) => {
+                self.warning(
+                    format!(
+                        "function {id} is not in the function index: its arguments are not \
+                         typed, and the node fails when it runs"
+                    ),
+                    span,
+                );
+                None
+            }
+        }
+    }
+
     /// Add the graph node `id` calling `function`, and its arguments' links.
     fn node(
         &mut self,
         id: Uuid,
         function: Found<'a>,
-        signature: Option<&'a ModuleFunction>,
         children: Option<Vec<Uuid>>,
         call: &Call,
         path: &str,
+        depth: usize,
     ) {
+        let signature = match function {
+            Found::Known(signature) => Some(signature),
+            Found::Unknown(_) => None,
+        };
         let (inputs, outputs) = match signature {
-            Some(signature) => self
-                .slots
-                .entry(signature.function_id)
-                .or_insert_with(|| slots(signature))
-                .clone(),
+            Some(signature) => {
+                self.signatures.insert(id, signature);
+                self.slots
+                    .entry(signature.function_id)
+                    .or_insert_with(|| slots(signature))
+                    .clone()
+            }
             None => (Vec::new(), vec![Io::new(_RET_PARAM_ID)]),
         };
         self.graph.nodes.insert(
@@ -459,7 +483,13 @@ impl<'a> Resolver<'a> {
             let ty = signature
                 .and_then(|signature| signature.function.parameters.get(&parameter))
                 .map(|parameter| &parameter.ty);
-            if let Some(source) = self.source(&argument.value, ty, &format!("{path}.{name}"), id) {
+            let call_path = format!("{path}.{name}");
+            let read = Read {
+                path: &call_path,
+                holder: id,
+                depth,
+            };
+            if let Some(source) = self.source(&argument.value, ty, read) {
                 self.graph
                     .links
                     .push(Link::new(Port::new(id, parameter), source));
@@ -474,46 +504,41 @@ impl<'a> Resolver<'a> {
             ));
             given.insert(parameter);
         }
-        if let Some(signature) = signature {
-            let missing: Vec<&str> = match native(signature.function_id) {
-                Some(native) => native
-                    .required
-                    .iter()
-                    .filter(|parameter| !given.contains(parameter))
-                    .map(|parameter| signature.function.parameters[parameter].name.as_str())
-                    .collect(),
-                None => signature
-                    .function
-                    .parameter_ordering
-                    .iter()
-                    .filter(|parameter| !given.contains(parameter))
-                    .filter_map(|parameter| signature.function.parameters.get(parameter))
-                    .filter(|parameter| !parameter.ty.is_option())
-                    .map(|parameter| parameter.name.as_str())
-                    .collect(),
-            };
+        // A native's parameters a node must bind are known; a module
+        // function declares no default, and is passed `()` or `None` for a
+        // parameter a node leaves out, which it may mean.
+        if let Some(native) = native(function.id()) {
+            let parameters = &native.function.function.parameters;
+            let missing: Vec<String> = native
+                .required
+                .iter()
+                .filter(|parameter| !given.contains(parameter))
+                .map(|parameter| format!("`{}`", parameters[parameter].name))
+                .collect();
             if !missing.is_empty() {
                 self.warning(
-                    format!(
-                        "`{label}` is not given {}",
-                        missing
-                            .iter()
-                            .map(|name| format!("`{name}`"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                    format!("`{label}` is not given {}", missing.join(", ")),
                     call.span,
                 );
             }
         }
     }
 
-    /// The source a node's return value is written to: a variable or another
-    /// node's port.
+    /// Where a node's return value is written: a variable, or another node's
+    /// input, which then reads the node. `@n.p` names an input of `n`,
+    /// whatever `n` outputs.
     fn target(&mut self, target: &Expr) -> Option<LinkSource> {
         match &target.kind {
-            ExprKind::Variable { .. } | ExprKind::Port { .. } => {
-                self.source(target, None, "", Uuid::nil())
+            ExprKind::Variable { .. } | ExprKind::VariableId { .. } => {
+                self.source(target, None, Read::TARGET)
+            }
+            ExprKind::Port { node, parameter } => {
+                let (id, declared) = self.referenced(node)?;
+                let port = match parameter {
+                    None => _RET_PARAM_ID,
+                    Some(parameter) => self.parameter(node, parameter, declared)?,
+                };
+                Some(LinkSource::Port(Port::new(id, port)))
             }
             _ => {
                 self.error(
@@ -527,72 +552,115 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// The link source `expression` is, given to a parameter of type `ty`; a
-    /// call is added as a node of its own at `path`, held by `holder`.
+    /// The node `name` names, by its name or its id.
+    fn referenced(&mut self, name: &super::ast::Name) -> Option<(Uuid, Declared<'a>)> {
+        let id = match self.named.get(&name.text) {
+            Some((id, _)) => *id,
+            None => match Uuid::parse_str(&name.text) {
+                Ok(id) => id,
+                Err(_) => {
+                    self.error(format!("no node is named `{}`", name.text), name.span);
+                    return None;
+                }
+            },
+        };
+        match self.declared.get(&id) {
+            Some(declared) => Some((id, *declared)),
+            None => {
+                self.error(format!("no node has the id {id}"), name.span);
+                None
+            }
+        }
+    }
+
+    /// The parameter of the node `node` names that `parameter` names.
+    fn parameter(
+        &mut self,
+        node: &super::ast::Name,
+        parameter: &super::ast::Name,
+        declared: Declared<'a>,
+    ) -> Option<Uuid> {
+        let found = match declared.function {
+            Some(Found::Known(function)) => parameter_named(function, &parameter.text),
+            _ => Uuid::parse_str(&parameter.text).ok(),
+        };
+        if found.is_none() {
+            self.error(
+                format!("`{}` has no parameter `{}`", node.text, parameter.text),
+                parameter.span,
+            );
+        }
+        found
+    }
+
+    /// The link source `expression` is, read as `read` says, given to a
+    /// parameter of type `ty`.
     fn source(
         &mut self,
         expression: &Expr,
         ty: Option<&FrozenTy>,
-        path: &str,
-        holder: Uuid,
+        read: Read,
     ) -> Option<LinkSource> {
+        if read.depth >= MAX_DEPTH {
+            self.error(
+                format!("expressions nest at most {MAX_DEPTH} levels deep"),
+                expression.span,
+            );
+            return None;
+        }
         match &expression.kind {
             ExprKind::Variable { name } => {
                 let id = gen_uuid_from_str(name);
-                if Uuid::parse_str(name).is_err() {
-                    self.graph.variables.insert(id, name.clone());
-                }
+                self.graph.variables.insert(id, name.clone());
                 Some(LinkSource::Variable(id))
             }
+            ExprKind::VariableId { value } => Some(LinkSource::Variable(*value)),
             ExprKind::Port { node, parameter } => {
-                let declared = match self.named.get(&node.text) {
-                    Some(declared) => *declared,
-                    None => match Uuid::parse_str(&node.text) {
-                        Ok(id) => Declared { id, function: None },
-                        Err(_) => {
-                            self.error(format!("no node is named `{}`", node.text), node.span);
-                            return None;
-                        }
-                    },
-                };
+                let (id, declared) = self.referenced(node)?;
                 let port = match parameter {
                     None => _RET_PARAM_ID,
                     Some(parameter) => {
-                        let found = match declared.function {
-                            Some(Found::Known(function)) => {
-                                parameter_named(function, &parameter.text)
-                            }
-                            _ => Uuid::parse_str(&parameter.text).ok(),
+                        let port = self.parameter(node, parameter, declared)?;
+                        // A detached node outputs its return value and the
+                        // parameters it writes; a tree node's argument is a
+                        // cell any node reads.
+                        let output = match declared.function {
+                            Some(Found::Known(function)) => function
+                                .function
+                                .parameters
+                                .get(&port)
+                                .is_some_and(|parameter| parameter.mutable),
+                            _ => true,
                         };
-                        match found {
-                            Some(port) => port,
-                            None => {
-                                self.error(
-                                    format!(
-                                        "`{}` has no parameter `{}`",
-                                        node.text, parameter.text
-                                    ),
-                                    parameter.span,
-                                );
-                                return None;
-                            }
+                        if !declared.attached && !output {
+                            self.error(
+                                format!(
+                                    "`{}` is held by no node: what it outputs is its return \
+                                     value `@{}` and the parameters it writes, and it does not \
+                                     write `{}`",
+                                    node.text, node.text, parameter.text
+                                ),
+                                parameter.span,
+                            );
+                            return None;
                         }
+                        port
                     }
                 };
-                Some(LinkSource::Port(Port::new(declared.id, port)))
+                Some(LinkSource::Port(Port::new(id, port)))
             }
             ExprKind::Select {
                 source,
                 path: selected,
             } => {
-                let source = self.source(source, None, path, holder)?;
+                let source = self.source(source, None, read.deeper())?;
                 Some(LinkSource::Select {
                     source: Box::new(source),
                     path: Key::new(selected.as_str()),
                 })
             }
-            ExprKind::Call { call } => self.call(call, path, holder),
-            _ => match literal(expression, &expected(ty)) {
+            ExprKind::Call { call } => self.call(call, read),
+            _ => match literal(expression, &expected(ty), read.depth) {
                 Ok(value) => Some(LinkSource::Literal(value)),
                 Err((message, span)) => {
                     self.error(message, span);
@@ -604,7 +672,7 @@ impl<'a> Resolver<'a> {
 
     /// A call in an argument: a node no node holds, read through its return
     /// value.
-    fn call(&mut self, call: &Call, path: &str, holder: Uuid) -> Option<LinkSource> {
+    fn call(&mut self, call: &Call, read: Read) -> Option<LinkSource> {
         let function = match self.functions.find(&call.function) {
             Ok(function) => function,
             Err(message) => {
@@ -622,32 +690,221 @@ impl<'a> Resolver<'a> {
             );
             return None;
         }
-        let signature = match function {
-            Found::Known(signature) => Some(signature),
-            Found::Unknown(id) => {
-                self.warning(
-                    format!(
-                        "function {id} is not in the function index: its arguments are not \
-                         typed, and the node fails when it runs"
-                    ),
-                    call.function.span,
-                );
-                None
-            }
-        };
-        let id = node_id(path);
-        self.claim(id, call.span, None, path);
+        // Warns when the function is not known.
+        self.signature(function, call.function.span);
+        let id = node_id(read.path);
+        if self.declared.contains_key(&id) || self.graph.nodes.contains_key(&id) {
+            self.error(
+                format!(
+                    "this call has the id of another node: `{}` is the path or the name of both",
+                    read.path
+                ),
+                call.span,
+            );
+        }
         self.nodes.push(LoadedNode {
             id,
             name: None,
             span: call.span,
             attached: false,
             function: function.id(),
-            parent: Some(holder),
-            path: path.to_string(),
+            parent: Some(read.holder),
+            path: read.path.to_string(),
         });
-        self.node(id, function, signature, None, call, path);
+        self.node(id, function, None, call, read.path, read.depth + 1);
         Some(LinkSource::Port(Port::new(id, _RET_PARAM_ID)))
+    }
+
+    /// A node's name for a message: its name, or its path.
+    fn label(&self, id: Uuid) -> String {
+        self.nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map(|node| format!("`{}`", node.name.as_deref().unwrap_or(&node.path)))
+            .unwrap_or_else(|| id.to_string())
+    }
+
+    /// Report the detached nodes that read one another in a cycle, which
+    /// lowering refuses, a node reading an output of its own included.
+    fn cycles(&mut self) {
+        let loaded: HashMap<Uuid, (bool, Span)> = self
+            .nodes
+            .iter()
+            .map(|node| (node.id, (node.attached, node.span)))
+            .collect();
+        let detached = |id: &Uuid| loaded.get(id).is_some_and(|(attached, _)| !attached);
+        // Who reads whom, among detached nodes.
+        let mut reads: BTreeMap<Uuid, Vec<Uuid>> = BTreeMap::new();
+        for link in &self.graph.links {
+            let (reader, read) = match (&link.source, link.target.port == _RET_PARAM_ID) {
+                // A return value written to an input: that input's node reads
+                // this one.
+                (LinkSource::Port(port), true) => (port.node, link.target.node),
+                (source, _) => match source_port(source) {
+                    Some(port) if port == link.target => continue,
+                    Some(port) => (link.target.node, port.node),
+                    None => continue,
+                },
+            };
+            if detached(&reader) && detached(&read) {
+                reads.entry(reader).or_default().push(read);
+            }
+        }
+        let mut state: HashMap<Uuid, u8> = HashMap::new(); // 1: on the path, 2: done
+        let mut reported = HashSet::new();
+        let starts: Vec<Uuid> = reads.keys().copied().collect();
+        for start in starts {
+            if state.contains_key(&start) {
+                continue;
+            }
+            let mut path = vec![start];
+            let mut next = vec![0usize];
+            state.insert(start, 1);
+            while let Some(&node) = path.last() {
+                let index = *next.last().expect("one per node");
+                match reads.get(&node).and_then(|read| read.get(index)).copied() {
+                    Some(read) => {
+                        *next.last_mut().expect("one per node") += 1;
+                        match state.get(&read) {
+                            None => {
+                                state.insert(read, 1);
+                                path.push(read);
+                                next.push(0);
+                            }
+                            Some(1) => {
+                                let from = path.iter().position(|id| *id == read).expect("on path");
+                                let cycle: Vec<Uuid> = path[from..].to_vec();
+                                let names = cycle
+                                    .iter()
+                                    .map(|id| self.label(*id))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                for id in cycle {
+                                    if reported.insert(id) {
+                                        let message = if from + 1 == path.len() {
+                                            format!(
+                                                "{names} reads an output of its own: feed a \
+                                                 value back through a store key"
+                                            )
+                                        } else {
+                                            format!(
+                                                "{names} read one another in a cycle: feed a \
+                                                 value back through a store key"
+                                            )
+                                        };
+                                        self.error(message, loaded[&id].1);
+                                    }
+                                }
+                            }
+                            Some(_) => {}
+                        }
+                    }
+                    None => {
+                        state.insert(node, 2);
+                        path.pop();
+                        next.pop();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Warn about the store keys several nodes write, one of them held by no
+    /// node, and say which wins. A node no node holds publishes its keys
+    /// after the tree ticks, so it wins over a tree node; among such nodes,
+    /// the one with the greatest id publishes last, and wins: lowering lists
+    /// them by id.
+    fn shared_keys(&mut self) {
+        let attached: HashMap<Uuid, (bool, Span)> = self
+            .nodes
+            .iter()
+            .map(|node| (node.id, (node.attached, node.span)))
+            .collect();
+        let mut writers: BTreeMap<&str, Vec<Uuid>> = BTreeMap::new();
+        for link in &self.graph.links {
+            let LinkSource::Variable(variable) = &link.source else {
+                continue;
+            };
+            let Some(key) = self.graph.variables.get(variable) else {
+                continue;
+            };
+            let written = link.target.port == _RET_PARAM_ID
+                || self
+                    .signatures
+                    .get(&link.target.node)
+                    .and_then(|function| function.function.parameters.get(&link.target.port))
+                    .is_some_and(|parameter| parameter.mutable);
+            if written && !is_tree_local(key) {
+                let nodes = writers.entry(key.as_str()).or_default();
+                if !nodes.contains(&link.target.node) {
+                    nodes.push(link.target.node);
+                }
+            }
+        }
+        let mut warnings = Vec::new();
+        for (key, nodes) in writers {
+            let Some(winner) = nodes
+                .iter()
+                .filter(|id| attached.get(id).is_some_and(|(attached, _)| !attached))
+                .max()
+                .copied()
+            else {
+                continue;
+            };
+            if nodes.len() < 2 {
+                continue;
+            }
+            let others = nodes
+                .iter()
+                .filter(|id| **id != winner)
+                .map(|id| self.label(*id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            for id in &nodes {
+                let message = if *id == winner {
+                    format!(
+                        "`{{{key}}}` is written by this node and by {others}: this node \
+                         publishes it last, and wins"
+                    )
+                } else {
+                    format!(
+                        "`{{{key}}}` is written by this node and by others: {} publishes it \
+                         last, and wins",
+                        self.label(winner)
+                    )
+                };
+                warnings.push(Diagnostic::warning(message, attached[id].1));
+            }
+        }
+        self.diagnostics.extend(warnings);
+    }
+}
+
+/// How an argument's expression is read: where a call in it is placed, the
+/// node holding it, and how deep it is nested.
+#[derive(Clone, Copy)]
+struct Read<'p> {
+    /// The path a call takes.
+    path: &'p str,
+    /// The node holding a call.
+    holder: Uuid,
+    /// How many expressions hold this one.
+    depth: usize,
+}
+
+impl Read<'_> {
+    /// A target: no call, nested in nothing.
+    const TARGET: Read<'static> = Read {
+        path: "",
+        holder: Uuid::nil(),
+        depth: 0,
+    };
+
+    fn deeper(self) -> Self {
+        Self {
+            depth: self.depth + 1,
+            ..self
+        }
     }
 }
 
@@ -723,9 +980,16 @@ fn expected(ty: Option<&FrozenTy>) -> Expected {
 
 type Typed = Result<Value, (String, Span)>;
 
-/// The value the literal `expression` writes, read as `expected`.
-fn literal(expression: &Expr, expected: &Expected) -> Typed {
+/// The value the literal `expression` writes, read as `expected`, nested
+/// in `depth` expressions.
+fn literal(expression: &Expr, expected: &Expected, depth: usize) -> Typed {
     let span = expression.span;
+    if depth >= MAX_DEPTH {
+        return Err((
+            format!("expressions nest at most {MAX_DEPTH} levels deep"),
+            span,
+        ));
+    }
     let mismatch = |what: &str, kind: &PrimitiveKind| {
         Err((
             format!("{what} is given to a parameter of type {kind}"),
@@ -734,18 +998,19 @@ fn literal(expression: &Expr, expected: &Expected) -> Typed {
     };
     match (&expression.kind, expected) {
         (ExprKind::None, Expected::Option(_) | Expected::Any) => Ok(Value::Option(None)),
-        (ExprKind::Some { value }, Expected::Option(inner)) => {
-            Ok(Value::Option(Some(Box::new(literal(value, inner)?))))
-        }
+        (ExprKind::Some { value }, Expected::Option(inner)) => Ok(Value::Option(Some(Box::new(
+            literal(value, inner, depth + 1)?,
+        )))),
         (ExprKind::Some { value }, Expected::Any) => Ok(Value::Option(Some(Box::new(literal(
             value,
             &Expected::Any,
+            depth + 1,
         )?)))),
         (ExprKind::None | ExprKind::Some { .. }, Expected::Primitive(kind)) => {
             mismatch("an optional", kind)
         }
         // An optional parameter's value is framed when it is passed.
-        (_, Expected::Option(inner)) => literal(expression, inner),
+        (_, Expected::Option(inner)) => literal(expression, inner, depth),
         (ExprKind::Number { text, suffix }, expected) => {
             let kind = match (suffix, expected) {
                 (Some(suffix), Expected::Primitive(kind))
@@ -766,7 +1031,7 @@ fn literal(expression: &Expr, expected: &Expected) -> Typed {
                     ))
                 }
             };
-            number(text, kind).ok_or_else(|| (format!("`{text}` is no {kind}"), span))
+            number(text, kind).map_err(|message| (message, span))
         }
         (
             ExprKind::String { value },
@@ -794,13 +1059,15 @@ fn literal(expression: &Expr, expected: &Expected) -> Typed {
                 (Some(stated), Expected::Primitive(kind)) if stated != *kind => {
                     mismatch(&format!("a {stated}"), kind)
                 }
-                (Some(kind), _) => array(kind, elements),
-                (None, Expected::Primitive(kind)) if kind.is_array() => array(*kind, elements),
+                (Some(kind), _) => array(kind, elements, depth),
+                (None, Expected::Primitive(kind)) if kind.is_array() => {
+                    array(*kind, elements, depth)
+                }
                 (None, Expected::Primitive(kind)) => mismatch("an array", kind),
                 (None, _) => Ok(Value::ArrayValue(
                     elements
                         .iter()
-                        .map(|element| literal(element, &Expected::Any))
+                        .map(|element| literal(element, &Expected::Any, depth + 1))
                         .collect::<Result<_, _>>()?,
                 )),
             }
@@ -810,39 +1077,57 @@ fn literal(expression: &Expr, expected: &Expected) -> Typed {
             .map_err(|error| (format!("not the JSON form of a value: {error}"), span)),
         (
             ExprKind::Variable { .. }
+            | ExprKind::VariableId { .. }
             | ExprKind::Port { .. }
             | ExprKind::Select { .. }
             | ExprKind::Call { .. },
             _,
         ) => Err((
-            "an array holds literals: a variable, a port or a call is an argument of its own"
+            "`some(…)` and an array hold literals: a variable, a port or a call is an argument \
+             of its own"
                 .to_string(),
             span,
         )),
     }
 }
 
-/// `text` as a number of type `kind`.
-fn number(text: &str, kind: PrimitiveKind) -> Option<Value> {
+/// `text` as a number of type `kind`. A finite text is a finite number: one
+/// past the type's range is refused, not rounded to an infinity.
+fn number(text: &str, kind: PrimitiveKind) -> Result<Value, String> {
     use PrimitiveKind::*;
-    Some(match kind {
-        U8 => Value::U8(text.parse().ok()?),
-        U16 => Value::U16(text.parse().ok()?),
-        U32 => Value::U32(text.parse().ok()?),
-        U64 => Value::U64(text.parse().ok()?),
-        I8 => Value::I8(text.parse().ok()?),
-        I16 => Value::I16(text.parse().ok()?),
-        I32 => Value::I32(text.parse().ok()?),
-        I64 => Value::I64(text.parse().ok()?),
-        F32 => Value::F32(text.parse().ok()?),
-        F64 => Value::F64(text.parse().ok()?),
-        _ => return None,
+    let not = || format!("`{text}` is no {kind}");
+    let finite = !text.contains("inf") && !text.contains("NaN");
+    let out_of_range = || format!("`{text}` is past the range of {kind}");
+    Ok(match kind {
+        U8 => Value::U8(text.parse().map_err(|_| not())?),
+        U16 => Value::U16(text.parse().map_err(|_| not())?),
+        U32 => Value::U32(text.parse().map_err(|_| not())?),
+        U64 => Value::U64(text.parse().map_err(|_| not())?),
+        I8 => Value::I8(text.parse().map_err(|_| not())?),
+        I16 => Value::I16(text.parse().map_err(|_| not())?),
+        I32 => Value::I32(text.parse().map_err(|_| not())?),
+        I64 => Value::I64(text.parse().map_err(|_| not())?),
+        F32 => {
+            let value: f32 = text.parse().map_err(|_| not())?;
+            if finite && !value.is_finite() {
+                return Err(out_of_range());
+            }
+            Value::F32(value)
+        }
+        F64 => {
+            let value: f64 = text.parse().map_err(|_| not())?;
+            if finite && !value.is_finite() {
+                return Err(out_of_range());
+            }
+            Value::F64(value)
+        }
+        _ => return Err(not()),
     })
 }
 
 /// The array of type `kind` holding `elements`, each read as its element
 /// type.
-fn array(kind: PrimitiveKind, elements: &[Expr]) -> Typed {
+fn array(kind: PrimitiveKind, elements: &[Expr], depth: usize) -> Typed {
     use PrimitiveKind::*;
     let element = match kind {
         ArrayBoolean => Boolean,
@@ -861,7 +1146,7 @@ fn array(kind: PrimitiveKind, elements: &[Expr]) -> Typed {
     };
     let values = elements
         .iter()
-        .map(|value| literal(value, &Expected::Primitive(element)))
+        .map(|value| literal(value, &Expected::Primitive(element), depth + 1))
         .collect::<Result<Vec<_>, _>>()?;
     macro_rules! collect {
         ($variant:ident, $array:ident) => {

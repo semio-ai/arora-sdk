@@ -248,6 +248,7 @@ dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
  "arora-buffers",
+ "arora-dataflow-nodes",
  "arora-simple-data-store",
  "arora-types",
  "derive_more 2.1.1",
