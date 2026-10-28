@@ -868,6 +868,50 @@ mod tests {
         assert!(!engine.set_length(PlayerId(99), None));
     }
 
+    /// A standalone clip's length carries playback past its last keypoint;
+    /// a window overrides that end, and an absent length uses the keypoint.
+    #[test]
+    fn a_clips_length_is_its_natural_end() {
+        let json = r#"{"lengthNs":3000000000,"tracks":[
+            {"id":"t","animatableId":"x","points":[
+                {"id":"a","timeNs":0,"value":0},
+                {"id":"b","timeNs":1000000000,"value":1}
+            ]}
+        ]}"#;
+        let without_length = json.replace("\"lengthNs\":3000000000,", "");
+        for (clip, window_end, end) in [
+            (json, None, 3_000_000_000),
+            (json, Some(2_000_000_000), 2_000_000_000),
+            (without_length.as_str(), None, 1_000_000_000),
+        ] {
+            let mut engine = Engine::new();
+            let anim = engine.load(Clip::from_json(clip).unwrap(), vec![]);
+            let player = engine.create_player("p");
+            engine
+                .add_instance(player, anim, 1.0, Timing::default())
+                .unwrap();
+            engine.set_mode(player, LoopMode::Once);
+            if let Some(window_end) = window_end {
+                engine.set_window(player, 0, Some(window_end));
+            }
+            engine.play(player);
+            engine.step(0, 0);
+            for (now, dt, position, ended) in [
+                (end - 1, end - 1, end - 1, false),
+                (end, 1, end, true),
+                (end + 1_000_000_000, 1_000_000_000, end, true),
+            ] {
+                engine.step(now, dt);
+                let info = &engine.players()[0];
+                assert_eq!(
+                    (info.position, info.ended),
+                    (position, ended),
+                    "end {end}, window {window_end:?}, time {now}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn opposite_unbounded_velocities_of_equal_weight_cancel_in_a_blend() {
         let vertical = |rising: bool| {
