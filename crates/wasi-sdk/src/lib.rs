@@ -38,8 +38,32 @@ pub fn locate_or_download() -> Result<PathBuf> {
         return Ok(install);
     }
 
-    download_and_extract(&cache, &install)?;
+    install_once(&cache, &install, download_and_extract)?;
     Ok(install)
+}
+
+/// Install the SDK at `install` with `fetch`, unless it is there. Build scripts run
+/// concurrently: an exclusive lock on a file beside the install makes them take turns,
+/// so the first one fetches and the others find its install once they hold the lock.
+fn install_once(
+    cache: &Path,
+    install: &Path,
+    fetch: impl FnOnce(&Path, &Path) -> Result<()>,
+) -> Result<()> {
+    fs::create_dir_all(cache).with_context(|| format!("creating {}", cache.display()))?;
+    let lock_path = cache.join(format!("wasi-sdk-{VERSION_MAJOR}.lock"));
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("opening {}", lock_path.display()))?;
+    lock.lock()
+        .with_context(|| format!("locking {}", lock_path.display()))?;
+    if install.join("bin").join(clang_exe_name()).exists() {
+        return Ok(());
+    }
+    fetch(cache, install)
 }
 
 /// Path to the WASI SDK's CMake toolchain file for `wasm32-wasip2`, the target
@@ -160,8 +184,13 @@ fn install_extracted(extracted: &Path, install: &Path) -> Result<()> {
         return Ok(());
     }
     fs::remove_dir_all(install).ok();
-    fs::rename(extracted, install)
-        .with_context(|| format!("renaming {} to {}", extracted.display(), install.display()))
+    match fs::rename(extracted, install) {
+        Ok(()) => Ok(()),
+        // Another build installed it in between.
+        Err(_) if installed() => Ok(()),
+        Err(error) => Err(error)
+            .with_context(|| format!("renaming {} to {}", extracted.display(), install.display())),
+    }
 }
 
 fn host_os_arch() -> Result<(&'static str, String)> {
@@ -226,6 +255,38 @@ mod tests {
 
         install_extracted(&extracted, &install).unwrap();
         assert_eq!(marker(&install), "installed");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Build scripts installing at once over a partial directory: one fetches, the others
+    /// wait for it and keep its install.
+    #[test]
+    fn concurrent_installs_fetch_once() {
+        let dir = scratch("concurrent");
+        let install = dir.join("install");
+        fs::create_dir_all(install.join("share")).unwrap();
+        let fetches = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let builds: Vec<_> = (0..4)
+                .map(|build| {
+                    let (dir, install, fetches) = (&dir, &install, &fetches);
+                    scope.spawn(move || {
+                        install_once(dir, install, |_, install| {
+                            fetches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            let extracted = dir.join(format!("extracted-{build}"));
+                            sdk(&extracted, &format!("build {build}"));
+                            install_extracted(&extracted, install)
+                        })
+                    })
+                })
+                .collect();
+            for build in builds {
+                build.join().unwrap().unwrap();
+            }
+        });
+        assert_eq!(fetches.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(marker(&install).starts_with("build "));
         fs::remove_dir_all(&dir).ok();
     }
 
