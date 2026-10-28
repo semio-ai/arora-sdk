@@ -80,8 +80,9 @@ with open(os.environ['FAKE_LOG'], 'a') as log:
             self.assertIn('--locked', build)
             self.assertIn('--offline', build)
             self.assertIn('--quiet', build)
-        order = [Path(c[1]).parent.name for c in commands if c[0] == 'round']
-        self.assertEqual(order, ['a', 'b', 'b', 'a'] * 4)
+        runs = [Path(c[1]) for c in commands if c[0] == 'round']
+        self.assertEqual([p.parent.name for p in runs[:2]], ['discarded'] * 2)
+        self.assertEqual([p.parent.name for p in runs[2:]], ['a', 'b', 'b', 'a'] * 4)
         self.assertFalse(any((self.out / 'worktrees').iterdir()))
         self.assertEqual(len([c for c in commands if 'remove' in c]), 2)
 

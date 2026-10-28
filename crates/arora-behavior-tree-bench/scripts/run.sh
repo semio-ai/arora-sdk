@@ -55,6 +55,12 @@ with open(path, 'w') as out:
     json.dump({'schema': 1, 'rounds': int(rounds), 'forms': forms.split(',') if forms else None,
                'builds': dict(zip(labels, revisions))}, out, indent=2)
 PY
+# One discarded round first: the round straight after the builds can run on a
+# machine still settling from compiling, which no later round does.
+mkdir -p "$out/discarded"
+for label in "${labels[@]}"; do
+  "$out/targets/$label/release/bench-kit" "$out/discarded/$label.json" ${workloads[@]+"${workloads[@]}"}
+done
 for (( round=1; round<=rounds; round++ )); do
   for (( position=0; position<${#labels[@]}; position++ )); do
     if (( round % 2 )); then i=$position; else i=$((${#labels[@]} - 1 - position)); fi

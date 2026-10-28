@@ -366,7 +366,9 @@ one detached worktree and target directory per revision, builds the round binary
 with `--release --locked`, and runs one process per build per round. Extra cargo
 flags are whitespace-separated in `BENCH_CARGO_FLAGS` (for example, `--offline`).
 The default is eight rounds; the runner requires an even count of at least four.
-Order is forward on odd rounds and reversed on even rounds. Exit traps remove
+Order is forward on odd rounds and reversed on even rounds. One discarded round
+runs each build once before the first: the round straight after the builds can
+run on a machine still settling from compiling. Exit traps remove
 created worktrees on success, failure and interruption; target directories,
 resolved revision IDs, raw rounds and comparisons stay under the output directory.
 Use a new directory for each run. Compiler settings may be supplied through the
@@ -422,6 +424,10 @@ ROUNDS=8 crates/arora-behavior-tree-bench/scripts/run.sh /tmp/bench-aa \
 A whole process can be an outlier because of startup state, scheduling or thermal
 conditions. Rounds use separate processes, after a discarded real-work pilot, and
 intervals come from bootstrapping rounds together across all tests in a process.
+Other work on the machine during a run, a build included, widens every interval
+and can load one build's rounds more than the other's, so run comparisons on an
+otherwise idle machine. The short synthetic workload is the noisiest test; a
+longer workload of your own resolves smaller differences.
 An A/A interval measures session noise, not a universal threshold for improvement.
 
 ## Checks
