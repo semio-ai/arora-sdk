@@ -174,8 +174,15 @@ pub struct RunnerArgs {
     device_dir: Option<std::path::PathBuf>,
 
     /// The port the open local bridge serves on, ws://127.0.0.1:PORT; 9000
-    /// when unset. Several devices on one host serve on several ports.
-    #[arg(long, value_name = "PORT", env = crate::device::BRIDGE_PORT_VAR)]
+    /// when unset. Several devices on one host serve on several ports. Port 0
+    /// is refused: the bridge advertises the port it is given, not one the
+    /// system picks.
+    #[arg(
+        long,
+        value_name = "PORT",
+        env = crate::device::BRIDGE_PORT_VAR,
+        value_parser = clap::value_parser!(u16).range(1..)
+    )]
     bridge_port: Option<u16>,
 }
 
@@ -552,7 +559,7 @@ mod tests {
 
     #[test]
     fn a_bridge_port_that_is_no_port_is_refused() {
-        for port in ["70000", "x"] {
+        for port in ["0", "70000", "x"] {
             assert!(
                 Runner::try_parse_from(["runner", "--bridge-port", port]).is_err(),
                 "{port:?} is refused"

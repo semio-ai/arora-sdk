@@ -162,13 +162,14 @@ fn prompt(state: &State) -> Paragraph<'_> {
         }
         None => match &state.enrollment_code {
             Some(code) => Paragraph::new(vec![
+                // The code leads its line, so a narrow terminal clips the
+                // explanation and never the code.
                 Line::from(vec![
-                    Span::styled("To enroll this device, enter the code ", bold),
                     Span::styled(
                         code.code.clone(),
                         bold.fg(Color::Cyan).add_modifier(Modifier::REVERSED),
                     ),
-                    Span::styled(" in Semio Studio", bold),
+                    Span::styled(" enrolls this device: enter it in Semio Studio", bold),
                 ]),
                 Line::from(match &code.approval_url {
                     Some(url) => format!("or open {url}"),
@@ -246,7 +247,11 @@ mod tests {
 
     /// The text a frame of `state` shows, row after row.
     fn rendered(state: &State) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(100, 24)).expect("test backend");
+        rendered_in(state, 100)
+    }
+
+    fn rendered_in(state: &State, width: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("test backend");
         terminal
             .draw(|frame| draw(frame, state, Instant::now()))
             .expect("draw");
@@ -269,11 +274,17 @@ mod tests {
             approval_url: Some("https://studio.example/approve?code=BCDF-GHJK".to_string()),
         });
         let shown = rendered(&state);
-        assert!(shown.contains("BCDF-GHJK in Semio Studio"), "{shown}");
+        assert!(
+            shown.contains("BCDF-GHJK enrolls this device: enter it in Semio Studio"),
+            "{shown}"
+        );
         assert!(
             shown.contains("or open https://studio.example/approve?code=BCDF-GHJK"),
             "{shown}"
         );
+
+        // A terminal 20 columns wide still shows the whole code.
+        assert!(rendered_in(&state, 20).contains("BCDF-GHJK"));
 
         let (question, _rx) = super::super::state::text_prompt("Device name".into(), false);
         state.prompts.push_back(question);
