@@ -1,3 +1,4 @@
+mod support;
 use arora_behavior_tree_bench::{
     clock::Monotonic,
     forms::{Form, FORMS},
@@ -68,17 +69,23 @@ fn real_functions_can_be_detached() {
 fn say_timing_is_observed_through_the_tree() {
     let workload = Workload::parse(&fixture().to_string()).unwrap();
     for form in FORMS {
-        let run = measure::replay(&workload, *form, true, &Monotonic::default());
+        let run = measure::replay(&workload, *form, true, &Monotonic::default()).unwrap();
         assert_eq!(run.calls, vec![1; 16], "{}", form.name());
         let expected = (0..16)
             .map(|tick| {
-                measure::values_hash(&[
-                    Some(arora_types::value::Value::String("sil".into())),
-                    Some(if tick < 9 {
-                        arora_types::value::Value::Boolean(false)
-                    } else {
-                        arora_types::value::Value::F64(1.0)
-                    }),
+                use arora_types::value::Value;
+                support::store_hash(vec![
+                    ("clock", Some(Value::F64((tick + 1) as f64 * 0.02))),
+                    ("text", Some(Value::String("Hi".into()))),
+                    ("viseme", Some(Value::String("sil".into()))),
+                    (
+                        "done",
+                        Some(if tick < 9 {
+                            Value::Boolean(false)
+                        } else {
+                            Value::F64(1.0)
+                        }),
+                    ),
                 ])
             })
             .collect::<Vec<_>>();
@@ -93,7 +100,7 @@ fn replays_reset_module_state_counts_and_digests() {
     for form in FORMS {
         let rows = measure::measure(&workload, &[*form], 3, &Monotonic::default()).unwrap();
         let first = &rows[0].runs[0];
-        let next = measure::replay(&workload, *form, true, &Monotonic::default());
+        let next = measure::replay(&workload, *form, true, &Monotonic::default()).unwrap();
         measure::assert_counts(first, &next);
         assert_eq!(first.written, next.written);
     }
@@ -172,7 +179,9 @@ fn parallel_replays_hold_one_device_through_lowering_and_ticks() {
                     reads: std::cell::Cell::new(0),
                     monotonic: Monotonic::default(),
                 };
-                measure::replay(&workload, form, true, &clock);
+                // Without recording, the pilot and the measured replay are the
+                // only replays, and both read this clock.
+                measure::replay(&workload, form, false, &clock).unwrap();
                 assert_eq!(clock.reads.get(), 34);
             });
         }

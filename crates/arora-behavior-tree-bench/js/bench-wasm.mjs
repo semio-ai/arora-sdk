@@ -44,7 +44,12 @@ export async function loadBenchWasm(bytes, { now = () => performance.now(), rand
   if (x._initialize) x._initialize();
   const text = (ptr, len) => decoder.decode(new Uint8Array(memory.buffer, ptr, len));
   const call = (f) => { stderr = ''; try { return f(); } catch (e) { throw new Error(stderr.trim() || e.message); } };
-  const check = (f) => { if (call(f) !== 0) throw new Error('benchmark rejected arguments or workload'); };
+  const failure = () => {
+    let detail;
+    try { detail = JSON.parse(text(x.bench_result(), x.bench_result_len())).error; } catch {}
+    return new Error(`benchmark rejected arguments or workload${detail ? `: ${detail}` : ''}`);
+  };
+  const check = (f) => { if (call(f) !== 0) throw failure(); };
   const result = () => {
     const record = JSON.parse(text(x.bench_result(), x.bench_result_len()));
     return { ...record, clock: { ...clock, modes: record.clock.modes } };
@@ -68,7 +73,7 @@ export async function loadBenchWasm(bytes, { now = () => performance.now(), rand
       forms, phases: phaseNames.split(','), calls, ticks, warmUp, dt,
       begin(form) { check(() => x.bench_workload_begin(formIndex(form))); },
       select(form) { check(() => x.bench_workload_select(formIndex(form))); },
-      sample() { const n = call(() => x.bench_workload_sample()); if (!n) throw new Error('begin a form first'); return n; },
+      sample() { const n = call(() => x.bench_workload_sample()); if (!n) throw failure(); return n; },
       finish() { check(() => x.bench_workload_finish()); return result(); },
       measure(form, { samples = 7 } = {}) {
         if (!Number.isInteger(samples) || samples <= 0 || samples % 2 === 0) throw new Error('positive odd samples required');

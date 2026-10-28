@@ -19,7 +19,7 @@ pub struct Replay {
     pub times: Vec<f64>,
     pub calls: Vec<u64>,
     pub dispatches: Vec<u64>,
-    /// One FNV-1a digest of all compared keys per tick, warm-up included.
+    /// One FNV-1a digest of the whole store, sorted by key name, per tick, warm-up included.
     pub written: Vec<String>,
     pub repetitions: usize,
     pub replay_times: Vec<Vec<f64>>,
@@ -42,7 +42,7 @@ fn replay_once(
     record: bool,
     clock: &dyn Clock,
     mode: TimingMode,
-) -> Replay {
+) -> Result<Replay, String> {
     with_fresh_dataflow(|dataflow| replay_on(workload, form, record, clock, mode, dataflow))
 }
 
@@ -59,7 +59,7 @@ fn replay_on(
     clock: &dyn Clock,
     mode: TimingMode,
     dataflow: &mut arora_dataflow_nodes::functions::DataflowNodes,
-) -> Replay {
+) -> Result<Replay, String> {
     let _device = crate::modules::fresh_device();
     let store = SimpleDataStore::new();
     let slots: Vec<_> = workload
@@ -72,11 +72,6 @@ fn replay_on(
             }
             slot
         })
-        .collect();
-    let mut written: Vec<_> = workload
-        .keys
-        .iter()
-        .map(|(_, initial)| initial.clone())
         .collect();
     let mut host = Bridge::new(workload.dt);
     let counts = host.counts.clone();
@@ -91,7 +86,7 @@ fn replay_on(
         std::rc::Rc::new(move |name: &str| Some(resolving_store.slot(&Key::from(name))));
     let tree = form
         .lower(nodes, &resolver, Bridge::index(), &mut bridge)
-        .unwrap();
+        .map_err(|e| format!("{}: {e}", form.name()))?;
     // Every per-tick vector holds the whole replay before timing starts, so
     // a replay-wide interval never includes a reallocation.
     let ticks = workload.events.len();
@@ -120,19 +115,15 @@ fn replay_on(
         };
         let time = (workload.clock, Value::F64((tick + 1) as f64 * workload.dt));
         for (k, value) in [time].iter().chain(events) {
-            // The host writes a key only when its value changes; a key the
-            // tree or a graph sink also writes is compared with the store.
-            let changed = if workload.writer_keys.contains(k) {
-                slots[*k].get().as_ref() != Some(value)
-            } else {
-                written[*k].as_ref() != Some(value)
-            };
-            if changed {
+            // Events compare with the current store, including writes through aliases.
+            if slots[*k].get().as_ref() != Some(value) {
                 slots[*k].set(Some(value.clone())).unwrap();
-                written[*k] = Some(value.clone());
             }
         }
-        black_box(tree.tick(&mut bridge).unwrap());
+        black_box(
+            tree.tick(&mut bridge)
+                .map_err(|e| format!("{} at tick {tick}: {e}", form.name()))?,
+        );
         #[cfg(any(test, feature = "bench-check"))]
         clock.tick_finished();
         if mode == TimingMode::Tick {
@@ -144,24 +135,14 @@ fn replay_on(
         result.calls.push(counts.module_calls.get() - calls);
         result.dispatches.push(counts.dispatches.get() - dispatches);
         if record {
-            if workload.dynamic_keys {
-                let snapshot = store.snapshot();
-                let mut entries: Vec<_> = snapshot.storage.into_iter().collect();
-                entries.sort_by(|a, b| a.0.get_path().cmp(b.0.get_path()));
-                let values = entries
-                    .into_iter()
-                    .flat_map(|(key, value)| [Some(Value::String(key.get_path().into())), value])
-                    .collect::<Vec<_>>();
-                result.written.push(values_hash(&values));
-            } else {
-                result.written.push(values_hash(
-                    &workload
-                        .compared
-                        .iter()
-                        .map(|&k| slots[k].get())
-                        .collect::<Vec<_>>(),
-                ));
-            }
+            let snapshot = store.snapshot();
+            let mut entries: Vec<_> = snapshot.storage.into_iter().collect();
+            entries.sort_by(|a, b| a.0.get_path().cmp(b.0.get_path()));
+            let values = entries
+                .into_iter()
+                .flat_map(|(key, value)| [Some(Value::String(key.get_path().into())), value])
+                .collect::<Vec<_>>();
+            result.written.push(values_hash(&values));
         }
     }
     result.mean_us = if mode == TimingMode::Tick {
@@ -170,7 +151,7 @@ fn replay_on(
         result.replay_us[0] / (workload.events.len() - workload.warm_up) as f64
     };
     tree.unregister(&mut bridge);
-    result
+    Ok(result)
 }
 
 /// Quantile: linear between the two nearest order statistics.
@@ -273,7 +254,12 @@ pub fn summarize(workload: &Workload, runs: &[Replay]) -> Summary {
 
 /// Record agreement outside measured intervals when requested. Additional
 /// samples contribute timing only, on freshly lowered trees.
-pub fn replay(workload: &Workload, form: &dyn Form, record: bool, clock: &dyn Clock) -> Replay {
+pub fn replay(
+    workload: &Workload,
+    form: &dyn Form,
+    record: bool,
+    clock: &dyn Clock,
+) -> Result<Replay, String> {
     replay_adaptive(workload, form, record, clock, 0.0)
 }
 
@@ -286,11 +272,11 @@ pub fn replay_adaptive(
     record: bool,
     clock: &dyn Clock,
     minimum_us: f64,
-) -> Replay {
+) -> Result<Replay, String> {
     let measured = workload.events.len() - workload.warm_up;
     // Discarding real work before sampling also warms each process's code,
     // allocator and CPU state; startup transients otherwise dominate first tests.
-    let pilot = replay_once(workload, form, false, clock, TimingMode::Replay);
+    let pilot = replay_once(workload, form, false, clock, TimingMode::Replay)?;
     let elapsed = pilot.replay_us[0];
     let mode = if crate::clock::coarse(clock.step_us(), elapsed, measured) {
         TimingMode::Replay
@@ -301,22 +287,18 @@ pub fn replay_adaptive(
     let repetitions = (minimum_us / elapsed.max(clock.step_us()).max(f64::MIN_POSITIVE))
         .ceil()
         .max(1.0) as usize;
-    let mut result = replay_once(
-        workload,
-        form,
-        record && mode == TimingMode::Tick,
-        clock,
-        mode,
-    );
+    let mut result = replay_once(workload, form, false, clock, mode)?;
     assert_counts(&pilot, &result);
-    if record && mode == TimingMode::Replay {
+    // The whole-store snapshots run in a replay of their own, so no timed
+    // tick follows one.
+    if record {
         struct Untimed;
         impl Clock for Untimed {
             fn now(&self) -> f64 {
                 0.0
             }
         }
-        let recorded = replay_once(workload, form, true, &Untimed, TimingMode::Tick);
+        let recorded = replay_once(workload, form, true, &Untimed, TimingMode::Tick)?;
         assert_counts(&result, &recorded);
         result.written = recorded.written;
     }
@@ -324,7 +306,7 @@ pub fn replay_adaptive(
         result.replay_times.push(result.times.clone());
     }
     for _ in 1..repetitions {
-        let next = replay_once(workload, form, false, clock, mode);
+        let next = replay_once(workload, form, false, clock, mode)?;
         assert_eq!(
             result.calls, next.calls,
             "calls must be identical across replays"
@@ -347,7 +329,7 @@ pub fn replay_adaptive(
     for time in &mut result.times {
         *time /= repetitions as f64;
     }
-    result
+    Ok(result)
 }
 
 #[derive(Serialize)]
@@ -376,7 +358,7 @@ pub fn measure(
     let mut runs: Vec<Vec<Replay>> = forms.iter().map(|_| Vec::new()).collect();
     for sample in 0..samples {
         for (i, form) in forms.iter().enumerate() {
-            let run = replay(workload, *form, sample == 0, clock);
+            let run = replay(workload, *form, sample == 0, clock)?;
             if let Some(first) = runs[i].first() {
                 assert_counts(first, &run);
             }
@@ -386,7 +368,7 @@ pub fn measure(
     let reference = if let Some(i) = forms.iter().position(|form| form.name() == REFERENCE) {
         runs[i][0].written.clone()
     } else {
-        replay(workload, *reference_form, true, clock).written
+        replay(workload, *reference_form, true, clock)?.written
     };
     Ok(forms
         .iter()
@@ -653,7 +635,8 @@ mod tests {
                         &crate::clock::Monotonic::default(),
                         TimingMode::Tick,
                         dataflow,
-                    );
+                    )
+                    .unwrap();
                     assert!(
                         dataflow.sites() > 1,
                         "real nodes must have prepared their sites"

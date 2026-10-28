@@ -25,6 +25,22 @@ assert.equal(x.bench_minimum_sample_us(NaN), 1);
 assert.throws(() => wasm.loadWorkload('{'), /rejected/);
 const badRoot = JSON.parse(text); badRoot.text = 'missing_function()';
 assert.throws(() => wasm.loadWorkload(JSON.stringify(badRoot)), /rejected/);
+const badLowering = JSON.parse(text);
+badLowering.text = 'running\n\ng: {S} = hold(t: {arora/time}, duration: 0, value: 1, out: {.o}, state: {k}[/0])';
+// Both direct lowering and an omitted detached reference return diagnostics.
+for (const form of selected) {
+  const session = wasm.loadWorkload(JSON.stringify(badLowering));
+  session.begin(form);
+  if (form === 'detached') {
+    assert.equal(x.bench_workload_sample(), 0, 'lowering returns an error count without trapping');
+  } else {
+    assert.equal(x.bench_workload_sample(), 1);
+    assert.equal(x.bench_workload_finish(), 1, 'reference lowering returns an error status without trapping');
+  }
+  const diagnostic = JSON.parse(new TextDecoder().decode(new Uint8Array(x.memory.buffer, x.bench_result(), x.bench_result_len())));
+  assert.match(diagnostic.error, /^detached:.*inconsistent behavior tree/);
+  assert.throws(() => wasm.loadWorkload(JSON.stringify(badLowering)).measure(form, { samples: 1 }), /detached:.*inconsistent behavior tree/);
+}
 const one = wasm.loadWorkload(text).measure('attached-naive', { samples: 1 });
 assert.equal(one.forms['attached-naive'].differing, 0, 'detached reference when not selected');
 for (const name of wasm.defaults.workloads) {

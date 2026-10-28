@@ -1,0 +1,20 @@
+{
+ "keys": [
+  {
+   "name": "clock",
+   "initial": 0.0
+  }
+ ],
+ "text": "running\n\ng: {S} = hold(t: {clock}, duration: 0, value: 1, out: {.o}, state: {k}[/0])",
+ "ticks": 5,
+ "warmUp": 0,
+ "clock": "clock",
+ "dt": 0.016666666666666666,
+ "events": [],
+ "phases": {
+  "names": [
+   "one"
+  ],
+  "runs": []
+ }
+}

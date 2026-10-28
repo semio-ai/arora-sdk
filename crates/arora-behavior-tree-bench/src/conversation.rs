@@ -967,16 +967,33 @@ mod tests {
                             done = 1.0;
                         }
                     }
+                    let gate = if (12..32).contains(&tick) || tick >= 70 {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    let entries = [
+                        ("clock", (tick + 1) as f64 * DT),
+                        ("done", done),
+                        ("gate", gate),
+                    ]
+                    .into_iter()
+                    .chain(outputs.iter().map(String::as_str).zip(pose.iter().copied()));
                     measure::values_hash(
-                        &std::iter::once(done)
-                            .chain(pose.iter().copied())
-                            .map(|v| Some(AroraValue::F64(v)))
+                        &entries
+                            .flat_map(|(name, value)| {
+                                [
+                                    Some(AroraValue::String(name.into())),
+                                    Some(AroraValue::F64(value)),
+                                ]
+                            })
                             .collect::<Vec<_>>(),
                     )
                 })
                 .collect();
             for form in FORMS {
-                let replay = measure::replay(&workload, *form, true, &Monotonic::default());
+                let replay =
+                    measure::replay(&workload, *form, true, &Monotonic::default()).unwrap();
                 assert_eq!(replay.written, expected, "{name}/{}", form.name());
             }
         }

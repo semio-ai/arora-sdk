@@ -45,7 +45,7 @@ fn names() -> &'static str {
         )
     })
 }
-fn sample(workload: &Workload, form: &dyn Form, record: bool) -> Replay {
+fn sample(workload: &Workload, form: &dyn Form, record: bool) -> Result<Replay, String> {
     measure::replay_adaptive(
         workload,
         form,
@@ -53,6 +53,11 @@ fn sample(workload: &Workload, form: &dyn Form, record: bool) -> Replay {
         &WithStep(Monotonic::default(), STEP_US.get()),
         MINIMUM_US.get(),
     )
+}
+// Error details share the result buffer; status/count conventions stay unchanged.
+fn error(message: String, status: u32) -> u32 {
+    RESULT.set(serde_json::to_vec(&serde_json::json!({"error": message})).unwrap());
+    status
 }
 fn result(workload: &Workload, measurements: &[Measurement]) {
     RESULT.set(serde_json::to_vec(&measure::record(workload, measurements)).unwrap());
@@ -135,8 +140,9 @@ pub unsafe extern "C" fn bench_workload_load(ptr: *const u8, len: u32) -> u32 {
     let Ok(text) = std::str::from_utf8(std::slice::from_raw_parts(ptr, len as usize)) else {
         return 1;
     };
-    let Ok(workload) = Workload::parse(text) else {
-        return 1;
+    let workload = match Workload::parse(text) {
+        Ok(workload) => workload,
+        Err(message) => return error(message, 1),
     };
     load(workload);
     0
@@ -218,7 +224,10 @@ pub extern "C" fn bench_workload_sample() -> u32 {
             return 0;
         };
         let first = s.runs[f].is_empty();
-        let run = sample(&s.workload, FORMS[f], first);
+        let run = match sample(&s.workload, FORMS[f], first) {
+            Ok(run) => run,
+            Err(message) => return error(message, 0),
+        };
         if let Some(first) = s.runs[f].first() {
             measure::assert_counts(first, &run);
         }
@@ -240,8 +249,12 @@ pub extern "C" fn bench_workload_finish() -> u32 {
         }
         if s.reference.is_none() {
             let reference = FORMS.iter().find(|f| f.name() == REFERENCE).unwrap();
-            s.reference =
-                Some(measure::replay(&s.workload, *reference, true, &Monotonic::default()).written);
+            s.reference = Some(
+                match measure::replay(&s.workload, *reference, true, &Monotonic::default()) {
+                    Ok(run) => run.written,
+                    Err(message) => return error(message, 1),
+                },
+            );
         }
         let differing = measure::differences(s.reference.as_ref().unwrap(), &s.runs[f][0].written);
         let runs = std::mem::take(&mut s.runs[f]);
@@ -320,11 +333,18 @@ pub extern "C" fn bench_measure(
         return 1;
     }
     let workload = scenario.workload(n as usize, warm_up as usize, ticks as usize);
-    let runs: Vec<_> = (0..samples)
+    let runs: Vec<_> = match (0..samples)
         .map(|s| sample(&workload, *form, s == 0))
-        .collect();
+        .collect::<Result<_, _>>()
+    {
+        Ok(runs) => runs,
+        Err(message) => return error(message, 1),
+    };
     let reference = FORMS.iter().find(|f| f.name() == REFERENCE).unwrap();
-    let expected = measure::replay(&workload, *reference, true, &Monotonic::default());
+    let expected = match measure::replay(&workload, *reference, true, &Monotonic::default()) {
+        Ok(run) => run,
+        Err(message) => return error(message, 1),
+    };
     let differing = measure::differences(&expected.written, &runs[0].written);
     let h = hash(&runs[0].written);
     let summary = measure::summarize(&workload, &runs);

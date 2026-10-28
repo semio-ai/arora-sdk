@@ -1,3 +1,4 @@
+mod support;
 use arora_behavior_tree_bench::{
     clock::Monotonic,
     forms::{self, Fixture, FORMS},
@@ -70,6 +71,31 @@ fn parser_rejects_invalid_envelope() {
             serde_json::json!({"names":["x"],"runs":[[0,1]]}),
             "phase run",
         ),
+        (
+            "phases",
+            serde_json::json!({"names":[""],"runs":[]}),
+            "phase names",
+        ),
+        (
+            "phases",
+            serde_json::json!({"names":["a,b"],"runs":[]}),
+            "phase names",
+        ),
+        (
+            "phases",
+            serde_json::json!({"names":["a;b"],"runs":[]}),
+            "phase names",
+        ),
+        (
+            "phases",
+            serde_json::json!({"names":["x"],"runs":[[160,0]]}),
+            "phase run",
+        ),
+        (
+            "phases",
+            serde_json::json!({"names":["x"],"runs":[[2,0],[1,0]]}),
+            "phase run",
+        ),
     ] {
         let mut raw = synthetic::json();
         raw[field] = value;
@@ -97,26 +123,6 @@ fn parser_rejects_shared_outputs_but_accepts_loader_warnings() {
         .contains("at most one output"));
     raw["text"] = "parallel\n  unpack(values: f32[1], out_0: {target})\n  unpack(values: f32[2], out_0: {target})".into();
     assert!(Workload::parse(&raw.to_string()).is_ok());
-}
-
-#[test]
-fn parser_rejects_a_second_writer_of_a_graph_calls_key() {
-    let mut raw = synthetic::json();
-    let error = |raw: &serde_json::Value| Workload::parse(&raw.to_string()).err().unwrap();
-    // Two graph calls writing one key.
-    raw["text"] = "running\n\na: {target} = add(node: \"a\", operand_0: 1f32)\nb: {target} = add(node: \"b\", operand_0: 2f32)".into();
-    assert!(
-        error(&raw).contains("no other writer: target"),
-        "{}",
-        error(&raw)
-    );
-    // A tree output on a key a graph call writes.
-    raw["text"] = "parallel\n  unpack(values: f32[5], out_0: {target})\n  running\n\na: {target} = add(node: \"a\", operand_0: 1f32)".into();
-    assert!(
-        error(&raw).contains("no other writer: target"),
-        "{}",
-        error(&raw)
-    );
 }
 
 #[test]
@@ -152,6 +158,16 @@ fn summary_excludes_warm_up_and_uses_tick_medians_then_linear_quantiles() {
     assert_eq!(s.phases, vec![Some(3.0), Some(3.5)]);
 }
 
+fn write_hash(tick: usize, gate: bool, out: f64) -> String {
+    use arora_types::value::Value;
+    support::store_hash(vec![
+        ("clock", Some(Value::F64((tick + 1) as f64 / 60.0))),
+        ("gate", Some(Value::Boolean(gate))),
+        ("observed", Some(Value::F64(0.0))),
+        ("out", Some(Value::F64(out))),
+    ])
+}
+
 // The store must win over the host's last write when the tree writes the key.
 fn write_raw() -> serde_json::Value {
     let text = "fallback\n  sequence\n    equal(a: {gate}, b: true)\n    unpack(values: f64[2], out_0: {out})\n  running";
@@ -161,62 +177,15 @@ fn write_raw() -> serde_json::Value {
 }
 #[test]
 fn host_reapplies_events_after_tree_writes() {
-    use arora_types::value::Value;
     let workload = Workload::parse(&write_raw().to_string()).unwrap();
     for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
         let expected: Vec<_> = [2.0, 2.0, 1.0]
             .into_iter()
-            .map(|x| measure::values_hash(&[Some(Value::F64(x))]))
+            .enumerate()
+            .map(|(tick, x)| write_hash(tick, tick == 0, x))
             .collect();
         assert_eq!(row.runs[0].written, expected, "{}", row.form);
     }
-}
-
-#[test]
-fn an_output_bound_to_another_nodes_input_writes_the_key_it_reads() {
-    let mut raw = synthetic::json();
-    raw["keys"] =
-        serde_json::json!([{"name":"arora/time","initial":0.0},{"name":"out","initial":null}]);
-    raw["events"] = serde_json::json!([]);
-    raw["text"] = "parallel\n  reader: is_string_set(value: {out})\n  set_string(variable: @reader.value, value: \"changed\")\n  running".into();
-    let workload = Workload::parse(&raw.to_string()).unwrap();
-    let out = workload
-        .keys
-        .iter()
-        .position(|(name, _)| name == "out")
-        .unwrap();
-    assert!(workload.compared.contains(&out));
-    assert!(workload.writer_keys.contains(&out));
-}
-
-#[test]
-fn parser_rejects_order_dependent_reads_of_graph_calls() {
-    let mut raw = synthetic::json();
-    let error = |raw: &serde_json::Value| Workload::parse(&raw.to_string()).err().unwrap();
-    // The tree reads a key a graph call writes.
-    raw["text"] = "{graph/mixed} = add(operand_0: {target})\n\nsink: {target} = add(node: \"sink\", operand_0: 1f32)".into();
-    assert!(
-        error(&raw).contains("through its port, not through target"),
-        "{}",
-        error(&raw)
-    );
-    // A graph call reads a tree-local cell another graph call writes.
-    raw["text"] = "running\n\ntmp: {.tmp} = add(node: \"tmp\", operand_0: 1f32)\nreader: {target} = add(node: \"reader\", operand_0: {.tmp})".into();
-    assert!(
-        error(&raw).contains("through its port, not through .tmp"),
-        "{}",
-        error(&raw)
-    );
-    // A graph call writes another node's input.
-    raw["text"] = "running\n\nconsumer: {target} = add(node: \"consumer\", operand_0: 0f32)\nproducer: @consumer.operand_0 = add(node: \"producer\", operand_0: 1f32)".into();
-    assert!(
-        error(&raw).contains("not another node's input"),
-        "{}",
-        error(&raw)
-    );
-    // A graph call's state is its own.
-    raw["text"] = "running\n\nd: {target} = damp(node: \"d\", in: {input}, param.half_life: 0.12f32, dt: 0.016666667f32, state: {.d})".into();
-    assert!(Workload::parse(&raw.to_string()).is_ok());
 }
 
 #[test]
@@ -271,20 +240,19 @@ fn digests_canonicalize_signed_zero_in_both_widths() {
 fn tree_written_values_change_the_digest() {
     let mut raw = write_raw();
     let workload = Workload::parse(&raw.to_string()).unwrap();
-    let first = measure::replay(&workload, FORMS[0], true, &Monotonic::default());
+    let first = measure::replay(&workload, FORMS[0], true, &Monotonic::default()).unwrap();
     raw["text"] = raw["text"]
         .as_str()
         .unwrap()
         .replace("f64[2]", "f64[3]")
         .into();
     let workload = Workload::parse(&raw.to_string()).unwrap();
-    let second = measure::replay(&workload, FORMS[0], true, &Monotonic::default());
+    let second = measure::replay(&workload, FORMS[0], true, &Monotonic::default()).unwrap();
     assert_ne!(first.written[0], second.written[0]);
 }
 
 #[test]
 fn timed_actions_progress_at_thirty_hz() {
-    use arora_types::value::Value;
     for text in [
         "sequence\n  hold(t: {clock}, duration: 0.05, state: ())\n  unpack(values: f64[2], out_0: {out})",
         "unpack(values: @frame, out_0: {out})\n\nlate: greaterthan(lhs: {clock}, rhs: 0.09f32)\nframe: if(cond: @late, then: f64[2], else: f64[1])",
@@ -293,7 +261,13 @@ fn timed_actions_progress_at_thirty_hz() {
         raw["text"] = text.into(); raw["dt"] = (1.0/30.0).into(); raw["events"] = serde_json::json!([]);
         let workload = Workload::parse(&raw.to_string()).unwrap();
         for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
-            assert_eq!(row.runs[0].written[2],measure::values_hash(&[Some(Value::F64(2.0))]));
+            let expected = vec![
+                ("clock", Some(arora_types::value::Value::F64(0.1))),
+                ("gate", Some(arora_types::value::Value::Boolean(true))),
+                ("observed", Some(arora_types::value::Value::F64(0.0))),
+                ("out", Some(arora_types::value::Value::F64(2.0))),
+            ];
+            assert_eq!(row.runs[0].written[2], support::store_hash(expected));
             assert_eq!(row.differing,0);
         }
     }
@@ -301,16 +275,12 @@ fn timed_actions_progress_at_thirty_hz() {
 /// Native frame selection leaves only the frame due at the device time.
 #[test]
 fn a_tree_call_leaves_its_last_write_to_an_output() {
-    use arora_types::value::Value;
     let mut raw = write_raw();
     raw["text"] = "unpack(values: @frame, out_0: {out})\n\ndue: greaterthan(lhs: {clock}, rhs: 0f32)\nframe: if(cond: @due, then: f64[0], else: f64[1])".into();
     raw["events"] = serde_json::json!([]);
     let workload = Workload::parse(&raw.to_string()).unwrap();
     for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
-        assert_eq!(
-            row.runs[0].written[0],
-            measure::values_hash(&[Some(Value::F64(0.0))])
-        );
+        assert_eq!(row.runs[0].written[0], write_hash(0, true, 0.0));
     }
 }
 
@@ -329,7 +299,7 @@ fn counting_includes_reentrant_dataflow_host_and_real_calls_once() {
     raw["events"] = serde_json::json!([]);
     let workload = Workload::parse(&raw.to_string()).unwrap();
     for form in FORMS {
-        let run = measure::replay(&workload, *form, true, &Monotonic::default());
+        let run = measure::replay(&workload, *form, true, &Monotonic::default()).unwrap();
         let detached = form.name() == "detached";
         assert_eq!(
             run.calls,
@@ -371,12 +341,22 @@ fn attached_transform_preserves_state_ports_and_text_only_keys() {
     raw["text"] = "{introduced} = add(operand_0: @smooth.state[.0])\n\nsmooth: damp(in: f32[1,2], dt: 0.1f32, param.half_life: 0.1f32, state: ())".into();
     raw["events"] = serde_json::json!([]);
     let workload = Workload::parse(&raw.to_string()).unwrap();
-    assert_eq!(workload.keys.last().unwrap().0, "introduced");
     let rows = measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap();
     assert!(rows.iter().all(|r| r.differing == 0));
-    let expected = measure::values_hash(&[Some(arora_types::value::Value::F32(1.0))]);
+    use arora_types::value::Value;
+    let expected = (0..3)
+        .map(|tick| {
+            support::store_hash(vec![
+                ("clock", Some(Value::F64((tick + 1) as f64 / 60.0))),
+                ("gate", Some(Value::Boolean(true))),
+                ("observed", Some(Value::F64(0.0))),
+                ("out", Some(Value::F64(0.0))),
+                ("introduced", Some(Value::F32(1.0))),
+            ])
+        })
+        .collect::<Vec<_>>();
     for row in rows {
-        assert_eq!(row.runs[0].written, vec![expected.clone(); 3]);
+        assert_eq!(row.runs[0].written, expected);
     }
 }
 
@@ -408,5 +388,205 @@ fn scatter_writes_dynamic_keys_and_host_events_remain_authoritative() {
     for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
         assert_eq!(row.differing, 0);
         assert_eq!(row.runs[0].written, expected);
+    }
+}
+
+/// These shapes depend on detached demand or publication order; agreement must
+/// expose their different stores, including writes through selection aliases.
+#[test]
+fn order_dependent_workloads_report_differing_ticks() {
+    for (name, source) in [
+        (
+            "port read after tree write",
+            include_str!("fixtures/port_read_after_tree_write.json"),
+        ),
+        (
+            "host event on graph key",
+            include_str!("fixtures/host_event_on_sink_key.json"),
+        ),
+        (
+            "selection alias",
+            include_str!("fixtures/tree_write_via_select_alias.json"),
+        ),
+        (
+            "graph literal input",
+            include_str!("fixtures/tree_writes_graph_literal_input.json"),
+        ),
+        (
+            "scatter graph key",
+            include_str!("fixtures/scatter_and_graph_write_one_key.json"),
+        ),
+        (
+            "escaped selection",
+            include_str!("fixtures/selection_alias_after_tree_write.json"),
+        ),
+        (
+            "graph key input",
+            include_str!("fixtures/tree_writes_graph_key_input.json"),
+        ),
+        (
+            "scatter clock reader",
+            include_str!("fixtures/scatter_with_clock_reader.json"),
+        ),
+    ] {
+        let workload = Workload::parse(source).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let rows = measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap();
+        assert_eq!(rows[0].differing, 0, "{name}");
+        assert!(rows[1].differing > 0, "{name}: silent agreement");
+    }
+}
+
+/// A never-run detached native and a tree reading a graph's local cell are
+/// valid runtime workloads; their order is judged by replay, not parsing.
+#[test]
+fn runtime_accepts_local_graph_cells_and_unexecuted_natives() {
+    for source in [
+        include_str!("fixtures/tree_reads_local_cell_of_graph.json"),
+        include_str!("fixtures/never_running_native_plus_tree_writer.json"),
+    ] {
+        let workload = Workload::parse(source).unwrap();
+        let rows = measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap();
+        assert!(rows.iter().all(|r| r.differing == 0));
+    }
+}
+
+/// Repeated events restore an aliased cell before every tick, observable as
+/// seen=1 even though the tree leaves k=5 at the end of the tick.
+#[test]
+fn host_reapplies_events_on_selection_aliases() {
+    use arora_types::value::Value;
+    for source in [
+        include_str!("fixtures/events_on_selection_alias.json"),
+        include_str!("fixtures/events_on_input_alias.json"),
+    ] {
+        let workload = Workload::parse(source).unwrap();
+        let expected = (0..4)
+            .map(|tick| {
+                support::store_hash(vec![
+                    ("clock", Some(Value::F64((tick + 1) as f64 * workload.dt))),
+                    ("k", Some(Value::F32(5.0))),
+                    ("seen", Some(Value::F64(1.0))),
+                ])
+            })
+            .collect::<Vec<_>>();
+        for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
+            assert_eq!(row.differing, 0);
+            assert_eq!(row.runs[0].written, expected, "{}", row.form);
+        }
+    }
+}
+
+/// A runtime-only lowering failure must return a diagnostic naming the failing form,
+/// including when the selected forms omit the reference.
+#[test]
+fn lowering_errors_name_the_form_without_panicking() {
+    let workload =
+        Workload::parse(include_str!("fixtures/graph_state_bound_to_select.json")).unwrap();
+    for form in FORMS {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            measure::measure(&workload, &[*form], 1, &Monotonic::default())
+        }));
+        let error = outcome
+            .expect("lowering must not panic")
+            .err()
+            .expect("lowering must fail");
+        assert!(error.starts_with("detached:"), "{error}");
+    }
+}
+
+/// NaN payloads/signs cannot create disagreements for equal float values,
+/// including specialized float arrays and heterogeneous arrays.
+#[test]
+fn digests_canonicalize_nan_in_both_widths_and_arrays() {
+    use arora_types::value::Value;
+    let a32 = f32::from_bits(0x7fc0_0001);
+    let b32 = f32::from_bits(0xffc0_0002);
+    let a64 = f64::from_bits(0x7ff8_0000_0000_0001);
+    let b64 = f64::from_bits(0xfff8_0000_0000_0002);
+    for (a, b) in [
+        (Value::F32(a32), Value::F32(b32)),
+        (Value::F64(a64), Value::F64(b64)),
+        (Value::ArrayF32(vec![a32]), Value::ArrayF32(vec![b32])),
+        (Value::ArrayF64(vec![a64]), Value::ArrayF64(vec![b64])),
+        (
+            Value::ArrayValue(vec![Value::F32(a32), Value::F64(a64)]),
+            Value::ArrayValue(vec![Value::F32(b32), Value::F64(b64)]),
+        ),
+    ] {
+        assert_eq!(
+            measure::values_hash(&[Some(a)]),
+            measure::values_hash(&[Some(b)])
+        );
+    }
+}
+
+/// Distinct structure types with identical fields remain distinct in a digest.
+#[test]
+fn digests_include_structure_ids() {
+    use arora_types::value::{Structure, Value};
+    let value = |id| Some(Value::Structure(Structure { id, fields: vec![] }));
+    assert_ne!(
+        measure::values_hash(&[value(uuid::Uuid::from_u128(1))]),
+        measure::values_hash(&[value(uuid::Uuid::from_u128(2))]),
+    );
+}
+
+/// Keys without writers and absent cells are part of agreement, independent
+/// of envelope order. Text-only keys also enter through runtime resolution.
+#[test]
+fn digests_cover_all_store_names_values_and_absent_cells() {
+    use arora_types::value::Value;
+    let mut raw = write_raw();
+    raw["text"] = "reader: equal(a: {text_only}, b: 1f64)".into();
+    raw["events"] = serde_json::json!([]);
+    raw["keys"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"name":"absent","initial":null}));
+    let expected = (0..3)
+        .map(|tick| {
+            support::store_hash(vec![
+                ("clock", Some(Value::F64((tick + 1) as f64 / 60.0))),
+                ("gate", Some(Value::Boolean(true))),
+                ("observed", Some(Value::F64(0.0))),
+                ("out", Some(Value::F64(0.0))),
+                ("absent", None),
+                ("text_only", None),
+            ])
+        })
+        .collect::<Vec<_>>();
+    for _ in 0..2 {
+        let workload = Workload::parse(&raw.to_string()).unwrap();
+        for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
+            assert_eq!(row.runs[0].written, expected);
+        }
+        raw["keys"].as_array_mut().unwrap().reverse();
+    }
+}
+
+/// An escaped selection write must be observed even when the workload has
+/// another directly written key; digest coverage cannot come from writer scans.
+#[test]
+fn whole_store_detects_selection_alias_escape() {
+    let workload = Workload::parse(include_str!(
+        "fixtures/selection_alias_with_another_output.json"
+    ))
+    .unwrap();
+    let rows = measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap();
+    assert_eq!(rows[0].differing, 0);
+    assert!(rows[1].differing > 0);
+}
+
+/// The direct-output sanity check deliberately leaves input aliases to the
+/// runtime, including duplicate cells that are not direct VariableId bindings.
+#[test]
+fn parser_leaves_output_alias_resolution_to_the_runtime() {
+    for text in [
+        "parallel\n  reader: equal(a: {target}, b: 1f64)\n  pulse(out: {target}, state: @reader.a)",
+        "running\n\nconsumer: {target} = add(node: \"consumer\", operand_0: 0f32)\nproducer: @consumer.operand_0 = add(node: \"producer\", operand_0: 1f32)",
+    ] {
+        let mut raw = synthetic::json();
+        raw["text"] = text.into();
+        assert!(Workload::parse(&raw.to_string()).is_ok());
     }
 }

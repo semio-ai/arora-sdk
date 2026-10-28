@@ -1,7 +1,23 @@
+//! Eager graph calls ordered around the tree by a local heuristic.
+//!
+//! Childless graph calls in the function index run once per tick in port order,
+//! before the tree, except calls reading cells the tree writes or attached
+//! ports and their dependants, which run after it. Scatter conservatively
+//! marks every named store cell as tree-written. Output ports become bindings;
+//! unattached natives stay in place. Cell lookup follows variables and input
+//! port aliases, stopping at selections.
+//!
+//! This order can disagree with detached's on-demand evaluation and after-tree
+//! publication: the tree can write a cell then read a graph value derived from
+//! it; readers can use a graph's key or cell instead of its port; host events
+//! or scatter can overwrite a graph key; a tree output can bind a graph input.
+//! Such disagreements expose order-dependent workloads. Other forms disagreeing
+//! with detached indicate a defect; built-in agreement tests cover independent
+//! workloads.
 use super::{Fixture, Form, Nodes};
 use crate::{
     host::Bridge,
-    model::{is_output, written_cell, Workload},
+    model::{is_output, Workload},
 };
 use arora_behavior_tree::{
     nodes::PARALLEL_FUNCTION_ID,
@@ -12,6 +28,22 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 pub struct AttachedNaive;
+
+/// Heuristic cell lookup for ordering tree writes: a variable or an input port
+/// alias, without descending into selections.
+fn written_cell(nodes: &HashMap<Uuid, &Node>, expr: &Expression) -> Option<Uuid> {
+    let mut expr = expr;
+    for _ in 0..=nodes.len() {
+        match expr {
+            Expression::VariableId(cell) => return Some(*cell),
+            Expression::NodeArgument(port) => {
+                expr = nodes.get(&port.node)?.arguments.get(&port.parameter)?;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
 
 fn sources(expr: &Expression, ports: &mut HashSet<Uuid>, variables: &mut HashSet<Uuid>) {
     match expr {
@@ -56,7 +88,10 @@ impl Form for AttachedNaive {
                     .filter_map(|(_, e)| written_cell(&by_id, e))
             })
             .collect();
-        if workload.dynamic_keys {
+        if nodes
+            .iter()
+            .any(|n| n.function == arora_behavior_tree::nodes::SCATTER_FUNCTION_ID)
+        {
             tree_writes.extend(
                 names
                     .iter()

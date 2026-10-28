@@ -61,7 +61,10 @@ pub fn virtual_run(step: f64, seed: u32, samples: usize) -> serde_json::Value {
     };
     let workload = Scenario::Settled.workload(1, 7, 53);
     let runs = (0..samples)
-        .map(|s| measure::replay_adaptive(&workload, forms::FORMS[0], s == 0, &clock, step * 50.0))
+        .map(|s| {
+            measure::replay_adaptive(&workload, forms::FORMS[0], s == 0, &clock, step * 50.0)
+                .unwrap()
+        })
         .collect::<Vec<_>>();
     let m = measure::Measurement {
         form: forms::FORMS[0].name().into(),
@@ -121,7 +124,8 @@ mod tests {
             reads: Cell::new(0),
         };
         let workload = Scenario::Settled.workload(1, 0, 53);
-        let run = measure::replay_adaptive(&workload, forms::FORMS[0], true, &clock, 5000.0);
+        let run =
+            measure::replay_adaptive(&workload, forms::FORMS[0], true, &clock, 5000.0).unwrap();
         assert_eq!(run.repetitions, 50); // unresolved pilot uses its 100 us step
         assert_eq!(clock.reads.get(), 2 + 2 * run.repetitions);
         assert_eq!(run.replay_us.len(), run.repetitions);

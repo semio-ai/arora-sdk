@@ -13,8 +13,8 @@ dispatch is an `arora_call_indirect`, including control nodes and the root.
 
 Times are microseconds per tick, including clock updates and the host's input
 writes. Loading, lowering, digesting and summarizing are outside the timed
-interval. The host writes only changed values; for keys also written by the tree
-or a graph sink it compares with the store. Each replay starts from a freshly
+interval. Before each clock or event write, the host reads that key's current
+store value and writes only when it differs. Each replay starts from a freshly
 lowered tree and includes its workload warm-up. A discarded pilot runs real work
 before every sample, warming the process's code, allocator and CPU state before
 collecting times. Samples interleave forms.
@@ -37,15 +37,15 @@ Raw JSON records each sample's `timingMode` (`tick` or `replay`), `sampleMeans`,
 `repetitions`, and clock modes. In tick mode, `times` contains per-tick means over
 repetitions and `replayTimes` retains individual repetitions, warm-up included.
 In replay mode these per-tick arrays are empty and `replayUs` retains the measured
-intervals, excluding warm-up. Counts are retained from the first measured replay; call and dispatch arrays
-are checked for equality against the pilot and across repetitions and samples.
-Digests come from the first sample's recording replay. Coarse agreement runs separately, outside
-measured intervals.
+intervals, excluding warm-up. Counts are retained from the first measured replay;
+call and dispatch arrays are checked for equality against the pilot and across
+repetitions and samples. Digests come from an untimed replay of their own in the
+first sample, so no timed tick follows a snapshot.
 
-A digest covers every sink key and every key the tree can write after each tick,
-in key-index order, including warm-up. Scale keys follow graph-call order. With
-native `scatter`, whose destination names are runtime data, it covers the whole
-store, sorted by key name and including those names.
+After every tick, including warm-up, a digest covers the whole store in sorted
+key-name order. It hashes each name and its value, including absent cells,
+keys introduced by text, and writes through aliases, selections, scatter or
+linked modules.
 Digests hash every value by its kind and contents with FNV-1a, so equal values
 hash alike: every float a value holds, alone or in an array, structure or
 record, has its signed zero and NaN canonicalized, and a record's fields are
@@ -60,10 +60,14 @@ proofs of equivalence.
 
 The registered forms are:
 
-- `attached-naive`: every graph call is a leaf of a root `PARALLEL` and runs
-  every tick. Calls transitively reading a key the tree writes follow the tree;
-  other calls precede it, in data order. A reader uses a sink's store key or an
-  unpublished call's tree-local return binding.
+- `attached-naive`: childless graph calls in the function index become leaves of a root
+  `PARALLEL` and run every tick in port dependency order. Calls reading cells
+  the tree writes, attached ports, and their dependants run after the tree;
+  the rest run before it. Its cell lookup follows direct variables and input
+  port aliases, stopping at selections. Unattached natives stay in place.
+  If scatter appears, it conservatively treats all named store
+  cells as tree-written. Graph output ports become their output bindings;
+  otherwise a return uses a private tree-local cell.
 - `detached`: graph calls are detached nodes referenced by node return ports.
   Sinks run after the tree; a branch's publishing leaves demand its graph calls.
   The executor caches unchanged inputs and evaluates a demanded node at most once
@@ -91,22 +95,30 @@ Envelope numbers become f64, booleans and strings retain their kinds, and null
 initial values mean absent keys. Text literals use the language's types;
 dataflow arithmetic computes in f32. A module's dynamic parameters need typed
 numeric literals such as `0.12f32`. Store keys introduced by text without an
-initial envelope entry start absent and are included in the digest after the
-declared keys, sorted by name. Clock and event keys must be declared.
-A call binds each key or cell to at most one output; an output bound to another
-node's input writes the key or cell that input reads. Detached writes graph
-calls' keys and cells after the tree and evaluates graph calls on demand within
-it, while attached-naive runs graph calls around the tree in an order of its
-own. Three rules keep that difference from changing what a workload computes:
+initial envelope entry start absent. All store cells participate in the digest
+in sorted name order. Clock and event keys must be declared.
+A call binds each directly named key or cell to at most one output. This sanity
+check does not resolve aliases; the runtime owns cell resolution and lowering.
+A lowering error returns a diagnostic naming the failing form, including when
+that form is the detached reference evaluated outside the selection.
 
-- a key or cell a graph call writes has no other writer, neither a second graph
-  call nor a tree node, since a second writer would leave whichever write the
-  form orders last;
-- a graph call's value is read through its port (`@name`), never through the
-  key or cell it writes, since each form would read it on a different tick;
-  a call's own state is its own;
-- a graph call's outputs bind keys or cells, never another node's input, since
-  that would reorder the reader without a port to order it by.
+### Attached-naive order and disagreement
+
+Attached-naive's order is a heuristic, local to that form. It eagerly evaluates
+graph calls before the tree in data order, moving calls reading tree-written
+cells or attached ports, and their dependants, after the tree. Detached instead
+evaluates demanded graph calls during the tree and publishes sinks after it.
+The following shapes can therefore disagree:
+
+- the tree writes a cell and reads a graph value derived from it in the same tick;
+- a graph value is read by its key or cell rather than by its port;
+- host events or `scatter` write a graph call's key;
+- a tree output is bound to a graph call's input.
+
+These workloads parse; replay judges their resulting stores. Under
+attached-naive a disagreement can mean an order-dependent workload. Under any
+other form it means a defect. Built-in workloads are order-independent, as their
+agreement tests show. Comparing performance requires agreement for the workload.
 
 ```json
 {
@@ -388,7 +400,9 @@ uses the same definitions as native.
 All export names start with `bench_`. Pointers address linear memory. Names and
 result buffers are borrowed until the next state-changing export; copy before
 calling another export. Row access outside its range returns NaN. Status exports
-return 0 on success and 1 for invalid input; an executor failure traps with stderr.
+return 0 on success and 1 for invalid input or lowering failure. Lowering
+failures put `{"error":"form: diagnostic"}` in the result buffer; the JS loader
+throws that diagnostic. Executor failures during ticking trap with stderr.
 
 | exports | contract |
 |---|---|
@@ -402,11 +416,11 @@ return 0 on success and 1 for invalid input; an executor failure traps with stde
 | `workload_names()`, `workload_names_len()` | `form,...;phase,...;graphCalls,ticks,warmUp,dt` |
 | `workload_begin(form)` | reset this form's runs and select it |
 | `workload_select(form)` | select a form without clearing runs, for interleaving |
-| `workload_sample()` | one logical sample; returns its positive sample count, or 0 if not begun |
+| `workload_sample()` | one logical sample; returns its positive sample count, or 0 if not begun or lowering fails |
 | `workload_finish()` | summarize selected form; requires positive odd samples; consumes its runs |
 | `workload_row(i)` | 0–4 mean/p50/p95/p99/max µs; 5–6 calls/dispatches; 7 differing ticks; 8–9 high/low aggregate digest; 10+ phase means |
 | `workload_series()`, `workload_series_len()` | f64 triples per 15 ticks after warm-up: time, calls, phase; length counts f64 elements |
-| `result()`, `result_len()` | last form's full raw JSON record, identical schema to native |
+| `result()`, `result_len()` | last form's full raw JSON record (native schema), or an error object |
 | `minimum_sample_us(us)` | nonnegative pilot target per sample; 0 disables repetition |
 | `clock_step_us(us)` | nonnegative clock step used to select timing mode |
 | `defaults()`, `defaults_len()` | borrowed UTF-8 JSON: ticks, warmUp, sizes, reference, workloads |

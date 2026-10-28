@@ -10,6 +10,13 @@ use crate::{
 };
 use std::{collections::BTreeMap, path::Path};
 
+fn or_exit<T>(result: Result<T, String>) -> T {
+    result.unwrap_or_else(|message| {
+        eprintln!("{message}");
+        std::process::exit(1);
+    })
+}
+
 fn time(value: Option<f64>) -> String {
     value.map_or_else(|| "unresolved".into(), |x| format!("{x:.3}"))
 }
@@ -105,15 +112,14 @@ fn args() -> Vec<String> {
 pub fn workload_main() {
     let args = args();
     let name = args.first().map_or("synthetic", String::as_str);
-    let workload = builtins::workload(name).unwrap_or_else(|| Workload::load(name).unwrap());
+    let workload = builtins::workload(name).unwrap_or_else(|| or_exit(Workload::load(name)));
     let samples = number(&args, 1, 7);
-    let rows = measure::measure(
+    let rows = or_exit(measure::measure(
         &workload,
         &chosen("WORKLOAD_ONLY"),
         samples,
         &Monotonic::default(),
-    )
-    .unwrap();
+    ));
     print!("{}", workload_table(&workload, &rows));
     if let Some(path) = args
         .get(2)
@@ -158,8 +164,12 @@ pub fn scale_main() {
                 continue;
             }
             let workload = scenario.workload(n, warm_up, ticks);
-            let rows =
-                measure::measure(&workload, &selected, samples, &Monotonic::default()).unwrap();
+            let rows = or_exit(measure::measure(
+                &workload,
+                &selected,
+                samples,
+                &Monotonic::default(),
+            ));
             print!("{}", scale_rows(n, scenario, &rows));
             records.push(serde_json::json!({"n": n, "scenario": scenario.name(), "record": measure::record(&workload, &rows)}));
             agreement(&rows);
@@ -191,7 +201,7 @@ pub fn round_main() {
     let mut tests = BTreeMap::new();
     let mut run = |name: String, kind, n, workload: Workload| {
         assert!(!tests.contains_key(&name), "duplicate test name: {name}");
-        let rows = measure::measure(&workload, &forms, samples, &clock).unwrap();
+        let rows = or_exit(measure::measure(&workload, &forms, samples, &clock));
         agreement(&rows);
         tests.insert(name, serde_json::json!({"kind": kind, "size": n, "record": measure::record(&workload, &rows)}));
     };
@@ -210,7 +220,7 @@ pub fn round_main() {
             .to_str()
             .unwrap()
             .to_owned();
-        run(name, "workload", 0, Workload::load(path).unwrap());
+        run(name, "workload", 0, or_exit(Workload::load(path)));
     }
     for n in sizes {
         for s in Scenario::ALL {

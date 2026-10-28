@@ -1,0 +1,50 @@
+{
+ "keys": [
+  {
+   "name": "clock",
+   "initial": 0.0
+  },
+  {
+   "name": "S",
+   "initial": 0.0
+  }
+ ],
+ "text": "sequence\n  {k} = add(node: \"w\", operand_0: 1f32)\n  {o} = add(node: \"r\", operand_0: @g)\n\ng: {S} = add(node: \"g\", operand_0: {k})",
+ "ticks": 5,
+ "warmUp": 0,
+ "clock": "clock",
+ "dt": 0.016666666666666666,
+ "events": [
+  [
+   0,
+   "S",
+   99.0
+  ],
+  [
+   1,
+   "S",
+   99.0
+  ],
+  [
+   2,
+   "S",
+   99.0
+  ],
+  [
+   3,
+   "S",
+   99.0
+  ],
+  [
+   4,
+   "S",
+   99.0
+  ]
+ ],
+ "phases": {
+  "names": [
+   "one"
+  ],
+  "runs": []
+ }
+}
