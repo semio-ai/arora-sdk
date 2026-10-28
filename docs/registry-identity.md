@@ -206,6 +206,7 @@ dependency, and that is what the package id adds.
 | `semio-studio-assets` | studio-bridge | Studio's `RegistrySource`: reads Studio's packages, publishes through the endpoint |
 | `arora-studio-bridge-client` | studio-bridge | The device's live connection to Studio, on the same session |
 | `arora-semio` | semio-cli | Studio's provider: fills the sign-in, registry, devices and tokens roles behind `arora`'s verbs |
+| `semio` | semio-cli | Studio's sign-in and enrollment as commands of their own (`semio auth login`, `semio device enroll`), which work without `arora` |
 | Rules and endpoint | semio_studio | Names, package ids, scopes, releases |
 
 ## 8. What changes, by repository
@@ -252,8 +253,13 @@ binds ids in folder registries and writes the alias a move leaves.
 ### Packages without a Studio project
 
 Publishing from CI, with its configuration and a publish token, needs no
-Studio project. The token carries the authority, and the endpoint applies the
-checks Studio already makes:
+Studio project. Studio's database already allows it: a package's
+`sourceProjectId` is optional provenance in its schema and types
+(`docs/new-studio-sharing-tech/03-firestore-schema.md`, `01-types.md`), and
+Studio's server code handles a package without one. Only the client create
+rule, `isPublishBoundToSource`, requires a project, and client creates close
+when the endpoint opens. The token carries the authority, and the endpoint
+applies the checks Studio already makes:
 
 | Case | Check |
 |---|---|
