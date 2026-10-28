@@ -93,6 +93,7 @@ use arora_types::value::Value;
 use arora_types::value_serde;
 use uuid::Uuid;
 
+use crate::detached::is_detachable;
 use crate::graph::build_behavior_tree;
 use crate::is_interpreter_function_id;
 use crate::nodes::{
@@ -142,6 +143,9 @@ pub fn graph_type() -> GraphType {
 struct Run {
     handle: TaskHandle,
     decorator: Uuid,
+    /// The nodes of the run's graph that no node holds: detached, they leave
+    /// with the run.
+    detached: Vec<Uuid>,
     /// The variables the run's spawn declared: they leave with the run when
     /// no remaining link reads them.
     variables: Vec<Uuid>,
@@ -177,6 +181,9 @@ pub struct BehaviorTreeInterpreter {
     /// or relinked: they start afresh at the next lowering, and every other
     /// node keeps its state.
     fresh: HashSet<Uuid>,
+    /// The device's function index as of the last lowering: a run's detached
+    /// nodes are lowered against it before the run is accepted.
+    functions: FunctionIndex,
 }
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
@@ -203,10 +210,12 @@ fn source_variable(source: &LinkSource) -> Option<Uuid> {
     }
 }
 
-/// Check that `graph` is one tree rooted at `root`: every child is one of its
-/// nodes, no node has two parents or is the root's parent, and every node is
-/// reached from the root.
-fn check_tree(graph: &Graph, root: Uuid) -> Result<(), BehaviorError> {
+/// Check that `graph` is one tree rooted at `root`, beside which it may list
+/// detached nodes: every child is one of its nodes, no node has two parents or
+/// is the root's parent, and every node is reached from the root, but for a
+/// node no node holds that is a call to a module function with no children,
+/// which runs [detached](crate::detached). Returns the detached nodes.
+fn check_tree(graph: &Graph, root: Uuid) -> Result<Vec<Uuid>, BehaviorError> {
     let mut parent: HashMap<Uuid, Uuid> = HashMap::new();
     for node in graph.nodes.values() {
         for child in node.children.iter().flatten() {
@@ -230,21 +239,27 @@ fn check_tree(graph: &Graph, root: Uuid) -> Result<(), BehaviorError> {
             }
         }
     }
-    if let Some(stray) = graph
-        .nodes
-        .keys()
-        .find(|id| **id != root && !parent.contains_key(id))
-    {
-        return Err(behavior_error(format!(
-            "node {stray} is not under the graph's root {root}"
-        )));
+    let mut detached = Vec::new();
+    for node in graph.nodes.values() {
+        if node.id == root || parent.contains_key(&node.id) {
+            continue;
+        }
+        if !is_detachable(node.function, node.children.as_deref()) {
+            return Err(behavior_error(format!(
+                "node {} is not under the graph's root {root}: a node outside the tree runs \
+                 detached only when it calls a module function and has no children",
+                node.id
+            )));
+        }
+        detached.push(node.id);
     }
     // One parent each and a parentless root: a cycle would leave its nodes
     // unreachable from the root.
-    if subtree(graph, root).len() != graph.nodes.len() {
+    if subtree(graph, root).len() + detached.len() != graph.nodes.len() {
         return Err(behavior_error("the graph's children form a cycle"));
     }
-    Ok(())
+    detached.sort();
+    Ok(detached)
 }
 
 /// Check that the nodes under `root` name only nodes as children and hold no
@@ -385,6 +400,7 @@ impl BehaviorTreeInterpreter {
             lowered: None,
             dirty: true,
             fresh: HashSet::new(),
+            functions: FunctionIndex::new(),
         }
     }
 
@@ -447,11 +463,16 @@ impl BehaviorTreeInterpreter {
         self.all_runs().find(|run| run.decorator == *id)
     }
 
-    /// Every run's nodes: each decorator and its subtree.
+    /// `run`'s nodes: its decorator, its subtree and its detached nodes.
+    fn nodes_of(&self, run: &Run) -> HashSet<Uuid> {
+        let mut nodes = subtree(&self.graph, run.decorator);
+        nodes.extend(&run.detached);
+        nodes
+    }
+
+    /// Every run's nodes.
     fn run_nodes(&self) -> HashSet<Uuid> {
-        self.all_runs()
-            .flat_map(|run| subtree(&self.graph, run.decorator))
-            .collect()
+        self.all_runs().flat_map(|run| self.nodes_of(run)).collect()
     }
 
     /// The variables a link into a run's nodes reads.
@@ -493,6 +514,16 @@ impl BehaviorTreeInterpreter {
     /// would not lower. A selection feeding a parameter the function declares
     /// mutable fails the next tick, which holds the device's index.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
+        self.edit_lowering(diff, false)
+    }
+
+    /// [`edit`](Self::edit), and when `detached`, lower the edited graph's
+    /// detached nodes too, against the function index of the last lowering:
+    /// a run whose detached nodes cannot lower — reading one another in a
+    /// cycle, writing one cell twice — is refused here, rather than stalling
+    /// every tick of the device until it is halted. A function that index
+    /// does not have fails its node when it runs, as at any lowering.
+    fn edit_lowering(&mut self, diff: GraphDiff, detached: bool) -> Result<(), BehaviorError> {
         let changed: Vec<Uuid> = changed_nodes(&diff).collect();
         let mut graph = self.graph.clone();
         graph
@@ -503,8 +534,13 @@ impl BehaviorTreeInterpreter {
         // the tick hands over: here only the return binding is checked, and
         // the lowering checks the rest.
         check_selections(&graph, &FunctionIndex::new())?;
-        build_behavior_tree(&graph, &|_| None)
+        let tree = build_behavior_tree(&graph, &|_| None)
             .map_err(|e| behavior_error(format!("the edited graph does not lower: {e:?}")))?;
+        if detached {
+            tree.lower_detached(&self.functions).map_err(|e| {
+                behavior_error(format!("the graph's detached nodes do not lower: {e:?}"))
+            })?;
+        }
         self.graph = graph;
         self.dirty = true;
         self.fresh.extend(changed);
@@ -519,6 +555,7 @@ impl BehaviorTreeInterpreter {
         module: &str,
         function: Uuid,
         root: Uuid,
+        detached: Vec<Uuid>,
         mut fragment: GraphDiff,
     ) -> Result<TaskHandle, BehaviorError> {
         let task = TaskId(Uuid::new_v4());
@@ -555,10 +592,11 @@ impl BehaviorTreeInterpreter {
         self.runs.push(Run {
             handle: handle.clone(),
             decorator,
+            detached,
             variables,
         });
         fragment.add_nodes.push(self.runner_node());
-        self.edit(fragment).inspect_err(|_| {
+        self.edit_lowering(fragment, true).inspect_err(|_| {
             self.runs.pop();
         })?;
         Ok(handle)
@@ -587,9 +625,14 @@ impl BehaviorTreeInterpreter {
     /// already runs changes nothing. The graph may name only the run's own
     /// nodes and new ones: a node the main behavior or another run also holds
     /// is theirs as much as the run's, and stays as they hold it.
-    fn respawn(&mut self, at: usize, graph: Graph) -> Result<TaskHandle, BehaviorError> {
+    fn respawn(
+        &mut self,
+        at: usize,
+        graph: Graph,
+        detached: Vec<Uuid>,
+    ) -> Result<TaskHandle, BehaviorError> {
         let decorator = self.runs[at].decorator;
-        let mut held = subtree(&self.graph, decorator);
+        let mut held = self.nodes_of(&self.runs[at]);
         held.remove(&decorator);
         let mut leaving = held.clone();
         leaving.insert(decorator);
@@ -651,9 +694,10 @@ impl BehaviorTreeInterpreter {
             ..GraphDiff::default()
         };
         if diff != GraphDiff::default() {
-            self.edit(diff)?;
+            self.edit_lowering(diff, true)?;
         }
         let run = &mut self.runs[at];
+        run.detached = detached;
         for id in graph.variables.keys() {
             if !run.variables.contains(id) {
                 run.variables.push(*id);
@@ -670,7 +714,8 @@ impl BehaviorTreeInterpreter {
         if runs.is_empty() {
             return Ok(());
         }
-        let leaving = reach(&self.graph, runs.iter().map(|run| run.decorator));
+        let mut leaving = reach(&self.graph, runs.iter().map(|run| run.decorator));
+        leaving.extend(runs.iter().flat_map(|run| &run.detached));
         let staying = self.held_outside(&leaving);
         let diff = GraphDiff {
             remove_nodes: leaving.difference(&staying).copied().collect(),
@@ -760,6 +805,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             self.fresh.clear();
             self.lowered = Some(lowered);
             self.dirty = false;
+            self.functions.clone_from(ctx.functions);
         }
 
         // One runtime tick is one tree tick. The runner's own status is not an
@@ -912,7 +958,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             )],
             ..GraphDiff::default()
         };
-        self.graft(&module, function, call_node, fragment)
+        self.graft(&module, function, call_node, Vec::new(), fragment)
     }
 
     fn spawn_graph(
@@ -937,11 +983,12 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 "the spawned graph's root {root} is not one of its nodes"
             )));
         }
-        // The run is its own region of the scaffold: one tree of nodes the
-        // device does not have (or its own, for a live run's root), of
-        // functions the interpreter runs, whose links stay among them and
-        // lower, renaming no declared variable.
-        check_tree(&graph, root)?;
+        // The run is its own region of the scaffold: one tree, and the
+        // detached nodes beside it, of nodes the device does not have (or its
+        // own, for a live run's root), of functions the interpreter runs,
+        // whose links stay among them and lower, renaming no declared
+        // variable. The detached nodes leave with the run.
+        let detached = check_tree(&graph, root)?;
         if let Some(node) = graph
             .nodes
             .values()
@@ -972,7 +1019,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             .iter()
             .position(|run| self.root_of(run) == Some(root))
         {
-            return self.respawn(at, graph);
+            return self.respawn(at, graph, detached);
         }
         if let Some(id) = graph
             .nodes
@@ -996,6 +1043,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             &interpreter_module::ID.to_string(),
             interpreter_module::SPAWN_GRAPH,
             root,
+            detached,
             fragment,
         )
     }

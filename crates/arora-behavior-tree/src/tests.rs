@@ -910,6 +910,214 @@ mod task_runs {
         );
     }
 
+    /// A graph whose leaf `below(x: @cm, limit: 30)` reads a detached chain,
+    /// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw, lo: 0)`,
+    /// beside a sink `{out} = mul(a: @cm, b: 2)`: the nodes `ids`, in that
+    /// order.
+    fn detached_graph(ids: [u128; 4]) -> arora_behavior::graph::Graph {
+        use crate::call_expression_tests::{
+            BELOW, BELOW_LIMIT, BELOW_X, CLAMP, CLAMP_LO, CLAMP_X, MUL, MUL_A, MUL_B,
+        };
+        use crate::schema::_RET_PARAM_ID;
+        use arora_behavior::graph::{Graph, Link, LinkSource, Node as GraphNode, Port};
+
+        let [leaf, raw, cm, sink] = ids.map(Uuid::from_u128);
+        let (distance, out) = (Uuid::from_u128(0x6D), Uuid::from_u128(0x6E));
+        let mut graph = Graph::empty();
+        graph.root = Some(leaf);
+        for (id, function) in [(leaf, BELOW), (raw, MUL), (cm, CLAMP), (sink, MUL)] {
+            graph.nodes.insert(
+                id,
+                GraphNode {
+                    id,
+                    function,
+                    ..GraphNode::default()
+                },
+            );
+        }
+        let read = |node| LinkSource::Port(Port::new(node, _RET_PARAM_ID));
+        let number = |value| LinkSource::Literal(Value::F64(value));
+        graph.links = vec![
+            Link::new(Port::new(leaf, BELOW_X), read(cm)),
+            Link::new(Port::new(leaf, BELOW_LIMIT), number(30.0)),
+            Link::new(Port::new(raw, MUL_A), LinkSource::Variable(distance)),
+            Link::new(Port::new(raw, MUL_B), number(100.0)),
+            Link::new(Port::new(cm, CLAMP_X), read(raw)),
+            Link::new(Port::new(cm, CLAMP_LO), number(0.0)),
+            Link::new(Port::new(sink, MUL_A), read(cm)),
+            Link::new(Port::new(sink, MUL_B), number(2.0)),
+            Link::new(Port::new(sink, _RET_PARAM_ID), LinkSource::Variable(out)),
+        ];
+        graph.variables = HashMap::from([
+            (distance, "sensor/distance".to_string()),
+            (out, "out".to_string()),
+        ]);
+        graph
+    }
+
+    /// A spawned graph may list nodes no node holds, which run detached, as
+    /// in any `behavior-tree 1.3` graph: here a chain the run's leaf reads,
+    /// and a sink writing a store key. They belong to the run: spawned
+    /// again, the run takes the graph over; halted, they leave with it.
+    #[test]
+    fn a_spawned_graph_runs_its_detached_nodes() {
+        use crate::call_expression_tests::{index, Engine};
+        use arora_types::data::{DataStore, Key, StateChange};
+
+        let [leaf, raw, cm, sink] = [0x60, 0x61, 0x62, 0x63].map(Uuid::from_u128);
+        let graph = detached_graph([0x60, 0x61, 0x62, 0x63]);
+
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("sensor/distance", Value::F64(0.2)))
+            .unwrap();
+        let mut interp = BehaviorTreeInterpreter::new();
+        let handle = interp
+            .spawn_graph(&graph_type(), graph.clone(), RunPolicy::Concurrent)
+            .expect("a graph with detached nodes spawns");
+        let again = interp
+            .spawn_graph(&graph_type(), graph.clone(), RunPolicy::Concurrent)
+            .expect("spawned again, the live run takes the graph over");
+        assert_eq!(again.id, handle.id);
+
+        let functions = index();
+        let mut engine = Engine::default();
+        let mut ctx = BehaviorContext {
+            functions: &functions,
+            store: &store,
+            call_bridge: &mut engine,
+        };
+        interp.tick(&mut ctx).unwrap();
+        let success: Value = Status::Success.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&handle.status)),
+            vec![Some(success)],
+            "20 cm is below 30"
+        );
+        assert_eq!(
+            store.read(&[Key::from("out")]),
+            vec![Some(Value::F64(40.0))],
+            "the sink wrote its key"
+        );
+
+        // The finished run is pruned with its detached nodes, so the graph
+        // spawns anew; halted, the new run's nodes leave at once.
+        let next = interp
+            .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
+            .expect("the finished run's nodes left with it");
+        assert_ne!(next.id, handle.id);
+        interp.halt(next.id).unwrap();
+        for id in [leaf, raw, cm, sink] {
+            assert!(
+                !interp.graph().nodes.contains_key(&id),
+                "node {id} left with the run"
+            );
+        }
+    }
+
+    /// A run whose detached nodes cannot lower — here two reading each other
+    /// in a cycle — is refused at spawn, and the runs already there go on
+    /// ticking.
+    #[test]
+    fn a_spawned_graph_whose_detached_nodes_do_not_lower_is_refused() {
+        use crate::call_expression_tests::{
+            index, Engine, BELOW, BELOW_LIMIT, BELOW_X, MUL, MUL_A, MUL_B,
+        };
+        use crate::schema::_RET_PARAM_ID;
+        use arora_behavior::graph::{Graph, Link, LinkSource, Node as GraphNode, Port};
+        use arora_types::data::{DataStore, StateChange};
+
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("sensor/distance", Value::F64(0.2)))
+            .unwrap();
+        let mut interp = BehaviorTreeInterpreter::new();
+        let good = interp
+            .spawn_graph(
+                &graph_type(),
+                detached_graph([0x60, 0x61, 0x62, 0x63]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let functions = index();
+        let mut engine = Engine::default();
+        let mut tick = |interp: &mut BehaviorTreeInterpreter| {
+            let mut ctx = BehaviorContext {
+                functions: &functions,
+                store: &store,
+                call_bridge: &mut engine,
+            };
+            interp.tick(&mut ctx)
+        };
+        tick(&mut interp).expect("the good run ticks");
+
+        let [leaf, a, b] = [0x90, 0x91, 0x92].map(Uuid::from_u128);
+        let mut cycle = Graph::empty();
+        cycle.root = Some(leaf);
+        for (id, function) in [(leaf, BELOW), (a, MUL), (b, MUL)] {
+            cycle.nodes.insert(
+                id,
+                GraphNode {
+                    id,
+                    function,
+                    ..GraphNode::default()
+                },
+            );
+        }
+        let read = |node| LinkSource::Port(Port::new(node, _RET_PARAM_ID));
+        let two = LinkSource::Literal(Value::F64(2.0));
+        cycle.links = vec![
+            Link::new(Port::new(leaf, BELOW_X), read(a)),
+            Link::new(Port::new(leaf, BELOW_LIMIT), two.clone()),
+            Link::new(Port::new(a, MUL_A), read(b)),
+            Link::new(Port::new(a, MUL_B), two.clone()),
+            Link::new(Port::new(b, MUL_A), read(a)),
+            Link::new(Port::new(b, MUL_B), two),
+        ];
+        let refused = interp.spawn_graph(&graph_type(), cycle, RunPolicy::Concurrent);
+        let error = refused.expect_err("a cycle of detached nodes is refused at spawn");
+        assert!(error.message.contains("cycle"), "{}", error.message);
+        for id in [leaf, a, b] {
+            assert!(
+                !interp.graph().nodes.contains_key(&id),
+                "nothing of it stays"
+            );
+        }
+        tick(&mut interp).expect("the device ticks on");
+        let success: Value = Status::Success.into();
+        assert_eq!(
+            store.read(std::slice::from_ref(&good.status)),
+            vec![Some(success)]
+        );
+    }
+
+    /// A run's detached node is the run's: another run listing a node of
+    /// that id is refused.
+    #[test]
+    fn a_detached_node_of_one_run_is_not_another_s() {
+        let mut interp = BehaviorTreeInterpreter::new();
+        interp
+            .spawn_graph(
+                &graph_type(),
+                detached_graph([0x60, 0x61, 0x62, 0x63]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let nodes_before = interp.graph().nodes.len();
+        let refused = interp.spawn_graph(
+            &graph_type(),
+            detached_graph([0x70, 0x71, 0x72, 0x63]),
+            RunPolicy::Concurrent,
+        );
+        let error = refused.expect_err("the sink's id is the first run's");
+        assert!(
+            error.message.contains(&Uuid::from_u128(0x63).to_string()),
+            "{}",
+            error.message
+        );
+        assert_eq!(interp.graph().nodes.len(), nodes_before);
+    }
+
     /// A spawned graph is a run: its tree ticks on every step beside the main
     /// behavior, its status key reads Running, and a halt ends it Failure and
     /// prunes every one of its nodes.
