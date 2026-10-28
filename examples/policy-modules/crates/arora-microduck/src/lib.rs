@@ -110,8 +110,8 @@ pub struct DeviceConfig {
     /// drives this robot's model by, instead of the joint names.
     pub studio: Option<StudioModel>,
     pub speech: Speech,
-    /// What a [served](serve) run asks of Semio Studio (`--studio`,
-    /// `--no-studio`).
+    /// What a [served](serve) run does about Semio Studio: Studio, unless
+    /// `--no-studio`.
     #[cfg(feature = "studio")]
     pub studio_choice: arora::studio::Choice,
 }
@@ -220,8 +220,8 @@ impl Device {
 /// Serve the device until the process stops, on the standard Arora run: the
 /// simulator paces itself at real time, the runtime steps at the policies'
 /// period, and the bridge is the run's default — the open local bridge on
-/// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio when
-/// `studio_choice` asks for it (a
+/// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio unless
+/// `studio_choice` is `Local` (a
 /// device registering is asked for the owner, the device name and the model
 /// family, or they come from `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`).
 pub async fn serve(config: DeviceConfig) -> Result<()> {

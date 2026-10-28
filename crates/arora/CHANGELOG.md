@@ -8,41 +8,40 @@ All notable changes to `arora`. The format follows
 
 ### Changed
 
-- A `studio-bridge` run connects to Semio Studio only when it asks for it:
-  `--studio`, `ARORA_STUDIO=1`, or `AroraBuilder::with_studio(Choice::Studio)`.
-  A device holding a saved Studio credential serves the open local bridge
-  when its run does not ask, because a saved credential is not proof of an
-  opt-in: a headless run of 13.4 or earlier signed the device up unasked.
-  - Such a run logs, naming the credential's directory,
-    `Studio: serving the local bridge, as the run does not ask for Studio. Pass --studio to connect with the saved credential in <path>.`
-    It looks the credential up only for that line: a credential that does
-    not read gives a warning, and a lookup that fails, such as a device
-    directory that cannot be named, gives a warning instead of failing the
-    start.
-  - `run`, `run_with_hal` and `run_with` do not ask, so in a `studio-bridge`
-    build they serve the open local bridge.
-  - `studio::Choice::Local` is the default: what a run that asks nothing
-    gives, and what `--no-studio` gives. `--no-studio` still wins over
-    `--studio` and `ARORA_STUDIO`.
+- Building with Semio Studio is the opt-in, and the only one. The `arora`
+  binary built with `studio-bridge` connects to Studio on every run unless
+  the run passes `--no-studio`, whatever the device holds; a device holding
+  no saved Studio credential signs up as a new Studio device.
+  A build without `studio-bridge` has no Studio option.
+  - `studio::StudioArgs` is `--no-studio` alone, and `StudioArgs::choice`
+    returns the `Choice` itself: `Choice::Local` with `--no-studio`, else
+    `Choice::Studio`.
+  - `run`, `run_with_hal`, `run_with`, and an `AroraBuilder` given no
+    `with_studio`, serve the open local bridge in a `studio-bridge` build,
+    whatever the device holds. A feature of arora is enabled for every crate
+    a build links, so `studio-bridge` alone does not tell that the runner at
+    hand was built with Studio.
+  - A run logs which bridge it serves in one line, and no longer looks a
+    saved credential up when it serves the local bridge.
   - The `studio::connect` functions are unchanged: an embedder calling one
-    asks for Studio.
+    connects.
 
-  To migrate a device that connects with its saved credential, pass
-  `--studio` to its runner, or set `ARORA_STUDIO=1` in its environment. An
-  embedder building its device with `AroraBuilder` passes
-  `with_studio(studio::Choice::Studio)`.
+  To migrate, drop `--studio` and `ARORA_STUDIO` from the runs of a build
+  with Studio, and pass `--no-studio` to a run of such a build that should
+  serve the local bridge. An embedder building its device with
+  `AroraBuilder` that connects passes `with_studio(studio::Choice::Studio)`.
 
 ### Removed
 
-- `studio::Choice::IfSaved`, connecting on a saved credential alone. Use
-  `Choice::Studio` to connect, or `Choice::Local`, the default, to serve the
-  local bridge.
-- `RunnerArgs::studio`. A runner that connects to Semio Studio flattens
+- `--studio` and `ARORA_STUDIO`: a build with Studio connects without them.
+- `studio::Choice::IfSaved`, connecting on a saved credential alone, and
+  `Choice`'s `Default`.
+- `RunnerArgs::studio`. A runner built with Semio Studio flattens
   `studio::StudioArgs` itself, under a feature of its own that enables
   arora's `studio-bridge`: an arora feature is enabled for every runner a
   build links, so a runner built without Studio beside one built with it
-  would otherwise take `--studio` and ignore it. `RunnerArgs` carries
-  `--module` alone.
+  would otherwise take `--no-studio` although it never connects.
+  `RunnerArgs` carries `--module` alone.
 
 ## [15.0.0] - 2026-10-23
 

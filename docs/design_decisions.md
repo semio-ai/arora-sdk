@@ -813,24 +813,23 @@ producer onto the same path.
 
 ### Semio Studio is opt-in
 
-A device contacts Semio Studio only when its run asks for it: `--studio` (or
-`ARORA_STUDIO=1`) on a runner, or an embedder calling `studio::connect`.
-Otherwise it serves the open local bridge, and says so. Arora is free software,
-and Studio, its bridge and its backend are a commercial service beside it: free
-software does not sign its users up to a commercial service, nor report to one,
-unless they opted in. The connection itself sits behind the `studio-bridge`
-feature, which no default build enables — the robot runners' `runner` feature
-included, a runner that connects being built with `--features runner,studio` —
-and a build with it still waits to be asked.
+Arora is free software, and Studio, its bridge and its backend are a
+commercial service beside it: free software does not sign its users up to a
+commercial service, nor report to one, unless they opted in. The opt-in is the
+build. The connection sits behind arora's `studio-bridge` feature, and each
+robot runner's own `studio` feature, which no default build enables — the
+runners' `runner` feature included. A runner built with it is Semio's runner
+build, made to run with Studio, so its runs connect by default, on a terminal
+or headless; `--no-studio` opts one run out and serves the open local bridge.
+A build without it has no Studio option at all. A second, run-time opt-in is
+not kept: it would make every run of a build that exists for Studio repeat the
+choice its build already made, and a deployment that forgets the flag would
+silently run without Studio.
 
-The rule is the same on a terminal and headless. Connecting whenever nobody is
-there to decline would make every unattended start — a service, a CI job, an
-agent — a sign-up on Studio's production project.
-
-A saved credential does not connect a run on its own, because it is not proof
-of an opt-in: a headless run of arora 13.4 or earlier signed the device up
-unasked, and an embedder's `studio::connect` shares the per-user device
-directory. A run that does not ask still looks the credential up, only to say
-in its log that the device holds one and that `--studio` connects with it; the
-lookup never fails the run. `--no-studio` wins over `--studio` and
-`ARORA_STUDIO`, so a run overrides the variable without unsetting it.
+What a run does is decided by the runner built with Studio, not by the
+feature: a feature of arora is enabled for every crate a build links, so a
+runner built without Studio beside one built with it sees `studio-bridge` on.
+An `AroraBuilder` that no runner hands a choice therefore serves the open local
+bridge, and a runner flattens `--no-studio` only under its own `studio`
+feature. An embedder connects by calling `studio::connect`, or by handing
+`Choice::Studio` to `AroraBuilder::with_studio`.

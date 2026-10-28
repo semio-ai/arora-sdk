@@ -792,8 +792,9 @@ pub struct AroraBuilder {
     step_period: Option<std::time::Duration>,
     #[cfg(feature = "native")]
     frontend: Option<operator::Frontend>,
+    /// What a runner said of Semio Studio; none serves the open local bridge.
     #[cfg(feature = "studio-bridge")]
-    studio: studio::Choice,
+    studio: Option<studio::Choice>,
 }
 
 impl AroraBuilder {
@@ -1130,14 +1131,16 @@ impl AroraBuilder {
         self
     }
 
-    /// What the run asks of Semio Studio when [`run`](AroraBuilder::run)
-    /// fills the default bridge: a runner passes what its command line says
-    /// ([`StudioArgs::choice`](studio::StudioArgs::choice)). Default:
-    /// [`Choice::Local`](studio::Choice::Local), the open local bridge. See
+    /// What the run does about Semio Studio when [`run`](AroraBuilder::run)
+    /// fills the default bridge: a runner built with Studio passes what its
+    /// command line says ([`StudioArgs::choice`](studio::StudioArgs::choice)),
+    /// Studio unless `--no-studio`. Without it, the run serves the open local
+    /// bridge, as a runner built without Studio does in a build where another
+    /// crate enables `studio-bridge`. See
     /// [whether a run connects](studio#whether-a-run-connects).
     #[cfg(feature = "studio-bridge")]
     pub fn with_studio(mut self, choice: studio::Choice) -> Self {
-        self.studio = choice;
+        self.studio = Some(choice);
         self
     }
 
@@ -1148,7 +1151,7 @@ impl AroraBuilder {
     /// HAL, an empty interpreter), and drive the step loop.
     ///
     /// The default bridge is the open local bridge, unless the `studio-bridge`
-    /// feature is on and the run asks for Semio Studio (`with_studio`), as
+    /// feature is on and the runner hands Studio to `with_studio`, as
     /// `arora::studio` says. Under the
     /// terminal UI, a run that connects asks the operator for the
     /// registration nothing else gives, and serves the open local bridge when
@@ -1181,7 +1184,12 @@ impl AroraBuilder {
                     Some(hal) => hal.describe().await,
                     None => arora_hal::HalDescription::default(),
                 };
-                let bridge = studio::default_bridge(&frontend, &description, self.studio).await?;
+                let bridge = studio::default_bridge(
+                    &frontend,
+                    &description,
+                    self.studio.unwrap_or(studio::Choice::Local),
+                )
+                .await?;
                 self = self.with_bridge(bridge);
             }
             #[cfg(not(feature = "studio-bridge"))]

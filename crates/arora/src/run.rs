@@ -21,11 +21,11 @@
 //! The **default bridge** is the open local bridge
 //! ([`arora-bridge-ws`](arora_bridge_ws)): the device serves
 //! `ws://127.0.0.1:9000` and any editor or app on the machine connects — no
-//! accounts. A build with the `studio-bridge` feature connects to Semio Studio
-//! instead (Firebase auth + Zenoh) when the run asks for it
-//! ([`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio), which a
-//! runner's `--studio` gives), as `arora::studio` says; these entry points do
-//! not ask.
+//! accounts. A runner built with Studio connects to Semio Studio instead
+//! (Firebase auth + Zenoh) unless its run passes `--no-studio`
+//! ([`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio), which the
+//! runner's command line gives), as `arora::studio` says; these entry points
+//! hand no choice, and serve the open local bridge.
 //! The two are mutually exclusive: each of these entry points wires exactly one bridge.
 //! (Assembling an [`Arora`] directly with the builder can wire several.)
 //!
@@ -69,9 +69,9 @@ use crate::Arora;
 /// device directory ([`device_dir::from_env`](crate::device_dir::from_env))
 /// and `module`, the records their directories carry included;
 /// [`modules`](Self::modules) reads them for a binary that loads them itself.
-/// In a `studio-bridge` build, `--studio` and `--no-studio` (the `studio`
-/// field) say what the run asks of Semio Studio: hand their
-/// `StudioArgs::choice` to `AroraBuilder::with_studio`.
+/// In a `studio-bridge` build, the run connects to Semio Studio unless it
+/// passes `--no-studio` (the `studio` field): hand its `StudioArgs::choice`
+/// to `AroraBuilder::with_studio`.
 /// The `arora` binary's `main` is the worked example.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Parser)]
@@ -79,7 +79,7 @@ use crate::Arora;
     about = "The Arora device runner",
     long_about = "The Arora device runner: a headless device over the fake HAL, serving the \
                   open local bridge. A build with Semio Studio (the studio-bridge feature) \
-                  connects to Studio instead with --studio.\n\n\
+                  connects to Studio instead, unless the run passes --no-studio.\n\n\
                   At start it loads every module directory under its device directory's \
                   modules/ — the device directory is DEVICE_DIR; else <IDENTITY_FILE>_dir \
                   while that deprecated variable is set; else the per-user directory of the \
@@ -112,8 +112,8 @@ pub struct DeviceCli {
     #[arg(long, value_name = "DIR", help = MODULE_HELP)]
     pub module: Vec<std::path::PathBuf>,
 
-    /// `--studio` and `--no-studio`, as a runner flattens
-    /// [`StudioArgs`](crate::studio::StudioArgs) for them.
+    /// `--no-studio`, as a runner built with Studio flattens
+    /// [`StudioArgs`](crate::studio::StudioArgs) for it.
     #[cfg(feature = "studio-bridge")]
     #[command(flatten)]
     pub studio: crate::studio::StudioArgs,
@@ -131,13 +131,14 @@ const MODULE_HELP: &str = "A module directory to load besides the device directo
 /// device directory's, through
 /// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs).
 ///
-/// A runner that connects to Semio Studio also flattens
+/// A runner built with Semio Studio also flattens
 /// [`StudioArgs`](crate::studio::StudioArgs), under a feature of its own that
 /// enables arora's `studio-bridge`, and hands its `choice()` to
-/// `AroraBuilder::with_studio`. The Studio options are not in this struct
-/// because a feature of arora is enabled for every runner a build links:
-/// a runner built without Studio, beside one built with it, would then take
-/// `--studio` and ignore it.
+/// `AroraBuilder::with_studio`: it connects unless the run passes
+/// `--no-studio`. The Studio option is not in this struct because a feature
+/// of arora is enabled for every runner a build links: a runner built without
+/// Studio, beside one built with it, would then take `--no-studio` although
+/// it never connects.
 ///
 /// The robot runners of `arora-hal-ros2`, `arora-hal-restful` and
 /// `arora-hal-naoqi` take it; the `arora` binary's [`DeviceCli`] takes the
@@ -185,7 +186,7 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
 /// Build (and start serving) the open local bridge — the device serves
 /// `ws://127.0.0.1:9000` and any editor or app on the machine connects, no
 /// accounts. This is the default bridge; a `studio-bridge` build serves it too
-/// when the run does not connect to Semio Studio, or when the operator
+/// when the run opts out of Semio Studio (`--no-studio`), or when the operator
 /// declines the connection, so such a device still exposes a local bridge
 /// (just no Semio Studio).
 ///

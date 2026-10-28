@@ -49,7 +49,7 @@ learned policy for a different robot into an Arora module. It assumes the
   in-process) + Groot tree (`with_groot`), built directly for a lockstep run
   and handed to the standard `AroraBuilder::run` for serving — the operator
   front end, and Semio Studio or the local bridge by build feature and
-  `--studio` — with
+  `--no-studio` — with
   the joint-order check at build. Only the HAL is simulation-specific: the
   device for the real robot swaps it and keeps the rest.
 - The `interactive` tree's shape: a fallback of situation checks first,
