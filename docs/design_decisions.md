@@ -813,27 +813,26 @@ producer onto the same path.
 
 ### Semio Studio is opt-in
 
-A device contacts Semio Studio only when its run asks for it: `--studio` (or
-`ARORA_STUDIO=1`) on a runner, or an embedder calling `studio::connect`.
-Otherwise it serves the open local bridge, and says so. Arora is free software,
-and Studio, its bridge and its backend are a commercial service beside it: free
-software does not sign its users up to a commercial service, nor report to one,
-unless they opted in. The connection itself sits behind the `studio-bridge`
-feature, which no default build enables — the robot runners' `runner` feature
-included, a runner that connects being built with `--features runner,studio` —
-and a build with it still waits to be asked.
+Arora is free software, and Studio, its bridge and its backend are a
+commercial service beside it: free software does not sign its users up to a
+commercial service, nor report to one, unless they opted in. The opt-in is the
+build. The connection sits behind arora's `studio-bridge` feature, and each
+robot runner's own `studio` feature, which no default build enables — the
+runners' `runner` feature included. A runner built with it is Semio's runner
+build, made to run with Studio, so its runs connect by default, on a terminal
+or headless; `--no-studio` opts one run out and serves the open local bridge.
+A build without it has no Studio option at all. A second, run-time opt-in is
+not kept: it would make every run of a build that exists for Studio repeat the
+choice its build already made, and a deployment that forgets the flag would
+silently run without Studio.
 
-The rule is the same on a terminal and headless. Connecting whenever nobody is
-there to decline would make every unattended start — a service, a CI job, an
-agent — a request to Studio's production project.
-
-A saved credential does not connect a run on its own, because it is not proof
-of an opt-in: a headless run of arora 13.4 or earlier signed the device up
-unasked, and an embedder's `studio::connect` shares the per-user device
-directory. A run that does not ask still looks the credential up, only to say
-in its log that the device holds one and that `--studio` connects with it; the
-lookup never fails the run. `--no-studio` wins over `--studio` and
-`ARORA_STUDIO`, so a run overrides the variable without unsetting it.
+What a run does is decided by the runner built with Studio, not by the
+feature: a feature of arora is enabled for every crate a build links, so a
+runner built without Studio beside one built with it sees `studio-bridge` on.
+An `AroraBuilder` that no runner hands a choice therefore serves the open local
+bridge, and a runner flattens `--no-studio` only under its own `studio`
+feature. An embedder connects by calling `studio::connect`, or by handing
+`Choice::Studio` to `AroraBuilder::with_studio`.
 
 ### A device enrolls with Semio Studio
 
@@ -848,17 +847,20 @@ than anyone: each run reports the fields the environment and the HAL give,
 and only those, so a family the operator typed at enrollment, for a device
 nothing else describes, stays the record's.
 
-A run that asked for Studio and finds the device not enrolled enrolls it then,
-without a separate command: asking for Studio is the opt-in, and a person's
-approval in Studio is the consent the enrollment needs. Without an enrollment
-token, it enrolls by code, headless included: the code is in the log — or on
-standard error when the log shows no info lines, since the run waits on
-someone seeing it — and the run waits for a person's decision, so a service
-started with `--studio` joins Studio once someone approves it, and never
-before. A refused code, or a
-refused token, fails the run instead of serving the local bridge: the run
-asked for Studio, and serving something else would hide that Studio refused
-the device.
+A run that connects to Studio and finds the device not enrolled enrolls it
+then, without a separate command: building with Studio is the opt-in, and a
+person's approval in Studio is the consent the enrollment needs. Enrolling as
+a command of its own is Semio's client's, `semio device enroll NAME`, which
+saves the same credential under the device's name: arora's own verbs never
+reach Studio, and only a build with `studio-bridge`, Semio's runner build, reads
+that credential. Without an enrollment token, it enrolls by code, headless
+included: the code is in the log — or on standard error when the log shows no
+info lines, since the run waits on someone seeing it — and the run waits for a
+person's decision, so a service started from a build with Studio joins Studio
+once someone approves it, and never before. A refused code, or a refused
+token, fails the run instead of serving the local bridge: the run is one of a
+build made for Studio, and serving something else would hide that Studio
+refused the device.
 
 Only a device the client finds not enrolled enrolls. Studio failing otherwise
 says nothing of the enrollment, and a credential of another Firebase project
@@ -870,3 +872,39 @@ The enrollment token is read from the environment only. A command-line option
 would put a secret where the host's other users read it (`ps`) and where the
 shell keeps it (its history); the environment of a service is its own. arora
 never logs it.
+
+### A device's name keys its Studio credential
+
+A run is a device named on its machine (`--device`, `ARORA_DEVICE`, `default`
+when unset), and the name is the only key between arora and Semio's
+enrollment: Semio's device store (`semio-studio-auth`) maps a name to its
+credential, in a directory of its own apart from the device directory. arora
+names the device and decides when a run enrolls; where a Studio credential
+lives is Studio's. Keeping the credential in the device directory would make
+every Semio tool that enrolls a device (`semio device enroll`) compute arora's
+directory layout, and a build without Studio would carry a Studio
+subdirectory it never reads.
+
+The device directory stays arora's, for what the device keeps of its own
+(its modules), and `--device-dir` places it anywhere. A run that connects to
+Studio given a directory and no name is refused, naming the fix: unnamed, two
+such devices would share the credential of `default`, each one's enrollment
+replacing the other's. Without Studio a directory alone is fine, since
+nothing is keyed by the name.
+
+The deprecated `DEVICE_DIR` given alone keeps its credential in
+`<DEVICE_DIR>/studio/`, where an earlier arora kept it, with no store and no
+move. It is the variable deployments that run several devices already set,
+one directory each: moving their credentials into the store under the one
+name they share would merge them. Every other credential found in a device
+directory's `studio/` moves into the store under the device's name once, so
+an upgrade keeps the device enrolled.
+
+arora validates the name itself, with the same rule as the store's
+`DeviceName` (exactly one normal path component, so not `D:bench`, which
+Windows joins as a path on another drive): a build without Studio links no
+Semio crate.
+
+The local bridge's port is an option of the device too
+(`--bridge-port`, `ARORA_BRIDGE_PORT`, 9000 when unset): two devices on one
+host cannot serve one port.

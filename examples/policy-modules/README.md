@@ -57,28 +57,28 @@ its Live Data page writes the commands. Once:
 
 Then, for each demo:
 
-4. Run the device with the Studio bridge, asking for Studio with `--studio`:
+4. Run the device built with the Studio bridge, which connects to Studio:
 
    ```sh
    cargo run --release -p arora-microduck --features studio,piper -- \
-       --studio --studio-model assets/microduck/studio-model.glb
+       --studio-model assets/microduck/studio-model.glb
    ```
 
    The first run enrolls the device with Studio: the terminal asks for a
    device name, then shows a code, which you enter in Studio, choosing the
    device's owner. The device saves its Studio credential, and every later
-   run with `--studio` connects with it (`--no-studio` declines). The model
+   run connects with it (`--no-studio` declines). The model
    family is the GLB's robot name, capitalised (`Microduck`), and the
    hardware version `mujoco`; `DEVICE_NAME`, `MODEL_FAMILY` and
    `HARDWARE_VERSION` override them. Without a terminal nothing is asked: the
    log shows the code, or the device enrolls with the enrollment token
    `STUDIO_ENROLLMENT_TOKEN` holds. The device keeps its Studio identity
-   in its device directory, `~/Library/Application
-   Support/semio/arora/devices/<DEVICE_LOCAL_ID>/studio/` on macOS
-   (`~/.local/share/…` on Linux; `default` when `DEVICE_LOCAL_ID` is unset),
-   so every run with the same local id is the same device, whatever the
-   build. Give the duck its own (`DEVICE_LOCAL_ID=microduck`) when another
-   Arora device runs on this machine.
+   under its name in Semio's device store, `~/Library/Application
+   Support/semio/devices/<name>/` on macOS (`~/.local/share/…` on Linux;
+   the name is `ARORA_DEVICE`, `default` when unset), so every run with the
+   same name is the same device, whatever the build. Give the duck its own
+   (`ARORA_DEVICE=microduck`) when another Arora device runs on this
+   machine.
 5. In Studio, open a project with the Microduck model and pair the device
    from the **Connections** sidebar: the duck in the scene moves with the
    simulated one, walking across the floor.
@@ -101,8 +101,8 @@ and downloads a voice; libpiper is GPLv3, hence opt-in. Without it, or with
 
 ## Without Studio
 
-Built without `--features studio` — or with it, when the run does not pass
-`--studio`, or passes `--no-studio` — the device serves the open local bridge on
+Built without `--features studio` — or with it, when the run passes
+`--no-studio` — the device serves the open local bridge on
 `ws://127.0.0.1:9000`, the standard Arora bridge any local client talks
 to: JSON messages, a `values_changed` push per step with every key that
 changed, and writes as

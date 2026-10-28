@@ -178,9 +178,13 @@ impl Operator for Tui {
         }
     }
 
-    fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) {
-        if let Ok(mut state) = self.state.lock() {
-            state.enrollment_code = code.cloned();
+    fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.enrollment_code = code.cloned();
+                true
+            }
+            Err(_) => false,
         }
     }
 }

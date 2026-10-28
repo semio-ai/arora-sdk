@@ -131,7 +131,7 @@ Stage 1 is a stopgap. A developer supplies the model file by hand only until Sta
 ### How a developer runs against the live Studio
 
 1. Put the GLB at `crates/arora-hal-ros2/models/<name>.glb`, or set `model_glb_path` in an overrides file or a full config.
-2. Start `arora-ros2 --studio` (built with `--features runner,studio`). The device enrolls: enter the code it shows in Studio, and choose the developer as owner. The family of the robot, for example `quori`, is the `model_family` of the HAL config. Later runs with `--studio` connect with the credential the enrollment saved.
+2. Start `arora-ros2` built with `--features runner,studio`, which connects to Studio. The device enrolls: enter the code it shows in Studio, and choose the developer as owner. The family of the robot, for example `quori`, is the `model_family` of the HAL config. Later runs connect with the credential the enrollment saved.
 3. Studio creates the device when it enrolls. The device appears in the device list of the developer.
 4. In Studio, open a project that the developer owns. The project contains the same GLB as a model, with the same family. The developer can upload it as a project asset. After the Quori publication, the developer can add `@quori/quori` as a dependency.
 5. Make the binding in Studio. Values flow. The joint ids match, because Studio and the device use the same GLB.
@@ -170,7 +170,7 @@ The parts are independent, except where this table names a dependency:
 - This part replaces the device account and self-registration. It changes the sign-in and the registration of the bridge client. It keeps the bridge and its connection.
 - No part of model resolution (2.2) waits for this part.
 - **arora-sdk side:** arora 16 enrolls a device that is not enrolled. It shows the code in the terminal UI and in the headless log, or redeems the enrollment token in `STUDIO_ENROLLMENT_TOKEN`, and keeps the credential in the device directory. Giving the credential to the resolver remains: the bridge and the resolver take it through one token-source interface.
-- **The bridge client**: `arora-studio-bridge-client` 11 enrolls the device and signs it in, through `semio-studio-session`.
+- **The bridge client**: `arora-studio-bridge-client` 11 enrolls the device and signs it in, through `semio-studio-auth`.
 
 ### 2.2 Model resolution in a Semio client
 

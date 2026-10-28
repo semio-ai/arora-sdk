@@ -1,32 +1,108 @@
-//! The Studio connection's credentials: the `studio/` subdirectory of the
-//! device directory ([`crate::device_dir`]), which arora names and
-//! [`DeviceCredentials`] alone writes inside.
+//! The Studio connection's credentials: the device name's in Semio's device
+//! store (`DeviceStore`), which [`DeviceCredentials`] alone writes inside.
+//! arora names the device; where its credential lives is the store's.
 //!
-//! Two older layouts come in here, both in [`DeviceCredentials`]' format:
+//! Three older layouts come in here, all in [`DeviceCredentials`]' format:
 //!
+//! - **arora 11.1 to 15** kept the credentials in the device directory's
+//!   `studio/` subdirectory. They move into the store under the device's
+//!   name, once, the first time the device connects. Their bridge identity
+//!   is removed: the client reissues it.
 //! - **arora 11.0 and earlier** kept the credentials in `.semio/arora` under
 //!   the first writable directory among the executable's directory, the home
 //!   directory and the current directory. They were the one device a host
-//!   ran, so they move into the device that sets no local id, once.
+//!   ran, so they move into the device named `default`, once.
 //! - **`IDENTITY_FILE`**, deprecated, named the refresh token's file alone,
 //!   its key staying in that legacy directory. The device directory of a run
-//!   that sets it is `<IDENTITY_FILE>_dir`, into which the file is copied with
-//!   its key. The file is neither updated nor removed.
+//!   that sets it is `<IDENTITY_FILE>_dir`, into whose `studio/` the file is
+//!   copied with its key. The file is neither updated nor removed.
+//!
+//! A run given the deprecated `DEVICE_DIR` or `IDENTITY_FILE` without a name
+//! keeps its credentials in its device directory's `studio/`
+//! ([`crate::device`]).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use arora_studio_bridge_client::auth::{DeviceName, DeviceStore};
 use arora_studio_bridge_client::credentials::DeviceCredentials;
 use log::{info, warn};
 
+use crate::device::{Credential, Device};
 use crate::device_dir;
 
-/// The Studio connection's subdirectory of the device directory.
+/// The subdirectory of the device directory an earlier arora kept the Studio
+/// connection's credentials in.
 pub(super) const STUDIO_DIR: &str = "studio";
 
-/// The Studio credentials of the device whose directory is `device_dir`,
-/// created if missing.
+/// The Studio credentials of `device`, created if missing: the device name's
+/// in the store under `store`, else in the default store
+/// (`DeviceStore::from_env`), as [`crate::device`] says. Refuses a device
+/// given a directory and no name.
+pub(super) fn of(device: &Device, store: Option<&Path>) -> Result<DeviceCredentials> {
+    match device.credential() {
+        Credential::Unnamed => bail!(
+            "this run connects to Semio Studio, and gives the device directory {} but no device \
+             name: name this device with --device or ARORA_DEVICE",
+            device.dir().display()
+        ),
+        Credential::DeviceDir { identity_file } => {
+            if let Some(file) = identity_file {
+                identity_file_dir(file, &identity_key_dirs(None))?;
+            }
+            info!(
+                "Studio: this device keeps its credential in {}, as a device directory the \
+                 deprecated DEVICE_DIR or IDENTITY_FILE gives without a device name does",
+                device.dir().join(STUDIO_DIR).display()
+            );
+            in_device_dir(device.dir())
+        }
+        Credential::Store { identity_file } => {
+            let store = store_at(store)?;
+            // A file gone, its identity is wherever it migrated to.
+            if let Some(file) = identity_file.as_ref().filter(|file| file.is_file()) {
+                identity_file_dir(file, &identity_key_dirs(Some(&store)))?;
+            }
+            in_store(&store, device.name(), device.dir())
+        }
+    }
+}
+
+/// The store under `root`, else the default one.
+pub(super) fn store_at(root: Option<&Path>) -> Result<DeviceStore> {
+    match root {
+        Some(root) => Ok(DeviceStore::at(root)),
+        None => DeviceStore::from_env().context("could not find Semio's device store"),
+    }
+}
+
+/// The Studio credentials of the device `name` in `store`, created if
+/// missing. When they hold none, the device directory `device_dir`'s
+/// `studio/` moves in, and for the device named `default`, the first legacy
+/// `.semio/arora` holding any.
+pub(super) fn in_store(
+    store: &DeviceStore,
+    name: &str,
+    device_dir: &Path,
+) -> Result<DeviceCredentials> {
+    device_dir::check_name(name)?;
+    let name = DeviceName::new(name)?;
+    let credentials = DeviceCredentials::in_store(store, &name).with_context(|| {
+        format!(
+            "could not create the Studio credentials directory {}",
+            store.dir(&name).display()
+        )
+    })?;
+    adopt_device_dir(&credentials, device_dir)?;
+    if name == DeviceName::default() {
+        adopt_legacy(&credentials, &legacy_dirs())?;
+    }
+    Ok(credentials)
+}
+
+/// The Studio credentials kept in the device directory `device_dir`'s
+/// `studio/`, created if missing.
 pub(super) fn in_device_dir(device_dir: &Path) -> Result<DeviceCredentials> {
     let dir = device_dir.join(STUDIO_DIR);
     DeviceCredentials::in_dir(&dir).with_context(|| {
@@ -37,33 +113,55 @@ pub(super) fn in_device_dir(device_dir: &Path) -> Result<DeviceCredentials> {
     })
 }
 
-/// The Studio credentials of a run configured from the environment: in the
-/// device directory `DEVICE_DIR` names; else, when the deprecated
-/// `IDENTITY_FILE` is set, in the directory it migrates to; else in the
-/// per-user directory of the device `DEVICE_LOCAL_ID` names.
-pub(super) fn from_env() -> Result<DeviceCredentials> {
-    let identity_file = super::env_nonempty("IDENTITY_FILE").map(PathBuf::from);
-    if let Some(dir) = device_dir::override_from_env() {
-        if identity_file.is_some() {
-            warn!("IDENTITY_FILE is deprecated, and ignored: DEVICE_DIR is set");
+/// Moves the credentials the device directory `device_dir`'s `studio/` holds
+/// into `credentials`, when it holds none. The bridge identity left behind is
+/// removed, the client reissuing it, and so is the emptied `studio/`.
+fn adopt_device_dir(credentials: &DeviceCredentials, device_dir: &Path) -> Result<()> {
+    let old = device_dir.join(STUDIO_DIR);
+    if !old.is_dir() {
+        return Ok(());
+    }
+    let moved = credentials
+        .adopt(&old)
+        .with_context(|| format!("could not move the Studio credentials in {}", old.display()))?;
+    if !moved {
+        return Ok(());
+    }
+    if old.is_dir() {
+        let bridge = DeviceCredentials::in_dir(&old)?.bridge_identity_files();
+        for file in [bridge.private_key, bridge.certificate, bridge.ca_bundle] {
+            match fs::remove_file(&file) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    warn!("could not remove {}: {error}", file.display())
+                }
+                _ => {}
+            }
         }
-        return in_device_dir(&dir);
+        // `remove_dir` removes only an empty directory.
+        let _ = fs::remove_dir(&old);
     }
-    if let Some(file) = identity_file {
-        // The key the file is encrypted under stayed in a legacy directory,
-        // unless the default device has since adopted it.
-        let mut key_dirs = legacy_dirs();
-        if let Ok(default) = device_dir::of(device_dir::DEFAULT_LOCAL_ID) {
-            key_dirs.push(default.join(STUDIO_DIR));
-        }
-        return in_device_dir(&identity_file_dir(&file, &key_dirs)?);
+    info!(
+        "Studio: moved this device's credential from {} to {}",
+        old.display(),
+        credentials.path().display()
+    );
+    Ok(())
+}
+
+/// The directories whose key the identity `IDENTITY_FILE` names may decrypt
+/// under: the legacy ones it stayed in, unless the device named `default`
+/// has since adopted it — into `store`, or, by an earlier arora, into its
+/// device directory's `studio/`.
+fn identity_key_dirs(store: Option<&DeviceStore>) -> Vec<PathBuf> {
+    let mut key_dirs = legacy_dirs();
+    let store = store.cloned().or_else(|| DeviceStore::from_env().ok());
+    if let Some(store) = store {
+        key_dirs.push(store.dir(&DeviceName::default()));
     }
-    let local_id = device_dir::local_id_from_env();
-    let credentials = in_device_dir(&device_dir::of(&local_id)?)?;
-    if local_id == device_dir::DEFAULT_LOCAL_ID {
-        adopt_legacy(&credentials, &legacy_dirs())?;
+    if let Ok(default) = device_dir::of(device_dir::DEFAULT_NAME) {
+        key_dirs.push(default.join(STUDIO_DIR));
     }
-    Ok(credentials)
+    key_dirs
 }
 
 /// The legacy credentials locations: `.semio/arora` under the executable's
@@ -113,12 +211,6 @@ fn adopt_legacy(credentials: &DeviceCredentials, legacy: &[PathBuf]) -> Result<(
 /// present, that it is no longer read nor updated and can be removed.
 fn identity_file_dir(file: &Path, key_dirs: &[PathBuf]) -> Result<PathBuf> {
     let dir = device_dir::of_identity_file(file);
-    warn!(
-        "IDENTITY_FILE is deprecated: DEVICE_DIR names the directory holding what the \
-         device keeps. The identity IDENTITY_FILE names ({}) migrates to {}",
-        file.display(),
-        dir.display()
-    );
     match (file.is_file(), dir.is_dir()) {
         (true, true) => warn!(
             "{} is no longer read nor updated, and can be removed: the identity is in {}",
@@ -334,6 +426,133 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The device `name` (none when `None`) whose directory is `dir`, given
+    /// no deprecated variable.
+    fn device(name: Option<&str>, dir: &Path) -> Device {
+        crate::device::resolve(
+            name.map(str::to_string),
+            Some(dir.to_path_buf()),
+            None,
+            &|_| None,
+        )
+        .unwrap()
+    }
+
+    // The devices below are never named `default`: its credentials adopt the
+    // legacy `.semio/arora` of the host running the tests.
+
+    #[test]
+    fn a_device_s_credential_is_its_name_s_in_the_store() {
+        let root = scratch("store");
+        let store = root.join("store");
+        let dir = root.join("device");
+
+        let credentials = of(&device(Some("bench"), &dir), Some(&store)).unwrap();
+
+        assert_eq!(credentials.path(), store.join("bench"));
+        credentials.save_refresh_token("t").unwrap();
+        assert!(
+            !dir.join(STUDIO_DIR).exists(),
+            "nothing is kept in the device directory"
+        );
+        let other = of(&device(Some("bench-2"), &dir), Some(&store)).unwrap();
+        assert_eq!(other.refresh_token().unwrap(), None, "a name is a device");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_credential_in_the_device_directory_moves_into_the_store_once() {
+        let root = scratch("moves-to-store");
+        let store = root.join("store");
+        let dir = root.join("device");
+        let old = holding(&dir.join(STUDIO_DIR), "t");
+        old.save_bridge_private_key("key").unwrap();
+        old.save_bridge_certificate("crt", "ca").unwrap();
+
+        let credentials = of(&device(Some("bench"), &dir), Some(&store)).unwrap();
+
+        assert_eq!(credentials.refresh_token().unwrap(), Some("t".to_string()));
+        assert!(
+            !dir.join(STUDIO_DIR).exists(),
+            "the device directory's studio/ is emptied, its bridge identity reissued, and removed"
+        );
+
+        // Once the store holds one, the device directory is not read again.
+        holding(&dir.join(STUDIO_DIR), "other");
+        let credentials = of(&device(Some("bench"), &dir), Some(&store)).unwrap();
+        assert_eq!(credentials.refresh_token().unwrap(), Some("t".to_string()));
+        assert_eq!(token_of(&dir), Some("other".to_string()));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_run_given_a_directory_and_no_name_is_refused() {
+        let root = scratch("unnamed");
+        let store = root.join("store");
+        let dir = root.join("device");
+
+        let error = of(&device(None, &dir), Some(&store)).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("name this device with --device or ARORA_DEVICE"),
+            "{error}"
+        );
+        assert!(!store.exists(), "the store is not touched");
+        assert!(!dir.exists(), "nor the device directory");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn device_dir_alone_keeps_the_credential_in_its_studio_directory() {
+        let root = scratch("device-dir-alone");
+        let store = root.join("store");
+        let dir = root.join("device");
+        holding(&dir.join(STUDIO_DIR), "kept");
+        let device = crate::device::resolve(None, None, None, &|key: &str| {
+            (key == "DEVICE_DIR").then(|| dir.display().to_string())
+        })
+        .unwrap();
+
+        let credentials = of(&device, Some(&store)).unwrap();
+
+        assert_eq!(credentials.path(), dir.join(STUDIO_DIR));
+        assert_eq!(
+            credentials.refresh_token().unwrap(),
+            Some("kept".to_string())
+        );
+        assert!(!store.exists(), "no store, no move");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn an_identity_file_s_migrated_directory_moves_into_the_store_under_a_name() {
+        let root = scratch("file-to-store");
+        let (file, key_dir) = identity_file_layout(&root, "t");
+        let dir = identity_file_dir(&file, std::slice::from_ref(&key_dir)).unwrap();
+        let store = DeviceStore::at(root.join("store"));
+
+        let credentials = in_store(&store, "bench", &dir).unwrap();
+
+        assert_eq!(credentials.refresh_token().unwrap(), Some("t".to_string()));
+        assert!(!dir.join(STUDIO_DIR).exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_name_that_is_not_one_path_component_names_no_credential() {
+        let root = scratch("bad-name");
+        let store = DeviceStore::at(root.join("store"));
+        for bad in ["", "..", "a/b"] {
+            assert!(
+                in_store(&store, bad, &root.join("device")).is_err(),
+                "{bad:?} is refused"
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn neither_the_identity_file_nor_its_directory_is_an_error() {
         let root = scratch("file-neither");
@@ -344,7 +563,8 @@ mod tests {
 
     /// The variable handing the process
     /// [`credentials_resolve_in_the_device_directory_given_as_on_android`]
-    /// starts the device directory it passes explicitly.
+    /// starts the device directory it passes explicitly, the device store
+    /// inside it.
     #[cfg(unix)]
     const ANDROID_CASE_DIR: &str = "ARORA_TEST_ANDROID_CASE_DIR";
 
@@ -353,9 +573,10 @@ mod tests {
     /// host gives places a device directory. The test runs itself again as
     /// such a process — its executable hard-linked into a read-only
     /// directory, `HOME` unset, `/` its working directory — where the
-    /// credentials a connection hands the client resolve in the device
-    /// directory it is given (`connect_in_device_dir`) and in the one
-    /// `DEVICE_DIR` names (`connect`), and keep what is saved in them.
+    /// credentials a connection hands the client resolve in the device store
+    /// it is given with a device directory and a name
+    /// (`connect_in_device_dir`), and in the directory the deprecated
+    /// `DEVICE_DIR` names alone (`connect`), and keep what is saved in them.
     #[cfg(unix)]
     #[test]
     fn credentials_resolve_in_the_device_directory_given_as_on_android() {
@@ -398,6 +619,10 @@ mod tests {
             .env_remove("XDG_DATA_HOME")
             .env_remove("DEVICE_LOCAL_ID")
             .env_remove("IDENTITY_FILE")
+            .env_remove("ARORA_DEVICE")
+            .env_remove("ARORA_DEVICE_DIR")
+            .env_remove("ARORA_BRIDGE_PORT")
+            .env_remove("SEMIO_DEVICE_STORE")
             .current_dir("/")
             .output()
             .unwrap();
@@ -419,29 +644,40 @@ mod tests {
             [exe.file_name().unwrap().to_os_string()],
             "nothing is written beside the executable"
         );
-        assert_eq!(token_of(&given), Some("given".to_string()));
+        assert_eq!(
+            DeviceCredentials::in_dir(android_store(&given).join("android"))
+                .unwrap()
+                .refresh_token()
+                .unwrap(),
+            Some("given".to_string())
+        );
         assert_eq!(token_of(&named), Some("named".to_string()));
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// In the Android-case process: the credentials of the device directory
-    /// `given`, and those of the environment, resolve where they are told and
-    /// keep a token.
+    /// The device store the Android-case process is given, in the device
+    /// directory `given`, as an app keeps both in its data directory.
+    #[cfg(unix)]
+    fn android_store(given: &Path) -> PathBuf {
+        given.join("devices")
+    }
+
+    /// In the Android-case process: the credentials of the device `android`
+    /// in the store inside the device directory `given`, and those of the
+    /// environment, resolve where they are told and keep a token.
     #[cfg(unix)]
     fn resolve_as_on_android(given: &Path) {
         assert!(std::env::var_os("HOME").is_none(), "HOME is unset");
         assert_eq!(std::env::current_dir().unwrap(), Path::new("/"));
 
-        let explicit = in_device_dir(given).unwrap();
-        assert_eq!(explicit.path(), given.join(STUDIO_DIR));
+        let store = android_store(given);
+        let explicit = in_store(&DeviceStore::at(&store), "android", given).unwrap();
+        assert_eq!(explicit.path(), store.join("android"));
         explicit.save_refresh_token("given").unwrap();
 
         let named = PathBuf::from(std::env::var_os("DEVICE_DIR").unwrap());
-        let from_environment = from_env().unwrap();
+        let from_environment = of(&Device::from_env().unwrap(), None).unwrap();
         assert_eq!(from_environment.path(), named.join(STUDIO_DIR));
         from_environment.save_refresh_token("named").unwrap();
-
-        assert_eq!(token_of(given), Some("given".to_string()));
-        assert_eq!(token_of(&named), Some("named".to_string()));
     }
 }

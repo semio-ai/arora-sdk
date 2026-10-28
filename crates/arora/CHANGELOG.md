@@ -8,23 +8,62 @@ All notable changes to `arora`. The format follows
 
 ### Added
 
+- **Several devices on one host**: `RunnerArgs`, the options every runner
+  takes (the `arora` binary's `DeviceCli`, `arora-ros2`, `arora-restful`,
+  `arora-naoqi`), gives the device the run is besides `--module`:
+  `--device <NAME>` (`ARORA_DEVICE`), its name on this machine, `default`
+  when unset; `--device-dir <PATH>` (`ARORA_DEVICE_DIR`), its directory,
+  else `<data_local_dir>/semio/arora/devices/<name>`; and
+  `--bridge-port <PORT>` (`ARORA_BRIDGE_PORT`), the port of its open local
+  bridge, `device::DEFAULT_BRIDGE_PORT` (9000) when unset.
+  `RunnerArgs::device()` resolves them into a `Device` (`name()`, `dir()`,
+  `bridge_port()`), and `Device::from_env()` resolves them from the
+  environment alone. `AroraBuilder::with_device(Device)` hands the device to
+  `run`, whose default bridge serves on its port and connects to Studio as
+  it; a builder given no device serves on 9000, and connects as
+  `Device::from_env()`.
 - `operator::EnrollmentCode` and `Operator::show_enrollment_code`: an operator
   shows the code that enrolls the device with Semio Studio, until the next
-  call replaces or clears it. The default shows nothing, as the run's log says
-  each code. The terminal UI shows the code in its prompt line, with Studio's
-  page approving it when the Studio client knows Studio's web address
-  (`STUDIO_URL`, else the one baked into it).
-- `studio::connect_in_device_dir(device_dir, description, operator)`: the
-  connection of `connect_with_operator_and_description`, or with no operator
-  of `connect_with_description`, in the device directory given rather than
-  the one the environment names, as `connect_with_device_dir` takes it. An
-  Android app passes the data directory its platform gives it at run time and
-  its own operator, which names the device and shows the codes it enrolls by.
-  Nothing on Android places one otherwise: its executable's directory is
-  read-only, it has no home, and its working directory is `/`. `DEVICE_DIR`
-  remains the process-wide equivalent.
+  call replaces or clears it, and returns whether it shows the code. The
+  default shows nothing and returns `false`: a code no operator shows goes to
+  standard error when the run's log shows no info lines. The terminal UI
+  shows the code in its prompt line, with Studio's page approving it when the
+  Studio client knows Studio's web address (`STUDIO_URL`, else the one baked
+  into it).
+- `studio::connect_in_device_dir(device_dir, name, store, description,
+  operator)`: the connection of `connect_with_operator_and_description`, or
+  with no operator of `connect_with_description`, as the device `name` whose
+  directory is `device_dir`, its credential the name's in the device store
+  under `store`, or in the default store (`SEMIO_DEVICE_STORE`, else
+  `<data_local_dir>/semio/devices/`) with `None`. An Android app passes the
+  data directory its platform gives it at run time, a store root inside it,
+  and its own operator, which names the device and shows the codes it
+  enrolls by. Nothing on Android places either otherwise: its executable's
+  directory is read-only, it has no home, and its working directory is `/`.
 
 ### Changed
+
+- Building with Semio Studio is the opt-in, and the only one. The `arora`
+  binary built with `studio-bridge` connects to Studio on every run unless
+  the run passes `--no-studio`, whatever the device holds, enrolling a device
+  that is not enrolled first (below). A build without `studio-bridge` has no
+  Studio option.
+  - `studio::StudioArgs` is `--no-studio` alone, and `StudioArgs::choice`
+    returns the `Choice` itself: `Choice::Local` with `--no-studio`, else
+    `Choice::Studio`.
+  - `run`, `run_with_hal`, `run_with`, and an `AroraBuilder` given no
+    `with_studio`, serve the open local bridge in a `studio-bridge` build,
+    whatever the device holds. A feature of arora is enabled for every crate
+    a build links, so `studio-bridge` alone does not tell that the runner at
+    hand was built with Studio.
+  - A run logs which bridge it serves in one line, and no longer looks a
+    saved credential up when it serves the local bridge.
+  - An embedder calling a `studio::connect` function connects.
+
+  To migrate, drop `--studio` and `ARORA_STUDIO` from the runs of a build
+  with Studio, and pass `--no-studio` to a run of such a build that should
+  serve the local bridge. An embedder building its device with
+  `AroraBuilder` that connects passes `with_studio(studio::Choice::Studio)`.
 
 - **A device enrolls with Semio Studio** (`arora-studio-bridge-client` 11).
   Studio creates the device, under the owner a person chooses, when it
@@ -59,45 +98,70 @@ All notable changes to `arora`. The format follows
     `connect`, `connect_with_description` and `connect_with_device_dir` log
     the codes, and ask nobody.
 
-  To migrate a device registered by arora 13 or earlier: run it once with
-  `--studio`, and enter the code it shows in Studio, choosing its owner; or
-  create an enrollment token in Studio and set it in
+  To migrate a device registered by arora 13 or earlier: run it once from a
+  build with Studio, and enter the code it shows in Studio, choosing its
+  owner; or create an enrollment token in Studio and set it in
   `STUDIO_ENROLLMENT_TOKEN` for that run. An embedder matching
   `connect_with_operator`'s `Ok(None)` drops that arm.
-- A `studio-bridge` run connects to Semio Studio only when it asks for it:
-  `--studio`, `ARORA_STUDIO=1`, or `AroraBuilder::with_studio(Choice::Studio)`.
-  A device holding a saved Studio credential serves the open local bridge
-  when its run does not ask, because a saved credential is not proof of an
-  opt-in: a headless run of 13.4 or earlier signed the device up unasked.
-  - Such a run logs, naming the credential's directory,
-    `Studio: serving the local bridge, as the run does not ask for Studio. Pass --studio to connect with the saved credential in <path>.`
-    It looks the credential up only for that line: a credential that does
-    not read gives a warning, and a lookup that fails, such as a device
-    directory that cannot be named, gives a warning instead of failing the
-    start.
-  - `run`, `run_with_hal` and `run_with` do not ask, so in a `studio-bridge`
-    build they serve the open local bridge.
-  - `studio::Choice::Local` is the default: what a run that asks nothing
-    gives, and what `--no-studio` gives. `--no-studio` still wins over
-    `--studio` and `ARORA_STUDIO`.
-  - An embedder calling a `studio::connect` function asks for Studio.
 
-  To migrate a device that connects with its saved credential, pass
-  `--studio` to its runner, or set `ARORA_STUDIO=1` in its environment. An
-  embedder building its device with `AroraBuilder` passes
-  `with_studio(studio::Choice::Studio)`.
+- **A device's Studio credential is its name's in Semio's device store**,
+  apart from its directory: `<data_local_dir>/semio/devices/<name>/`, or
+  under `SEMIO_DEVICE_STORE` (`semio-studio-auth`'s `DeviceStore`, through
+  the client's `DeviceCredentials::in_store`). arora names the device and
+  never computes where its credential is; the device directory holds none.
+  - A run that connects to Studio given a device directory
+    (`--device-dir`, `ARORA_DEVICE_DIR`) and no name is refused: "name this
+    device with --device or ARORA_DEVICE". Two such devices would otherwise
+    share the credential of the name `default`. Without Studio, a directory
+    alone is fine.
+  - A credential the device directory's `studio/` holds moves into the store
+    under the device's name, once, when the store holds none for it, and the
+    log says so. Its bridge certificate is reissued. Credentials from arora
+    11.0 and earlier (`.semio/arora`) move into the store under `default`,
+    and a deprecated `IDENTITY_FILE` given with a name migrates through
+    `<IDENTITY_FILE>_dir/studio/` into the store.
+  - `studio::connect_with_device_dir(device_dir, name)` takes the device's
+    name, whose credential it connects with.
+- `DeviceCli` flattens `RunnerArgs` as its `runner` field, in place of its
+  own `module`.
+- `device_dir::DEFAULT_LOCAL_ID` is `device_dir::DEFAULT_NAME`. A device's
+  name is exactly one normal path component: besides `""`, `.`, `..` and
+  names holding `/` or `\`, one Windows reads as a path on another drive,
+  such as `D:bench`, is refused.
+
+  To migrate, name each device on a host with `--device` or `ARORA_DEVICE`
+  in place of `DEVICE_LOCAL_ID`, and give a directory with `--device-dir`
+  or `ARORA_DEVICE_DIR` in place of `DEVICE_DIR`, with a name when the run
+  connects to Studio. A runner with a command line of its own hands
+  `RunnerArgs::device()` to `AroraBuilder::with_device`, and its `dir()` to
+  `with_module_dirs`. `semio device enroll NAME` enrolls the device of that
+  name.
+
+### Deprecated
+
+- `DEVICE_LOCAL_ID` names the device, as `ARORA_DEVICE` does, when neither
+  `--device` nor `ARORA_DEVICE` does, with a warning.
+- `DEVICE_DIR`, with a warning to name the device, is the device directory
+  when neither `--device-dir` nor `ARORA_DEVICE_DIR` gives one. Given with a
+  name, it acts as `ARORA_DEVICE_DIR`. Given alone, the run keeps its Studio
+  credential in `<DEVICE_DIR>/studio/`, without store or move, so an
+  upgraded runner keeps the credential it had and two such devices never
+  share one. `IDENTITY_FILE` given alone does the same in
+  `<IDENTITY_FILE>_dir/studio/`.
 
 ### Removed
 
-- `studio::Choice::IfSaved`, connecting on a saved credential alone. Use
-  `Choice::Studio` to connect, or `Choice::Local`, the default, to serve the
-  local bridge.
-- `RunnerArgs::studio`. A runner that connects to Semio Studio flattens
+- `device_dir::from_env`: `Device::from_env()?.dir()` is the device
+  directory the environment configures.
+- `--studio` and `ARORA_STUDIO`: a build with Studio connects without them.
+- `studio::Choice::IfSaved`, connecting on a saved credential alone, and
+  `Choice`'s `Default`.
+- `RunnerArgs::studio`. A runner built with Semio Studio flattens
   `studio::StudioArgs` itself, under a feature of its own that enables
   arora's `studio-bridge`: an arora feature is enabled for every runner a
   build links, so a runner built without Studio beside one built with it
-  would otherwise take `--studio` and ignore it. `RunnerArgs` carries
-  `--module` alone.
+  would otherwise take `--no-studio` although it never connects.
+  `RunnerArgs` carries `--module` alone.
 - `DEVICE_OWNERS` and the owner prompt: the person approving the device
   chooses its owner in Studio. `DEVICE_DESCRIPTION` goes too: Studio's
   record holds the description.

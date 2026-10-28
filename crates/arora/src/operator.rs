@@ -108,10 +108,15 @@ pub trait Operator: Send + Sync {
 
     /// Show `code` until the next call, which shows the code replacing it
     /// when it expires undecided, or `None` once the enrollment ends. Nothing
-    /// is awaited: a person acts on it in Studio. The run's log says each
-    /// code too, which is all the default shows.
-    fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) {
+    /// is awaited: a person acts on it in Studio.
+    ///
+    /// Returns whether the operator shows the code to a person. The run
+    /// waits on someone seeing it, so a code the operator does not show goes
+    /// to standard error unless the run's log shows info lines. The default
+    /// shows nothing and returns `false`.
+    fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
         let _ = code;
+        false
     }
 }
 

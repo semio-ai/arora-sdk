@@ -17,6 +17,9 @@
 //! drive it with [`step`](Arora::step) (once per frame) or
 //! [`run`](Arora::run) (the visible loop over `step`).
 
+/// The device a run is: its name, its directory, its local bridge's port.
+#[cfg(feature = "native")]
+pub mod device;
 /// A device's directory: what the device keeps of its own from one run to the
 /// next, each use in a subdirectory of its own.
 #[cfg(feature = "native")]
@@ -50,6 +53,8 @@ pub mod tui;
 /// this arora serves.
 #[cfg(feature = "native")]
 pub use arora_bridge_ws as bridge_ws;
+#[cfg(feature = "native")]
+pub use device::Device;
 #[cfg(feature = "native")]
 pub use run::{
     local_ws_bridge, local_ws_bridge_with, run, run_with, run_with_frontend, run_with_hal,
@@ -792,8 +797,12 @@ pub struct AroraBuilder {
     step_period: Option<std::time::Duration>,
     #[cfg(feature = "native")]
     frontend: Option<operator::Frontend>,
+    /// The device a runner said the run is.
+    #[cfg(feature = "native")]
+    device: Option<Device>,
+    /// What a runner said of Semio Studio; none serves the open local bridge.
     #[cfg(feature = "studio-bridge")]
-    studio: studio::Choice,
+    studio: Option<studio::Choice>,
 }
 
 impl AroraBuilder {
@@ -1003,8 +1012,8 @@ impl AroraBuilder {
 
     /// Load the modules a device carries as module directories
     /// ([`module_dir`]): every one under `device_dir`'s `modules/`, in name
-    /// order, then each of `dirs`. A device runner passes its device directory
-    /// ([`device_dir::from_env`]) and its `--module` directories.
+    /// order, then each of `dirs`. A device runner passes its device's
+    /// directory ([`Device::dir`]) and its `--module` directories.
     ///
     /// Each module loads at [`build`](Self::build) as
     /// [`with_module`](Self::with_module) loads one, and at build the records
@@ -1026,10 +1035,12 @@ impl AroraBuilder {
     ///
     /// ```no_run
     /// # async fn runner(module_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    /// let device = arora::Device::from_env()?;
     /// arora::Arora::builder()
     ///     .with_hal(Box::new(arora_hal::FakeHal::new()))
-    ///     .with_module_dirs(&arora::device_dir::from_env()?, module_dirs)
+    ///     .with_module_dirs(device.dir(), module_dirs)
     ///     .await?
+    ///     .with_device(device)
     ///     .run()
     ///     .await
     /// # }
@@ -1130,14 +1141,28 @@ impl AroraBuilder {
         self
     }
 
-    /// What the run asks of Semio Studio when [`run`](AroraBuilder::run)
-    /// fills the default bridge: a runner passes what its command line says
-    /// ([`StudioArgs::choice`](studio::StudioArgs::choice)). Default:
-    /// [`Choice::Local`](studio::Choice::Local), the open local bridge. See
+    /// The device the run is, as a runner's options give it
+    /// ([`RunnerArgs::device`]): [`run`](AroraBuilder::run) serves the open
+    /// local bridge on its port, and connects to Semio Studio as it, when it
+    /// fills the default bridge. Without it, the local bridge serves on
+    /// [`device::DEFAULT_BRIDGE_PORT`], and a run that connects is the device
+    /// the environment configures ([`Device::from_env`]).
+    #[cfg(feature = "native")]
+    pub fn with_device(mut self, device: Device) -> Self {
+        self.device = Some(device);
+        self
+    }
+
+    /// What the run does about Semio Studio when [`run`](AroraBuilder::run)
+    /// fills the default bridge: a runner built with Studio passes what its
+    /// command line says ([`StudioArgs::choice`](studio::StudioArgs::choice)),
+    /// Studio unless `--no-studio`. Without it, the run serves the open local
+    /// bridge, as a runner built without Studio does in a build where another
+    /// crate enables `studio-bridge`. See
     /// [whether a run connects](studio#whether-a-run-connects).
     #[cfg(feature = "studio-bridge")]
     pub fn with_studio(mut self, choice: studio::Choice) -> Self {
-        self.studio = choice;
+        self.studio = Some(choice);
         self
     }
 
@@ -1147,8 +1172,9 @@ impl AroraBuilder {
     /// default any other unset seam (a private `SimpleDataStore`, the fake
     /// HAL, an empty interpreter), and drive the step loop.
     ///
-    /// The default bridge is the open local bridge, unless the `studio-bridge`
-    /// feature is on and the run asks for Semio Studio (`with_studio`), as
+    /// The default bridge is the open local bridge, on the port of the device
+    /// [`with_device`](Self::with_device) gives, unless the `studio-bridge`
+    /// feature is on and the runner hands Studio to `with_studio`, as
     /// `arora::studio` says. A run that connects enrolls a device that is not
     /// enrolled with Studio: under the terminal UI, the operator names it and
     /// is shown the code a person approves it with in Studio.
@@ -1180,12 +1206,19 @@ impl AroraBuilder {
                     Some(hal) => hal.describe().await,
                     None => arora_hal::HalDescription::default(),
                 };
-                let bridge = studio::default_bridge(&frontend, &description, self.studio).await?;
+                let bridge = studio::default_bridge(
+                    &frontend,
+                    &description,
+                    self.studio.unwrap_or(studio::Choice::Local),
+                    self.device.take(),
+                )
+                .await?;
                 self = self.with_bridge(bridge);
             }
             #[cfg(not(feature = "studio-bridge"))]
             {
-                self = self.with_bridge(run::local_ws_bridge().await?);
+                let bridge = run::local_ws_bridge_on(self.device.as_ref()).await?;
+                self = self.with_bridge(bridge);
             }
         }
         run::run_builder_with_frontend(self, frontend).await
