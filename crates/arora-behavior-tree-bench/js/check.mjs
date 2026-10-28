@@ -20,6 +20,9 @@ assert.equal(x.bench_workload_finish(), 1);
 assert.equal(x.bench_measure(0, 0, 0, 0, 10, 1), 1);
 assert.equal(x.bench_measure(10, 0, 0, 0, 10, 0), 1);
 assert.equal(x.bench_measure(10, 0, 0, 0, 10, 2), 1);
+// A warm-up plus ticks past u32 is invalid input, not a trap.
+assert.equal(x.bench_measure(10, 0, 0, 0xffffffff, 1, 1), 1);
+assert.equal(x.bench_scale_load(10, 0, 0xffffffff, 1), 1);
 assert.equal(x.bench_minimum_sample_us(-1), 1);
 assert.equal(x.bench_minimum_sample_us(NaN), 1);
 assert.throws(() => wasm.loadWorkload('{'), /rejected/);

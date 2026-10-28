@@ -36,6 +36,9 @@ impl Scenario {
     }
     pub fn workload(self, n: usize, warm_up: usize, ticks: usize) -> Workload {
         assert!(n > 0 && ticks > 0);
+        let total = warm_up
+            .checked_add(ticks)
+            .expect("warm-up plus ticks fits in a usize");
         let branches = matches!(self, Self::Branches | Self::BranchesSwitching);
         let (parts, size) = if branches { (8, n.div_ceil(8)) } else { (1, n) };
         let k = 2.max(size / 10);
@@ -164,7 +167,7 @@ impl Scenario {
         }
         keys.push(json!({"name":"arora/time","initial":0.0}));
         let mut events = Vec::new();
-        for step in 0..warm_up + ticks {
+        for step in 0..total {
             match self {
                 Self::Settled | Self::Clock => {}
                 Self::OneInput => events.push(json!([step, inputs[0], step % 17])),
@@ -188,7 +191,7 @@ impl Scenario {
                 }
             }
         }
-        let raw: Value = json!({"keys":keys,"text":format!("{tree}\n{text}"),"clock":"arora/time","dt":DT,"ticks":warm_up+ticks,"warmUp":warm_up,
+        let raw: Value = json!({"keys":keys,"text":format!("{tree}\n{text}"),"clock":"arora/time","dt":DT,"ticks":total,"warmUp":warm_up,
             "events":events,"phases":{"names":[self.name()],"runs":[]}});
         Workload::parse(&raw.to_string()).expect("valid scale workload")
     }

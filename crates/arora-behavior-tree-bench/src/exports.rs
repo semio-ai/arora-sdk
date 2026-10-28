@@ -177,7 +177,8 @@ pub extern "C" fn bench_scale_load(n: u32, scenario: u32, warm_up: u32, ticks: u
     let Some(scenario) = Scenario::ALL.get(scenario as usize) else {
         return 1;
     };
-    if n == 0 || ticks == 0 {
+    // On wasm32 a usize is 32 bits, so the replay's total must fit in a u32.
+    if n == 0 || ticks == 0 || warm_up.checked_add(ticks).is_none() {
         return 1;
     }
     load(scenario.workload(n as usize, warm_up as usize, ticks as usize));
@@ -329,7 +330,7 @@ pub extern "C" fn bench_measure(
     ) else {
         return 1;
     };
-    if n == 0 || ticks == 0 || samples.is_multiple_of(2) {
+    if n == 0 || ticks == 0 || samples.is_multiple_of(2) || warm_up.checked_add(ticks).is_none() {
         return 1;
     }
     let workload = scenario.workload(n as usize, warm_up as usize, ticks as usize);
