@@ -181,6 +181,9 @@ pub struct BehaviorTreeInterpreter {
     /// or relinked: they start afresh at the next lowering, and every other
     /// node keeps its state.
     fresh: HashSet<Uuid>,
+    /// The device's function index as of the last lowering: a run's detached
+    /// nodes are lowered against it before the run is accepted.
+    functions: FunctionIndex,
 }
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
@@ -207,10 +210,11 @@ fn source_variable(source: &LinkSource) -> Option<Uuid> {
     }
 }
 
-/// Check that `graph` is one tree rooted at `root` and nodes beside it that
-/// are detached: every child is one of its nodes, no node has two parents or
-/// is the root's parent, and every node is reached from the root but for the
-/// nodes no node holds that [detach](crate::detached). Answers those.
+/// Check that `graph` is one tree rooted at `root`, beside which it may list
+/// detached nodes: every child is one of its nodes, no node has two parents or
+/// is the root's parent, and every node is reached from the root, but for a
+/// node no node holds that is a call to a module function with no children,
+/// which runs [detached](crate::detached). Returns the detached nodes.
 fn check_tree(graph: &Graph, root: Uuid) -> Result<Vec<Uuid>, BehaviorError> {
     let mut parent: HashMap<Uuid, Uuid> = HashMap::new();
     for node in graph.nodes.values() {
@@ -242,8 +246,8 @@ fn check_tree(graph: &Graph, root: Uuid) -> Result<Vec<Uuid>, BehaviorError> {
         }
         if !is_detachable(node.function, node.children.as_deref()) {
             return Err(behavior_error(format!(
-                "node {} is not under the graph's root {root}, and is no call to a module \
-                 function without children, which would run detached",
+                "node {} is not under the graph's root {root}: a node outside the tree runs \
+                 detached only when it calls a module function and has no children",
                 node.id
             )));
         }
@@ -396,6 +400,7 @@ impl BehaviorTreeInterpreter {
             lowered: None,
             dirty: true,
             fresh: HashSet::new(),
+            functions: FunctionIndex::new(),
         }
     }
 
@@ -509,6 +514,16 @@ impl BehaviorTreeInterpreter {
     /// would not lower. A selection feeding a parameter the function declares
     /// mutable fails the next tick, which holds the device's index.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
+        self.edit_lowering(diff, false)
+    }
+
+    /// [`edit`](Self::edit), and when `detached`, lower the edited graph's
+    /// detached nodes too, against the function index of the last lowering:
+    /// a run whose detached nodes cannot lower — reading one another in a
+    /// cycle, writing one cell twice — is refused here, rather than stalling
+    /// every tick of the device until it is halted. A function that index
+    /// does not have fails its node when it runs, as at any lowering.
+    fn edit_lowering(&mut self, diff: GraphDiff, detached: bool) -> Result<(), BehaviorError> {
         let changed: Vec<Uuid> = changed_nodes(&diff).collect();
         let mut graph = self.graph.clone();
         graph
@@ -519,8 +534,13 @@ impl BehaviorTreeInterpreter {
         // the tick hands over: here only the return binding is checked, and
         // the lowering checks the rest.
         check_selections(&graph, &FunctionIndex::new())?;
-        build_behavior_tree(&graph, &|_| None)
+        let tree = build_behavior_tree(&graph, &|_| None)
             .map_err(|e| behavior_error(format!("the edited graph does not lower: {e:?}")))?;
+        if detached {
+            tree.lower_detached(&self.functions).map_err(|e| {
+                behavior_error(format!("the graph's detached nodes do not lower: {e:?}"))
+            })?;
+        }
         self.graph = graph;
         self.dirty = true;
         self.fresh.extend(changed);
@@ -576,7 +596,7 @@ impl BehaviorTreeInterpreter {
             variables,
         });
         fragment.add_nodes.push(self.runner_node());
-        self.edit(fragment).inspect_err(|_| {
+        self.edit_lowering(fragment, true).inspect_err(|_| {
             self.runs.pop();
         })?;
         Ok(handle)
@@ -674,7 +694,7 @@ impl BehaviorTreeInterpreter {
             ..GraphDiff::default()
         };
         if diff != GraphDiff::default() {
-            self.edit(diff)?;
+            self.edit_lowering(diff, true)?;
         }
         let run = &mut self.runs[at];
         run.detached = detached;
@@ -785,6 +805,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             self.fresh.clear();
             self.lowered = Some(lowered);
             self.dirty = false;
+            self.functions.clone_from(ctx.functions);
         }
 
         // One runtime tick is one tree tick. The runner's own status is not an
