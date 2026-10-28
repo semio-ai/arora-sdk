@@ -26,7 +26,7 @@ use crate::nodes::{
     STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
     UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, UNSET_STR_FUNCTION_ID, WAIT_STR_SET_FUNCTION_ID,
 };
-use crate::schema::{Expression, _RET_PARAM_ID};
+use crate::schema::{Expression, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
 use crate::variable::TREE_LOCAL_PREFIX;
 use crate::ModuleFunction;
@@ -588,6 +588,19 @@ fn groot_param_arg_to_arora(
     module_function: &ModuleFunction,
     variables: &mut HashMap<String, Uuid>,
 ) -> Result<(Uuid, Expression), BehaviorTreeError> {
+    if param_arg.0 == "_on_change" {
+        let value =
+            param_arg
+                .1
+                .parse::<bool>()
+                .map_err(|_| BehaviorTreeError::InconsistentTreeError {
+                    message: "_on_change needs a boolean literal".to_string(),
+                })?;
+        return Ok((
+            _ON_CHANGE_PARAM_ID,
+            Expression::Value(Value::Boolean(value)),
+        ));
+    }
     let param_matches: Vec<&Uuid> = module_function
         .function
         .parameter_ordering
@@ -664,8 +677,8 @@ fn arora_param_to_groot(
     module_function: &ModuleFunction,
     variables: &mut HashMap<Uuid, String>,
 ) -> Result<(String, String), BehaviorTreeError> {
-    // Behavior tree layer: handle _RET_PARAM_ID specially
-    if *param_arg.0 == _RET_PARAM_ID {
+    // Reserved arguments belong to the tree, outside the module signature.
+    if [_RET_PARAM_ID, _ON_CHANGE_PARAM_ID].contains(param_arg.0) {
         let value = match param_arg.1 {
             Expression::Uuid(id) | Expression::VariableId(id) => {
                 format!("{{{}}}", groot_variable_name(*id, variables))
@@ -677,7 +690,12 @@ fn arora_param_to_groot(
                 })
             }
         };
-        return Ok(("_ret".to_string(), value));
+        let name = if *param_arg.0 == _RET_PARAM_ID {
+            "_ret"
+        } else {
+            "_on_change"
+        };
+        return Ok((name.to_string(), value));
     }
 
     let function = &module_function.function;
@@ -1217,19 +1235,31 @@ mod tests {
     }
 
     /// The export writes a module function under its declared name — the
-    /// spelling the importer accepts — so a tree round-trips.
+    /// spelling the importer accepts — and preserves the reserved cache opt-in
+    /// without resolving it against the module's parameters.
     #[test]
     fn a_module_function_exports_under_its_name_and_round_trips() {
         let mut index = HashMap::new();
         let walk = index_status_leaf(&mut index, Uuid::new_v4(), "walk");
-        let node = TreeNode::action_node(walk);
-        let mut names = HashMap::new();
-        let exported = Node::try_from_tree_node(&node, &index, &mut names).expect("exported");
-        assert_eq!(exported.id, "walk");
-        let back = exported
-            .try_into_tree_node(&index, &mut HashMap::new())
-            .expect("the exported tag resolves again");
-        assert_eq!(back.function, walk);
+        for on_change in [true, false] {
+            let mut node = TreeNode::action_node(walk);
+            node.parameters.insert(
+                _ON_CHANGE_PARAM_ID,
+                Expression::Value(Value::Boolean(on_change)),
+            );
+            let mut names = HashMap::new();
+            let exported = Node::try_from_tree_node(&node, &index, &mut names).expect("exported");
+            assert_eq!(exported.id, "walk");
+            assert_eq!(exported.param_args["_on_change"], on_change.to_string());
+            let xml = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+            let back = BehaviorTree::try_from_groot_xml(&xml)
+                .unwrap()
+                .root
+                .try_into_tree_node(&index, &mut HashMap::new())
+                .expect("the exported tag resolves again");
+            assert_eq!(back.function, walk);
+            assert_eq!(back.parameters, node.parameters);
+        }
     }
 
     /// The core string nodes resolve with no module loaded — an empty index —

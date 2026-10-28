@@ -53,7 +53,10 @@ impl TreeNode {
     ) -> Result<Rc<Node>, BehaviorTreeError> {
         let mut cells = crate::id_hash::IdMap::default();
         cells.extend(node_parameters_variables.drain());
-        let root = self.collect_cells(node_index, variables, &mut cells, resolver, names);
+        let mut variable_cells = crate::id_hash::IdMap::default();
+        variable_cells.extend(variables.drain());
+        let root = self.collect_cells(node_index, &mut variable_cells, &mut cells, resolver, names);
+        variables.extend(variable_cells);
         node_parameters_variables.extend(cells);
         root
     }
@@ -62,7 +65,7 @@ impl TreeNode {
     pub(crate) fn collect_cells(
         self,
         mut node_index: &mut HashMap<Uuid, Rc<Node>>,
-        mut variables: &mut HashMap<Uuid, VariableCell>,
+        mut variables: &mut crate::id_hash::IdMap<Uuid, VariableCell>,
         mut node_parameters_variables: &mut crate::id_hash::IdMap<NodeParameterId, VariableCell>,
         resolver: &VariableResolver,
         names: &HashMap<Uuid, String>,
@@ -122,7 +125,7 @@ impl TreeNode {
         names: &HashMap<Uuid, String>,
     ) -> Result<BehaviorTree, BehaviorTreeError> {
         let mut node_index = HashMap::new();
-        let mut variables = HashMap::new();
+        let mut variables = crate::id_hash::IdMap::default();
         let mut node_arg_variables = crate::id_hash::IdMap::default();
         let root = self.collect_cells(
             &mut node_index,

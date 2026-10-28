@@ -1,0 +1,277 @@
+//! `cargo bench -p arora-behavior-tree --offline --bench incremental -- [ticks] [samples]`
+//! prints median microseconds per tick after 50 warm-up ticks, plus module calls
+//! and engine indirect dispatches per measured tick. Defaults: 500 ticks, 7 samples.
+//!
+//! The graph has N = 10, 100, 1000 module calls (add, mul, clamp, remap) and
+//! K = max(2, N/10) store inputs `input/j`, feeding K independent chains: call
+//! `i` reads input `i` when `i < K`, else the return of call `i - K`. Each call
+//! takes the same two arguments, `x` and `y`, in every form. Only the last call
+//! of each chain, which no call reads, publishes: its `_ret` is bound to the
+//! chain's store key `output/j`. Every other return is a value the next call
+//! of its chain reads, and stays in the tree. `settled` changes no input,
+//! `one-input` one chain's, `all-inputs` every chain's.
+//!
+//! The forms:
+//!
+//! - `attached-naive`: today's executor, `PARALLEL[ leaf × N, RUN ]`. An
+//!   intermediate leaf binds `_ret` to a tree-local variable, which its
+//!   reader's `@node` reads; a chain's last leaf binds `_ret` to its key.
+//! - `attached-plain-incremental`: the same tree with the incremental flag on
+//!   and no `_on_change`: the incremental cost for existing effectful trees.
+//! - `attached-incremental`: the same tree, its leaves `_on_change`, on the
+//!   incremental executor.
+//! - `detached`: the same calls as detached nodes under a root `RUN`. A chain's
+//!   last node binds `_ret` to its key, a sink; every other binds nothing and
+//!   is read through `@node`, so it runs because it feeds a sink.
+//! - `attached-guarded`: the attached leaves and bindings on today's executor
+//!   (flag off), each leaf wrapped as `FALLBACK[SEQ[Equal(a: 0, b: 1), leaf],
+//!   SUCCEED]`, the pattern a tree uses to skip an unchanged node without the
+//!   flag. `Equal` on two different literals always fails, so no leaf is
+//!   called: the row is the cost of the guard alone on a settled graph, four
+//!   native nodes ticked per graph node and no module call. A literal guard
+//!   cannot follow an input change, so this form runs in `settled` only, and
+//!   it is left out of the output comparison because its leaves never publish.
+//!
+//! Every other form must publish the same K keys, which the bench compares.
+//! Store publication is included in all timings.
+//!
+//! The host is a native test bridge, not wasm execution. It answers the owned
+//! calls the attached executor makes (`arora_call`) and the borrowed calls the
+//! detached evaluator makes (`arora_call_borrowed`) alike: it computes from the
+//! arguments where they are, copies none, and records none, counting module
+//! calls the same way on both. Compare counts as well as times.
+mod support {
+    pub mod incremental;
+}
+
+use std::collections::HashMap;
+use std::hint::black_box;
+use std::time::Instant;
+
+use arora_behavior_tree::nodes::{
+    EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
+    PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+};
+use arora_behavior_tree::schema::{
+    Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID,
+};
+use arora_behavior_tree::{load_behavior_tree_nodes_with, lower_behavior_tree};
+use arora_simple_data_store::SimpleDataStore;
+use arora_types::data::{DataStore, Key};
+use arora_types::value::Value;
+use support::incremental::{Bridge, Op, X, Y};
+use uuid::Uuid;
+
+fn id(n: usize) -> Uuid {
+    Uuid::from_u128(n as u128)
+}
+fn variable(n: usize) -> Expression {
+    Expression::VariableId(id(n))
+}
+/// First id of the `attached-guarded` wrapper nodes: graph node `i` takes
+/// `GUARD + 4 * i` to `GUARD + 4 * i + 3`, above every other id in the bench.
+const GUARD: usize = 1_000_000;
+fn measure(
+    n: usize,
+    mode: &str,
+    scenario: &str,
+    ticks: usize,
+    samples: usize,
+) -> (f64, f64, f64, Vec<Option<Value>>) {
+    let k = 2.max(n / 10);
+    let store = SimpleDataStore::new();
+    let mut names = HashMap::new();
+    let inputs: Vec<_> = (0..k)
+        .map(|i| {
+            let key = format!("input/{i}");
+            names.insert(id(60000 + i), key.clone());
+            let slot = store.slot(&Key::from(key));
+            slot.set(Some(Value::F64(0.0))).unwrap();
+            slot
+        })
+        .collect();
+    // One published key per chain, written by its last node.
+    let outputs: Vec<_> = (0..k)
+        .map(|j| {
+            let key = format!("output/{j}");
+            names.insert(id(90000 + j), key.clone());
+            store.slot(&Key::from(key))
+        })
+        .collect();
+    let detached = mode == "detached";
+    let guarded = mode == "attached-guarded";
+    let top = |i: usize| id(if guarded { GUARD + 4 * i } else { 2 + i });
+    let mut nodes = vec![Node {
+        id: id(1),
+        function: if detached {
+            RUN_FUNCTION_ID
+        } else {
+            PARALLEL_FUNCTION_ID
+        },
+        children: (!detached).then(|| (0..n).map(top).chain([id(2 + n)]).collect()),
+        ..Node::default()
+    }];
+    let mut bridge = Bridge::default();
+    bridge.count_only = true;
+    for i in 0..n {
+        let function = id(100000 + i);
+        bridge
+            .ops
+            .insert(function, [Op::Add, Op::Mul, Op::Clamp, Op::Remap][i % 4]);
+        let input = if i < k {
+            variable(60000 + i)
+        } else {
+            Expression::NodeArgument(NodeParameterId {
+                node: id(2 + i - k),
+                parameter: _RET_PARAM_ID,
+            })
+        };
+        let mut arguments = HashMap::from([(X, input), (Y, Expression::Value(Value::F64(1.1)))]);
+        // Leaf `i + k` reads leaf `i`; a leaf no other reads ends chain `i % k`
+        // and publishes its return to that chain's key. An attached reader
+        // reads the tree-local variable `_ret` is bound to; a detached reader
+        // reads the port `@node` names, so an intermediate detached node binds
+        // nothing and runs because the sink of its chain reads it.
+        if i + k >= n {
+            arguments.insert(_RET_PARAM_ID, variable(90000 + i % k));
+        } else if !detached {
+            arguments.insert(_RET_PARAM_ID, variable(30000 + i));
+        }
+        if mode == "attached-incremental" {
+            arguments.insert(_ON_CHANGE_PARAM_ID, Expression::Value(Value::Boolean(true)));
+        }
+        nodes.push(Node {
+            id: id(2 + i),
+            function,
+            arguments,
+            children: None,
+        });
+        if guarded {
+            let fallback = GUARD + 4 * i;
+            let (seq, equal, succeed) = (fallback + 1, fallback + 2, fallback + 3);
+            nodes.extend([
+                Node {
+                    id: id(fallback),
+                    function: FALLBACK_FUNCTION_ID,
+                    children: Some(vec![id(seq), id(succeed)]),
+                    ..Node::default()
+                },
+                Node {
+                    id: id(seq),
+                    function: SEQ_FUNCTION_ID,
+                    children: Some(vec![id(equal), id(2 + i)]),
+                    ..Node::default()
+                },
+                Node {
+                    id: id(equal),
+                    function: EQUAL_FUNCTION_ID,
+                    arguments: HashMap::from([
+                        (EQUAL_A_PARAM_ID, Expression::Value(Value::F64(0.0))),
+                        (EQUAL_B_PARAM_ID, Expression::Value(Value::F64(1.0))),
+                    ]),
+                    ..Node::default()
+                },
+                Node {
+                    id: id(succeed),
+                    function: SUCCEED_FUNCTION_ID,
+                    ..Node::default()
+                },
+            ]);
+        }
+    }
+    if !detached {
+        nodes.push(Node {
+            id: id(2 + n),
+            function: RUN_FUNCTION_ID,
+            ..Node::default()
+        });
+    }
+    let tree =
+        load_behavior_tree_nodes_with(nodes, &|name| Some(store.slot(&Key::from(name))), &names)
+            .unwrap();
+    let tree = lower_behavior_tree(tree, &bridge.index(), &mut bridge, false).unwrap();
+    tree.set_incremental(matches!(
+        mode,
+        "attached-incremental" | "attached-plain-incremental"
+    ));
+    let update = |step: usize| {
+        let changed = match scenario {
+            "settled" => 0,
+            "one-input" => 1,
+            "all-inputs" => k,
+            _ => unreachable!(),
+        };
+        for input in inputs.iter().take(changed) {
+            input.set(Some(Value::F64((step % 17) as f64))).unwrap();
+        }
+    };
+    for step in 0..50 {
+        update(step);
+        black_box(tree.tick(&mut bridge).unwrap());
+    }
+    let mut times = Vec::new();
+    let mut calls = 0;
+    let mut dispatches = 0;
+    for sample in 0..samples {
+        bridge.reset_counts();
+        let start = Instant::now();
+        for step in 0..ticks {
+            update(50 + sample * ticks + step);
+            black_box(tree.tick(&mut bridge).unwrap());
+        }
+        times.push(start.elapsed().as_secs_f64() * 1e6 / ticks as f64);
+        calls += bridge.module_calls;
+        dispatches += bridge.dispatches;
+    }
+    times.sort_by(f64::total_cmp);
+    let divisor = (ticks * samples) as f64;
+    (
+        times[samples / 2],
+        calls as f64 / divisor,
+        dispatches as f64 / divisor,
+        outputs.iter().map(|slot| slot.get()).collect(),
+    )
+}
+fn main() {
+    let args: Vec<_> = std::env::args()
+        .skip(1)
+        .filter(|arg| arg != "--bench")
+        .collect();
+    let ticks: usize = args.first().map_or(500, |arg| arg.parse().expect("ticks"));
+    let samples: usize = args.get(1).map_or(7, |arg| arg.parse().expect("samples"));
+    assert!(
+        ticks > 0 && samples > 0 && samples % 2 == 1,
+        "positive ticks and odd samples"
+    );
+    println!("ticks={ticks}, samples={samples}, warm-up=50; median time, mean counts per tick");
+    println!("| N | scenario | form | us/tick | module calls/tick | dispatches/tick |");
+    println!("|---:|---|---|---:|---:|---:|");
+    for n in [10, 100, 1000] {
+        for scenario in ["settled", "one-input", "all-inputs"] {
+            let mut expected = None;
+            for mode in [
+                "attached-naive",
+                "attached-plain-incremental",
+                "attached-incremental",
+                "detached",
+                "attached-guarded",
+            ] {
+                let guarded = mode == "attached-guarded";
+                if guarded && scenario != "settled" {
+                    continue;
+                }
+                let (time, calls, dispatches, outputs) = measure(n, mode, scenario, ticks, samples);
+                if guarded {
+                    assert_eq!(calls, 0.0, "{n} {scenario} {mode}: a guarded leaf ran");
+                } else if let Some(expected) = &expected {
+                    assert_eq!(&outputs, expected, "{n} {scenario} {mode}");
+                } else {
+                    expected = Some(outputs);
+                }
+                println!(
+                    "| {n} | {scenario} | {mode} | {time:.3} | {calls:.3} | {dispatches:.3} |"
+                );
+            }
+        }
+    }
+}

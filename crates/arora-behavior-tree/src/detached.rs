@@ -88,7 +88,7 @@ use crate::nodes::{
     SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID, SET_STR_VARIABLE_PARAM_ID, UNPACK_FUNCTION_ID,
     UNPACK_OUT_PARAM_IDS, UNSET_STR_FUNCTION_ID, UNSET_STR_VARIABLE_PARAM_ID,
 };
-use crate::schema::{Expression, Node, NodeParameterId, _RET_PARAM_ID};
+use crate::schema::{Expression, Node, NodeParameterId, _ON_CHANGE_PARAM_ID, _RET_PARAM_ID};
 use crate::variable::VariableCell;
 use crate::{
     argument_value, compute_expression, expression_call_signatures, is_interpreter_function_id,
@@ -162,7 +162,7 @@ struct Lowered {
     /// order.
     observed: Vec<usize>,
     /// By attached node: the detached nodes it reads, by position.
-    pulls: HashMap<Uuid, Rc<[usize]>>,
+    pulls: crate::id_hash::IdMap<Uuid, Rc<[usize]>>,
     plan: DetachedPlan,
 }
 
@@ -204,16 +204,13 @@ fn inconsistent(message: String) -> BehaviorTreeError {
 
 /// The identity of a cell: two clones of one cell are the same cell.
 fn cell_id(cell: &VariableCell) -> usize {
-    match cell {
-        VariableCell::Local(cell) => Rc::as_ptr(cell) as *const () as usize,
-        VariableCell::Stored(slot) => Rc::as_ptr(slot) as *const () as usize,
-    }
+    cell.identity()
 }
 
 /// The cells `expression` reads, at any depth.
-fn cells_read(
+pub(crate) fn cells_read(
     expression: &Expression,
-    variables: &HashMap<Uuid, VariableCell>,
+    variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
     node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     found: &mut Vec<VariableCell>,
 ) {
@@ -368,7 +365,7 @@ impl Detached {
         &self,
         functions: &FunctionIndex,
         attached: &[Rc<Node>],
-        variables: &HashMap<Uuid, VariableCell>,
+        variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
         node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
     ) -> Result<(), BehaviorTreeError> {
         let names = Names::functions(functions);
@@ -455,7 +452,7 @@ impl Detached {
             let mut ports = vec![_RET_PARAM_ID];
             if let Some(signature) = signature {
                 for &(parameter, argument) in &ordered {
-                    if parameter == _RET_PARAM_ID {
+                    if parameter == _RET_PARAM_ID || parameter == _ON_CHANGE_PARAM_ID {
                         continue;
                     }
                     let Some(declared) = signature.function.parameters.get(&parameter) else {
@@ -529,7 +526,9 @@ impl Detached {
             arguments.push(
                 ordered
                     .into_iter()
-                    .filter(|(parameter, _)| *parameter != _RET_PARAM_ID)
+                    .filter(|(parameter, _)| {
+                        ![_RET_PARAM_ID, _ON_CHANGE_PARAM_ID].contains(parameter)
+                    })
                     .map(|(parameter, argument)| {
                         let at = NodeParameterId {
                             node: node.id,
@@ -717,7 +716,7 @@ impl Detached {
             .enumerate()
             .map(|(at, node)| reads_of(node, Some(at)))
             .collect::<Result<_, _>>()?;
-        let mut pulls = HashMap::new();
+        let mut pulls = crate::id_hash::IdMap::default();
         let mut tree_reads = Vec::new();
         for node in attached {
             let read = reads_of(node, None)?;
@@ -1218,13 +1217,13 @@ pub(crate) fn native_writes(function: Uuid) -> &'static [Uuid] {
 fn call_writes(
     node: &Node,
     functions: &FunctionIndex,
-    variables: &HashMap<Uuid, VariableCell>,
+    variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
     node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
 ) -> Vec<VariableCell> {
     fn walk(
         expression: &Expression,
         functions: &FunctionIndex,
-        variables: &HashMap<Uuid, VariableCell>,
+        variables: &crate::id_hash::IdMap<Uuid, VariableCell>,
         node_parameters_variables: &crate::id_hash::IdMap<NodeParameterId, VariableCell>,
         found: &mut Vec<VariableCell>,
     ) {
