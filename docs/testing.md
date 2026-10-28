@@ -10,8 +10,11 @@ cargo test --release                  # what CI's `test` job runs, over the defa
 cargo test --release -p arora-hal     # one crate
 ```
 
-Never pass `--workspace`: it adds the opt-in NAO cross-compile, which needs its
-own toolchain. On a pull request CI tests only the members the diff reaches;
+`--workspace` is an optional, broader run: it adds the members kept out of the
+default build, polly (and its AWS SDK) and the test guests, whose own unit tests
+(`modules/test-rust-wasm`'s, for one) the default run does not reach; the
+integration tests build those guests only as artifacts. On a pull request CI tests
+only the members the diff reaches;
 `.github/scripts/list_modified_targets.sh origin/main` prints that selection.
 The Zenoh backend of the ROS 2 bridge and the wasm32 browser tests run in their
 own CI jobs (see [the CI section of the architecture](architecture.md#ci)); the
@@ -70,7 +73,6 @@ tests:
   | the ROS 2 bridge over live DDS | `crates/arora-bridge-ros2/tests/tests.rs` |
   | the ROS 2 bridge over a running device, on both backends | `crates/arora-bridge-ros2/tests/device.rs` |
   | the ROS 2 bridge to a native subscriber (`#[ignore]`d, Docker) | `crates/arora-bridge-ros2/tests/zenoh_native.rs` |
-  | the NAOqi device against a fake NAOqi | `crates/arora-hal-naoqi/tests/device.rs` |
   | guests through `arora-cli` | `tests/tests/integration.rs` |
 
   A variant of a behaviour that a unit test can reach — another input, another

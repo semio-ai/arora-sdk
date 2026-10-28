@@ -299,7 +299,7 @@ over them. Animation has already moved the same way.
 | vizij-rs | In arora-sdk | Stays in vizij-rs |
 |---|---|---|
 | `vizij-graph-core` 3.1 | **`arora-dataflow-nodes`**: the node vocabulary (arithmetic, logic, time, smoothing, vectors, noise, blending, records, IK behind the `urdf_ik` feature) as the functions of `@arora/dataflow`, `@arora/geometry` and `@arora/kinematics` (§4.3) | `vizij-graph-core` 4: the graph format, the editor registry, the importer from a graph to a tree and its detached nodes, `TreeRuntime`, and `@vizij/graph`'s `input`, `output` and declared-shape check |
-| `vizij-api-core` 2.1 | **`arora-geometry`**: vec2–4, quat, transform and the blending of values | `vizij-api-core` 3: shapes, typed paths, color, coercion, write batches and the graph-spec JSON forms, over `arora-geometry` |
+| `vizij-api-core` 2.1 | **`arora-geometry`**: vec2–4, quat, transform and the blending of values; **`arora-graphics-types`**: the RGBA colour | `vizij-api-core` 3: shapes, typed paths, coercion, write batches and the graph-spec JSON forms, over `arora-geometry` and `arora-graphics-types` |
 | `vizij-arora-behavior` 7.2 | — | `ProcessingGraph`, which runs a face on the tree through `vizij-graph-core` |
 | `vizij-graph-wasm`, `vizij-graph-registry-export` | — | the editor's wasm bindings and registry export, over `vizij-graph-core` |
 | `vizij-arora-host` | — | the face's composition, the standard and ROS4HRI mappings, the profiles, the skills |
@@ -455,7 +455,7 @@ Each stage lands on its own and states what it hands to the next.
 | `arora-behavior-tree` | 9.3: detached nodes, `behavior-tree 1.3`. `Expression` does not change. |
 | `arora-behavior` (9.6) | No change for detached nodes: `Graph` carries them. Minor with §5: `Replace` and `Overlap`, since `RunPolicy` is non-exhaustive. |
 | `arora` (13.6), `arora-web` | Minor: `load` and `edit` described. Major with §5: `Concurrent` refuses an overlap it accepted before. |
-| `arora-dataflow-nodes`, `arora-geometry` | New, `1.0.0`. |
+| `arora-dataflow-nodes`, `arora-geometry`, `arora-graphics-types` | New, `1.0.0`. |
 | `vizij-graph-core` 4, `vizij-api-core` 3 | Major: over `arora-dataflow-nodes` and `arora-geometry`. |
 | `vizij-animation-core`, `vizij-animation-module` | No further release once vizij-rs depends on the arora crates. |
 | `vizij-arora-host` | Major: it registers the skills as trees. |

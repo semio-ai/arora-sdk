@@ -150,7 +150,8 @@ const MODULE_HELP: &str = "A module directory to load besides the device directo
 /// it never connects.
 ///
 /// The `arora` binary's [`DeviceCli`] and the robot runners of
-/// `arora-hal-ros2`, `arora-hal-restful` and `arora-hal-naoqi` take it.
+/// `arora-hal-ros2`, `arora-hal-restful` and `arora-hal-naoqi` (in
+/// arora-aldebaran) take it.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Args)]
 pub struct RunnerArgs {

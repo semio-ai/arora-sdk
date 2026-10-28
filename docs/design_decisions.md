@@ -68,9 +68,6 @@ own caching properly.
 - `[unstable] bindeps = true` enables artifact dependencies for the whole
   workspace. This is the canonical spelling; `cargo-features = ["bindeps"]`
   inside an individual `Cargo.toml` is **not** sufficient for bindeps.
-- `[target.i686-unknown-linux-musl]` pins the Homebrew cross-compiler
-  binaries on macOS (`brew install messense/macos-cross-toolchains/...`)
-  for the NAO cross-build of `arora-naoqi`.
 - `[target.wasm32-unknown-unknown]` sets `getrandom_backend="wasm_js"` so the
   browser engine build (`arora-web`) selects getrandom's WebCrypto backend.
 
@@ -226,12 +223,14 @@ core module with the same target features.
 
 ### NAO through a Rust HAL, not a C++ module
 
-The NAO is served by `crates/arora-hal-naoqi`, a HAL over the pure-Rust
+The NAO is served by `arora-hal-naoqi`, a HAL over the pure-Rust
 `libqi-vibe` crate, rather than by a C++ module linking libqi. There is no
-C++ cross-build: the HAL builds for the host with the workspace, and the
-cross-build of its `arora-naoqi` runner to `i686-unknown-linux-musl` for the
-robot is opt-in and not run in CI. See
-[Deploy it on the robot](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).
+C++ cross-build: the HAL builds for the host, and the cross-build of its
+`arora-naoqi` runner to `i686-unknown-linux-musl` for the robot is opt-in and
+not run in CI. It lives in
+[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran), with the
+other Aldebaran robot support, and depends on the published Arora crates. See
+[Deploy it on the robot](https://github.com/semio-ai/arora-aldebaran#deploy-it-on-the-robot).
 
 ## Engine architecture
 
@@ -714,8 +713,8 @@ what its hardware takes.
 ### A device carries its modules as module directories
 
 Every device runner — `arora`, and the robot runners `arora-ros2`,
-`arora-restful` and `arora-naoqi` — loads the guest modules under its device
-directory's `modules/` (and any `--module` directory): each a `header.json`
+`arora-restful` and arora-aldebaran's `arora-naoqi` — loads the guest
+modules under its device directory's `modules/` (and any `--module` directory): each a `header.json`
 beside its artifact, and optionally the module's records in `records/`. An
 operator installs a module by copying a directory, with no custom binary; the
 embedder path (`AroraBuilder::with_module`, `with_registry`) stays what it is,

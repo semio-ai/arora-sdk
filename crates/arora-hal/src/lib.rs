@@ -29,7 +29,8 @@
 //! the same state.
 //!
 //! Pick an implementation per robot: [`FakeHal`] here (also the test double),
-//! and the real ones (ros2, restful, nao) in their own sibling crates.
+//! and the real ones (ros2, restful) in their own sibling crates; NAOqi's
+//! lives in arora-aldebaran.
 
 use std::collections::{BTreeSet, HashMap};
 use std::pin::Pin;

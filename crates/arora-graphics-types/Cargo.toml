@@ -1,0 +1,18 @@
+[package]
+name = "arora-graphics-types"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Arora's graphics types over its Value: the RGBA colour."
+repository = "https://github.com/semio-ai/arora-sdk"
+readme = "README.md"
+keywords = ["arora", "graphics", "color", "robotics"]
+categories = ["science::robotics", "graphics"]
+
+[dependencies]
+arora-geometry = { path = "../arora-geometry", version = "1" }
+arora-types = { path = "../arora-types", version = "3" }
+uuid = "1"
+
+[dev-dependencies]
+serde_json = "1"

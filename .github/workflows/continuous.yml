@@ -36,7 +36,6 @@ jobs:
       test-arora-msgs-ros2: ${{ steps.affected.outputs.test-arora-msgs-ros2 }}
       test-arora-hal-ros2: ${{ steps.affected.outputs.test-arora-hal-ros2 }}
       test-arora-hal-restful: ${{ steps.affected.outputs.test-arora-hal-restful }}
-      test-arora-hal-naoqi: ${{ steps.affected.outputs.test-arora-hal-naoqi }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -121,27 +120,27 @@ jobs:
       - name: Test the ROS 2 bridge on the Zenoh backend
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
 
-  # The robot runners (arora-ros2, arora-restful, arora-naoqi) build only
-  # with their crates' `runner` feature, with or without their `studio`
-  # feature (arora's Semio Studio connection, which decides whether a runner
-  # contacts Studio, and builds only with arora's `studio-bridge`). The test
-  # and lint jobs leave all of these off, so they would never be compiled.
-  # Lint the runners and run their tests both ways whenever a change reaches
-  # one of their crates, and test them once mixed: one runner with `studio`
-  # enables arora's `studio-bridge` for all of them, and the others must still
-  # take no Studio option, refusing `--no-studio`.
+  # The robot runners (arora-ros2, arora-restful) build only with their
+  # crates' `runner` feature, with or without their `studio` feature (arora's
+  # Semio Studio connection, which decides whether a runner contacts Studio,
+  # and builds only with arora's `studio-bridge`). The test and lint jobs leave
+  # all of these off, so they would never be compiled. Lint the runners and run
+  # their tests both ways whenever a change reaches one of their crates, and
+  # test them once mixed: one runner with `studio` enables arora's
+  # `studio-bridge` for both, and the other must still take no Studio option,
+  # refusing `--no-studio`.
   runners:
     needs: select
-    if: needs.select.outputs.test-arora || needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful || needs.select.outputs.test-arora-hal-naoqi
+    if: needs.select.outputs.test-arora || needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      # Line tables are enough for a failing test's backtrace, and keep three
+      # Line tables are enough for a failing test's backtrace, and keep the
       # linked runtimes within the runner's disk.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner
-      STUDIO_RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner,arora-hal-ros2/studio,arora-hal-restful/studio,arora-hal-naoqi/studio
-      MIXED_RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner,arora-hal-restful/studio
+      RUNNERS: -p arora-hal-ros2 -p arora-hal-restful --features arora-hal-ros2/runner,arora-hal-restful/runner
+      STUDIO_RUNNERS: -p arora-hal-ros2 -p arora-hal-restful --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-ros2/studio,arora-hal-restful/studio
+      MIXED_RUNNERS: -p arora-hal-ros2 -p arora-hal-restful --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-restful/studio
     steps:
       - uses: actions/checkout@v6
 
