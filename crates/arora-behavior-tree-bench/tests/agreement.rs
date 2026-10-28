@@ -152,50 +152,88 @@ fn summary_excludes_warm_up_and_uses_tick_medians_then_linear_quantiles() {
     assert_eq!(s.phases, vec![Some(3.0), Some(3.5)]);
 }
 
-// The store must win over the host's last write when another writer intervenes.
-fn write_raw(sink: bool) -> serde_json::Value {
-    let text = if sink {
-        "running\n\nobserved: {observed} = add(operand_0: {out})\nwriter: {out} = add(operand_0: 2f64)"
-    } else {
-        "fallback\n  sequence\n    equal(a: {gate}, b: true)\n    unpack(values: f64[2], out_0: {out})\n  running"
-    };
+// The store must win over the host's last write when the tree writes the key.
+fn write_raw() -> serde_json::Value {
+    let text = "fallback\n  sequence\n    equal(a: {gate}, b: true)\n    unpack(values: f64[2], out_0: {out})\n  running";
     serde_json::json!({"keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0},{"name":"gate","initial":true},{"name":"observed","initial":0.0}],
         "text":text,"ticks":3,"warmUp":0,"clock":"clock","dt":1.0/60.0,
         "events":[[0,"out",1.0],[1,"gate",false],[2,"out",1.0]],"phases":{"names":["one"],"runs":[]}})
 }
 #[test]
 fn host_reapplies_events_after_tree_writes() {
-    assert_host_write(false);
-}
-#[test]
-fn host_reapplies_events_after_sink_writes() {
-    assert_host_write(true);
-}
-fn assert_host_write(sink: bool) {
     use arora_types::value::Value;
-    let workload = Workload::parse(&write_raw(sink).to_string()).unwrap();
+    let workload = Workload::parse(&write_raw().to_string()).unwrap();
     for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
-        let expected: Vec<_> = (if sink {
-            vec![vec![2.0, 1.0], vec![2.0, 2.0], vec![2.0, 1.0]]
-        } else {
-            vec![vec![2.0], vec![2.0], vec![1.0]]
-        })
-        .into_iter()
-        .map(|values| {
-            measure::values_hash(
-                &values
-                    .into_iter()
-                    .map(|x| Some(Value::F64(x)))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect();
+        let expected: Vec<_> = [2.0, 2.0, 1.0]
+            .into_iter()
+            .map(|x| measure::values_hash(&[Some(Value::F64(x))]))
+            .collect();
         assert_eq!(row.runs[0].written, expected, "{}", row.form);
     }
 }
+
+#[test]
+fn an_output_bound_to_another_nodes_input_writes_the_key_it_reads() {
+    let mut raw = synthetic::json();
+    raw["keys"] =
+        serde_json::json!([{"name":"arora/time","initial":0.0},{"name":"out","initial":null}]);
+    raw["events"] = serde_json::json!([]);
+    raw["text"] = "parallel\n  reader: is_string_set(value: {out})\n  set_string(variable: @reader.value, value: \"changed\")\n  running".into();
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    let out = workload
+        .keys
+        .iter()
+        .position(|(name, _)| name == "out")
+        .unwrap();
+    assert!(workload.compared.contains(&out));
+    assert!(workload.writer_keys.contains(&out));
+}
+
+#[test]
+fn parser_rejects_order_dependent_reads_of_graph_calls() {
+    let mut raw = synthetic::json();
+    let error = |raw: &serde_json::Value| Workload::parse(&raw.to_string()).err().unwrap();
+    // The tree reads a key a graph call writes.
+    raw["text"] = "{graph/mixed} = add(operand_0: {target})\n\nsink: {target} = add(node: \"sink\", operand_0: 1f32)".into();
+    assert!(
+        error(&raw).contains("through its port, not through target"),
+        "{}",
+        error(&raw)
+    );
+    // A graph call reads a tree-local cell another graph call writes.
+    raw["text"] = "running\n\ntmp: {.tmp} = add(node: \"tmp\", operand_0: 1f32)\nreader: {target} = add(node: \"reader\", operand_0: {.tmp})".into();
+    assert!(
+        error(&raw).contains("through its port, not through .tmp"),
+        "{}",
+        error(&raw)
+    );
+    // A graph call writes another node's input.
+    raw["text"] = "running\n\nconsumer: {target} = add(node: \"consumer\", operand_0: 0f32)\nproducer: @consumer.operand_0 = add(node: \"producer\", operand_0: 1f32)".into();
+    assert!(
+        error(&raw).contains("not another node's input"),
+        "{}",
+        error(&raw)
+    );
+    // A graph call's state is its own.
+    raw["text"] = "running\n\nd: {target} = damp(node: \"d\", in: {input}, param.half_life: 0.12f32, dt: 0.016666667f32, state: {.d})".into();
+    assert!(Workload::parse(&raw.to_string()).is_ok());
+}
+
+#[test]
+fn digests_canonicalize_signed_zero_in_both_widths() {
+    use arora_types::value::Value;
+    assert_eq!(
+        measure::values_hash(&[Some(Value::F32(-0.0))]),
+        measure::values_hash(&[Some(Value::F32(0.0))])
+    );
+    assert_eq!(
+        measure::values_hash(&[Some(Value::F64(-0.0))]),
+        measure::values_hash(&[Some(Value::F64(0.0))])
+    );
+}
 #[test]
 fn tree_written_values_change_the_digest() {
-    let mut raw = write_raw(false);
+    let mut raw = write_raw();
     let workload = Workload::parse(&raw.to_string()).unwrap();
     let first = measure::replay(&workload, FORMS[0], true, &Monotonic::default());
     raw["text"] = raw["text"]
@@ -215,7 +253,7 @@ fn timed_actions_progress_at_thirty_hz() {
         "sequence\n  hold(t: {clock}, duration: 0.05, state: ())\n  unpack(values: f64[2], out_0: {out})",
         "unpack(values: @frame, out_0: {out})\n\nlate: greaterthan(lhs: {clock}, rhs: 0.09f32)\nframe: if(cond: @late, then: f64[2], else: f64[1])",
     ] {
-        let mut raw = write_raw(false);
+        let mut raw = write_raw();
         raw["text"] = text.into(); raw["dt"] = (1.0/30.0).into(); raw["events"] = serde_json::json!([]);
         let workload = Workload::parse(&raw.to_string()).unwrap();
         for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
@@ -228,7 +266,7 @@ fn timed_actions_progress_at_thirty_hz() {
 #[test]
 fn a_tree_call_leaves_its_last_write_to_an_output() {
     use arora_types::value::Value;
-    let mut raw = write_raw(false);
+    let mut raw = write_raw();
     raw["text"] = "unpack(values: @frame, out_0: {out})\n\ndue: greaterthan(lhs: {clock}, rhs: 0f32)\nframe: if(cond: @due, then: f64[0], else: f64[1])".into();
     raw["events"] = serde_json::json!([]);
     let workload = Workload::parse(&raw.to_string()).unwrap();
@@ -246,7 +284,7 @@ fn a_tree_call_leaves_its_last_write_to_an_output() {
 /// Attached adds its wrapper and its graph leaf, and runs the constant each tick.
 #[test]
 fn counting_includes_reentrant_dataflow_host_and_real_calls_once() {
-    let mut raw = write_raw(false);
+    let mut raw = write_raw();
     raw["text"] = "parallel\n  hold(t: {clock}, duration: 0, state: ())\n  parallel\n    unpack(values: @values, out_0: {out})\n    unpack(values: @values, out_0: {observed})\n  say(text: \"\", voice: \"\", viseme: {viseme})\n\nvalues: constant(param.value: f64[3])".into();
     raw["keys"]
         .as_array_mut()
@@ -273,7 +311,7 @@ fn counting_includes_reentrant_dataflow_host_and_real_calls_once() {
 /// around the tree; the naive form still runs even an unused graph every tick.
 #[test]
 fn attached_transform_orders_calls_and_replaces_return_ports() {
-    let mut raw = write_raw(false);
+    let mut raw = write_raw();
     raw["text"] = "unpack(values: f64[4], out_0: {out})\n\nlast: {observed} = add(operand_0: @first)\nfirst: add(operand_0: {out}, operand_1: 1f32)\nunused: add(operand_0: 9f32)".into();
     raw["events"] = serde_json::json!([]);
     let workload = Workload::parse(&raw.to_string()).unwrap();
@@ -293,7 +331,7 @@ fn attached_transform_orders_calls_and_replaces_return_ports() {
 /// cell, while a text-only output key still participates in agreement.
 #[test]
 fn attached_transform_preserves_state_ports_and_text_only_keys() {
-    let mut raw = write_raw(false);
+    let mut raw = write_raw();
     raw["text"] = "{introduced} = add(operand_0: @smooth.state[.0])\n\nsmooth: damp(in: f32[1,2], dt: 0.1f32, param.half_life: 0.1f32, state: ())".into();
     raw["events"] = serde_json::json!([]);
     let workload = Workload::parse(&raw.to_string()).unwrap();
@@ -311,7 +349,7 @@ fn attached_transform_preserves_state_ports_and_text_only_keys() {
 #[test]
 fn scatter_writes_dynamic_keys_and_host_events_remain_authoritative() {
     use arora_types::value::Value;
-    let mut raw = write_raw(false);
+    let mut raw = write_raw();
     raw["text"] = "fallback\n  sequence\n    equal(a: {gate}, b: true)\n    scatter(keys: str[\"out\",\"extra\"], values: f64[2,3])\n  running".into();
     let workload = Workload::parse(&raw.to_string()).unwrap();
     let expected = (0..3)

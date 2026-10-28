@@ -92,11 +92,20 @@ dataflow arithmetic computes in f32. A module's dynamic parameters need typed
 numeric literals such as `0.12f32`. Store keys introduced by text without an
 initial envelope entry start absent and are included in the digest after the
 declared keys, sorted by name. Clock and event keys must be declared.
-A tree call binds each store key to at most one output. A key a graph call
-writes has no other writer, neither a second graph call nor a tree output:
-detached writes graph calls' keys after the tree, in data order, while
-attached-naive runs graph calls around the tree in its own order, so a second
-writer would leave whichever write the form orders last.
+A call binds each key or cell to at most one output; an output bound to another
+node's input writes the key or cell that input reads. Detached writes graph
+calls' keys and cells after the tree and evaluates graph calls on demand within
+it, while attached-naive runs graph calls around the tree in an order of its
+own. Three rules keep that difference from changing what a workload computes:
+
+- a key or cell a graph call writes has no other writer, neither a second graph
+  call nor a tree node, since a second writer would leave whichever write the
+  form orders last;
+- a graph call's value is read through its port (`@name`), never through the
+  key or cell it writes, since each form would read it on a different tick;
+  a call's own state is its own;
+- a graph call's outputs bind keys or cells, never another node's input, since
+  that would reorder the reader without a port to order it by.
 
 ```json
 {

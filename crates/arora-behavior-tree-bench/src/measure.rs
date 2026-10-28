@@ -442,6 +442,18 @@ pub fn values_hash(values: &[Option<Value>]) -> String {
                 .to_bits()
                 .to_le_bytes());
             }
+            Some(Value::F32(x)) => {
+                eat(&[5]);
+                eat(&(if *x == 0.0 {
+                    0.0f32
+                } else if x.is_nan() {
+                    f32::NAN
+                } else {
+                    *x
+                })
+                .to_bits()
+                .to_le_bytes());
+            }
             Some(Value::Boolean(b)) => eat(&[2, u8::from(*b)]),
             Some(Value::String(s)) => {
                 eat(&[3]);

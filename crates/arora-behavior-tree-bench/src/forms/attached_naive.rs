@@ -1,7 +1,7 @@
 use super::{Fixture, Form, Nodes};
 use crate::{
     host::Bridge,
-    model::{is_output, Workload},
+    model::{is_output, written_cell, Workload},
 };
 use arora_behavior_tree::{
     nodes::PARALLEL_FUNCTION_ID,
@@ -45,14 +45,15 @@ impl Form for AttachedNaive {
         let functions = Bridge::index();
         let mutable =
             |node: &Node, parameter: &Uuid| is_output(functions, &node.function, parameter);
+        let by_id: HashMap<_, _> = nodes.iter().map(|n| (n.id, n)).collect();
         let mut tree_writes: HashSet<_> = nodes
             .iter()
             .filter(|n| workload.attached.contains(&n.id))
             .flat_map(|n| {
-                n.arguments.iter().filter_map(|(p, e)| match e {
-                    Expression::VariableId(v) if mutable(n, p) => Some(*v),
-                    _ => None,
-                })
+                n.arguments
+                    .iter()
+                    .filter(|(p, _)| mutable(n, p))
+                    .filter_map(|(_, e)| written_cell(&by_id, e))
             })
             .collect();
         if workload.dynamic_keys {
