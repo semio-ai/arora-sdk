@@ -15,6 +15,7 @@ pub mod schema;
 pub mod schema_groot;
 #[cfg(test)]
 mod tests;
+pub mod text;
 pub mod tree_node;
 pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
@@ -1376,6 +1377,38 @@ pub fn load_behavior_tree_nodes_with(
 
 pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
     load_behavior_tree_nodes(serde_yaml::from_str(yaml)?)
+}
+
+/// Load a tree from its [text], its functions found in `functions`,
+/// binding each variable `resolver` resolves to a store slot, as
+/// [`build_behavior_tree`](graph::build_behavior_tree) does. A text with an
+/// error is refused with every error, each at its `line:column`; warnings do
+/// not stop it.
+pub fn load_behavior_tree_text(
+    source: &str,
+    functions: &FunctionIndex,
+    resolver: &VariableResolver,
+) -> Result<BehaviorTree, BehaviorTreeError> {
+    let parsed = text::parse(source);
+    let loaded = text::resolve(&parsed.document, functions);
+    let errors: Vec<String> = parsed
+        .diagnostics
+        .iter()
+        .chain(&loaded.diagnostics)
+        .filter(|diagnostic| diagnostic.severity == text::Severity::Error)
+        .map(|diagnostic| {
+            let before = &source[..diagnostic.span.start.min(source.len())];
+            let line = before.matches('\n').count() + 1;
+            let column = before.len() - before.rfind('\n').map_or(0, |at| at + 1) + 1;
+            format!("{line}:{column}: {}", diagnostic.message)
+        })
+        .collect();
+    if !errors.is_empty() {
+        return Err(BehaviorTreeError::ParsingError {
+            message: errors.join("; "),
+        });
+    }
+    graph::build_behavior_tree(&loaded.graph, resolver)
 }
 
 // Other helpers

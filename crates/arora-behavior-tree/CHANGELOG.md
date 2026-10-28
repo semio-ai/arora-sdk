@@ -4,6 +4,36 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.7.0] - 2026-10-28
+
+### Added
+
+- `text`: the behavior text language, a tree nested by indentation and its
+  detached nodes listed after it, everything by name
+  ([`docs/text.md`](docs/text.md)). `text::parse` reads a text into its
+  syntax tree, every part with its span, and reports what does not parse
+  while keeping every line that does. `text::format` writes it in its
+  canonical layout. `text::resolve` turns it into the shared `Graph`, with
+  where each node is written (`Loaded`), against a function index and the
+  natives: node ids are UUID v5 of their names or paths, literals take their
+  parameters' types, and a call in an argument is a detached node.
+  `text::natives` describes the native nodes as functions, for a palette.
+  The syntax tree, `Loaded` and the diagnostics are serde values.
+- `load_behavior_tree_text`: a tree from its text, beside
+  `load_behavior_tree_yaml`.
+- `BehaviorTree::display`: the tree as text, which `text::parse` reads back
+  to the graph it was built from.
+
+### Changed
+
+- The display names the native nodes (`sequence`, `equal`, `set_string`, …)
+  and their parameters, which it showed as ids; shows a node without
+  arguments without parentheses; shows a string array as `str[…]`, which
+  read as an array of values; and shows a structure, an enumeration or a
+  key-value as `json("…")`, its serde JSON. Everything it writes but an
+  anonymous cell and a computed id is the text language.
+- Requires `logos` 0.16, and `uuid`'s `v5` feature.
+
 ## [9.6.0] - 2026-10-28
 
 ### Added
