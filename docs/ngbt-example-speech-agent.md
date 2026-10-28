@@ -366,8 +366,9 @@ times are rounded; the reference computes them from the TTS rule (§6).
   and the motion graph. The reference counts its own with tracer calls, and
   the designs count theirs by their rules (§10). The modeled µs of each tick
   comes from these counts.
-- **Waiting.** One second waiting on the llm: its 100 polls and what each
-  reads.
+- **Waiting.** One second waiting on the llm: what each build does for the
+  wait over its 100 ticks. A waiting leaf is ticked when its call starts and
+  when it completes, and in between is woken on completion, not polled.
 - **Each build at its best.** Each build is measured with every optimization
   its framework can take, each checked to leave its channels exact (§10).
 - **Effects.** Per run: one rag and one recall; one prompt per LLM round; one
@@ -402,7 +403,7 @@ download it and open it in a browser.
   side; the reference's ghost stays on the timeline. The robot, with a dashed
   ghost of the reference, and Sam beside it: away, in view, speaking, or turned
   away while the face is lost; live
-  captions; the states; what it said; the service strip; the channels; the
+  captions; the states, and every leaf waiting, polled or not; what it said; the service strip; the channels; the
   cost of each tick, charted as µs, node ticks, executions or checks, with
   this tick's work by area; and the scorecard. A failed check jumps to its
   moment.

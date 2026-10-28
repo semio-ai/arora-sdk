@@ -1642,6 +1642,23 @@ function incTreeInto(m, T, P, opt, seen) {
 }
 // The store keys the tree's checks read that changed: what a store subscription reports.
 function changedReads(T, P) { let k = 0; for (const part of TREE_PARTS) for (const [uid, s] of T[part]) if (TREE_NODE.get(uid).k === 'check' && (!P || P[part].get(uid) !== s)) k++; return Math.min(k, 6); }
+// The waits at tick i: the conversation's leaf, the reply run's calls in flight, and the judge's follow-ups after its
+// verdict, each with whether it starts or ends there.
+function waitsAt(ctx, f, i) {
+  const key = (lane) => `${f.runId}:${lane}`, waits = [], leaf = ctx.convLeaf[i];
+  if (leaf) waits.push({ leaf, start: ctx.convLeaf[i - 1] !== leaf, end: ctx.convLeaf[i + 1] !== leaf });
+  for (const lane of SERVICES) if (ctx.laneAt[i].has(key(lane))) waits.push({ leaf: lane, start: ctx.starts[i].has(key(lane)), end: ctx.ends[i].has(key(lane)) });
+  if (ctx.laneAt[i].has(key('judge')) && f.conv !== 'judging') waits.push({ leaf: 'judge', start: false, end: ctx.ends[i].has(key('judge')) });
+  return waits;
+}
+// Idle, the conversation's RUNNING leaf, which waits for Sam's voice.
+const idleOf = (T) => [...T.conversation].find(([uid, st]) => st === 'R' && TREE_NODE.get(uid).k === 'running');
+// Every leaf waiting at tick i, whether this tick polls it or not: what the chip under each robot lists.
+function waitingAt(rec, i) {
+  const ctx = controlContext(rec), waits = waitsAt(ctx, rec.frames[i], i).map((w) => w.leaf);
+  if (!ctx.convLeaf[i] && idleOf(ctx.trees[i])) waits.unshift('idle');
+  return waits;
+}
 // What the statechart, the waits and the prompt cost a design at one tick.
 const incrementalTree = (design, opt) => design.strategy === 'inc' || design.strategy === 'macro' || !!opt.incTree || !!opt.incControl;
 function controlWork(design, opt0, f, prevKeys, ctx, i) {
@@ -1652,15 +1669,11 @@ function controlWork(design, opt0, f, prevKeys, ctx, i) {
   const T = ctx.trees[i], P = i ? ctx.trees[i - 1] : null;
   const treeTicks = incremental ? new Uint8Array(treeIds + 1) : null;   // null: every node reached is ticked
   if (incremental) incTreeInto(sc, T, P, opt, treeTicks); else fullTreeInto(sc, T);
-  // The waits: the conversation's leaf, the reply run's calls in flight, and the judge's follow-ups after its verdict.
-  const waits = [], leaf = ctx.convLeaf[i];
-  if (leaf) waits.push({ leaf, start: ctx.convLeaf[i - 1] !== leaf, end: ctx.convLeaf[i + 1] !== leaf });
-  for (const lane of SERVICES) if (laneOn(lane)) waits.push({ leaf: lane, start: ctx.starts[i].has(key(lane)), end: ctx.ends[i].has(key(lane)) });
-  if (laneOn('judge') && f.conv !== 'judging') waits.push({ leaf: 'judge', start: false, end: ctx.ends[i].has(key('judge')) });
+  const waits = waitsAt(ctx, f, i);
   for (const w of waits) waitInto(polls, R, w, opt);
   const polled = waits.filter((w) => !opt.wake || w.start || w.end).map((w) => w.leaf);   // woken on completion, a wait is not polled
-  // Idle, the conversation’s RUNNING leaf waits for Sam’s voice: re-ticked at every tick, unless it is clean on #404’s executor with wake.
-  if (!leaf) { const idle = [...T.conversation].find(([uid, st]) => st === 'R' && TREE_NODE.get(uid).k === 'running'); if (idle && !(opt.wake && P && P.conversation.get(idle[0]) === 'R')) polled.push('idle'); }
+  // Idle is re-ticked at every tick, unless it is clean on #404’s executor with wake.
+  if (!ctx.convLeaf[i]) { const idle = idleOf(T); if (idle && !(opt.wake && P && P.conversation.get(idle[0]) === 'R')) polled.push('idle'); }
   if (opt.wake && waits.length) sc.cacheCheck++;   // the executor's queue of completed calls
   // The prompt, read by the llm: at every poll, or latched, when its call starts.
   if (laneOn('llm') && (!opt.latch || ctx.starts[i].has(key('llm')))) promptInto(prompt, R, opt.latch || ctx.prompt[i].changed);
@@ -2320,7 +2333,7 @@ const PARTS = [
   { id: 'conversation', label: 'Conversation' }, { id: 'attention', label: 'Attention' }, { id: 'reply', label: 'Reply run' },
   ...MOTION_GROUPS.map(([id, label]) => ({ id, label, motion: true })),
 ];
-if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim, probeOf, ORDER, INDEX, NODE, SINK_IDX, SOURCES, TREES, TREE_NODE, motionInput, seriesOf, inspectNode, motionPorts, FUNCS };
+if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, waitingAt, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim, probeOf, ORDER, INDEX, NODE, SINK_IDX, SOURCES, TREES, TREE_NODE, motionInput, seriesOf, inspectNode, motionPorts, FUNCS };
 </script>
 
 <script>
@@ -2354,7 +2367,7 @@ const PLOTS = [
 ];
 const SERIES = ['var(--run-1)', 'var(--run-2)', 'var(--run-3)'];
 const runColor = (id) => (id >= 1 && id <= 3 ? `var(--run-${id})` : 'var(--run-x)');
-// What a polled wait waits for, for the chip under each robot.
+// What a waiting leaf waits for, for the chip under each robot.
 const POLL_LABEL = { idle: 'the voice', listen: 'listen', judge: 'judge', play: 'audio', await: 'next sentence', rag: 'rag', recall: 'recall', llm: 'llm', tool: 'tool', tts: 'tts', filler: 'filler' };
 const TABS = [['graph', 'Graph'], ['outline', 'As it runs'], ['stored', 'Stored form']];
 
@@ -3155,8 +3168,8 @@ function renderSide(side, at) {
   if (f.think > 0.02) chips.push(el('span', { class: 'chip' }, 'thinking', el('span', { class: 'w' }, el('i', { style: `width:${Math.round(f.think * 100)}%` }))));
   if (f.gesture) chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'clip' }), f.gesture));
   chips.push(el('span', { class: 'chip' }, el('span', { class: 'k', text: 'tick' }), usText(side.rec.cost[i].us)));
-  const polls = side.rec.polls ? side.rec.polls[i] : [];
-  chips.push(el('span', { class: `chip${polls.length ? ' poll' : ''}` }, el('span', { class: 'k', text: 'polls' }), polls.length ? polls.map((k) => POLL_LABEL[k] || k).join(' · ') : 'nothing'));
+  const waits = waitingAt(side.rec, i);
+  chips.push(el('span', { class: `chip${waits.length ? ' poll' : ''}` }, el('span', { class: 'k', text: 'waiting' }), waits.length ? waits.map((k) => POLL_LABEL[k] || k).join(' · ') : 'nothing'));
   side.chips.replaceChildren(...chips);
   for (const { li, s } of side.rows) {
     const end = s.end ?? RUN_END, paused = s.pauses.some(([a, b]) => f.t >= a && f.t < (b ?? RUN_END));
@@ -3206,7 +3219,7 @@ function buildGlance() {
   const rows = IMPLS.map((impl) => ({ impl, tr: el('tr', {}, el('td', { text: impl.name }), head.slice(1).map(() => el('td', { text: '…' }))) }));
   const box = el('section', { class: 'glance', 'aria-label': 'Every implementation at a glance' },
     el('h2', { text: 'Every implementation at a glance' }),
-    el('p', { text: `The whole run on a ${HZ} Hz clock, where waiting is polling: a leaf that waits is polled until its work is done. A tick’s node ticks are every node it steps through, polls and what they read included; executions are what runs; checks are what it reads or compares to decide. “1 s on the llm” is one second of that wait, as node ticks · executions · checks, and its cost.` }),
+    el('p', { text: `The whole run on a ${HZ} Hz clock. A leaf that waits on a call is ticked when the call starts and when it completes; in between, each build leaves it to be woken on completion, so it is not polled. A tick’s node ticks are every node it steps through, those waiting leaves and what they read included; executions are what runs; checks are what it reads or compares to decide. “1 s on the llm” is one second of that wait, as node ticks · executions · checks, and its cost.` }),
     el('p', { text: 'Each build runs with every optimization its framework can take, each checked to leave its channels exact. The reference is bespoke: it computes a value only when what it follows from changed, knows from the script when a clip, a fade or a glance next changes, and pays nothing for a framework. The designs’ cost is modeled with the NGBT spectrum’s per-operation rates, fitted to the Rust benches, plus 2 µs of work a call and 2 ms a prompt build.' }),
     el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h) => el('th', { scope: 'col', text: h })))), el('tbody', {}, rows.map((r) => r.tr)))));
   document.querySelector('.traces').after(box);
