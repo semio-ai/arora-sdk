@@ -15,6 +15,7 @@ pub mod schema;
 pub mod schema_groot;
 #[cfg(test)]
 mod tests;
+pub mod text;
 pub mod tree_node;
 pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
@@ -1376,6 +1377,49 @@ pub fn load_behavior_tree_nodes_with(
 
 pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
     load_behavior_tree_nodes(serde_yaml::from_str(yaml)?)
+}
+
+/// Load a tree from its [text], its functions found in `functions`,
+/// binding each variable `resolver` resolves to a store slot, as
+/// [`build_behavior_tree`](graph::build_behavior_tree) does. A text with an
+/// error is refused with every error, each at its `line:column`; warnings do
+/// not stop it. A column counts characters.
+pub fn load_behavior_tree_text(
+    source: &str,
+    functions: &FunctionIndex,
+    resolver: &VariableResolver,
+) -> Result<BehaviorTree, BehaviorTreeError> {
+    let parsed = text::parse(source);
+    let loaded = text::resolve(&parsed.document, functions);
+    let mut errors = parsed
+        .diagnostics
+        .iter()
+        .chain(&loaded.diagnostics)
+        .filter(|diagnostic| diagnostic.severity == text::Severity::Error)
+        .peekable();
+    if errors.peek().is_none() {
+        return graph::build_behavior_tree(&loaded.graph, resolver);
+    }
+    // Where each line starts, found once: a line ends at `\n`, `\r\n` or
+    // `\r`.
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(source.char_indices().filter_map(|(at, char)| match char {
+            '\n' => Some(at + 1),
+            '\r' if !source[at + 1..].starts_with('\n') => Some(at + 1),
+            _ => None,
+        }))
+        .collect();
+    let errors: Vec<String> = errors
+        .map(|diagnostic| {
+            let offset = diagnostic.span.start.min(source.len());
+            let line = starts.partition_point(|start| *start <= offset);
+            let column = source[starts[line - 1]..offset].chars().count() + 1;
+            format!("{line}:{column}: {}", diagnostic.message)
+        })
+        .collect();
+    Err(BehaviorTreeError::ParsingError {
+        message: errors.join("; "),
+    })
 }
 
 // Other helpers

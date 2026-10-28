@@ -167,16 +167,16 @@ and the mutable parameters of the function it becomes (§4.3).
 
 **The text form is one syntax** for both kinds: a name and a colon when the
 node is named, its bound return value before `=`, then the call. Detached
-nodes are listed beside the tree:
+nodes are listed after the tree:
 
 ```text
+fallback
+  below(x: @cm, limit: 10f64)
+  below(x: @cm, limit: 30f64)
+
 raw: mul(a: {sensor/distance}, b: 100f64)
 cm: clamp(x: @raw, lo: 0f64)
 level: {face/level} = add(a: @cm, b: 1f64)
-
-FALLBACK
-  below(x: @cm, limit: 10f64)
-  below(x: @cm, limit: 30f64)
 ```
 
 ### 3.2 Reads are deduced from the source
@@ -283,7 +283,9 @@ A behavior is shown and edited in two views of one stored form:
   reads it.
 
 The text form of §3.1 is the stored form's readable rendering, for reviews,
-diffs and agents. The diagrams and the text form in
+diffs and agents, and it reads back into the stored form: the
+[behavior text language](../crates/arora-behavior-tree/docs/text.md). The
+diagrams and the text form in
 [The NGBT spectrum](ngbt-spectrum.html) are sketches, to be redesigned or
 refined before they reach the editors.
 

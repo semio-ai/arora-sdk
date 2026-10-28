@@ -14,6 +14,25 @@ using [`load_behavior_tree_nodes` or `load_behavior_tree_yaml`](src/behavior_tre
 > [`docs/nodes.md`](docs/nodes.md), which builds on
 > [arora-behavior's interpreter workflow](../arora-behavior/docs/interpreter-workflow.md).
 
+## Text
+
+A tree and its detached nodes can be written as text, the tree nested by
+indentation and the detached nodes listed after it, every node, function,
+parameter and variable by name:
+
+```text
+fallback
+  below(x: @cm, limit: 30)
+  succeed
+
+raw: mul(a: {sensor/distance}, b: 100)
+cm: clamp(x: @raw, lo: 0)
+```
+
+The [`text`](src/text/mod.rs) module parses it, formats it and resolves it
+to the shared graph an interpreter runs; the display writes the same form. The
+language is described in [`docs/text.md`](docs/text.md).
+
 ## Schema
 
 The YAML format to the schema defined in [`src/schema.rs`](src/schema.rs).
