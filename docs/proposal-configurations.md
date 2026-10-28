@@ -145,7 +145,7 @@ reloaded on a running device is still indexed from its header (4.3).
 | Package identity | Studio's `publishedAssets/{id}` behind name claims and aliases; `arora-index`'s name-only pins | The registry, which binds a package id at first publish ([registry identity](registry-identity.md)) | Studio already keeps a package's id across a transfer; carrying it in releases, aliases and pins lets every client tell a reused name from the package it pinned, and follow a package to another registry. |
 | Holding records in a process | `arora-registry`'s `LocalRegistry`; the `feat/type-registry` `Registry`; `arora-index`'s `resolved.json` | `arora-registry` | One registry for authoring (tag, freeze) and for devices (exact lookup). A record carries its name, so the `records.json` index is not needed. `ty::low::TypeRegistry` stays on the header vocabulary's axis ([design note](design_decisions.md#two-type-vocabularies-two-axes)). |
 | Where records come from | `arora-registry-remote` (semio-db); `arora-index` (Studio v2); record directories | The store, through the `RegistrySource` trait in `arora-registry`, one implementation per backend (3.3) | `RemoteCachedRegistry` already pairs a local registry with a remote; generalized, a device's registry is a `LocalRegistry` in front of any source. `arora-index`'s selection, verification and sealing work over any source; the Studio source is Semio's `semio-studio-assets`. |
-| Connecting to Studio, credentials | `arora-index`'s `TokenSource`; the Studio source's `/tool-login` sign-in; studio-bridge's client | Semio's `semio-studio-auth`, which the bridge client, the Studio source and `arora-semio` all use | Arora works without Studio. Sign-in is one Semio crate; the bridge client keeps the device's credentials in its directory. |
+| Connecting to Studio, credentials | `arora-index`'s `TokenSource`; the Studio source's `/tool-login` sign-in; studio-bridge's client | Semio's `semio-studio-auth`, which the bridge client, the Studio source and `arora-semio` all use | Arora works without Studio. Sign-in is one Semio crate; the provider keeps each device's credential under its local name, apart from arora's device directory (3.11). |
 | The device's cache directory | `arora-index`'s `<device dir>/assets/`; the Studio Bridge client's directory; `<device dir>/modules/` | One cache, in the device directory, shared with the bridge client | Two cache roots for one device drift. Operator-installed `modules/` stays a separate, unverified input. |
 | Publishing | semio-cli (semio-db, then Studio through the Studio source); Studio's web publishing | The store's backend, through one publish path per backend | Records are published where they are read, and the backend decides at publication who owns a scope (2.2) and which package an id names (3.3). On Studio that path is its publish endpoint, the web app's included. |
 | Release selection | `arora-registry`'s `resolve_tag`; `arora-index`; Studio's `resolveDependency` | `arora-index`'s resolver, with the source supplying releases and metadata | One rule for a range: the newest non-deprecated version that satisfies it and has the requested artifact, as Studio's `resolveDependency`. |
@@ -1014,7 +1014,10 @@ unknown verb is an error.
   Several devices on one machine, as in a simulation, are several names,
   each with its own bridge port. A run that connects to Studio from a
   directory given without a name is refused, so it never takes another
-  device's credential.
+  device's credential. The deprecated `DEVICE_LOCAL_ID` is read as
+  `ARORA_DEVICE`; a device given only the deprecated `DEVICE_DIR` keeps its
+  credential in `<DEVICE_DIR>/studio/`, with a warning to name it, so an
+  upgraded runner keeps the credential it had.
 - **`semio` signs in and enrolls on its own.** `semio auth login`,
   `status` and `logout`, and `semio device enroll`, `list` and `revoke`
   ([semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11)), work with
@@ -1398,8 +1401,10 @@ enroll semio`, and package verbs that reach it through the registry a scope
 maps to. `arora`'s verbs are arora's, and a provider program fills roles
 behind them, as git remote helpers, docker credential helpers and Cargo's
 credential providers do. So `arora`'s surface, its help and what a script may
-call, is the same on every machine, and Arora ships nothing that reaches
-Semio until a user installs `arora-semio` and names it. Studio's sign-in and
+call, is the same on every machine, and no verb reaches Semio until a user
+installs `arora-semio` and names it. The runtime's own connection to Studio
+is chosen at build time instead: a build with Studio connects unless a run
+passes `--no-studio` (3.11). Studio's sign-in and
 enrollment are also `semio`'s own commands, on the same session, so a person
 or a robot can sign in and enroll with Studio whatever `arora` offers.
 
