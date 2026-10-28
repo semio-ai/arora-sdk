@@ -46,8 +46,8 @@ This produces:
 
 The NAO HAL (`arora-hal-naoqi`) and its `arora-naoqi` runner live in
 [arora-aldebaran](https://github.com/semio-ai/arora-aldebaran). See
-[Try it on a NAO](https://github.com/semio-ai/arora-aldebaran/blob/main/crates/arora-hal-naoqi/readme.md#try-it-on-a-nao) and
-[Deploy it on the robot](https://github.com/semio-ai/arora-aldebaran/blob/main/crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).
+[Try it on a NAO](https://github.com/semio-ai/arora-aldebaran#try-it-on-a-nao) and
+[Deploy it on the robot](https://github.com/semio-ai/arora-aldebaran#deploy-it-on-the-robot).
 
 ### Testing
 

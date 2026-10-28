@@ -230,7 +230,7 @@ C++ cross-build: the HAL builds for the host, and the cross-build of its
 not run in CI. It lives in
 [arora-aldebaran](https://github.com/semio-ai/arora-aldebaran), with the
 other Aldebaran robot support, and depends on the published Arora crates. See
-[Deploy it on the robot](https://github.com/semio-ai/arora-aldebaran/blob/main/crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).
+[Deploy it on the robot](https://github.com/semio-ai/arora-aldebaran#deploy-it-on-the-robot).
 
 ## Engine architecture
 
