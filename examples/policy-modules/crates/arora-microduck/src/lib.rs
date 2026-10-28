@@ -5,8 +5,8 @@
 //! [lockstep](Device::run_for) it is a deterministic, faster-than-real-time
 //! simulation for tests and batch runs; [served](serve) it is a live device
 //! at real time on the standard Arora run — the operator front end, and the
-//! open local bridge, or under the `studio` feature Semio Studio when the
-//! device holds a saved Studio credential or the run asks for it.
+//! open local bridge, or under the `studio` feature Semio Studio when the run
+//! asks for it.
 //!
 //! Only the HAL is simulation-specific: a device for the real robot is this
 //! assembly with the robot's HAL in place of [`MujocoHal`], publishing the
@@ -110,8 +110,8 @@ pub struct DeviceConfig {
     /// drives this robot's model by, instead of the joint names.
     pub studio: Option<StudioModel>,
     pub speech: Speech,
-    /// What a [served](serve) run asks of Semio Studio (`--studio`,
-    /// `--no-studio`).
+    /// What a [served](serve) run does about Semio Studio: Studio, unless
+    /// `--no-studio`.
     #[cfg(feature = "studio")]
     pub studio_choice: arora::studio::Choice,
 }
@@ -220,10 +220,10 @@ impl Device {
 /// Serve the device until the process stops, on the standard Arora run: the
 /// simulator paces itself at real time, the runtime steps at the policies'
 /// period, and the bridge is the run's default — the open local bridge on
-/// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio when the
-/// device holds a saved Studio credential or `studio_choice` asks for it (a
-/// device registering is asked for the owner, the device name and the model
-/// family, or they come from `DEVICE_OWNERS`, `DEVICE_NAME`, `MODEL_FAMILY`).
+/// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio unless
+/// `studio_choice` is `Local` (a device that is not enrolled enrolls first,
+/// named by `DEVICE_NAME` or the operator, its code shown for a person to
+/// approve in Studio).
 pub async fn serve(config: DeviceConfig) -> Result<()> {
     #[cfg(feature = "studio")]
     let studio = config.studio_choice;
@@ -269,8 +269,8 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         control_hz: 50.0,
         clock: config.clock,
         record: config.record.clone(),
-        // What the device registers with Studio as: the family of the model
-        // it publishes for, the simulator as its hardware.
+        // The model the device reports to Studio: the family of the model it
+        // publishes for, the simulator as its hardware.
         description: HalDescription {
             model_family: Some(
                 config

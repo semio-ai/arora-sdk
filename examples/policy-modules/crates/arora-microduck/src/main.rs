@@ -3,8 +3,7 @@
 //! Without `--duration` the device serves at real time on the standard Arora
 //! run: the operator front end (the terminal UI on a terminal), and the open
 //! local bridge on `ws://127.0.0.1:9000` — or, built with `--features
-//! studio`, Semio Studio when the device holds a saved Studio credential or
-//! the run passes `--studio` (`--no-studio` declines). With
+//! studio`, Semio Studio, unless the run passes `--no-studio`. With
 //! `--duration`, the device runs that much simulated time in lockstep, as
 //! fast as the machine allows, and prints what happened.
 
@@ -48,7 +47,7 @@ struct Cli {
     /// (builds with the `piper` feature), or nobody (sentences are logged).
     #[arg(long, value_enum, default_value_t = Speech::default())]
     speech: Speech,
-    /// `--studio` and `--no-studio`: what the run asks of Semio Studio.
+    /// `--no-studio`: serve the open local bridge instead of Semio Studio.
     #[cfg(feature = "studio")]
     #[command(flatten)]
     studio: arora::studio::StudioArgs,
@@ -86,7 +85,7 @@ async fn main() -> Result<()> {
         studio,
         speech: cli.speech,
         #[cfg(feature = "studio")]
-        studio_choice: cli.studio.choice()?,
+        studio_choice: cli.studio.choice(),
     };
 
     let result = match cli.duration {

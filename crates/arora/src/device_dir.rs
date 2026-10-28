@@ -1,76 +1,65 @@
 //! A device's directory: what the device keeps of its own from one run to
 //! the next. Each use keeps a subdirectory of its own: the modules the device
-//! loads at start in `modules/` ([`crate::module_dir`]), the Studio
-//! connection's credentials in `studio/`.
+//! loads at start in `modules/` ([`crate::module_dir`]).
 //!
 //! ```text
 //! <data_local_dir>/semio/arora/
 //! └── devices/
-//!     └── <local id>/      the device directory; DEVICE_DIR replaces this whole path
-//!         ├── modules/     the module directories the device loads at start
-//!         └── studio/      the Studio connection's credentials and saved registration
+//!     └── <name>/          the device directory; --device-dir replaces this whole path
+//!         └── modules/     the module directories the device loads at start
 //! ```
 //!
 //! `<data_local_dir>` is per user: `~/Library/Application Support` on macOS,
-//! `~/.local/share` on Linux, `%LOCALAPPDATA%` on Windows. The local id tells
-//! the devices of one user on one host apart; `DEVICE_LOCAL_ID` sets it, and a
-//! device that sets none is [`DEFAULT_LOCAL_ID`]. It is local only: the name a
-//! device shows (`DEVICE_NAME`) can change without making it another device,
-//! and the id Studio knows it by is assigned when it first signs in.
+//! `~/.local/share` on Linux, `%LOCALAPPDATA%` on Windows. The device's name
+//! tells the devices of one user on one host apart ([`crate::Device`] says
+//! how a run names it); a device that sets none is
+//! [`DEFAULT_NAME`](crate::device_dir::DEFAULT_NAME). It is local only: the
+//! name a device shows (`DEVICE_NAME`) can change without making it another
+//! device, and the id Studio knows it by is assigned when it enrolls.
+//!
+//! The device directory holds no Semio Studio credential: Semio's device
+//! store keeps it under the device's name (`arora::studio`), except for a
+//! device the deprecated `DEVICE_DIR` places without naming it
+//! ([`crate::device`]).
 
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-/// The local id of a device that sets none.
-pub const DEFAULT_LOCAL_ID: &str = "default";
+/// The name of a device that sets none.
+pub const DEFAULT_NAME: &str = "default";
 
-/// The per-user directory of the device whose local id is `local_id`:
-/// `<data_local_dir>/semio/arora/devices/<local_id>`. The id is one path
-/// component: not empty, not `.` or `..`, and free of path separators.
-pub fn of(local_id: &str) -> Result<PathBuf> {
-    if local_id.is_empty() || local_id == "." || local_id == ".." || local_id.contains(['/', '\\'])
-    {
-        bail!("a device's local id is one path component, not {local_id:?}");
-    }
+/// The per-user directory of the device named `name`:
+/// `<data_local_dir>/semio/arora/devices/<name>`. The name is one path
+/// component, as [`crate::Device`] says.
+pub fn of(name: &str) -> Result<PathBuf> {
+    check_name(name)?;
     Ok(dirs::data_local_dir()
         .context(
-            "this platform has no per-user data directory: set DEVICE_DIR, or name the \
-             device directory explicitly",
+            "this platform has no per-user data directory: give the device directory with \
+             --device-dir or ARORA_DEVICE_DIR",
         )?
         .join("semio")
         .join("arora")
         .join("devices")
-        .join(local_id))
+        .join(name))
 }
 
-/// The device directory of a run configured from the environment: `DEVICE_DIR`
-/// when set; else, while the deprecated `IDENTITY_FILE` is set, the directory
-/// its identity migrates to (`<IDENTITY_FILE>_dir`), with a warning that the
-/// variable is deprecated; else the per-user directory of the device
-/// `DEVICE_LOCAL_ID` names ([`of`]). The directory is named, not created: a
-/// use creates the subdirectory it writes.
-pub fn from_env() -> Result<PathBuf> {
-    if let Some(dir) = override_from_env() {
-        return Ok(dir);
+/// Refuses a device name that is not exactly one normal path component: the
+/// empty name, `.`, `..`, a name holding `/` or `\`, and one a platform reads
+/// as more than a name, such as `D:bench`, which Windows reads as a path on
+/// drive `D:`.
+pub(crate) fn check_name(name: &str) -> Result<()> {
+    let mut components = Path::new(name).components();
+    let one_normal = matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(component)), None) if component == name
+    );
+    if !one_normal || name.contains(['/', '\\']) {
+        bail!("a device's name is one path component, not {name:?}");
     }
-    if let Some(file) = env_nonempty("IDENTITY_FILE") {
-        let dir = of_identity_file(Path::new(&file));
-        log::warn!(
-            "IDENTITY_FILE is deprecated: DEVICE_DIR names the device directory. This run's \
-             is {}, the directory the identity {} migrates to",
-            dir.display(),
-            file
-        );
-        return Ok(dir);
-    }
-    of(&local_id_from_env())
-}
-
-/// The device directory `DEVICE_DIR` names, when set.
-pub(crate) fn override_from_env() -> Option<PathBuf> {
-    env_nonempty("DEVICE_DIR").map(PathBuf::from)
+    Ok(())
 }
 
 /// The device directory of a run that sets the deprecated `IDENTITY_FILE` to
@@ -86,24 +75,12 @@ pub(crate) fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// The local id `DEVICE_LOCAL_ID` sets, or [`DEFAULT_LOCAL_ID`].
-pub(crate) fn local_id_from_env() -> String {
-    env_nonempty("DEVICE_LOCAL_ID").unwrap_or_else(|| DEFAULT_LOCAL_ID.to_string())
-}
-
-fn env_nonempty(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_local_id_names_one_directory_under_devices() {
+    fn a_name_names_one_directory_under_devices() {
         let dir = of("bench-2").unwrap();
         assert!(
             dir.ends_with("semio/arora/devices/bench-2"),
@@ -113,9 +90,23 @@ mod tests {
     }
 
     #[test]
-    fn a_local_id_is_one_path_component() {
-        for bad in ["", ".", "..", "a/b", "a\\b"] {
-            assert!(of(bad).is_err(), "{bad:?} is refused");
+    fn a_name_is_one_path_component() {
+        for bad in ["", ".", "..", "a/b", "a\\b", "/", "bench/", "/bench"] {
+            assert!(check_name(bad).is_err(), "{bad:?} is refused");
+            assert!(of(bad).is_err(), "{bad:?} names no directory");
+        }
+        for good in ["default", "bench-2", "sim.0", "...", "a b"] {
+            assert!(check_name(good).is_ok(), "{good:?} is a name");
+        }
+    }
+
+    /// `Path::join` reads a name with a drive prefix as another drive's path,
+    /// leaving the devices' directory.
+    #[cfg(windows)]
+    #[test]
+    fn a_name_with_a_drive_prefix_is_refused_on_windows() {
+        for bad in ["D:bench", "D:", "C:\\bench", "\\\\server\\share"] {
+            assert!(check_name(bad).is_err(), "{bad:?} is refused");
         }
     }
 

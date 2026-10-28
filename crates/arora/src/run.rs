@@ -21,9 +21,11 @@
 //! The **default bridge** is the open local bridge
 //! ([`arora-bridge-ws`](arora_bridge_ws)): the device serves
 //! `ws://127.0.0.1:9000` and any editor or app on the machine connects — no
-//! accounts. A build with the `studio-bridge` feature connects to Semio Studio
-//! instead (Firebase auth + Zenoh) when the device holds a saved Studio
-//! credential or the run asks for it (`--studio`), as `arora::studio` says.
+//! accounts. A runner built with Studio connects to Semio Studio instead
+//! (Firebase auth + Zenoh) unless its run passes `--no-studio`
+//! ([`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio), which the
+//! runner's command line gives), as `arora::studio` says; these entry points
+//! hand no choice, and serve the open local bridge.
 //! The two are mutually exclusive: each of these entry points wires exactly one bridge.
 //! (Assembling an [`Arora`] directly with the builder can wire several.)
 //!
@@ -62,14 +64,16 @@ use crate::Arora;
 /// to [`with_groot`](crate::AroraBuilder::with_groot), which resolves its tags
 /// against the device's method index, so the tree's leaves call the modules
 /// the device carries.
-/// The modules — the device directory's and `--module`'s — load with
-/// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs), given the
-/// device directory ([`device_dir::from_env`](crate::device_dir::from_env))
-/// and `module`, the records their directories carry included;
-/// [`modules`](Self::modules) reads them for a binary that loads them itself.
-/// In a `studio-bridge` build, `--studio` and `--no-studio` (the `studio`
-/// field) say what the run asks of Semio Studio: hand their
-/// `StudioArgs::choice` to `AroraBuilder::with_studio`.
+/// The options every runner takes are its [`RunnerArgs`]: the device they
+/// give ([`RunnerArgs::device`]) goes to
+/// [`with_device`](crate::AroraBuilder::with_device), and its modules — the
+/// device directory's and `--module`'s — load with
+/// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs), the records
+/// their directories carry included; [`modules`](Self::modules) reads them
+/// for a binary that loads them itself.
+/// In a `studio-bridge` build, the run connects to Semio Studio unless it
+/// passes `--no-studio` (the `studio` field): hand its `StudioArgs::choice`
+/// to `AroraBuilder::with_studio`.
 /// The `arora` binary's `main` is the worked example.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Parser)]
@@ -77,13 +81,11 @@ use crate::Arora;
     about = "The Arora device runner",
     long_about = "The Arora device runner: a headless device over the fake HAL, serving the \
                   open local bridge. A build with Semio Studio (the studio-bridge feature) \
-                  connects to Studio instead when the device holds a saved Studio credential, \
-                  or with --studio.\n\n\
+                  connects to Studio instead, unless the run passes --no-studio.\n\n\
                   At start it loads every module directory under its device directory's \
-                  modules/ — the device directory is DEVICE_DIR; else <IDENTITY_FILE>_dir \
-                  while that deprecated variable is set; else the per-user directory of the \
-                  device DEVICE_LOCAL_ID names (`default` when unset) — then each --module \
-                  directory. A module directory holds header.json (the module's header) \
+                  modules/ — the device directory is --device-dir (ARORA_DEVICE_DIR), else \
+                  the per-user directory of the device --device (ARORA_DEVICE) names, \
+                  `default` when unset — then each --module directory. A module directory holds header.json (the module's header) \
                   beside its artifact, the one file with the extension the header's executor \
                   names: .wasm for wasm-component and wasm, the platform's dynamic library \
                   for native — and \
@@ -106,12 +108,13 @@ pub struct DeviceCli {
     #[arg(long)]
     pub open: bool,
 
-    /// A module directory to load besides the device directory's, as
-    /// [`RunnerArgs::module`] takes one.
-    #[arg(long, value_name = "DIR", help = MODULE_HELP)]
-    pub module: Vec<std::path::PathBuf>,
+    /// The options every runner takes: `--module`, and the device's name,
+    /// directory and local bridge port.
+    #[command(flatten)]
+    pub runner: RunnerArgs,
 
-    /// `--studio` and `--no-studio`, as [`RunnerArgs::studio`] takes them.
+    /// `--no-studio`, as a runner built with Studio flattens
+    /// [`StudioArgs`](crate::studio::StudioArgs) for it.
     #[cfg(feature = "studio-bridge")]
     #[command(flatten)]
     pub studio: crate::studio::StudioArgs,
@@ -126,15 +129,29 @@ const MODULE_HELP: &str = "A module directory to load besides the device directo
 /// The options every device runner takes besides its own, as a clap helper to
 /// `#[command(flatten)]` into the runner's command line:
 ///
-/// - `--module <DIR>` (or `--module=<DIR>`), repeatable. Load the directories
-///   it names, with the device directory's, through
-///   [`with_module_dirs`](crate::AroraBuilder::with_module_dirs).
-/// - In a `studio-bridge` build, `--studio` and `--no-studio` (the `studio`
-///   field). Hand their `StudioArgs::choice` to `AroraBuilder::with_studio`.
+/// - `--module <DIR>` (or `--module=<DIR>`), repeatable: the module
+///   directories to load besides the device directory's;
+/// - `--device <NAME>` (`ARORA_DEVICE`), `--device-dir <PATH>`
+///   (`ARORA_DEVICE_DIR`) and `--bridge-port <PORT>` (`ARORA_BRIDGE_PORT`):
+///   the device the run is, which [`device`](Self::device) resolves as
+///   [`crate::device`] says.
 ///
-/// The robot runners of `arora-hal-ros2`, `arora-hal-restful` and
-/// `arora-hal-naoqi` (in arora-aldebaran) take it; the `arora` binary's
-/// [`DeviceCli`] takes the same options.
+/// Hand the device to [`with_device`](crate::AroraBuilder::with_device), and
+/// load the module directories, with the device directory's, through
+/// [`with_module_dirs`](crate::AroraBuilder::with_module_dirs).
+///
+/// A runner built with Semio Studio also flattens
+/// [`StudioArgs`](crate::studio::StudioArgs), under a feature of its own that
+/// enables arora's `studio-bridge`, and hands its `choice()` to
+/// `AroraBuilder::with_studio`: it connects unless the run passes
+/// `--no-studio`. The Studio option is not in this struct because a feature
+/// of arora is enabled for every runner a build links: a runner built without
+/// Studio, beside one built with it, would then take `--no-studio` although
+/// it never connects.
+///
+/// The `arora` binary's [`DeviceCli`] and the robot runners of
+/// `arora-hal-ros2`, `arora-hal-restful` and `arora-hal-naoqi` (in
+/// arora-aldebaran) take it.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Args)]
 pub struct RunnerArgs {
@@ -143,26 +160,61 @@ pub struct RunnerArgs {
     #[arg(long, value_name = "DIR", help = MODULE_HELP)]
     pub module: Vec<std::path::PathBuf>,
 
-    /// What the run asks of Semio Studio: `--studio` connects, registering a
-    /// device that holds no saved Studio credential; `--no-studio` serves the
-    /// open local bridge; neither connects only a device holding one. See
-    /// [whether a run connects](crate::studio#whether-a-run-connects).
-    #[cfg(feature = "studio-bridge")]
-    #[command(flatten)]
-    pub studio: crate::studio::StudioArgs,
+    /// This device's name on this machine, one path component: it names the
+    /// device's directory, unless --device-dir gives it, and in a build with
+    /// Semio Studio its Studio credential. Several devices on one host are
+    /// several names. `default` when unset.
+    #[arg(long = "device", value_name = "NAME", env = crate::device::NAME_VAR)]
+    device: Option<String>,
+
+    /// The device directory, holding what the device keeps from one run to
+    /// the next (its modules/), instead of the per-user directory of its
+    /// name. A run that connects to Semio Studio given it also names the
+    /// device with --device.
+    #[arg(long, value_name = "PATH", env = crate::device::DIR_VAR)]
+    device_dir: Option<std::path::PathBuf>,
+
+    /// The port the open local bridge serves on, ws://127.0.0.1:PORT; 9000
+    /// when unset. Several devices on one host serve on several ports. Port 0
+    /// is refused: the bridge advertises the port it is given, not one the
+    /// system picks.
+    #[arg(
+        long,
+        value_name = "PORT",
+        env = crate::device::BRIDGE_PORT_VAR,
+        value_parser = clap::value_parser!(u16).range(1..)
+    )]
+    bridge_port: Option<u16>,
+}
+
+#[cfg(feature = "native")]
+impl RunnerArgs {
+    /// The device these options give, with the deprecated variables the
+    /// environment holds, as [`crate::device`] says. Fails on a name that is
+    /// not one path component, or when the device directory is the per-user
+    /// one and the platform has none.
+    ///
+    /// Resolving it logs the deprecated variables it honours: build the front
+    /// end first ([`standard_frontend`]), so the log captures it.
+    pub fn device(&self) -> Result<crate::Device> {
+        crate::device::resolve(
+            self.device.clone(),
+            self.device_dir.clone(),
+            self.bridge_port,
+            &crate::device::env_nonempty,
+        )
+    }
 }
 
 #[cfg(feature = "native")]
 impl DeviceCli {
     /// The modules this command line loads, read: every module directory under
-    /// the device directory's `modules/` ([`device_dir::from_env`]), then each
+    /// the device directory's `modules/` ([`RunnerArgs::device`]), then each
     /// `--module` directory, in that order. A directory that cannot be read as
     /// a module, or one module in two directories, is an error naming the
     /// module: a device never starts without a module it was given.
-    ///
-    /// [`device_dir::from_env`]: crate::device_dir::from_env
     pub fn modules(&self) -> Result<Vec<ModuleFiles>> {
-        crate::module_dir::read_device_modules(&crate::device_dir::from_env()?, &self.module)
+        crate::module_dir::read_device_modules(self.runner.device()?.dir(), &self.runner.module)
     }
 }
 
@@ -185,13 +237,13 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
 
 /// Build (and start serving) the open local bridge — the device serves
 /// `ws://127.0.0.1:9000` and any editor or app on the machine connects, no
-/// accounts. This is the default bridge; a `studio-bridge` build serves it too
-/// when the run does not connect to Semio Studio, or when the operator
-/// declines the connection, so such a device still exposes a local bridge
-/// (just no Semio Studio).
+/// accounts. This is the default bridge; a runner built with Semio Studio
+/// serves it when the run passes `--no-studio`.
 ///
 /// [`AroraBuilder::run`](crate::AroraBuilder::run) attaches this bridge for you
-/// when you inject none. A host that composes its own bridge set — say the open
+/// when you inject none, on the port of the device
+/// [`with_device`](crate::AroraBuilder::with_device) gives
+/// ([`Device::bridge_port`](crate::Device::bridge_port)). A host that composes its own bridge set — say the open
 /// local bridge *and* a ROS 2 bridge — attaches it explicitly instead, the same
 /// way [`studio::connect`](crate::studio::connect) is composed:
 ///
@@ -208,6 +260,17 @@ pub async fn run_with_hal(hal: Box<dyn Hal>) -> Result<()> {
 #[cfg(feature = "native")]
 pub async fn local_ws_bridge() -> Result<Box<dyn Bridge>> {
     local_ws_bridge_with(arora_bridge_ws::ServerConfig::default()).await
+}
+
+/// The open local bridge on `device`'s port, or on
+/// [`DEFAULT_BRIDGE_PORT`](crate::device::DEFAULT_BRIDGE_PORT) with no device.
+#[cfg(feature = "native")]
+pub(crate) async fn local_ws_bridge_on(device: Option<&crate::Device>) -> Result<Box<dyn Bridge>> {
+    let port = device.map_or(
+        crate::device::DEFAULT_BRIDGE_PORT,
+        crate::Device::bridge_port,
+    );
+    local_ws_bridge_with(arora_bridge_ws::ServerConfig::with_port(port)).await
 }
 
 /// The open local bridge on a server configuration of your own — another port
@@ -466,6 +529,42 @@ mod tests {
         assert_eq!(runner.runner.module, expected);
         let device = DeviceCli::try_parse_from(["arora", "--module=a", "--module", "b"])
             .expect("the arora binary's options parse");
-        assert_eq!(device.module, expected);
+        assert_eq!(device.runner.module, expected);
+    }
+
+    /// The device options give the device's name, directory and bridge port,
+    /// on a runner's command line and on the `arora` binary's.
+    #[test]
+    fn the_device_options_give_the_device() {
+        let runner = Runner::try_parse_from([
+            "runner",
+            "--device",
+            "bench-2",
+            "--device-dir=/srv/bench-2",
+            "--bridge-port",
+            "9002",
+        ])
+        .expect("the runner's options parse");
+        let device = runner.runner.device().unwrap();
+        assert_eq!(device.name(), "bench-2");
+        assert_eq!(device.dir(), std::path::Path::new("/srv/bench-2"));
+        assert_eq!(device.bridge_port(), 9002);
+        let device = DeviceCli::try_parse_from(["arora", "--device=bench-3"])
+            .expect("the arora binary's options parse")
+            .runner
+            .device()
+            .unwrap();
+        assert_eq!(device.name(), "bench-3");
+        assert!(device.dir().ends_with("semio/arora/devices/bench-3"));
+    }
+
+    #[test]
+    fn a_bridge_port_that_is_no_port_is_refused() {
+        for port in ["0", "70000", "x"] {
+            assert!(
+                Runner::try_parse_from(["runner", "--bridge-port", port]).is_err(),
+                "{port:?} is refused"
+            );
+        }
     }
 }

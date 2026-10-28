@@ -14,6 +14,7 @@ use arora_types::data::{Key, Subscription};
 use arora_types::value::Value;
 
 use super::{TuiCommand, TuiCommandEvent};
+use crate::operator::EnrollmentCode;
 
 /// How many log lines the pane remembers.
 pub(crate) const LOG_CAPACITY: usize = 4000;
@@ -98,6 +99,9 @@ pub(crate) struct State {
     pub cpu_percent: Option<f32>,
     /// Front = the prompt currently shown in the prompt line.
     pub prompts: VecDeque<Prompt>,
+    /// The code enrolling the device with Semio Studio, shown in the prompt
+    /// line while no prompt waits.
+    pub enrollment_code: Option<EnrollmentCode>,
     /// The text being typed for a `Prompt::Text`.
     pub input: String,
     /// One-shot hint shown in the shortcuts line (e.g. "an answer is required").
@@ -127,6 +131,7 @@ impl State {
             loop_hz: None,
             cpu_percent: None,
             prompts: VecDeque::new(),
+            enrollment_code: None,
             input: String::new(),
             hint: None,
             quit_requested: false,
@@ -169,6 +174,12 @@ impl State {
         } else if self.scroll_from_bottom > 0 {
             self.scroll_from_bottom = (self.scroll_from_bottom + 1).min(self.max_scroll());
         }
+    }
+
+    /// Whether the prompt line shows: a prompt waits, or an enrollment code
+    /// is shown.
+    pub fn prompt_line_shown(&self) -> bool {
+        self.prompts.front().is_some() || self.enrollment_code.is_some()
     }
 
     fn max_scroll(&self) -> usize {

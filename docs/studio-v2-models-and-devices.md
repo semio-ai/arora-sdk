@@ -131,18 +131,16 @@ Stage 1 is a stopgap. A developer supplies the model file by hand only until Sta
 ### How a developer runs against the live Studio
 
 1. Put the GLB at `crates/arora-hal-ros2/models/<name>.glb`, or set `model_glb_path` in an overrides file or a full config.
-2. Start `arora-ros2 --studio` (built with `--features runner,studio`). Give the uid of the Studio account of the developer as owner, and the family of the robot, for example `quori`. Later runs connect with the saved credential.
-3. The bridge client registers the device in the legacy shape. `normalizeLegacyDevice` changes it to the v2 shape. The device appears in the device list of the developer.
+2. Start `arora-ros2` built with `--features runner,studio`, which connects to Studio. The device enrolls: enter the code it shows in Studio, and choose the developer as owner. The family of the robot, for example `quori`, is the `model_family` of the HAL config. Later runs connect with the credential the enrollment saved.
+3. Studio creates the device when it enrolls. The device appears in the device list of the developer.
 4. In Studio, open a project that the developer owns. The project contains the same GLB as a model, with the same family. The developer can upload it as a project asset. After the Quori publication, the developer can add `@quori/quori` as a dependency.
 5. Make the binding in Studio. Values flow. The joint ids match, because Studio and the device use the same GLB.
-
-If the device does not appear in step 3, the trigger did not convert it. The semio_studio operator script `apps/studio/scripts/normalize-legacy-devices.mjs` converts such devices.
 
 ### Verification
 
 - arora-sdk CI passes on the Stage 1 change.
 - The `arora-hal-ros2` unit tests cover step 1. An overrides file sets `model_glb_path`, the fixture GLB gives the joint map, and a missing file gives the clear error.
-- The semio_studio functions test `apps/functions/test/devices.test.mjs` covers steps 2 and 3 on the Firebase emulators. It sends the registration of the bridge client as the device account. Then it verifies that `normalizeLegacyDevice` writes the v2 document, and that the owner can list the device.
+- The semio_studio functions test `apps/functions/test/devices.test.mjs` covers the legacy registration that Stage 1 kept, on the Firebase emulators. It sends the registration of the bridge client as the device account. Then it verifies that `normalizeLegacyDevice` writes the v2 document, and that the owner can list the device.
 - Stage 1 runs nothing against production or staging. The first run of a developer against production is the live check.
 
 ### Not in Stage 1
@@ -171,8 +169,8 @@ The parts are independent, except where this table names a dependency:
 - The device gets a credential that marks it as a device. The rules can then limit a device to device paths and to content reads. Studio can revoke the credential.
 - This part replaces the device account and self-registration. It changes the sign-in and the registration of the bridge client. It keeps the bridge and its connection.
 - No part of model resolution (2.2) waits for this part.
-- **arora-sdk side:** show the enrollment code in the terminal UI and in the headless log. Keep the credential in the device directory. Give the credential to the bridge and to the resolver through one token-source interface.
-- **Coordinate with the bridge client**. semio-ai/arora-sdk#268 moves arora to `arora-studio-bridge-client` 9. The credential change also goes into the bridge client.
+- **arora-sdk side:** arora 16 enrolls a device that is not enrolled. It shows the code in the terminal UI and in the headless log, or redeems the enrollment token in `STUDIO_ENROLLMENT_TOKEN`. The credential is kept under the device's local name in Semio's device store (`<data_local_dir>/semio/devices/<name>/`, or `SEMIO_DEVICE_STORE`), apart from the device directory; a device given only the deprecated `DEVICE_DIR` keeps it in that directory's `studio/`. Giving the credential to the resolver remains: the bridge and the resolver take it by the device's name, through one token-source interface.
+- **The bridge client**: `arora-studio-bridge-client` 11 enrolls the device and signs it in, through `semio-studio-auth`.
 
 ### 2.2 Model resolution in a Semio client
 

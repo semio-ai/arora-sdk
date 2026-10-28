@@ -37,7 +37,7 @@ use arora_bridge::{AccessDecision, DeviceInfo};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::operator::{
-    AccessRequestSummary, AccessRuling, Frontend, Operator, DEFAULT_ACCESS_GRACE,
+    AccessRequestSummary, AccessRuling, EnrollmentCode, Frontend, Operator, DEFAULT_ACCESS_GRACE,
 };
 use arora_types::data::Subscription;
 use state::{DeviceIdentity, State};
@@ -177,6 +177,16 @@ impl Operator for Tui {
             },
         }
     }
+
+    fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.enrollment_code = code.cloned();
+                true
+            }
+            Err(_) => false,
+        }
+    }
 }
 
 impl Drop for Tui {
@@ -297,8 +307,7 @@ fn run_ui(
                 }
             }
             let size = terminal.size().unwrap_or_default();
-            state.viewport_height =
-                view::log_height(size, state.prompts.front().is_some()) as usize;
+            state.viewport_height = view::log_height(size, state.prompt_line_shown()) as usize;
             let _ = terminal.draw(|frame| view::draw(frame, &state, now));
         }
     }

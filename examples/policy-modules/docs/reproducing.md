@@ -49,7 +49,7 @@ learned policy for a different robot into an Arora module. It assumes the
   in-process) + Groot tree (`with_groot`), built directly for a lockstep run
   and handed to the standard `AroraBuilder::run` for serving — the operator
   front end, and Semio Studio or the local bridge by build feature and
-  `--studio` — with
+  `--no-studio` — with
   the joint-order check at build. Only the HAL is simulation-specific: the
   device for the real robot swaps it and keeps the rest.
 - The `interactive` tree's shape: a fallback of situation checks first,
@@ -123,9 +123,9 @@ Studio needs the robot's model and the device's keys under Studio's ids.
    onshape-to-robot places them) and STL meshes (Studio reads STL and DAE
    only, matched by file name — two meshes with one file name in different
    directories collide). Studio names the model after the URDF's robot
-   name, capitalised; the device registers that name, read from the GLB, as
-   its model family (`HalDescription::model_family`, which arora registers
-   with Studio).
+   name, capitalised; the device reports that name, read from the GLB, as
+   its model family (`HalDescription::model_family`, which arora reports to
+   Studio).
 2. **The ids.** Studio gives each joint, and the robot's root translation and
    rotation, an id at upload, and drives them from `<id>.position` (radians,
    metres). The device reads them from the GLB Studio saves

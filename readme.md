@@ -14,7 +14,7 @@ A device running Arora is a few parts around one shared state:
 
 - a **HAL** ([`arora-hal`](crates/arora-hal/readme.md)) exposes your hardware — sensors in, actuators out — as typed values on a shared blackboard;
 - **behaviors** ([`arora-behavior`](crates/arora-behavior/readme.md)) execute against that state on every step: behavior trees out of the box, or any interpreter implementing the trait (a node graph, a script host);
-- a **bridge** ([`arora-bridge`](crates/arora-bridge/readme.md)) connects the device for **live control** — reading and writing state, calling functions, streaming updates — whether to Semio Studio (opt-in: the `studio-bridge` feature, and a run that asks with `--studio` or a device holding a saved Studio credential) or to any editor speaking the protocol;
+- a **bridge** ([`arora-bridge`](crates/arora-bridge/readme.md)) connects the device for **live control** — reading and writing state, calling functions, streaming updates — whether to Semio Studio (opt-in at build time: a build with the `studio-bridge` feature connects unless its run passes `--no-studio`) or to any editor speaking the protocol;
 - **modules** give behaviors typed functions to call, in wasm or native code, with their types declared as [records](docs/records.md).
 
 The runtime steps these as one deterministic loop — drain the bridge and the HAL into the state, tick the behaviors, flush the changes back out — so there is a single owner of the state and no locking in your control path. Bringing a new device to Arora means writing a HAL for its hardware and picking a bridge:

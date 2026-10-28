@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "15.0.0"
+version = "16.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -199,7 +199,6 @@ dependencies = [
  "log",
  "ratatui",
  "rustls",
- "serde",
  "serde_json",
  "sysinfo",
  "tokio",
@@ -418,16 +417,15 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "10.0.0"
+version = "11.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "655847e03688015f32d2a3dc0b14ea94499680c33aa0e143730928a518a0f3a0"
+checksum = "5602575ef24d923ae0acbf006a6bd7e29a8be6357314ab665b175fa10d644213"
 dependencies = [
  "arora-bridge",
  "arora-types",
  "async-stream",
  "async-trait",
  "chrono",
- "crypto_secretbox",
  "firestore",
  "futures",
  "futures-util",
@@ -437,9 +435,9 @@ dependencies = [
  "rcgen 0.13.2",
  "reqwest",
  "rustls",
+ "semio-studio-auth",
  "serde",
  "serde_json",
- "strfmt",
  "studio-bridge-msgs",
  "sync_wrapper",
  "tokio",
@@ -741,7 +739,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "regex",
@@ -4029,7 +4027,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4892,6 +4890,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "semio-studio-auth"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ede50887ae578bf5d4e17349c908aeed4091132cf2d15280afd69d7d5c84ce07"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "crypto_secretbox",
+ "dirs",
+ "log",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "webpki-roots",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5295,12 +5312,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
 
 [[package]]
-name = "strfmt"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046d549b88a663d317cd04d39696fca5f77db4db44e1db65bfb9dee7f9e680bd"
-
-[[package]]
 name = "string-interner"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5460,7 +5471,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
