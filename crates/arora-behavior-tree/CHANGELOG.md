@@ -4,6 +4,19 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Native control nodes tick their children directly, while every node remains
+  registered for module composites. Attached module calls resolve argument and
+  output cells at lowering and lend their arguments through
+  `CallBridge::arora_call_borrowed`, with the owned-call fallback for existing
+  bridges. Evaluation order, writes, statuses, traces and errors are preserved.
+- A node parameter's lookup, and `RunStatus`'s child lookup, build their error
+  message only when the lookup fails. Native nodes read their arguments
+  through it on every tick, and formatted the message on each read.
+
 ## [9.5.0] - 2026-10-22
 
 ### Added
