@@ -418,7 +418,7 @@ dependencies = [
 [[package]]
 name = "arora-studio-bridge-client"
 version = "11.0.0"
-source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#533f673a51f8b39901362cf5aa33a5eb28a1dcb6"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#14d519d9c344c06365cd4e7b7b11de3cf611ad2c"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -738,7 +738,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "regex",
@@ -4026,7 +4026,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4891,11 +4891,12 @@ dependencies = [
 [[package]]
 name = "semio-studio-auth"
 version = "1.0.0"
-source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#533f673a51f8b39901362cf5aa33a5eb28a1dcb6"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#14d519d9c344c06365cd4e7b7b11de3cf611ad2c"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "crypto_secretbox",
+ "dirs",
  "log",
  "reqwest",
  "rustls",
@@ -5358,7 +5359,7 @@ dependencies = [
 [[package]]
 name = "studio-bridge-msgs"
 version = "7.1.0"
-source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#533f673a51f8b39901362cf5aa33a5eb28a1dcb6"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fdevice-enrollment#14d519d9c344c06365cd4e7b7b11de3cf611ad2c"
 dependencies = [
  "arora-types",
  "chrono",

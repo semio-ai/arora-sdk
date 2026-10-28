@@ -45,7 +45,8 @@ arora-types = { path = "../arora-types", version = "3.1" }
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
 # 16: `AroraBuilder::with_studio` and `studio::StudioArgs`, the run's
 # Studio choice, a run of a runner built with Studio connecting unless it
-# passes `--no-studio`.
+# passes `--no-studio`; `RunnerArgs::device` and `AroraBuilder::with_device`,
+# the device's name, directory and local bridge port.
 arora = { path = "../arora", version = "16", optional = true }
 async-trait = "0.1"
 byteorder = "1"

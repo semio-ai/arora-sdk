@@ -5,8 +5,8 @@
 //!
 //! This is what makes `arora` Studio-capable (not just its binary):
 //! the full run — read Firebase config + Zenoh endpoints from the environment,
-//! keep the device's encrypted Studio credential in its device directory,
-//! enroll the device when it is not enrolled, build the real
+//! keep the device's encrypted Studio credential under its name in Semio's
+//! device store, enroll the device when it is not enrolled, build the real
 //! `ZenohDeviceClient` (the studio-bridge Zenoh connector), and drive it via
 //! [`crate::run_with_frontend`] over the caller's [`DataStore`]
 //! (`arora_types::data::DataStore` — the entrypoints default it to a fresh
@@ -35,9 +35,37 @@
 //! runner built without it, beside one built with it, would otherwise connect
 //! with no `--no-studio` to opt out.
 //!
-//! The saved credential is the refresh token of the device's Studio session,
-//! in its device directory's `studio/` subdirectory ([`crate::device_dir`]).
 //! A run says in one line of its log which bridge it serves.
+//!
+//! # Where the credential is
+//!
+//! The saved credential is the refresh token of the device's Studio session,
+//! with the key encrypting it and the key and certificate a TLS bridge knows
+//! the device by. Semio's device store keeps it under the device's name
+//! ([`crate::Device::name`]), one directory per name, apart from the device
+//! directory:
+//!
+//! ```text
+//! <data_local_dir>/semio/devices/   the store: SEMIO_DEVICE_STORE replaces this whole path
+//! └── <name>/                       the credential of the device <name>
+//! ```
+//!
+//! arora names the device, and the store places its credential: arora asks
+//! the device client for the name's credentials, and never computes where
+//! they are. Several devices on one machine are several names.
+//!
+//! - A run that connects given a device directory (`--device-dir`,
+//!   `ARORA_DEVICE_DIR`) and no name is refused: "name this device with
+//!   --device or ARORA_DEVICE". Two such devices would otherwise share the
+//!   credential of the name `default`.
+//! - A credential the device directory's `studio/` holds, where arora 11.1 to
+//!   15 kept it, moves into the store under the device's name, once, when the
+//!   store holds none for it; the log says so. Its bridge certificate is
+//!   reissued.
+//! - Given the deprecated `DEVICE_DIR` (or `IDENTITY_FILE`) and no name, the
+//!   run keeps its credential in that directory's `studio/`:
+//!   neither store nor move, so an upgraded runner keeps the credential it
+//!   had, and two such devices never share one.
 //!
 //! The `connect` functions below connect whoever calls them: an embedder
 //! calling one connects, a device that is not enrolled enrolling first.
@@ -75,7 +103,8 @@
 //! which Studio the device belongs to.
 //!
 //! A device can also be enrolled before it runs, with Semio's own client:
-//! `semio device enroll` saves the credential in the same device directory.
+//! `semio device enroll NAME` saves the credential under its name in the same
+//! store.
 //!
 //! Studio shows the person approving the device its description: its name,
 //! `DEVICE_NAME` — under the terminal UI the operator is asked for one when
@@ -112,16 +141,13 @@
 //!     enrolling by code shows beside the code.
 //!   - `STUDIO_ENROLLMENT_TOKEN` — the enrollment token a device that is not
 //!     enrolled enrolls with, instead of a code.
-//!   - `DEVICE_LOCAL_ID` — the device's local id, which names its directory
-//!     `<data_local_dir>/semio/arora/devices/<local id>` ([`crate::device_dir`]);
-//!     `default` when unset. Two devices on one host set different ids. The
-//!     Studio connection keeps its credentials (the refresh token of the
-//!     device's Studio session and the key encrypting it, and its bridge key
-//!     and certificate) in the directory's `studio/` subdirectory.
-//!   - `DEVICE_DIR` — the device directory itself, replacing the per-user
-//!     path. An embedder passes it to [`connect_with_device_dir`] instead.
-//!   - `IDENTITY_FILE` — deprecated: the identity it names migrates to
-//!     `<IDENTITY_FILE>_dir`, which the run uses as its device directory.
+//!   - `ARORA_DEVICE` (`--device`), `ARORA_DEVICE_DIR` (`--device-dir`) — the
+//!     device's name and directory, as [`crate::device`] says, with the
+//!     deprecated `DEVICE_LOCAL_ID`, `DEVICE_DIR` and `IDENTITY_FILE`. An
+//!     embedder passes them to [`connect_with_device_dir`] instead.
+//!   - `SEMIO_DEVICE_STORE` — the device store's root, replacing
+//!     `<data_local_dir>/semio/devices/`: for a service running as another
+//!     user, or tests.
 //!   - `DEVICE_NAME` — the name a device enrolls with; `MODEL_FAMILY`,
 //!     `HARDWARE_VERSION`, `SOFTWARE_VERSION` — its model. A set variable wins
 //!     over every other source of its field; a blank one counts as unset.
@@ -149,6 +175,7 @@ use arora_studio_bridge_client::{PartialDeviceModel, PartialDeviceModelVersion};
 use log::info;
 
 use crate::operator::{EnrollmentCode, Operator};
+use crate::Device;
 
 /// The prompt for the name of a device that enrolls. Empty falls back to a
 /// generated `arora-device-<random>` name, so the device is never nameless.
@@ -197,8 +224,10 @@ impl StudioArgs {
     }
 }
 
-/// Resolve the default bridge of a `studio-bridge` run doing `choice`: the
-/// Semio Studio connection, or the open local bridge with [`Choice::Local`].
+/// Resolve the default bridge of a `studio-bridge` run doing `choice` as
+/// `device`, else the device the environment configures: the Semio Studio
+/// connection, or the open local bridge on the device's port with
+/// [`Choice::Local`].
 ///
 /// A device that is not enrolled enrolls as the [module docs](self#enrollment)
 /// say: under the terminal UI, the operator names it when `DEVICE_NAME` does
@@ -210,11 +239,12 @@ pub(crate) async fn default_bridge(
     frontend: &crate::operator::Frontend,
     description: &HalDescription,
     choice: Choice,
+    device: Option<Device>,
 ) -> Result<Box<dyn Bridge>> {
     bridge_for(
         choice,
-        connect_studio(frontend, description),
-        crate::run::local_ws_bridge(),
+        connect_studio(frontend, description, device.as_ref()),
+        crate::run::local_ws_bridge_on(device.as_ref()),
     )
     .await
 }
@@ -242,14 +272,20 @@ async fn bridge_for(
     }
 }
 
-/// The Studio connection of a run that connects, through the operator only
-/// under the terminal UI: headless, nobody answers.
+/// The Studio connection of a run that connects as `device`, else as the
+/// device the environment configures, through the operator only under the
+/// terminal UI: headless, nobody answers.
 async fn connect_studio(
     frontend: &crate::operator::Frontend,
     description: &HalDescription,
+    device: Option<&Device>,
 ) -> Result<Box<dyn Bridge>> {
     let operator = frontend.interactive.then_some(&*frontend.operator);
-    connect_device(credentials::from_env()?, description, operator).await
+    let credentials = match device {
+        Some(device) => credentials::of(device, None)?,
+        None => credentials::of(&Device::from_env()?, None)?,
+    };
+    connect_device(credentials, description, operator).await
 }
 
 /// Build the Studio bridge of the device the environment configures,
@@ -273,7 +309,12 @@ pub async fn connect_with_operator_and_description(
     operator: &dyn Operator,
     description: &HalDescription,
 ) -> Result<Box<dyn Bridge>> {
-    connect_device(credentials::from_env()?, description, Some(operator)).await
+    connect_device(
+        credentials::of(&Device::from_env()?, None)?,
+        description,
+        Some(operator),
+    )
+    .await
 }
 
 /// Build the Semio Studio bridge — a ready-to-inject [`Bridge`] endpoint — of
@@ -307,18 +348,27 @@ pub async fn connect() -> Result<Box<dyn Bridge>> {
 /// itself (`hal.describe().await`), as the
 /// [module docs](self#the-devices-model) say.
 pub async fn connect_with_description(description: &HalDescription) -> Result<Box<dyn Bridge>> {
-    connect_device(credentials::from_env()?, description, None).await
+    connect_device(
+        credentials::of(&Device::from_env()?, None)?,
+        description,
+        None,
+    )
+    .await
 }
 
-/// [`connect`], with `device_dir` as the device directory rather than the one
-/// the environment names; the Studio credentials go in its `studio/`
-/// subdirectory. An app whose platform gives it a data directory (Android, a
-/// Tauri app) passes that; [`crate::device_dir::of`] gives the per-user one
-/// of a local id. The directories are created if missing, and the
-/// credentials when the device enrolls.
-pub async fn connect_with_device_dir(device_dir: &Path) -> Result<Box<dyn Bridge>> {
+/// [`connect`], as the device named `name` whose directory is `device_dir`,
+/// rather than the device the environment configures. An app whose platform
+/// gives it a data directory (Android, a Tauri app) passes that;
+/// [`crate::device_dir::of`] gives the per-user one of a name.
+///
+/// The credential is the name's in Semio's device store
+/// ([where the credential is](self#where-the-credential-is)), created if
+/// missing, and saved when the device enrolls; one `device_dir`'s `studio/`
+/// holds moves in once. Fails on a name that is not one path component.
+pub async fn connect_with_device_dir(device_dir: &Path, name: &str) -> Result<Box<dyn Bridge>> {
+    let store = credentials::store_at(None)?;
     connect_device(
-        credentials::in_device_dir(device_dir)?,
+        credentials::in_store(&store, name, device_dir)?,
         &HalDescription::default(),
         None,
     )
@@ -338,7 +388,7 @@ const _: () = {
     ) {
         send(&connect());
         send(&connect_with_description(description));
-        send(&connect_with_device_dir(device_dir));
+        send(&connect_with_device_dir(device_dir, "bench"));
         send(&connect_with_operator(operator));
         send(&connect_with_operator_and_description(
             operator,

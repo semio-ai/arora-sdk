@@ -8,6 +8,20 @@ All notable changes to `arora`. The format follows
 
 ### Added
 
+- **Several devices on one host**: `RunnerArgs`, the options every runner
+  takes (the `arora` binary's `DeviceCli`, `arora-ros2`, `arora-restful`,
+  `arora-naoqi`), gives the device the run is besides `--module`:
+  `--device <NAME>` (`ARORA_DEVICE`), its name on this machine, `default`
+  when unset; `--device-dir <PATH>` (`ARORA_DEVICE_DIR`), its directory,
+  else `<data_local_dir>/semio/arora/devices/<name>`; and
+  `--bridge-port <PORT>` (`ARORA_BRIDGE_PORT`), the port of its open local
+  bridge, `device::DEFAULT_BRIDGE_PORT` (9000) when unset.
+  `RunnerArgs::device()` resolves them into a `Device` (`name()`, `dir()`,
+  `bridge_port()`), and `Device::from_env()` resolves them from the
+  environment alone. `AroraBuilder::with_device(Device)` hands the device to
+  `run`, whose default bridge serves on its port and connects to Studio as
+  it; a builder given no device serves on 9000, and connects as
+  `Device::from_env()`.
 - `operator::EnrollmentCode` and `Operator::show_enrollment_code`: an operator
   shows the code that enrolls the device with Semio Studio, until the next
   call replaces or clears it, and returns whether it shows the code. The
@@ -80,8 +94,55 @@ All notable changes to `arora`. The format follows
   `STUDIO_ENROLLMENT_TOKEN` for that run. An embedder matching
   `connect_with_operator`'s `Ok(None)` drops that arm.
 
+- **A device's Studio credential is its name's in Semio's device store**,
+  apart from its directory: `<data_local_dir>/semio/devices/<name>/`, or
+  under `SEMIO_DEVICE_STORE` (`semio-studio-auth`'s `DeviceStore`, through
+  the client's `DeviceCredentials::in_store`). arora names the device and
+  never computes where its credential is; the device directory holds none.
+  - A run that connects to Studio given a device directory
+    (`--device-dir`, `ARORA_DEVICE_DIR`) and no name is refused: "name this
+    device with --device or ARORA_DEVICE". Two such devices would otherwise
+    share the credential of the name `default`. Without Studio, a directory
+    alone is fine.
+  - A credential the device directory's `studio/` holds moves into the store
+    under the device's name, once, when the store holds none for it, and the
+    log says so. Its bridge certificate is reissued. Credentials from arora
+    11.0 and earlier (`.semio/arora`) move into the store under `default`,
+    and a deprecated `IDENTITY_FILE` given with a name migrates through
+    `<IDENTITY_FILE>_dir/studio/` into the store.
+  - `studio::connect_with_device_dir(device_dir, name)` takes the device's
+    name, whose credential it connects with.
+- `DeviceCli` flattens `RunnerArgs` as its `runner` field, in place of its
+  own `module`.
+- `device_dir::DEFAULT_LOCAL_ID` is `device_dir::DEFAULT_NAME`. A device's
+  name is exactly one normal path component: besides `""`, `.`, `..` and
+  names holding `/` or `\`, one Windows reads as a path on another drive,
+  such as `D:bench`, is refused.
+
+  To migrate, name each device on a host with `--device` or `ARORA_DEVICE`
+  in place of `DEVICE_LOCAL_ID`, and give a directory with `--device-dir`
+  or `ARORA_DEVICE_DIR` in place of `DEVICE_DIR`, with a name when the run
+  connects to Studio. A runner with a command line of its own hands
+  `RunnerArgs::device()` to `AroraBuilder::with_device`, and its `dir()` to
+  `with_module_dirs`. `semio device enroll NAME` enrolls the device of that
+  name.
+
+### Deprecated
+
+- `DEVICE_LOCAL_ID` names the device, as `ARORA_DEVICE` does, when neither
+  `--device` nor `ARORA_DEVICE` does, with a warning.
+- `DEVICE_DIR`, with a warning to name the device, is the device directory
+  when neither `--device-dir` nor `ARORA_DEVICE_DIR` gives one. Given with a
+  name, it acts as `ARORA_DEVICE_DIR`. Given alone, the run keeps its Studio
+  credential in `<DEVICE_DIR>/studio/`, without store or move, so an
+  upgraded runner keeps the credential it had and two such devices never
+  share one. `IDENTITY_FILE` given alone does the same in
+  `<IDENTITY_FILE>_dir/studio/`.
+
 ### Removed
 
+- `device_dir::from_env`: `Device::from_env()?.dir()` is the device
+  directory the environment configures.
 - `--studio` and `ARORA_STUDIO`: a build with Studio connects without them.
 - `studio::Choice::IfSaved`, connecting on a saved credential alone, and
   `Choice`'s `Default`.

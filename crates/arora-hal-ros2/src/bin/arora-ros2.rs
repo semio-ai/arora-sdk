@@ -1,6 +1,7 @@
 //! arora-ros2: runs a ROS 2 robot as an Arora device.
 //!
-//! Usage: `arora-ros2 [--module <DIR>]... [--no-studio] <ROBOT> [OVERRIDES]`
+//! Usage: `arora-ros2 [--module <DIR>]... [--device <NAME>] [--device-dir <PATH>]
+//! [--bridge-port <PORT>] [--no-studio] <ROBOT> [OVERRIDES]`
 //! (`--help` lists the options; `--no-studio` in a build with the `studio`
 //! feature).
 //!
@@ -12,7 +13,12 @@
 //! The device serves the open local bridge. Built with the `studio` feature, it
 //! connects to Semio Studio instead, enrolling a device that is not enrolled
 //! with Studio first, unless the run passes `--no-studio`. Its enrollment and
-//! credential are arora's (`arora::studio`), configured from the environment.
+//! credential are arora's (`arora::studio`), the credential kept under the
+//! device's name.
+//!
+//! `--device`, `--device-dir` and `--bridge-port` (`ARORA_DEVICE`,
+//! `ARORA_DEVICE_DIR`, `ARORA_BRIDGE_PORT`) give the device the run is: its
+//! name, its directory and its local bridge's port, as `arora::Device` says.
 //!
 //! The device carries the modules its device directory holds under `modules/`,
 //! then each `--module` directory, as the `arora` runner does
@@ -76,10 +82,12 @@ async fn main() -> anyhow::Result<()> {
     // module loading and the HAL say is captured like the rest of the run. The
     // modules the device carries are read before the robot is reached: a
     // module directory that does not read fails the start at once.
-    let builder = Arora::builder()
-        .with_frontend(arora::standard_frontend())
-        .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
-        .await?;
+    let builder = Arora::builder().with_frontend(arora::standard_frontend());
+    let device = cli.runner.device()?;
+    let builder = builder
+        .with_module_dirs(device.dir(), &cli.runner.module)
+        .await?
+        .with_device(device);
     #[cfg(feature = "studio")]
     let builder = builder.with_studio(cli.studio.choice());
     // One runtime carries everything: the HAL's ROS tasks spawn on it at
@@ -120,6 +128,25 @@ mod tests {
             cli.runner.module,
             vec![std::path::PathBuf::from("a"), "b".into()]
         );
+    }
+
+    /// The device options give the device's name, directory and bridge port.
+    #[test]
+    fn the_device_options_give_the_device() {
+        let cli = Cli::try_parse_from([
+            "arora-ros2",
+            "--device",
+            "bench-2",
+            "--device-dir=/srv/bench-2",
+            "--bridge-port",
+            "9002",
+            "nao",
+        ])
+        .expect("the command line parses");
+        let device = cli.runner.device().expect("the device resolves");
+        assert_eq!(device.name(), "bench-2");
+        assert_eq!(device.dir(), std::path::Path::new("/srv/bench-2"));
+        assert_eq!(device.bridge_port(), 9002);
     }
 
     /// `-h` and `--help` print the help and exit 0; neither is a robot.

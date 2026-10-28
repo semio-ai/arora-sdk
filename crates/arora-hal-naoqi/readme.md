@@ -82,7 +82,10 @@ shows the code a person approves the device with in Studio.
 
 Options: `--tree <file.groot.xml>` runs another behavior tree, `--no-tree` none; in a build
 with the `studio` feature, `--no-studio` serves the open local bridge instead of connecting
-to Semio Studio; a
+to Semio Studio; `--device <name>`, `--device-dir <path>` and `--bridge-port <port>`
+(`ARORA_DEVICE`, `ARORA_DEVICE_DIR`, `ARORA_BRIDGE_PORT`) name the device, give its
+directory, and the port of its open local bridge (9000 by default), so several devices run
+on one machine; a
 JSON configuration ([`configs/nao.json`](configs/nao.json): joint ids, sampling period,
 joint speed, sensor families, Autonomous Life) can replace the address, and a second JSON
 file overrides it.
@@ -158,11 +161,11 @@ Studio, build it with `--features runner,studio`, run it once and approve the co
 in Studio. To leave it running after you log out, run it headless with `nohup`: an enrolled
 device connects to Studio with its saved credential.
 
-On the robot, the device directory follows the same rule as anywhere: `DEVICE_DIR` when it
-is set, else `semio/arora/devices/<DEVICE_LOCAL_ID>/` in the user data directory
-(`~/.local/share` on the robot), with `default` as the local id when `DEVICE_LOCAL_ID` is
-unset; [arora's readme](../arora/readme.md#where-a-device-keeps-its-data) has the whole
-rule. Its modules go in `modules/` there. The binary is static, so it loads WebAssembly
+On the robot, the device directory follows the same rule as anywhere: `--device-dir` (or
+`ARORA_DEVICE_DIR`) when given, else `semio/arora/devices/<name>/` in the user data
+directory (`~/.local/share` on the robot), the name being `--device` (or `ARORA_DEVICE`),
+`default` when unset; [arora's readme](../arora/readme.md#where-a-device-keeps-its-data)
+has the whole rule. Its modules go in `modules/` there. The binary is static, so it loads WebAssembly
 modules: a native module (a dynamic library) fails the start, naming it.
 
 ## The default behavior
@@ -192,7 +195,8 @@ Semio Studio is opt-in, at build time. A runner built with the Studio connection
 crate's `studio` feature: `--features runner,studio`) connects to Studio on every run,
 unless the run passes `--no-studio`, which serves the open local bridge instead. A runner
 built without it serves the open local bridge and takes no Studio option. Delete the
-device's `studio/` directory (below) to make it a device with no saved credential.
+device's directory in the device store (below) to make it a device with no saved
+credential.
 
 A device enrolls with Studio the first time it connects: a person approves it in Studio and
 chooses its owner, a person or an organization, and Studio creates the device.
@@ -223,12 +227,13 @@ never an option: the token is a secret). Studio creates the device under the tok
 A refused code or token fails the run.
 
 The device's identity (its Studio credential) is kept on the machine that runs
-`arora-naoqi`, under `semio/arora/devices/default/studio/` in its user data directory:
-`~/.local/share` on Linux and on the robot, `~/Library/Application Support` on macOS. The
+`arora-naoqi`, under its name in Semio's device store: `semio/devices/<name>/` in the user
+data directory — `~/.local/share` on Linux and on the robot, `~/Library/Application Support`
+on macOS — the name being `default` unless `--device` (or `ARORA_DEVICE`) gives one. The
 next runs connect with it without enrolling again; a device run from your computer, then
 deployed on the robot, enrolls twice. To enroll the robot afresh, delete that directory and
-run it again, or give the run another identity with
-`DEVICE_LOCAL_ID=<name>` (or a whole other directory with `DEVICE_DIR`). A credential an
+run it again, or give the run another identity with `--device <name>`. A run given a device
+directory (`--device-dir`) that connects to Studio names the device too. A credential an
 earlier `arora-naoqi` saved, before devices enrolled, is no enrolled device's: the next run
 enrolls the device.
 

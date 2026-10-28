@@ -20,8 +20,8 @@ loaded to run a tree of them.
 The crate is a default workspace member, so `cargo build` produces the `arora`
 binary: the headless device runner — no HAL-attached display; a head like Vizij
 embeds the library instead. It reads its configuration from the environment
-and serves the open local bridge on `ws://127.0.0.1:9000`. A build with the
-`studio-bridge` feature connects to Semio Studio instead, unless the run passes
+and serves the open local bridge on `ws://127.0.0.1:9000` (`--bridge-port`
+serves on another). A build with the `studio-bridge` feature connects to Semio Studio instead, unless the run passes
 `--no-studio` ([Semio Studio is opt-in](#semio-studio-is-opt-in)). The front end is the terminal operator UI when the process is attached to a
 terminal (feature `tui`), headless otherwise. In the terminal UI the wheel and
 PgUp/PgDn scroll the log pane, `m` hands the mouse to the terminal to select
@@ -41,6 +41,9 @@ cargo build                      # builds arora into target/debug/arora
 
 # load a module from a directory besides those in the device directory
 ./target/debug/arora --module node_modules/@vizij/animation-module/artifact
+
+# a second device on this machine: its own name, directory and bridge port
+./target/debug/arora --device bench-2 --bridge-port 9001
 ```
 
 At start the device loads every module in its device directory's `modules/`
@@ -84,16 +87,18 @@ A device-specific Arora is built from the outside, with no fork and no
 per-device feature flag: the [`device` example](examples/device.rs) provides
 its own `Hal` and hands it to `run_with`; swap in a real robot HAL and the
 studio-bridge connector and it is a real device build. `DeviceCli` is the clap
-options the binary parses (the Groot file, `--open`, `--module`, and in a
-`studio-bridge` build `--no-studio`); flatten it into a larger
-CLI and inject the results through the builder. A runner's
-modules, its device directory's and those its command line names, load with
-`AroraBuilder::with_module_dirs(&device_dir::from_env()?, &dirs)`, records
-included, as the `arora` binary and the robot runners load theirs. A runner
-with a command line of its own flattens `RunnerArgs` into it for `--module`,
-and, under a feature of its own enabling `studio-bridge`, `studio::StudioArgs`
-for `--no-studio`, whose `choice()` it hands to `AroraBuilder::with_studio`,
-as the robot runners do. The records join the registry `with_registry` gives
+options the binary parses (the Groot file, `--open`, the options every runner
+takes, and in a `studio-bridge` build `--no-studio`); flatten it into a larger
+CLI and inject the results through the builder. The options every runner
+takes are `RunnerArgs`: `--module`, and the device the run is
+([below](#where-a-device-keeps-its-data)), which `RunnerArgs::device()`
+resolves into a `Device` for `AroraBuilder::with_device`. A runner's modules,
+its device directory's and those its command line names, load with
+`AroraBuilder::with_module_dirs(device.dir(), &dirs)`, records included, as
+the `arora` binary and the robot runners load theirs. A runner with a command
+line of its own flattens `RunnerArgs` into it, and, under a feature of its
+own enabling `studio-bridge`, `studio::StudioArgs` for `--no-studio`, whose
+`choice()` it hands to `AroraBuilder::with_studio`, as the robot runners do. The records join the registry `with_registry` gives
 when the device is built, whichever of the two calls comes first.
 
 On wasm, build the library with `--no-default-features`: the `native` feature
@@ -102,6 +107,16 @@ binary.
 
 ## Where a device keeps its data
 
+A run is a **device**, named on its machine: `--device <name>`
+(`ARORA_DEVICE`), `default` when unset. Several devices on one host are
+several names, each with its own directory and, to serve side by side, its
+own local bridge port: `--bridge-port <port>` (`ARORA_BRIDGE_PORT`), 9000
+when unset. The name is one path component (not empty, not `.` or `..`, no
+`/` or `\`, nothing Windows reads as a drive, such as `D:bench`), and is
+local only: the name a device shows in Studio (`DEVICE_NAME`) can change
+without making it another device, and the id Studio knows it by is assigned
+when it enrolls.
+
 A device keeps what is its own from one run to the next in its **device
 directory**, each use in a subdirectory of its own:
 
@@ -109,24 +124,30 @@ directory**, each use in a subdirectory of its own:
 <data_local_dir>/semio/arora/      per user: ~/Library/Application Support (macOS),
 │                                  ~/.local/share (Linux), %LOCALAPPDATA% (Windows)
 └── devices/
-    └── <local id>/                the device directory: DEVICE_LOCAL_ID, `default` when unset;
-        │                          DEVICE_DIR replaces this whole path
-        ├── modules/               the modules the device loads at start, in name order
-        │   └── <name>/            a module directory (what --module names elsewhere):
-        │       ├── header.json    the module's header (its low-level Header, as JSON)
-        │       ├── *.wasm         its artifact: the one file with the executor's extension —
-        │       │                  .wasm for wasm, .so / .dylib / .dll for native
-        │       └── records/       optional: the module's record and the records it depends
-        │                          on, in arora-registry's layout (module/, structure/, …)
-        └── studio/                the Studio connection's credentials, kept by
-            ├── key                arora-studio-bridge-client's DeviceCredentials
-            └── refresh_token
+    └── <name>/                    the device directory: --device-dir (ARORA_DEVICE_DIR)
+        │                          replaces this whole path
+        └── modules/               the modules the device loads at start, in name order
+            └── <module>/          a module directory (what --module names elsewhere):
+                ├── header.json    the module's header (its low-level Header, as JSON)
+                ├── *.wasm         its artifact: the one file with the executor's extension —
+                │                  .wasm for wasm, .so / .dylib / .dll for native
+                └── records/       optional: the module's record and the records it depends
+                                   on, in arora-registry's layout (module/, structure/, …)
 ```
 
-The local id tells apart the devices one user runs on one host. It is local
-only: the name a device shows can change without making it another device, and
-the id Studio knows it by is assigned when it enrolls.
 Anything else a device keeps goes in a subdirectory of its own beside these.
+
+In a build with Semio Studio, the device's Studio credential is not in its
+directory: Semio's device store keeps it under the device's name, which is
+the only key between arora and Studio's enrollment
+([where the credential is](#where-the-studio-credential-is)).
+
+Deprecated variables still name a device, each with a warning:
+`DEVICE_LOCAL_ID` its name, as `ARORA_DEVICE` does; `DEVICE_DIR` its
+directory, as `ARORA_DEVICE_DIR` does when the run names the device — given
+alone, the device keeps its Studio credential in `<DEVICE_DIR>/studio/`, so
+an upgraded runner keeps the credential it had; and `IDENTITY_FILE`, whose
+identity migrates to `<IDENTITY_FILE>_dir`, the run's device directory.
 
 A module directory is the layout a module is published in: the
 `@vizij/animation-module` package's `artifact/` — `header.json` beside
@@ -163,10 +184,11 @@ Studio option:
 | nothing | connects to Studio; a device that is not enrolled with Studio [enrolls](#enrolling-a-device-with-studio) first |
 | `--no-studio` | serves the open local bridge, whatever it holds |
 
-The credential is the refresh token of the device's Studio session, in its
-device directory's `studio/`. A device holds one once it has enrolled, and
-every later run connects with it; deleting `studio/` makes it a device with
-none. The run says which bridge it serves in one line:
+The credential is the refresh token of the device's Studio session, under
+its name in Semio's device store ([below](#where-the-studio-credential-is)).
+A device holds one once it has enrolled, and every later run connects with
+it; deleting the name's directory there makes it a device with none. The run
+says which bridge it serves in one line:
 
 ```text
 Studio: connecting to Semio Studio (--no-studio serves the open local bridge instead); a device not enrolled with it enrolls first.
@@ -182,18 +204,40 @@ local bridge: a feature of arora is enabled for every crate a build links, so
 `studio-bridge` alone does not tell that the runner at hand was built with
 Studio.
 
+#### Where the Studio credential is
+
+Semio's device store (`semio-studio-auth`'s `DeviceStore`) keeps each
+device's credential in a directory of its name's, apart from the device
+directory:
+
+```text
+<data_local_dir>/semio/devices/    the store: SEMIO_DEVICE_STORE replaces this whole path
+└── <name>/                        the device's credential: key, refresh_token, and the
+                                   key and certificate a TLS bridge knows it by
+```
+
+arora names the device; the store places its credential. A run that
+connects to Studio given a device directory (`--device-dir`,
+`ARORA_DEVICE_DIR`) and no name is refused — "name this device with
+--device or ARORA_DEVICE" — since two such devices would share the
+credential of `default`. Without Studio, a directory alone is fine.
+
 The chain down to the bridge's code, in a `studio-bridge` build:
 
-1. [`device_dir`](src/device_dir.rs) resolves the device directory
-   (`device_dir::from_env`): `DEVICE_DIR`; else `<IDENTITY_FILE>_dir` while
-   that deprecated variable is set; else
-   `device_dir::of(<DEVICE_LOCAL_ID, or default>)`. The per-user directory
-   needs a home: a container whose user has no passwd entry sets `DEVICE_DIR`.
-   An embedder whose platform gives it a data directory (Android, a Tauri app)
-   passes its own to `studio::connect_with_device_dir`.
-2. [`studio::credentials`](src/studio/credentials.rs) names `<device dir>/studio`
-   and hands it to `DeviceCredentials::in_dir`. The credentials there are the
-   client's; arora writes nothing there.
+1. [`device`](src/device.rs) resolves the device the run is
+   (`RunnerArgs::device`, or `Device::from_env`): its name, and its
+   directory, `--device-dir` or else `device_dir::of(<name>)`. The per-user
+   directory needs a home: a container whose user has no passwd entry gives
+   `--device-dir`, and `SEMIO_DEVICE_STORE` for the credential. An embedder
+   whose platform gives it a data directory (Android, a Tauri app) passes its
+   own, with the device's name, to `studio::connect_with_device_dir`.
+2. [`studio::credentials`](src/studio/credentials.rs) asks the client for
+   the name's credentials in the store, `DeviceCredentials::in_store`. A
+   credential the device directory's `studio/` holds, where arora 11.1 to 15
+   kept it, moves in once when the store holds none for the name
+   (`DeviceCredentials::adopt`), and the log says so; its bridge certificate
+   is reissued. The credentials are the client's; arora writes nothing
+   there.
 3. `studio::connect` passes the `DeviceCredentials` to
    `ZenohDeviceClient::new`, or to `new_endpoint` when `STUDIO_BRIDGE_ENDPOINT`
    names the bridge's endpoint. The client signs the device in with the
@@ -243,9 +287,9 @@ pointed at that project (the `FIREBASE_*` variables) or the directory is
 deleted to enroll the device with the run's.
 
 A device can also be enrolled before it runs, with Semio's own client:
-`semio device enroll` enrolls it by code or enrollment token and saves the
-credential in the same `studio/` of its device directory, which a run of a
-build with Studio then connects with.
+`semio device enroll NAME` enrolls it by code or enrollment token and saves
+the credential under that name in the same store, which a run of a build
+with Studio named `NAME` then connects with.
 
 The person approving the device sees its description: its name, and its model
 family and hardware and software versions. The name is `DEVICE_NAME`; under
@@ -268,9 +312,9 @@ the operator typed at enrollment stays, as no report gives another.
 
 Credentials from arora 11.0 and earlier, in `.semio/arora` under the
 executable's directory, the home directory or the current directory, move into
-`devices/default/studio/` at the device's first start. A deprecated
-`IDENTITY_FILE` migrates to `<IDENTITY_FILE>_dir`, which that run uses as its
-device directory.
+the store under `default` the first time the device named `default` connects.
+A deprecated `IDENTITY_FILE` migrates to `<IDENTITY_FILE>_dir/studio/`, and
+on into the store when the run names the device.
 
 See the [root map](../../readme.md) for where this sits in Arora.
 

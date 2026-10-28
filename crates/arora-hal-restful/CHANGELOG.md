@@ -6,6 +6,17 @@ All notable changes to `arora-hal-restful`. The format follows
 
 ## [5.0.0] - 2026-10-23
 
+### Added
+
+- The `arora-restful` runner takes `--device <NAME>` (`ARORA_DEVICE`),
+  `--device-dir <PATH>` (`ARORA_DEVICE_DIR`) and `--bridge-port <PORT>`
+  (`ARORA_BRIDGE_PORT`, 9000 when unset), arora 16's `RunnerArgs`: the
+  device's name, its directory, and the port of its open local bridge, so
+  several devices run on one host. Built with `studio`, the device's Studio
+  credential is its name's in Semio's device store, and a run that connects
+  given a device directory and no name is refused. `DEVICE_LOCAL_ID` and
+  `DEVICE_DIR` are deprecated, as arora 16 says.
+
 ### Changed
 
 - `runner` no longer enables `studio`: the `arora-restful` runner it builds serves

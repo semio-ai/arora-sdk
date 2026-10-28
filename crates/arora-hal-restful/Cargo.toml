@@ -33,7 +33,8 @@ arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-types = { path = "../arora-types", version = "3.1" }
 # 16: `AroraBuilder::with_studio` and `studio::StudioArgs`, the run's
 # Studio choice, a run of a runner built with Studio connecting unless it
-# passes `--no-studio`.
+# passes `--no-studio`; `RunnerArgs::device` and `AroraBuilder::with_device`,
+# the device's name, directory and local bridge port.
 arora = { path = "../arora", version = "16", optional = true }
 async-trait = "0.1"
 futures = "0.3"

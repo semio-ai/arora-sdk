@@ -1,10 +1,10 @@
 //! The default `arora` binary: the device runner, headless (no HAL-attached
 //! display — a head like Vizij embeds [`arora::run_with_hal`] instead).
 //!
-//! It reads its configuration from the environment (the device directory,
-//! Firebase options, Zenoh endpoints), loads the modules in its device
-//! directory and those `--module` names, serves the open local bridge, and
-//! runs the arora runtime. A `studio-bridge` build connects to Semio Studio
+//! It reads its configuration from its options and the environment (the
+//! device's name, directory and local bridge port, Firebase options, Zenoh
+//! endpoints), loads the modules in its device directory and those `--module`
+//! names, serves the open local bridge, and runs the arora runtime. A `studio-bridge` build connects to Semio Studio
 //! over Zenoh instead, unless the run passes `--no-studio`. See
 //! [`arora::run_with_hal`] for the configuration env vars and the full run.
 //!
@@ -41,14 +41,17 @@ async fn main() -> anyhow::Result<()> {
     let mut builder = arora::Arora::builder()
         .with_data_store(Box::new(store))
         .with_frontend(arora::standard_frontend());
+    // The device the run is: its name, its directory, its local bridge's port.
+    let device = cli.runner.device()?;
     // The modules the device carries: its device directory's, then `--module`'s.
     // Each loads at build, where one the engine rejects fails the start. The
     // records their directories carry describe them: a module whose record
     // the registry holds has every export described, or fails the start when
     // the record does not match it.
     builder = builder
-        .with_module_dirs(&arora::device_dir::from_env()?, &cli.module)
-        .await?;
+        .with_module_dirs(device.dir(), &cli.runner.module)
+        .await?
+        .with_device(device);
     #[cfg(feature = "studio-bridge")]
     {
         builder = builder.with_studio(cli.studio.choice());

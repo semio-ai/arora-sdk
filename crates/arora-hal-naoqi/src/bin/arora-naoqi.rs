@@ -1,8 +1,8 @@
 //! arora-naoqi: runs a NAOqi robot (NAO, Pepper) as an Arora device.
 //!
-//! Usage: `arora-naoqi [--tree <FILE> | --no-tree] [--module <DIR>]... [--no-studio] <ROBOT>
-//! [OVERRIDES]` (`--help` lists the options; `--no-studio` in a build with the `studio`
-//! feature).
+//! Usage: `arora-naoqi [--tree <FILE> | --no-tree] [--module <DIR>]... [--device <NAME>]
+//! [--device-dir <PATH>] [--bridge-port <PORT>] [--no-studio] <ROBOT> [OVERRIDES]` (`--help`
+//! lists the options; `--no-studio` in a build with the `studio` feature).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var) is the
 //! address of its NAOqi or a path to a `NaoqiRobotConfig` JSON file (see
@@ -11,13 +11,17 @@
 //! The device serves the open local bridge. Built with the `studio` feature, it connects to
 //! Semio Studio instead, enrolling a device that is not enrolled with Studio first, unless
 //! the run passes `--no-studio`. Its enrollment and credential are arora's (`arora::studio`),
-//! configured from the environment.
+//! the credential kept under the device's name.
 //!
 //! The device runs a behavior tree: by default `trees/ready.groot.xml`, which says "Arora is
 //! ready" with a hand gesture at start; `--tree` runs another one, `--no-tree` none. The
 //! tree's leaves are the robot's voice (`Say`), its gestures (`HandsReady`) and the
 //! native `IsStringSet` and `UnsetString`. On the terminal UI, `r` requests it again through
 //! `ready`, which plays the default behavior again; the key is open to remote writers too.
+//!
+//! `--device`, `--device-dir` and `--bridge-port` (`ARORA_DEVICE`, `ARORA_DEVICE_DIR`,
+//! `ARORA_BRIDGE_PORT`) give the device the run is: its name, its directory and its local
+//! bridge's port, as `arora::Device` says.
 //!
 //! The device carries the modules its device directory holds under `modules/`, then each
 //! `--module` directory, as the `arora` runner does (`AroraBuilder::with_module_dirs`): a
@@ -124,10 +128,12 @@ async fn main() -> anyhow::Result<()> {
     }]);
     // The modules the device carries, read before the robot is reached: a module directory
     // that does not read fails the start at once.
-    let builder = Arora::builder()
-        .with_frontend(frontend)
-        .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
-        .await?;
+    let builder = Arora::builder().with_frontend(frontend);
+    let device = cli.runner.device()?;
+    let builder = builder
+        .with_module_dirs(device.dir(), &cli.runner.module)
+        .await?
+        .with_device(device);
     #[cfg(feature = "studio")]
     let builder = builder.with_studio(cli.studio.choice());
 
@@ -226,6 +232,25 @@ mod tests {
         ])
         .expect_err("the two are refused together");
         assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    /// The device options give the device's name, directory and bridge port.
+    #[test]
+    fn the_device_options_give_the_device() {
+        let cli = Cli::try_parse_from([
+            "arora-naoqi",
+            "--device",
+            "bench-2",
+            "--device-dir=/srv/bench-2",
+            "--bridge-port",
+            "9002",
+            "nao.local",
+        ])
+        .expect("the command line parses");
+        let device = cli.runner.device().expect("the device resolves");
+        assert_eq!(device.name(), "bench-2");
+        assert_eq!(device.dir(), std::path::Path::new("/srv/bench-2"));
+        assert_eq!(device.bridge_port(), 9002);
     }
 
     /// `-h` and `--help` print the help and exit 0; neither is a robot.

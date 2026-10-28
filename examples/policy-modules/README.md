@@ -73,12 +73,12 @@ Then, for each demo:
    `HARDWARE_VERSION` override them. Without a terminal nothing is asked: the
    log shows the code, or the device enrolls with the enrollment token
    `STUDIO_ENROLLMENT_TOKEN` holds. The device keeps its Studio identity
-   in its device directory, `~/Library/Application
-   Support/semio/arora/devices/<DEVICE_LOCAL_ID>/studio/` on macOS
-   (`~/.local/share/…` on Linux; `default` when `DEVICE_LOCAL_ID` is unset),
-   so every run with the same local id is the same device, whatever the
-   build. Give the duck its own (`DEVICE_LOCAL_ID=microduck`) when another
-   Arora device runs on this machine.
+   under its name in Semio's device store, `~/Library/Application
+   Support/semio/devices/<name>/` on macOS (`~/.local/share/…` on Linux;
+   the name is `ARORA_DEVICE`, `default` when unset), so every run with the
+   same name is the same device, whatever the build. Give the duck its own
+   (`ARORA_DEVICE=microduck`) when another Arora device runs on this
+   machine.
 5. In Studio, open a project with the Microduck model and pair the device
    from the **Connections** sidebar: the duck in the scene moves with the
    simulated one, walking across the floor.

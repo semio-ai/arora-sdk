@@ -850,9 +850,9 @@ nothing else describes, stays the record's.
 A run that connects to Studio and finds the device not enrolled enrolls it
 then, without a separate command: building with Studio is the opt-in, and a
 person's approval in Studio is the consent the enrollment needs. Enrolling as
-a command of its own is Semio's client's, `semio device enroll`, which saves
-the same credential in the device directory: arora's own verbs never reach
-Studio, and only a build with `studio-bridge`, Semio's runner build, reads
+a command of its own is Semio's client's, `semio device enroll NAME`, which
+saves the same credential under the device's name: arora's own verbs never
+reach Studio, and only a build with `studio-bridge`, Semio's runner build, reads
 that credential. Without an enrollment token, it enrolls by code, headless
 included: the code is in the log — or on standard error when the log shows no
 info lines, since the run waits on someone seeing it — and the run waits for a
@@ -872,3 +872,39 @@ The enrollment token is read from the environment only. A command-line option
 would put a secret where the host's other users read it (`ps`) and where the
 shell keeps it (its history); the environment of a service is its own. arora
 never logs it.
+
+### A device's name keys its Studio credential
+
+A run is a device named on its machine (`--device`, `ARORA_DEVICE`, `default`
+when unset), and the name is the only key between arora and Semio's
+enrollment: Semio's device store (`semio-studio-auth`) maps a name to its
+credential, in a directory of its own apart from the device directory. arora
+names the device and decides when a run enrolls; where a Studio credential
+lives is Studio's. Keeping the credential in the device directory would make
+every Semio tool that enrolls a device (`semio device enroll`) compute arora's
+directory layout, and a build without Studio would carry a Studio
+subdirectory it never reads.
+
+The device directory stays arora's, for what the device keeps of its own
+(its modules), and `--device-dir` places it anywhere. A run that connects to
+Studio given a directory and no name is refused, naming the fix: unnamed, two
+such devices would share the credential of `default`, each one's enrollment
+replacing the other's. Without Studio a directory alone is fine, since
+nothing is keyed by the name.
+
+The deprecated `DEVICE_DIR` given alone keeps its credential in
+`<DEVICE_DIR>/studio/`, where an earlier arora kept it, with no store and no
+move. It is the variable deployments that run several devices already set,
+one directory each: moving their credentials into the store under the one
+name they share would merge them. Every other credential found in a device
+directory's `studio/` moves into the store under the device's name once, so
+an upgrade keeps the device enrolled.
+
+arora validates the name itself, with the same rule as the store's
+`DeviceName` (exactly one normal path component, so not `D:bench`, which
+Windows joins as a path on another drive): a build without Studio links no
+Semio crate.
+
+The local bridge's port is an option of the device too
+(`--bridge-port`, `ARORA_BRIDGE_PORT`, 9000 when unset): two devices on one
+host cannot serve one port.
