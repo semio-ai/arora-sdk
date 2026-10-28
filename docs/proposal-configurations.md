@@ -1175,11 +1175,6 @@ Each stage lands on its own.
   failure land as an `arora` minor; an exhaustive one makes each a major.
 - **Model family in requirements**: required, or left to Studio's binding
   check?
-- **A Studio scope's UUID.** Derived from the owning account's id, so
-  nothing is stored and nothing drifts, but a scope can then never pass to
-  another account; or minted when the handle is claimed and bound in a
-  stored document. `arora`, `vizij` and `semio` keep their fixed ids either
-  way.
 
 ---
 
@@ -1402,6 +1397,10 @@ or a robot can sign in and enroll with Studio whatever `arora` offers.
   tools for one task depending on where a package is published. Sign-in and
   enrollment are the exception: `semio` keeps them, so they work without
   `arora`.
+- **A Studio scope's UUID derived from its account's id** (a version 8 UUID
+  over a fixed namespace and the id). Nothing would be stored, but a scope
+  could never pass to another account. Studio mints the UUID when an account
+  first claims a handle, and keeps it with the account and its handle row.
 - **A project tool under a name of its own** (`arora-cli`, a short coined
   name). `arora-cli` already names the 2022 module runner, whose work is
   running modules, `arora`'s; a coined name has to be learnt and explained,

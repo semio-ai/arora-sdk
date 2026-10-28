@@ -242,7 +242,7 @@ dependency, and that is what the package id adds.
 | Version order | None: a fix on an older major is a release. |
 | Release dependencies | `{ scopedName, packageId, range }`. |
 | Artifact keys | `record`, `header`, `wasm` and `native/<triple>`, as #616's S5a lists. |
-| Scope UUIDs | Bound to their account; `@arora`, `@vizij` and `@semio` held by Semio's accounts with their fixed ids. |
+| Scope UUIDs | Minted by Studio's server when an account first claims a handle, kept on the account and on its `userHandles` row; a handle rename keeps it. `@arora`, `@vizij` and `@semio` are held by Semio's accounts with their fixed ids. |
 
 **`arora-pkg` and `arora-semio`**: `arora publish` reaches the endpoint
 through `arora-semio`'s registry role, with a publish token; `arora-pkg` also
@@ -417,10 +417,6 @@ trusts for that scope.
 
 ## 11. Open questions
 
-- **A Studio scope's UUID**: derived from the owning account's id (a version 8
-  UUID over SHA-256 of a fixed namespace and the id), so nothing is stored and
-  nothing drifts, but a scope can then never pass to another account; or
-  minted when the handle is claimed and bound in a stored document.
 - **Prerelease tags**: planned, not specified.
 - **Organization publish tokens**: until they exist, an organization's CI
   publishes as a person.
