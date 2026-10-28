@@ -10,8 +10,11 @@ cargo test --release                  # what CI's `test` job runs, over the defa
 cargo test --release -p arora-hal     # one crate
 ```
 
-Never pass `--workspace`: it adds the members kept out of the default build
-(polly and the test guests, which the integration tests build as artifacts). On a pull request CI tests only the members the diff reaches;
+`--workspace` is an optional, broader run: it adds the members kept out of the
+default build, polly (and its AWS SDK) and the test guests, whose own unit tests
+(`modules/test-rust-wasm`'s, for one) the default run does not reach; the
+integration tests build those guests only as artifacts. On a pull request CI tests
+only the members the diff reaches;
 `.github/scripts/list_modified_targets.sh origin/main` prints that selection.
 The Zenoh backend of the ROS 2 bridge and the wasm32 browser tests run in their
 own CI jobs (see [the CI section of the architecture](architecture.md#ci)); the
