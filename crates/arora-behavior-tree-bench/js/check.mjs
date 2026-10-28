@@ -41,6 +41,12 @@ for (const form of selected) {
   assert.match(diagnostic.error, /^detached:.*inconsistent behavior tree/);
   assert.throws(() => wasm.loadWorkload(JSON.stringify(badLowering)).measure(form, { samples: 1 }), /detached:.*inconsistent behavior tree/);
 }
+// A tick failure returns its diagnostic the same way, without trapping.
+const badTick = JSON.parse(text);
+badTick.text = 'hold(t: {arora/time}, duration: 0, value: 1, out: {target}, state: f64[])';
+for (const form of selected) {
+  assert.throws(() => wasm.loadWorkload(JSON.stringify(badTick)).measure(form, { samples: 1 }), /at tick 0:.*a saved state holds 3 numbers, not 0/);
+}
 const one = wasm.loadWorkload(text).measure('attached-naive', { samples: 1 });
 assert.equal(one.forms['attached-naive'].differing, 0, 'detached reference when not selected');
 for (const name of wasm.defaults.workloads) {

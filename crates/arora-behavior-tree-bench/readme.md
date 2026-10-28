@@ -405,9 +405,10 @@ uses the same definitions as native.
 All export names start with `bench_`. Pointers address linear memory. Names and
 result buffers are borrowed until the next state-changing export; copy before
 calling another export. Row access outside its range returns NaN. Status exports
-return 0 on success and 1 for invalid input or lowering failure. Lowering
-failures put `{"error":"form: diagnostic"}` in the result buffer; the JS loader
-throws that diagnostic. Executor failures during ticking trap with stderr.
+return 0 on success and 1 for invalid input or a failure to lower or tick.
+Such a failure puts `{"error":"form: diagnostic"}` in the result buffer (a tick
+failure names its tick: `form at tick t: diagnostic`), and the JS loader throws
+that diagnostic; no failure traps.
 
 | exports | contract |
 |---|---|
@@ -421,7 +422,7 @@ throws that diagnostic. Executor failures during ticking trap with stderr.
 | `workload_names()`, `workload_names_len()` | `form,...;phase,...;graphCalls,ticks,warmUp,dt` |
 | `workload_begin(form)` | reset this form's runs and select it |
 | `workload_select(form)` | select a form without clearing runs, for interleaving |
-| `workload_sample()` | one logical sample; returns its positive sample count, or 0 if not begun or lowering fails |
+| `workload_sample()` | one logical sample; returns its positive sample count, or 0 if not begun or lowering or ticking fails |
 | `workload_finish()` | summarize selected form; requires positive odd samples; consumes its runs |
 | `workload_row(i)` | 0–4 mean/p50/p95/p99/max µs; 5–6 calls/dispatches; 7 differing ticks; 8–9 high/low aggregate digest; 10+ phase means |
 | `workload_series()`, `workload_series_len()` | f64 triples per 15 ticks after warm-up: time, calls, phase; length counts f64 elements |
