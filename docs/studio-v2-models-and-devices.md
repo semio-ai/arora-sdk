@@ -131,7 +131,7 @@ Stage 1 is a stopgap. A developer supplies the model file by hand only until Sta
 ### How a developer runs against the live Studio
 
 1. Put the GLB at `crates/arora-hal-ros2/models/<name>.glb`, or set `model_glb_path` in an overrides file or a full config.
-2. Start `arora-ros2 --studio` (built with `--features runner,studio`). The device enrolls: enter the code it shows in Studio, and choose the developer as owner. The family of the robot, for example `quori`, is the `model_family` of the HAL config. Later runs with `--studio` connect with the credential the enrollment saved.
+2. Start `arora-ros2` built with `--features runner,studio`, which connects to Studio. The device enrolls: enter the code it shows in Studio, and choose the developer as owner. The family of the robot, for example `quori`, is the `model_family` of the HAL config. Later runs connect with the credential the enrollment saved.
 3. Studio creates the device when it enrolls. The device appears in the device list of the developer.
 4. In Studio, open a project that the developer owns. The project contains the same GLB as a model, with the same family. The developer can upload it as a project asset. After the Quori publication, the developer can add `@quori/quori` as a dependency.
 5. Make the binding in Studio. Values flow. The joint ids match, because Studio and the device use the same GLB.

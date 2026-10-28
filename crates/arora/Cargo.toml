@@ -12,8 +12,8 @@ path = "src/lib.rs"
 [[bin]]
 name = "arora"
 path = "src/main.rs"
-# The binary is the headless device runner: the open local bridge, and Semio
-# Studio only in a build with the opt-in studio-bridge feature. On wasm, build
+# The binary is the headless device runner: the open local bridge, or Semio
+# Studio in a build with the opt-in studio-bridge feature. On wasm, build
 # the library with --no-default-features.
 required-features = ["native"]
 
@@ -47,8 +47,8 @@ native = [
 # The Semio Studio connection: the studio-bridge Zenoh connector plus the
 # headless device runner (enrollment, token storage, app-data dir, logging)
 # that connects the device to Studio. Opt-in: a plain arora runtime (e.g.
-# Vizij hosting a local bridge) does not talk to the Semio store at all. A
-# build with it still connects only a run passing --studio.
+# Vizij hosting a local bridge) does not talk to the Semio store at all. The
+# binary built with it connects unless the run passes --no-studio.
 studio-bridge = [
     "native",
     "dep:arora-studio-bridge-client",
@@ -103,8 +103,7 @@ arora-studio-bridge-client = { version = "11", optional = true }
 # directory's `header.json`.
 dirs = { version = "6", optional = true }
 serde_json = { version = "1", optional = true }
-# `env`: `--studio` also reads `ARORA_STUDIO`.
-clap = { version = "4", features = ["derive", "env"], optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
 env_logger = { version = "0.11", optional = true }
 log = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }

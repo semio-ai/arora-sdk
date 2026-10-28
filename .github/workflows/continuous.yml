@@ -129,7 +129,7 @@ jobs:
   # Lint the runners and run their tests both ways whenever a change reaches
   # one of their crates, and test them once mixed: one runner with `studio`
   # enables arora's `studio-bridge` for all of them, and the others must still
-  # refuse `--studio`.
+  # take no Studio option, refusing `--no-studio`.
   runners:
     needs: select
     if: needs.select.outputs.test-arora || needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful || needs.select.outputs.test-arora-hal-naoqi

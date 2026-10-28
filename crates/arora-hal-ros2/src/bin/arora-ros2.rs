@@ -1,8 +1,8 @@
 //! arora-ros2: runs a ROS 2 robot as an Arora device.
 //!
-//! Usage: `arora-ros2 [--module <DIR>]... [--studio | --no-studio] <ROBOT>
-//! [OVERRIDES]` (`--help` lists the options; `--studio` and `--no-studio` in a
-//! build with the `studio` feature).
+//! Usage: `arora-ros2 [--module <DIR>]... [--no-studio] <ROBOT> [OVERRIDES]`
+//! (`--help` lists the options; `--no-studio` in a build with the `studio`
+//! feature).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var)
 //! is a well-known robot name or a path to a `ROS2RobotConfig` JSON file. An
@@ -10,9 +10,8 @@
 //! overrides the config's domain id.
 //!
 //! The device serves the open local bridge. Built with the `studio` feature, it
-//! connects to Semio Studio instead when the run passes `--studio`
-//! (`ARORA_STUDIO=1`), which enrolls a device that is not enrolled with
-//! Studio; `--no-studio` keeps it on the local bridge. Its enrollment and
+//! connects to Semio Studio instead, enrolling a device that is not enrolled
+//! with Studio first, unless the run passes `--no-studio`. Its enrollment and
 //! credential are arora's (`arora::studio`), configured from the environment.
 //!
 //! The device carries the modules its device directory holds under `modules/`,
@@ -37,9 +36,9 @@ struct Cli {
     overrides: Option<String>,
     #[command(flatten)]
     runner: RunnerArgs,
-    /// `--studio` and `--no-studio`, under this crate's own `studio` feature:
-    /// arora's `studio-bridge` may be enabled by another runner in the same
-    /// build, and this one must still refuse `--studio` without its own.
+    /// `--no-studio`, under this crate's own `studio` feature: arora's
+    /// `studio-bridge` may be enabled by another runner in the same build, and
+    /// this one, built without its own, neither connects nor takes the option.
     #[cfg(feature = "studio")]
     #[command(flatten)]
     studio: arora::studio::StudioArgs,
@@ -82,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
     #[cfg(feature = "studio")]
-    let builder = builder.with_studio(cli.studio.choice()?);
+    let builder = builder.with_studio(cli.studio.choice());
     // One runtime carries everything: the HAL's ROS tasks spawn on it at
     // construction, and arora drives the device on it.
     let hal = Ros2Hal::new(config)
@@ -141,31 +140,34 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
-    /// `--studio` and `--no-studio` parse into the run's Studio choice,
-    /// anywhere on the command line; neither serves the open local bridge.
+    /// Built with the `studio` feature, a run connects to Semio Studio unless
+    /// it passes `--no-studio`, anywhere on the command line; `--studio` is no
+    /// option.
     #[cfg(feature = "studio")]
     #[test]
-    fn studio_and_no_studio_give_the_run_s_studio_choice() {
+    fn a_run_connects_to_studio_unless_it_passes_no_studio() {
         use arora::studio::Choice;
         let choice = |args: &[&str]| {
             Cli::try_parse_from(args.iter().copied())
                 .expect("the command line parses")
                 .studio
                 .choice()
-                .expect("ARORA_STUDIO is unset or a boolean")
         };
-        assert_eq!(choice(&["arora-ros2", "nao"]), Choice::Local);
-        assert_eq!(choice(&["arora-ros2", "--studio", "nao"]), Choice::Studio);
+        assert_eq!(choice(&["arora-ros2", "nao"]), Choice::Studio);
+        assert_eq!(choice(&["arora-ros2", "--no-studio", "nao"]), Choice::Local);
         assert_eq!(choice(&["arora-ros2", "nao", "--no-studio"]), Choice::Local);
+        let error = Cli::try_parse_from(["arora-ros2", "--studio", "nao"])
+            .expect_err("--studio is refused");
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
     /// Built without the `studio` feature, the runner takes no Studio option:
-    /// `--studio` is refused, not ignored.
+    /// `--no-studio` is refused, not ignored.
     #[cfg(not(feature = "studio"))]
     #[test]
-    fn studio_is_refused_without_the_studio_feature() {
-        let error = Cli::try_parse_from(["arora-ros2", "--studio", "nao"])
-            .expect_err("--studio is refused");
+    fn no_studio_is_refused_without_the_studio_feature() {
+        let error = Cli::try_parse_from(["arora-ros2", "--no-studio", "nao"])
+            .expect_err("--no-studio is refused");
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 }

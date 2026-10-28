@@ -5,8 +5,7 @@
 //! Firebase options, Zenoh endpoints), loads the modules in its device
 //! directory and those `--module` names, serves the open local bridge, and
 //! runs the arora runtime. A `studio-bridge` build connects to Semio Studio
-//! over Zenoh instead when the run passes `--studio` (or sets
-//! `ARORA_STUDIO=1`); `--no-studio` keeps it on the local bridge. See
+//! over Zenoh instead, unless the run passes `--no-studio`. See
 //! [`arora::run_with_hal`] for the configuration env vars and the full run.
 //!
 //! A device-specific build is a thin downstream binary that depends on `arora`
@@ -52,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     #[cfg(feature = "studio-bridge")]
     {
-        builder = builder.with_studio(cli.studio.choice()?);
+        builder = builder.with_studio(cli.studio.choice());
     }
     // A Groot file is the device's behavior: the build resolves its tags
     // against the method index it assembles — the native nodes and the

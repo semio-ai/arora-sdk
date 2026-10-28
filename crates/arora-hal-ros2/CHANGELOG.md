@@ -11,24 +11,23 @@ All notable changes to `arora-hal-ros2`. The format follows
 - `runner` no longer enables `studio`: the `arora-ros2` runner it builds serves
   the open local bridge and takes no Studio option. A runner that connects to
   Semio Studio is built with `--features runner,studio`.
-- The `arora-ros2` runner takes `--studio` and `--no-studio` only under this
-  crate's `studio` feature, whichever other crate a build enables arora's
-  `studio-bridge` for: without `studio` it refuses `--studio`.
-- Requires arora 16: a runner built with `studio` connects to Semio Studio only
-  when the run passes `--studio` (or sets `ARORA_STUDIO=1`), a device holding a
-  saved Studio credential included. A run that does not ask serves the open
-  local bridge, and logs that `--studio` connects with the credential the
-  device holds.
-
-  To migrate a runner that connects with its saved credential, build it with
-  `--features runner,studio` and pass `--studio` on every run that should
-  connect, or set `ARORA_STUDIO=1` in its environment.
+- Requires arora 16: the `arora-ros2` runner built with `studio` connects to
+  Semio Studio on every run unless the run passes `--no-studio`, whatever the
+  device holds, enrolling a device that is not enrolled first (below).
+  `--studio` and `ARORA_STUDIO` are gone.
+- The runner takes `--no-studio` only under this crate's `studio` feature,
+  whichever other crate a build enables arora's `studio-bridge` for: without
+  `studio` it refuses `--no-studio` and serves the open local bridge.
 - A runner built with `studio` enrolls a device that is not enrolled with
   Semio Studio before it connects (arora 16). A person enters the code
   the run shows (in the terminal UI's prompt line, and in the log) in Studio,
   choosing the device's owner; or the run redeems the enrollment token
   `STUDIO_ENROLLMENT_TOKEN` holds. `DEVICE_OWNERS` and the owner prompt are
   gone, and a device an earlier `arora-ros2` registered enrolls again.
+
+  To migrate, build a runner that connects with `--features runner,studio`
+  and drop `--studio` and `ARORA_STUDIO` from its runs; pass `--no-studio` to
+  a run of it that should serve the local bridge.
 
 ## [5.6.0] - 2026-10-21
 

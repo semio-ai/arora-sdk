@@ -57,17 +57,17 @@ its Live Data page writes the commands. Once:
 
 Then, for each demo:
 
-4. Run the device with the Studio bridge, asking for Studio with `--studio`:
+4. Run the device built with the Studio bridge, which connects to Studio:
 
    ```sh
    cargo run --release -p arora-microduck --features studio,piper -- \
-       --studio --studio-model assets/microduck/studio-model.glb
+       --studio-model assets/microduck/studio-model.glb
    ```
 
    The first run enrolls the device with Studio: the terminal asks for a
    device name, then shows a code, which you enter in Studio, choosing the
    device's owner. The device saves its Studio credential, and every later
-   run with `--studio` connects with it (`--no-studio` declines). The model
+   run connects with it (`--no-studio` declines). The model
    family is the GLB's robot name, capitalised (`Microduck`), and the
    hardware version `mujoco`; `DEVICE_NAME`, `MODEL_FAMILY` and
    `HARDWARE_VERSION` override them. Without a terminal nothing is asked: the
@@ -101,8 +101,8 @@ and downloads a voice; libpiper is GPLv3, hence opt-in. Without it, or with
 
 ## Without Studio
 
-Built without `--features studio` — or with it, when the run does not pass
-`--studio`, or passes `--no-studio` — the device serves the open local bridge on
+Built without `--features studio` — or with it, when the run passes
+`--no-studio` — the device serves the open local bridge on
 `ws://127.0.0.1:9000`, the standard Arora bridge any local client talks
 to: JSON messages, a `values_changed` push per step with every key that
 changed, and writes as

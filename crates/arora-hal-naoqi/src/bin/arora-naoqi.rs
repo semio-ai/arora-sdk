@@ -1,17 +1,17 @@
 //! arora-naoqi: runs a NAOqi robot (NAO, Pepper) as an Arora device.
 //!
-//! Usage: `arora-naoqi [--tree <FILE> | --no-tree] [--module <DIR>]... [--studio | --no-studio]
-//! <ROBOT> [OVERRIDES]` (`--help` lists the options; `--studio` and `--no-studio` in a build with
-//! the `studio` feature).
+//! Usage: `arora-naoqi [--tree <FILE> | --no-tree] [--module <DIR>]... [--no-studio] <ROBOT>
+//! [OVERRIDES]` (`--help` lists the options; `--no-studio` in a build with the `studio`
+//! feature).
 //!
 //! The robot is picked at runtime: the first argument (or the `ROBOT` env var) is the
 //! address of its NAOqi or a path to a `NaoqiRobotConfig` JSON file (see
 //! `configs/nao.json`). An optional second JSON file overrides the selected config.
 //!
 //! The device serves the open local bridge. Built with the `studio` feature, it connects to
-//! Semio Studio instead when the run passes `--studio` (`ARORA_STUDIO=1`), which enrolls a
-//! device that is not enrolled with Studio; `--no-studio` keeps it on the local bridge. Its
-//! enrollment and credential are arora's (`arora::studio`), configured from the environment.
+//! Semio Studio instead, enrolling a device that is not enrolled with Studio first, unless
+//! the run passes `--no-studio`. Its enrollment and credential are arora's (`arora::studio`),
+//! configured from the environment.
 //!
 //! The device runs a behavior tree: by default `trees/ready.groot.xml`, which says "Arora is
 //! ready" with a hand gesture at start; `--tree` runs another one, `--no-tree` none. The
@@ -79,9 +79,9 @@ struct Cli {
     overrides: Option<String>,
     #[command(flatten)]
     runner: RunnerArgs,
-    /// `--studio` and `--no-studio`, under this crate's own `studio` feature:
-    /// arora's `studio-bridge` may be enabled by another runner in the same
-    /// build, and this one must still refuse `--studio` without its own.
+    /// `--no-studio`, under this crate's own `studio` feature: arora's
+    /// `studio-bridge` may be enabled by another runner in the same build, and
+    /// this one, built without its own, neither connects nor takes the option.
     #[cfg(feature = "studio")]
     #[command(flatten)]
     studio: arora::studio::StudioArgs,
@@ -129,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
         .with_module_dirs(&arora::device_dir::from_env()?, &cli.runner.module)
         .await?;
     #[cfg(feature = "studio")]
-    let builder = builder.with_studio(cli.studio.choice()?);
+    let builder = builder.with_studio(cli.studio.choice());
 
     // One runtime carries everything: the HAL's tasks spawn on it at construction, the
     // voice speaks on it, and arora drives the device on it.
@@ -246,40 +246,43 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
-    /// `--studio` and `--no-studio` parse into the run's Studio choice,
-    /// anywhere on the command line; neither serves the open local bridge.
+    /// Built with the `studio` feature, a run connects to Semio Studio unless
+    /// it passes `--no-studio`, anywhere on the command line; `--studio` is no
+    /// option.
     #[cfg(feature = "studio")]
     #[test]
-    fn studio_and_no_studio_give_the_run_s_studio_choice() {
+    fn a_run_connects_to_studio_unless_it_passes_no_studio() {
         use arora::studio::Choice;
         let choice = |args: &[&str]| {
             Cli::try_parse_from(args.iter().copied())
                 .expect("the command line parses")
                 .studio
                 .choice()
-                .expect("ARORA_STUDIO is unset or a boolean")
         };
         assert_eq!(
             choice(&["arora-naoqi", "tcp://nao.local:9559"]),
-            Choice::Local
+            Choice::Studio
         );
         assert_eq!(
-            choice(&["arora-naoqi", "--studio", "tcp://nao.local:9559"]),
-            Choice::Studio
+            choice(&["arora-naoqi", "--no-studio", "tcp://nao.local:9559"]),
+            Choice::Local
         );
         assert_eq!(
             choice(&["arora-naoqi", "tcp://nao.local:9559", "--no-studio"]),
             Choice::Local
         );
+        let error = Cli::try_parse_from(["arora-naoqi", "--studio", "tcp://nao.local:9559"])
+            .expect_err("--studio is refused");
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
     /// Built without the `studio` feature, the runner takes no Studio option:
-    /// `--studio` is refused, not ignored.
+    /// `--no-studio` is refused, not ignored.
     #[cfg(not(feature = "studio"))]
     #[test]
-    fn studio_is_refused_without_the_studio_feature() {
-        let error = Cli::try_parse_from(["arora-naoqi", "--studio", "tcp://nao.local:9559"])
-            .expect_err("--studio is refused");
+    fn no_studio_is_refused_without_the_studio_feature() {
+        let error = Cli::try_parse_from(["arora-naoqi", "--no-studio", "tcp://nao.local:9559"])
+            .expect_err("--no-studio is refused");
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 }
