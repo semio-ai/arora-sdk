@@ -88,6 +88,11 @@ export async function loadBenchWasm(bytes, { now = () => performance.now(), rand
   }
   return {
     forms, scenarios, clock, defaults, loadWorkload,
+    loadBuiltin(name) {
+      const index = defaults.workloads.indexOf(name);
+      if (index < 0) throw new Error(`unknown built-in workload: ${name}`);
+      check(() => x.bench_builtin_load(index)); return session();
+    },
     scaleName(n, scenario) {
       check(() => x.bench_scale_name(n, scenarios.indexOf(scenario)));
       return JSON.parse(text(x.bench_result(), x.bench_result_len()));

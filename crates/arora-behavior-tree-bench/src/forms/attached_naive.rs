@@ -1,4 +1,4 @@
-use super::{Form, Nodes};
+use super::{Fixture, Form, Nodes};
 use crate::{
     host::Bridge,
     model::{is_output, Workload},
@@ -165,15 +165,17 @@ impl Form for AttachedNaive {
         );
         (nodes, names)
     }
-    fn fixture_counts(&self) -> [(u64, u64); 7] {
-        [
-            (3760, 5520),
-            (1600, 1920),
-            (1600, 1920),
-            (1600, 1920),
-            (1600, 1920),
-            (2880, 3840),
-            (2880, 4200),
-        ]
+    fn fixture_counts(&self, fixture: Fixture) -> (u64, u64) {
+        use crate::scale::Scenario;
+        match fixture {
+            Fixture::Synthetic => (3760, 5520),
+            Fixture::Conversation => (714_560, 973_431),
+            Fixture::Scale(Scenario::Settled) => (1600, 1920),
+            Fixture::Scale(Scenario::OneInput) => (1600, 1920),
+            Fixture::Scale(Scenario::AllInputs) => (1600, 1920),
+            Fixture::Scale(Scenario::Clock) => (1600, 1920),
+            Fixture::Scale(Scenario::Branches) => (2880, 3840),
+            Fixture::Scale(Scenario::BranchesSwitching) => (2880, 4200),
+        }
     }
 }

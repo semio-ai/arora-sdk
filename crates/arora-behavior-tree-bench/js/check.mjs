@@ -7,6 +7,10 @@ const [modulePath, workloadPath] = process.argv.slice(2);
 const bytes = readFileSync(modulePath), text = readFileSync(workloadPath, 'utf8');
 const wasm = await loadBenchWasm(bytes), x = wasm.exports;
 const selected = wasm.forms.filter(f => f !== 'test-wrong');
+assert.deepEqual(wasm.defaults.workloads, ['synthetic', 'conversation']);
+assert.equal(x.bench_builtin_load(wasm.defaults.workloads.length), 1);
+assert.throws(() => wasm.loadBuiltin('missing'), /unknown built-in/);
+
 let readings = 0;
 assert.equal(clockStep(() => Math.floor(readings++ / 10)), 1);
 assert.throws(() => clockStep(() => 0), /did not advance/);
@@ -23,6 +27,10 @@ const badRoot = JSON.parse(text); badRoot.text = 'missing_function()';
 assert.throws(() => wasm.loadWorkload(JSON.stringify(badRoot)), /rejected/);
 const one = wasm.loadWorkload(text).measure('attached-naive', { samples: 1 });
 assert.equal(one.forms['attached-naive'].differing, 0, 'detached reference when not selected');
+for (const name of wasm.defaults.workloads) {
+  const record = await wasm.loadBuiltin(name).measureAll({ samples: 1, selected });
+  for (const form of selected) assert.equal(record.forms[form].differing, 0, `${name}/${form}`);
+}
 const baseline = await wasm.loadWorkload(text).measureAll({ samples: 3, selected });
 for (const form of selected) assert.equal(baseline.forms[form].differing, 0);
 assert.equal(x.bench_workload_row(7), 0);

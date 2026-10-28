@@ -367,7 +367,7 @@ fn defaults() -> &'static str {
     static DEFAULTS: OnceLock<String> = OnceLock::new();
     DEFAULTS.get_or_init(|| {
         serde_json::json!({"ticks": DEFAULT_TICKS, "warmUp": DEFAULT_WARM_UP,
-        "sizes": SIZES, "reference": REFERENCE})
+        "sizes": SIZES, "reference": REFERENCE, "workloads": crate::builtins::NAMES})
         .to_string()
     })
 }
@@ -394,5 +394,15 @@ pub extern "C" fn bench_scale_name(n: u32, scenario: u32) -> u32 {
         return 1;
     };
     RESULT.set(serde_json::to_vec(&crate::scale_name(scenario.name(), n as usize)).unwrap());
+    0
+}
+
+/// Load one of the built-ins listed in defaults.workloads.
+#[no_mangle]
+pub extern "C" fn bench_builtin_load(index: u32) -> u32 {
+    let Some(name) = crate::builtins::NAMES.get(index as usize) else {
+        return 1;
+    };
+    load(crate::builtins::workload(name).unwrap());
     0
 }

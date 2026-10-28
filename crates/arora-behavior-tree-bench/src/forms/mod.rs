@@ -2,7 +2,7 @@
 mod attached_naive;
 mod detached;
 
-use crate::model::Workload;
+use crate::{model::Workload, scale::Scenario};
 use arora_behavior::FunctionIndex;
 use arora_behavior_tree::{
     error::BehaviorTreeError, load_behavior_tree_nodes_with, lower_behavior_tree, schema::Node,
@@ -13,6 +13,23 @@ use std::{collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
 pub type Nodes = (Vec<Node>, HashMap<Uuid, String>);
+
+/// Named fixtures make each workload's total explicit in every form.
+#[derive(Clone, Copy)]
+pub enum Fixture {
+    Synthetic,
+    Conversation,
+    Scale(Scenario),
+}
+impl Fixture {
+    pub fn workload(self) -> Workload {
+        match self {
+            Self::Synthetic => crate::synthetic::workload(),
+            Self::Conversation => crate::conversation::workload(),
+            Self::Scale(s) => s.workload(10, 16, 144),
+        }
+    }
+}
 
 pub trait Form: Sync {
     fn name(&self) -> &'static str;
@@ -32,9 +49,9 @@ pub trait Form: Sync {
         lower_behavior_tree(tree, functions, bridge, false)
     }
 
-    /// Total (module calls, dispatches) in the fixed synthetic and six scale check fixtures.
+    /// Total (module calls, dispatches), including warm-up, for a named fixture.
     /// A new form declares its count contract beside its implementation.
-    fn fixture_counts(&self) -> [(u64, u64); 7];
+    fn fixture_counts(&self, fixture: Fixture) -> (u64, u64);
 }
 
 /// The reference is first. A form is one module and one entry here.

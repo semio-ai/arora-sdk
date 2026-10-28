@@ -27,6 +27,11 @@ function check(name, record) {
   const hashes = Object.values(record.forms).map(r => r.written.join(','));
   assert.ok(hashes.every(h => h === hashes[0]), `${name}: form digests differ`);
 }
+for (const name of wasm.defaults.workloads) {
+  const record = await wasm.loadBuiltin(name).measureAll({ samples, selected: forms });
+  check(name, record); output.tests[name] = { kind: 'workload', size: 0, record };
+  console.log(`${name}\n${workloadTable(record, forms)}`);
+}
 for (const path of paths) {
   const name = basename(path).replace(/\.json$/, '');
   if (output.tests[name]) throw new Error(`duplicate workload name: ${name}`);

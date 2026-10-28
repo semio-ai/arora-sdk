@@ -3,7 +3,7 @@
 <title>Arora behavior-tree benchmarks</title>
 <style>body { font: 16px system-ui; margin: 2rem; max-width: 90rem } pre { overflow: auto; font-size: 13px } button, input { font: inherit; margin: .5rem } </style>
 <h1>Behavior-tree benchmarks</h1>
-<p>Runs the synthetic workload and six scale scenarios at N=100. Choose a workload JSON to measure it in place of the synthetic one. Each form must agree with detached before its times are compared.</p>
+<p>Runs the synthetic and conversation workloads and six scale scenarios at N=100. Choose a workload JSON to include it. Each form must agree with detached before its times are compared.</p>
 <input type="file" id="workload" accept=".json"><button id="run">Run benchmarks</button>
 <button id="save" disabled>Save raw results</button>
 <pre id="output">Serve the workspace root over HTTP. See the crate README for build commands.</pre>
@@ -18,11 +18,21 @@ run.onclick = async () => {
     const wasm = await loadBenchWasm(await (await fetch('../../../target/wasm32-wasip1/bench-wasm/arora_behavior_tree_bench.wasm')).arrayBuffer());
     output.textContent = JSON.stringify(wasm.clock, null, 2) + '\n';
     const file = document.querySelector('#workload').files[0];
-    const text = file ? await file.text() : await (await fetch('../../../target/bench-synthetic.json')).text();
-    const record = await wasm.loadWorkload(text).measureAll({ samples: 7, yieldBetween });
-    results = { schema: 1, clock: wasm.clock, tests: { workload: { kind: 'workload', size: 0, record } } };
-    if (Object.values(record.forms).some(r => r.differing)) throw new Error('workload forms disagree');
-    output.textContent += workloadTable(record) + '\n\n' + scaleHeader + '\n';
+    results = { schema: 1, clock: wasm.clock, tests: {} };
+    const workloads = wasm.defaults.workloads.map(name => [name, () => wasm.loadBuiltin(name)]);
+    if (file) {
+      const text = await file.text();
+      const name = file.name.replace(/\.json$/, '');
+      if (wasm.defaults.workloads.includes(name)) throw new Error('duplicate workload name');
+      workloads.push([name, () => wasm.loadWorkload(text)]);
+    }
+    for (const [name, load] of workloads) {
+      const record = await load().measureAll({ samples: 7, yieldBetween });
+      results.tests[name] = { kind: 'workload', size: 0, record };
+      if (Object.values(record.forms).some(r => r.differing)) throw new Error(`${name}: workload forms disagree`);
+      output.textContent += name + '\n' + workloadTable(record) + '\n\n';
+    }
+    output.textContent += scaleHeader + '\n';
     for (const scenario of wasm.scenarios) {
       const record = await wasm.loadScale(100, scenario).measureAll({ samples: 7, yieldBetween });
       results.tests[wasm.scaleName(100, scenario)] = { kind: 'scale', size: 100, record };

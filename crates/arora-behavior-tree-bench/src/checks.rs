@@ -1,7 +1,7 @@
 //! Fixtures compiled only for tests and the explicit WASI check build.
 use crate::{
     clock::Clock,
-    forms::{self, Form, Nodes},
+    forms::{self, Fixture, Form, Nodes},
     measure,
     model::Workload,
     scale::Scenario,
@@ -19,8 +19,8 @@ impl Form for Wrong {
         nodes.0[0].children = None;
         nodes
     }
-    fn fixture_counts(&self) -> [(u64, u64); 7] {
-        [(0, 0); 7]
+    fn fixture_counts(&self, _fixture: Fixture) -> (u64, u64) {
+        (0, 0)
     }
 }
 

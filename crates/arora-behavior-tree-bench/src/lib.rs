@@ -1,6 +1,8 @@
 //! Shared behavior-tree benchmark model, forms, measurement and front ends.
+pub mod builtins;
 pub mod cli;
 pub mod clock;
+pub mod conversation;
 #[cfg(target_os = "wasi")]
 mod exports;
 pub mod forms;

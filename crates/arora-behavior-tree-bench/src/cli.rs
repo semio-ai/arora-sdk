@@ -1,11 +1,12 @@
 //! Thin native front ends over the same library used by WASI.
 use crate::{
+    builtins,
     clock::Monotonic,
     forms,
     measure::{self, Measurement},
     model::Workload,
     scale::{Scenario, SIZES},
-    scale_name, synthetic, DEFAULT_TICKS, DEFAULT_WARM_UP,
+    scale_name, DEFAULT_TICKS, DEFAULT_WARM_UP,
 };
 use std::{collections::BTreeMap, path::Path};
 
@@ -103,10 +104,8 @@ fn args() -> Vec<String> {
 
 pub fn workload_main() {
     let args = args();
-    let workload = match args.first().map(String::as_str) {
-        None | Some("synthetic") => synthetic::workload(),
-        Some(path) => Workload::load(path).unwrap(),
-    };
+    let name = args.first().map_or("synthetic", String::as_str);
+    let workload = builtins::workload(name).unwrap_or_else(|| Workload::load(name).unwrap());
     let samples = number(&args, 1, 7);
     let rows = measure::measure(
         &workload,
@@ -196,7 +195,14 @@ pub fn round_main() {
         agreement(&rows);
         tests.insert(name, serde_json::json!({"kind": kind, "size": n, "record": measure::record(&workload, &rows)}));
     };
-    run("synthetic".into(), "workload", 0, synthetic::workload());
+    for name in builtins::NAMES {
+        run(
+            (*name).into(),
+            "workload",
+            0,
+            builtins::workload(name).unwrap(),
+        );
+    }
     for path in args.iter().skip(1) {
         let name = Path::new(path)
             .file_stem()

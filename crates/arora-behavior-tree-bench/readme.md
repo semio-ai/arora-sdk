@@ -143,6 +143,36 @@ sentences from `speech/text` and writes `speech/viseme`. Events exercise complet
 interrupted and empty sentences. Native `running` keeps the root Running.
 It contains no device data.
 
+The [conversation workload](src/conversation.rs) replays 90 seconds at 60 Hz,
+with 60 warm-up ticks, 122 detached graph calls and 6,539 seeded input writes.
+It exercises perception smoothing, voice and turn detection, arrival and presence,
+speaker tracking, battery and distance thresholds, and a root parallel of safety,
+conversation, attention, base, LED and blinking branches. Conversation prioritizes
+listening and interruption over speaking, thinking and idle pointer or random gaze.
+The linked `say` reads each model turn's sentence from `agent/response_text` and
+writes `speech/viseme`; low battery uses `say(text: "Battery low.", voice: "")`.
+Body joints combine eased targets, speech beats and breathing under limits; base
+and LED commands are eased and limited. Gaze, emotion, nod, head shake, wave and
+point tools clear after completion.
+
+All computation uses real dataflow functions; control and assignment use natives.
+Entry-relative gesture frames use `hold` to capture the entry clock and report
+completion, then attached `subtract`, `greaterthan`, `if` and native `unpack`
+select and publish each due frame once. No gesture sequence is simplified.
+`hold` also retains gaze and emotion tools and the e-stop's entry pose. `pulse`
+schedules backchannel nods and blinks; two `wander` calls retain the idle gaze
+coordinates between seeded random gaps. These stand-ins supply timed entry,
+random-gap scheduling and interruption restart, which the linked functions do
+not combine. The input LCG uses seed 20261022, multiplier 1664525 and increment
+1013904223. Energy arrives at 30 Hz, speaker direction at 15 Hz and battery at
+1 Hz, with pointer use, an absence window and e-stop. Phase labels follow the
+agent's flags with listening, speaking, thinking, idle priority. Scripted viseme
+and face-key writes are absent.
+
+The workload contains no robot asset content or face graph; its keys are neutral.
+A robot's published face or body graph, once one exists, is referenced by identity
+and loaded through its owner's loader, never copied.
+
 ## Real modules
 
 The benchmark links workspace functions in process using their declared ids,
@@ -230,10 +260,10 @@ attached-naive runs every graph call plus active publishing leaves.
    `scatter` can resolve runtime keys. A placement pass can run before loading;
    a form can choose lowering options or set flags on the lowered tree before
    returning it. These choices stay in the form's module.
-4. Declare `fixture_counts`: total (module calls, dispatches), warm-up included,
-   for the synthetic fixture, then the six scenarios in `Scenario::ALL` order,
-   each at N=10 with 16 warm-up and 144 measured ticks. Update only the new form's
-   expectations, based on its execution semantics.
+4. Declare `fixture_counts(Fixture)`: total (module calls, dispatches), warm-up
+   included, for each named fixture: synthetic, conversation, and the six scale
+   scenarios at N=10 with 16 warm-up and 144 measured ticks. Every form declares
+   each workload's totals beside its implementation.
 5. Declare the module and add its instance to `FORMS`. Every harness, name list,
    agreement check and fixture test uses that registry. Keep detached registered
    as the reference.
@@ -249,13 +279,14 @@ From the workspace root, with its pinned nightly and normal platform tools:
 ```sh
 cargo test --release -p arora-behavior-tree-bench
 cargo bench -p arora-behavior-tree-bench --bench workload -- synthetic 7
+cargo bench -p arora-behavior-tree-bench --bench workload -- conversation 7
 cargo bench -p arora-behavior-tree-bench --bench workload -- /path/workload.json 7 raw.json
 cargo bench -p arora-behavior-tree-bench --bench scale -- 500 7
 cargo bench -p arora-behavior-tree-bench --bench scale -- 500 7 1000/clock/detached
 ```
 
-Workload arguments: path (or `synthetic`, the default), positive odd sample count
-(default 7), optional raw JSON path. `WORKLOAD_ONLY=detached,attached-naive`
+Workload arguments: path (or `synthetic`, the default, or `conversation`), positive
+odd sample count (default 7), optional raw JSON path. `WORKLOAD_ONLY=detached,attached-naive`
 selects forms, and `WORKLOAD_TIMES=raw.json` supplies a JSON path when no third
 argument is given. Unknown or duplicate form names fail.
 
@@ -270,10 +301,10 @@ cargo build --release -p arora-behavior-tree-bench --bin bench-kit
 BENCH_SAMPLES=1 target/release/bench-kit round.json /path/workload.json
 ```
 
-This always includes synthetic and all scale scenarios. Optional workloads use
-their file stems as test names, so stems must be distinct and different from
-`synthetic`. Configuration: `BENCH_FORMS`, `BENCH_SIZES`, `BENCH_TICKS` (500),
-`BENCH_WARM_UP` (200), `BENCH_SAMPLES` (1).
+This always includes synthetic, conversation and all scale scenarios. Optional
+workloads use their file stems as test names, so stems must be distinct and
+different from `synthetic` and `conversation`. Configuration: `BENCH_FORMS`,
+`BENCH_SIZES`, `BENCH_TICKS` (500), `BENCH_WARM_UP` (200), `BENCH_SAMPLES` (1).
 
 ## Node and browser use
 
@@ -286,9 +317,11 @@ WASI interface; it requires no npm packages.
 ```sh
 rustup target add wasm32-wasip1
 cargo build --profile bench-wasm -p arora-behavior-tree-bench --target wasm32-wasip1 --lib
-cargo run --release -p arora-behavior-tree-bench --bin synthetic-workload > target/bench-synthetic.json
+# Export a built-in workload as a replay envelope:
+cargo run --release -p arora-behavior-tree-bench --bin builtin-workload -- conversation > target/conversation.json
+cargo run --release -p arora-behavior-tree-bench --bin builtin-workload -- synthetic > target/bench-synthetic.json
 node crates/arora-behavior-tree-bench/js/run-node.mjs \
-  target/wasm32-wasip1/bench-wasm/arora_behavior_tree_bench.wasm target/bench-synthetic.json
+  target/wasm32-wasip1/bench-wasm/arora_behavior_tree_bench.wasm
 # Test-only wrong form and virtual clock, excluded from the distributable module:
 cargo build --profile bench-wasm -p arora-behavior-tree-bench --target wasm32-wasip1 --lib --features bench-check
 node crates/arora-behavior-tree-bench/js/check.mjs \
@@ -297,24 +330,23 @@ node crates/arora-behavior-tree-bench/js/check.mjs \
 cargo build --profile bench-wasm -p arora-behavior-tree-bench --target wasm32-wasip1 --lib
 ```
 
-Node 18+ is supported. The Node runner accepts additional workload paths, prints
-the native table columns and fails on disagreement. The same `BENCH_*` variables
+Node 18+ is supported. The Node runner includes both built-in workloads by default,
+accepts additional workload paths, prints the native table columns and fails on
+disagreement. The same `BENCH_*` variables
 configure Node and the native round binary. `NODE_TIMES=wasm.json` saves raw data.
 `NODE_NATIVE=round.json` additionally checks exact per-tick call and dispatch
-counts and identical test sets against a native round. Use the same workload
-stems in both files; for example, save synthetic as `synthetic.json` for a check
-against the native round's built-in `synthetic` test. Do not compare native and
-WASI value digests.
+counts and identical test sets against a native round. Use the same optional
+workload stems in both files; both runners include the built-ins without JSON
+files. Do not compare native and WASI value digests.
 
-For a browser, build the module and generate `target/bench-synthetic.json` as
-above, then serve the workspace root:
+For a browser, build the module as above, then serve the workspace root:
 
 ```sh
 python3 -m http.server 8000
 ```
 
 Open `http://localhost:8000/crates/arora-behavior-tree-bench/js/browser.html`.
-The page runs the synthetic workload and every scenario at N=100, yields between
+The page runs synthetic, conversation and every scenario at N=100, yields between
 samples, and can save raw results. A file picker accepts another workload without
 copying it into the repository. The loader is an ES module usable by other pages:
 
@@ -355,6 +387,7 @@ return 0 on success and 1 for invalid input; an executor failure traps with stde
 | `measure(n,scenario,form,warmUp,ticks,samples)` | one scale cell, indices into names |
 | `row(i)` | last scale row: 0–2 sample-mean median/q1/q3 µs; 3–4 mean calls/dispatches; 5–6 high/low u32 of aggregate per-tick digest |
 | `workload_load(ptr,len)` | parse workload UTF-8 JSON; replaces current session |
+| `builtin_load(index)` | load a built-in by index into `defaults.workloads` |
 | `scale_load(n,scenario,warmUp,ticks)` | initialize a scale session for interleaved sampling |
 | `workload_names()`, `workload_names_len()` | `form,...;phase,...;graphCalls,ticks,warmUp,dt` |
 | `workload_begin(form)` | reset this form's runs and select it |
@@ -366,7 +399,7 @@ return 0 on success and 1 for invalid input; an executor failure traps with stde
 | `result()`, `result_len()` | last form's full raw JSON record, identical schema to native |
 | `minimum_sample_us(us)` | nonnegative pilot target per sample; 0 disables repetition |
 | `clock_step_us(us)` | nonnegative clock step used to select timing mode |
-| `defaults()`, `defaults_len()` | borrowed UTF-8 JSON: ticks, warmUp, sizes, reference |
+| `defaults()`, `defaults_len()` | borrowed UTF-8 JSON: ticks, warmUp, sizes, reference, workloads |
 | `scale_name(n,scenario)` | writes a JSON scale test name to result; status 0 on success |
 
 The documented WASM build uses `bench-wasm`, inheriting release optimization
@@ -466,8 +499,9 @@ python3 -B crates/arora-behavior-tree-bench/scripts/test_analyze.py
 python3 -B crates/arora-behavior-tree-bench/scripts/test_run.py
 ```
 
-The registry test runs synthetic plus N=10 of every scenario, compares every tick
-with detached and asserts each form's total module calls and dispatches. The
+The registry test runs synthetic, conversation and N=10 of every scenario,
+compares every tick with detached and asserts each form's total module calls and
+dispatches. The
 Python checks run under `cargo test` as well, including runner lifecycle checks
 using local Git and Cargo stand-ins that do not modify a repository. Negative
 agreement fixtures and a quantized virtual clock check the failure paths. The existing CI package selection

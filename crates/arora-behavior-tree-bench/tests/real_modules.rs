@@ -119,8 +119,8 @@ fn parallel_replays_hold_one_device_through_lowering_and_ticks() {
         fn build(&self, w: &Workload) -> Nodes {
             FORMS[0].build(w)
         }
-        fn fixture_counts(&self) -> [(u64, u64); 7] {
-            FORMS[0].fixture_counts()
+        fn fixture_counts(&self, fixture: arora_behavior_tree_bench::forms::Fixture) -> (u64, u64) {
+            FORMS[0].fixture_counts(fixture)
         }
         fn lower(
             &self,

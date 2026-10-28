@@ -1,6 +1,6 @@
 use arora_behavior_tree_bench::{
     clock::Monotonic,
-    forms::{self, FORMS},
+    forms::{self, Fixture, FORMS},
     measure,
     model::Workload,
     scale::Scenario,
@@ -9,15 +9,17 @@ use arora_behavior_tree_bench::{
 
 #[test]
 fn every_registered_form_agrees_and_meets_its_count_contract() {
-    let fixtures = std::iter::once(synthetic::workload())
-        .chain(Scenario::ALL.map(|s| s.workload(10, 16, 144)));
-    for (fixture, workload) in fixtures.enumerate() {
+    let fixtures = [Fixture::Synthetic, Fixture::Conversation]
+        .into_iter()
+        .chain(Scenario::ALL.map(Fixture::Scale));
+    for (index, fixture) in fixtures.enumerate() {
+        let workload = fixture.workload();
         let measurements = measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap();
         for (form, m) in FORMS.iter().zip(measurements) {
             assert_eq!(
                 m.differing,
                 0,
-                "fixture {fixture}: {} writes different values",
+                "fixture {index}: {} writes different values",
                 form.name()
             );
             let counts: (u64, u64) = (
@@ -26,8 +28,8 @@ fn every_registered_form_agrees_and_meets_its_count_contract() {
             );
             assert_eq!(
                 counts,
-                form.fixture_counts()[fixture],
-                "fixture {fixture}: {} count contract",
+                form.fixture_counts(fixture),
+                "fixture {index}: {} count contract",
                 form.name()
             );
         }
