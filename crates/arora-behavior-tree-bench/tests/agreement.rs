@@ -220,6 +220,42 @@ fn parser_rejects_order_dependent_reads_of_graph_calls() {
 }
 
 #[test]
+fn digests_of_equal_composites_agree() {
+    use arora_types::keyvalue::{KeyValue, KeyValueField};
+    use arora_types::value::Value;
+    // Two maps holding the same fields iterate them in different orders.
+    let record = |names: Vec<usize>| {
+        Value::KeyValue(KeyValue {
+            id: uuid::Uuid::nil(),
+            fields: names
+                .into_iter()
+                .map(|i| {
+                    let name = format!("field{i}");
+                    let field = KeyValueField {
+                        id: uuid::Uuid::from_u128(i as u128),
+                        name: name.clone(),
+                        value: Some(Box::new(Value::F32(i as f32))),
+                    };
+                    (name, field)
+                })
+                .collect(),
+        })
+    };
+    assert_eq!(
+        measure::values_hash(&[Some(record((0..32).collect()))]),
+        measure::values_hash(&[Some(record((0..32).rev().collect()))])
+    );
+    assert_eq!(
+        measure::values_hash(&[Some(Value::ArrayF32(vec![-0.0, 1.0]))]),
+        measure::values_hash(&[Some(Value::ArrayF32(vec![0.0, 1.0]))])
+    );
+    assert_ne!(
+        measure::values_hash(&[Some(Value::ArrayF32(vec![0.0, 1.0]))]),
+        measure::values_hash(&[Some(Value::ArrayF32(vec![1.0, 0.0]))])
+    );
+}
+
+#[test]
 fn digests_canonicalize_signed_zero_in_both_widths() {
     use arora_types::value::Value;
     assert_eq!(

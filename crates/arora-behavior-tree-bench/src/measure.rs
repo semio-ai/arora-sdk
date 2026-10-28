@@ -418,7 +418,9 @@ pub fn differences(a: &[String], b: &[String]) -> usize {
     a.iter().zip(b).filter(|(a, b)| a != b).count() + a.len().abs_diff(b.len())
 }
 
-/// Stable FNV-1a over tagged values. Signed zero is canonicalized.
+/// Stable FNV-1a over tagged values: equal values hash alike. Every float a
+/// value holds has its signed zero and NaN canonicalized, and a record's
+/// fields are taken in name order, whatever order its map keeps them in.
 /// Digests are comparable only within one platform's math implementation.
 pub fn values_hash(values: &[Option<Value>]) -> String {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
@@ -430,43 +432,180 @@ pub fn values_hash(values: &[Option<Value>]) -> String {
     for value in values {
         match value {
             None => eat(&[0]),
-            Some(Value::F64(x)) => {
-                eat(&[1]);
-                eat(&(if *x == 0.0 {
-                    0.0f64
-                } else if x.is_nan() {
-                    f64::NAN
-                } else {
-                    *x
-                })
-                .to_bits()
-                .to_le_bytes());
-            }
-            Some(Value::F32(x)) => {
-                eat(&[5]);
-                eat(&(if *x == 0.0 {
-                    0.0f32
-                } else if x.is_nan() {
-                    f32::NAN
-                } else {
-                    *x
-                })
-                .to_bits()
-                .to_le_bytes());
-            }
-            Some(Value::Boolean(b)) => eat(&[2, u8::from(*b)]),
-            Some(Value::String(s)) => {
-                eat(&[3]);
-                eat(&(s.len() as u64).to_le_bytes());
-                eat(s.as_bytes());
-            }
-            Some(other) => {
-                eat(&[4]);
-                eat(format!("{other:?}").as_bytes());
-            }
+            Some(value) => hash_value(value, &mut eat),
         }
     }
     format!("{hash:016x}")
+}
+
+fn f32_bits(x: f32) -> [u8; 4] {
+    let x = if x == 0.0 {
+        0.0
+    } else if x.is_nan() {
+        f32::NAN
+    } else {
+        x
+    };
+    x.to_bits().to_le_bytes()
+}
+fn f64_bits(x: f64) -> [u8; 8] {
+    let x = if x == 0.0 {
+        0.0
+    } else if x.is_nan() {
+        f64::NAN
+    } else {
+        x
+    };
+    x.to_bits().to_le_bytes()
+}
+
+fn hash_value(value: &Value, eat: &mut dyn FnMut(&[u8])) {
+    let len = |eat: &mut dyn FnMut(&[u8]), n: usize| eat(&(n as u64).to_le_bytes());
+    let text = |eat: &mut dyn FnMut(&[u8]), s: &str| {
+        eat(&(s.len() as u64).to_le_bytes());
+        eat(s.as_bytes());
+    };
+    let fields = |eat: &mut dyn FnMut(&[u8]), fields: &[arora_types::value::StructureField]| {
+        eat(&(fields.len() as u64).to_le_bytes());
+        for field in fields {
+            eat(field.id.as_bytes());
+            hash_value(&field.value, eat);
+        }
+    };
+    macro_rules! array {
+        ($tag:expr, $items:expr, $bytes:expr) => {{
+            eat(&[$tag]);
+            len(eat, $items.len());
+            for item in $items {
+                eat(&$bytes(*item));
+            }
+        }};
+    }
+    match value {
+        Value::Unit => eat(&[6]),
+        Value::Boolean(b) => eat(&[2, u8::from(*b)]),
+        Value::U8(x) => eat(&[7, *x]),
+        Value::U16(x) => {
+            eat(&[8]);
+            eat(&x.to_le_bytes());
+        }
+        Value::U32(x) => {
+            eat(&[9]);
+            eat(&x.to_le_bytes());
+        }
+        Value::U64(x) => {
+            eat(&[10]);
+            eat(&x.to_le_bytes());
+        }
+        Value::I8(x) => eat(&[11, *x as u8]),
+        Value::I16(x) => {
+            eat(&[12]);
+            eat(&x.to_le_bytes());
+        }
+        Value::I32(x) => {
+            eat(&[13]);
+            eat(&x.to_le_bytes());
+        }
+        Value::I64(x) => {
+            eat(&[14]);
+            eat(&x.to_le_bytes());
+        }
+        Value::F32(x) => {
+            eat(&[5]);
+            eat(&f32_bits(*x));
+        }
+        Value::F64(x) => {
+            eat(&[1]);
+            eat(&f64_bits(*x));
+        }
+        Value::String(s) => {
+            eat(&[3]);
+            text(eat, s);
+        }
+        Value::Option(inner) => match inner {
+            None => eat(&[15, 0]),
+            Some(inner) => {
+                eat(&[15, 1]);
+                hash_value(inner, eat);
+            }
+        },
+        Value::Structure(structure) => {
+            eat(&[16]);
+            eat(structure.id.as_bytes());
+            fields(eat, &structure.fields);
+        }
+        Value::Enumeration(enumeration) => {
+            eat(&[17]);
+            eat(enumeration.id.as_bytes());
+            eat(enumeration.variant_id.as_bytes());
+            hash_value(&enumeration.value, eat);
+        }
+        Value::ArrayBoolean(items) => array!(18, items, |b: bool| [u8::from(b)]),
+        Value::ArrayU8(items) => array!(19, items, |x: u8| [x]),
+        Value::ArrayU16(items) => array!(20, items, u16::to_le_bytes),
+        Value::ArrayU32(items) => array!(21, items, u32::to_le_bytes),
+        Value::ArrayU64(items) => array!(22, items, u64::to_le_bytes),
+        Value::ArrayI8(items) => array!(23, items, i8::to_le_bytes),
+        Value::ArrayI16(items) => array!(24, items, i16::to_le_bytes),
+        Value::ArrayI32(items) => array!(25, items, i32::to_le_bytes),
+        Value::ArrayI64(items) => array!(26, items, i64::to_le_bytes),
+        Value::ArrayF32(items) => array!(27, items, f32_bits),
+        Value::ArrayF64(items) => array!(28, items, f64_bits),
+        Value::ArrayString(items) => {
+            eat(&[29]);
+            len(eat, items.len());
+            for item in items {
+                text(eat, item);
+            }
+        }
+        Value::ArrayValue(items) => {
+            eat(&[30]);
+            len(eat, items.len());
+            for item in items {
+                hash_value(item, eat);
+            }
+        }
+        Value::ArrayStructure { id, elements } => {
+            eat(&[31]);
+            eat(id.as_bytes());
+            len(eat, elements.len());
+            for element in elements {
+                fields(eat, &element.fields);
+            }
+        }
+        Value::ArrayEnumeration { id, elements } => {
+            eat(&[32]);
+            eat(id.as_bytes());
+            len(eat, elements.len());
+            for element in elements {
+                eat(element.variant_id.as_bytes());
+                hash_value(&element.value, eat);
+            }
+        }
+        Value::KeyValue(record) => {
+            eat(&[33]);
+            eat(record.id.as_bytes());
+            let mut names: Vec<_> = record.fields.iter().collect();
+            names.sort_by(|a, b| a.0.cmp(b.0));
+            len(eat, names.len());
+            for (name, field) in names {
+                text(eat, name);
+                eat(field.id.as_bytes());
+                text(eat, &field.name);
+                match &field.value {
+                    None => eat(&[0]),
+                    Some(value) => {
+                        eat(&[1]);
+                        hash_value(value, eat);
+                    }
+                }
+            }
+        }
+        Value::Uuid(id) => {
+            eat(&[34]);
+            eat(id.as_bytes());
+        }
+    }
 }
 
 /// One round's raw record, used by every front end and the comparison tools.

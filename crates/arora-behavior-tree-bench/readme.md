@@ -46,9 +46,10 @@ A digest covers every sink key and every key the tree can write after each tick,
 in key-index order, including warm-up. Scale keys follow graph-call order. With
 native `scatter`, whose destination names are runtime data, it covers the whole
 store, sorted by key name and including those names.
-Digests include absent values, boolean tags, UTF-8 strings with their byte
-lengths, and little-endian f64 bits, with signed zero and NaNs canonicalized,
-using FNV-1a. `differing` counts ticks whose digest
+Digests hash every value by its kind and contents with FNV-1a, so equal values
+hash alike: every float a value holds, alone or in an array, structure or
+record, has its signed zero and NaN canonicalized, and a record's fields are
+taken in name order rather than its map's order. `differing` counts ticks whose digest
 differs from the registered reference, `detached`, which is evaluated even if a
 selection omits it. The CLI, Node runner and browser page fail on disagreement.
 Library `measure`/`measureAll` calls and the C ABI report `differing`; callers must
