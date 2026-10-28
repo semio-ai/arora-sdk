@@ -155,7 +155,7 @@ Only these host stand-ins are needed:
 | `wander` | `t`, `gap_min`, `gap_max`, `salt`, `low`, `high`, mutable `out`, mutable `state`; emits a random level after seeded random gaps; Running | noise samples do not retain a random-gap schedule and held output across calls |
 
 Host numeric parameters are f64; initialize each private `state` with `()`.
-A saved state the action did not write, other than three numbers, is a tick error.
+A state other than `()` or the three numbers the action wrote is a tick error.
 The actions restart after a missed tick (a time gap greater than `1.5 * dt`).
 Random choices are deterministic functions of time and salt; [host.rs](src/host.rs)
 defines the hash. Outputs are written only when changed.

@@ -116,14 +116,20 @@ impl Bridge {
             _ => 0.0,
         };
         let t = number("t");
+        // A state starts as `()`; after a call it holds what the call wrote.
         let mut state = match get("state") {
+            None | Some(Value::Unit) => vec![f64::NAN; 3],
             Some(Value::ArrayF64(v)) if v.len() == 3 => v.clone(),
             Some(Value::ArrayF64(v)) => {
                 return Err(CallError::Generic {
                     message: format!("a saved state holds 3 numbers, not {}", v.len()),
                 })
             }
-            _ => vec![f64::NAN; 3],
+            Some(other) => {
+                return Err(CallError::Generic {
+                    message: format!("a saved state starts as (), not {other}"),
+                })
+            }
         };
         let restart = state[0].is_nan() || t - state[0] > self.gap;
         let mut output = None;
@@ -268,8 +274,28 @@ fn hash(mut x: u32) -> u32 {
     x = x.wrapping_mul(0x846c_a68b);
     x ^ (x >> 16)
 }
+/// A number in [0, 1) that the time, in whole microseconds, and a salt decide.
+/// Microseconds past 2^32 fold their high word in, so draws keep varying on
+/// replays longer than 71 minutes; earlier draws are those of the low word.
 fn random(t: f64, salt: f64) -> f64 {
-    f64::from(hash(
-        (t * 1e6).round() as u32 ^ hash(salt.round() as i64 as u32),
-    )) / 4_294_967_296.0
+    let micros = (t * 1e6).round() as u64;
+    let (low, high) = (micros as u32, (micros >> 32) as u32);
+    let seed = if high == 0 { low } else { low ^ hash(high) };
+    f64::from(hash(seed ^ hash(salt.round() as i64 as u32))) / 4_294_967_296.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draws_vary_past_two_to_the_32_microseconds() {
+        let past = 5_000.0;
+        assert!((0..8).any(|i| random(past, 7.0) != random(past + 0.25 * f64::from(i + 1), 7.0)));
+        // Before 2^32 us, a draw hashes the microseconds alone.
+        assert_eq!(
+            random(1.5, 7.0),
+            f64::from(hash(1_500_000 ^ hash(7))) / 4_294_967_296.0
+        );
+    }
 }

@@ -513,6 +513,15 @@ fn a_malformed_saved_state_is_a_tick_error() {
             "{error}"
         );
     }
+    raw["text"] =
+        "hold(t: {arora/time}, duration: 0, value: 1, out: {target}, state: \"x\")".into();
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    for form in FORMS {
+        let error = measure::measure(&workload, &[*form], 1, &Monotonic::default())
+            .err()
+            .expect("a state that is not () must fail");
+        assert!(error.contains("a saved state starts as ()"), "{error}");
+    }
 }
 
 /// NaN payloads/signs cannot create disagreements for equal float values,
