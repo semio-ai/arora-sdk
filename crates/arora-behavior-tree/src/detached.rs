@@ -240,6 +240,12 @@ fn cells_read(
     }
 }
 
+/// Whether a node calling `function`, with `children`, is detached when no
+/// node holds it: a call to a module function, holding no children.
+pub(crate) fn is_detachable(function: Uuid, children: Option<&[Uuid]>) -> bool {
+    !is_native(function) && children.is_none_or(|children| children.is_empty())
+}
+
 impl Detached {
     /// The detached nodes of `nodes`, in their order: the calls to a module
     /// function, with no children, that `attached` does not hold.
@@ -248,11 +254,7 @@ impl Detached {
             .iter()
             .filter(|node| {
                 !attached.contains(&node.id)
-                    && !is_native(node.function)
-                    && node
-                        .children
-                        .as_ref()
-                        .is_none_or(|children| children.is_empty())
+                    && is_detachable(node.function, node.children.as_deref())
             })
             .cloned()
             .collect()

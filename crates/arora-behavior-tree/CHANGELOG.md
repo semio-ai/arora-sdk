@@ -4,6 +4,17 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.5.1] - 2026-10-28
+
+### Fixed
+
+- `spawn_graph` runs the nodes a `behavior-tree 1.3` graph lists and no node
+  holds, as detached nodes, as loading such a graph does: it refused a graph
+  whose nodes were not all under its root. A node no node holds is accepted
+  when it would detach — a call to a module function with no children — and
+  refused otherwise. The run's detached nodes are its own: a spawn of the
+  same root takes them over, and they leave with the run.
+
 ## [9.5.0] - 2026-10-22
 
 ### Added
