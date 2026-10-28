@@ -58,10 +58,6 @@ arora-engine = { path = "../../crates/arora-engine", version = "7" }
 [patch.crates-io]
 arora-bridge = { path = "../../crates/arora-bridge" }
 arora-types = { path = "../../crates/arora-types" }
-# `arora-studio-bridge-client` 11, which arora 16 requires, is not on
-# crates.io yet: until it is, it comes from its branch, as in the SDK's
-# workspace. Remove this entry once 11.0.0 is published.
-arora-studio-bridge-client = { git = "https://github.com/semio-ai/studio-bridge", branch = "feat/device-enrollment" }
 
 # The policy module is built twice: natively (its tests, the in-process
 # device) and as a wasm guest through the device's artifact dependency, which
