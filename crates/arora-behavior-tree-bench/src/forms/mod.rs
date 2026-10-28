@@ -1,6 +1,5 @@
 //! A form owns construction and lowering; harnesses use only this registry.
 mod attached_naive;
-pub mod build;
 mod detached;
 
 use crate::model::Workload;
@@ -10,7 +9,7 @@ use arora_behavior_tree::{
     variable::VariableResolver, LoweredTree,
 };
 use arora_types::call::CallBridge;
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 use uuid::Uuid;
 
 pub type Nodes = (Vec<Node>, HashMap<Uuid, String>);
@@ -24,11 +23,12 @@ pub trait Form: Sync {
     fn lower(
         &self,
         nodes: Nodes,
-        resolver: &VariableResolver<'_>,
+        resolver: &Rc<VariableResolver<'static>>,
         functions: &FunctionIndex,
         bridge: &mut dyn CallBridge,
     ) -> Result<LoweredTree, BehaviorTreeError> {
-        let tree = load_behavior_tree_nodes_with(nodes.0, resolver, &nodes.1)?;
+        let tree = load_behavior_tree_nodes_with(nodes.0, &**resolver, &nodes.1)?
+            .with_key_resolver(resolver.clone());
         lower_behavior_tree(tree, functions, bridge, false)
     }
 

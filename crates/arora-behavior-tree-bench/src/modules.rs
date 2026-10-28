@@ -43,10 +43,10 @@ mod tests {
     #[test]
     fn bridge_uses_frozen_signatures_and_unfiltered_mutations() {
         let _device = fresh_device();
-        let mut bridge = Bridge::new(Default::default(), 0.02);
+        let mut bridge = Bridge::new(0.02);
         for module in MODULES {
             for function in (module.exports)() {
-                let index = bridge.index();
+                let index = Bridge::index();
                 let indexed = &index[&function.id];
                 assert_eq!(indexed.module_id, module.id);
                 assert_eq!(indexed.function_name, function.name);
@@ -90,6 +90,6 @@ mod tests {
                 value: Box::new(Value::String("sil".into()))
             }]
         );
-        assert_eq!(bridge.module_calls, 2);
+        assert_eq!(bridge.counts.module_calls.get(), 2);
     }
 }

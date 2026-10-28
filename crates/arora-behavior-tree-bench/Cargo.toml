@@ -22,6 +22,7 @@ harness = false
 bench-check = []
 
 [dependencies]
+arora-dataflow-nodes = { path = "../arora-dataflow-nodes", default-features = false }
 say-silent = { path = "../../modules/say-silent" }
 arora-behavior = { path = "../arora-behavior" }
 arora-behavior-tree = { path = "../arora-behavior-tree" }

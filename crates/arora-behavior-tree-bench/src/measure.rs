@@ -1,9 +1,8 @@
 //! Replay and statistics shared by native and WebAssembly.
 use crate::{
     clock::Clock,
-    forms::build::signatures,
     forms::{Form, FORMS, REFERENCE},
-    host::Bridge,
+    host::{Bridge, Counting},
     model::Workload,
 };
 use arora_simple_data_store::SimpleDataStore;
@@ -44,6 +43,23 @@ fn replay_once(
     clock: &dyn Clock,
     mode: TimingMode,
 ) -> Replay {
+    with_fresh_dataflow(|dataflow| replay_on(workload, form, record, clock, mode, dataflow))
+}
+
+fn with_fresh_dataflow<T>(
+    run: impl FnOnce(&mut arora_dataflow_nodes::functions::DataflowNodes) -> T,
+) -> T {
+    run(&mut arora_dataflow_nodes::functions::DataflowNodes::new())
+}
+
+fn replay_on(
+    workload: &Workload,
+    form: &dyn Form,
+    record: bool,
+    clock: &dyn Clock,
+    mode: TimingMode,
+    dataflow: &mut arora_dataflow_nodes::functions::DataflowNodes,
+) -> Replay {
     let _device = crate::modules::fresh_device();
     let store = SimpleDataStore::new();
     let slots: Vec<_> = workload
@@ -62,11 +78,19 @@ fn replay_once(
         .iter()
         .map(|(_, initial)| initial.clone())
         .collect();
-    let mut bridge = Bridge::new(signatures(workload), workload.dt);
+    let mut host = Bridge::new(workload.dt);
+    let counts = host.counts.clone();
+    let mut dataflow_bridge = dataflow.bridge(&mut host);
+    let mut bridge = Counting {
+        inner: &mut dataflow_bridge,
+        counts: counts.clone(),
+    };
     let nodes = form.build(workload);
-    let resolver = |name: &str| Some(store.slot(&Key::from(name)));
+    let resolving_store = store.clone();
+    let resolver: std::rc::Rc<arora_behavior_tree::variable::VariableResolver<'static>> =
+        std::rc::Rc::new(move |name: &str| Some(resolving_store.slot(&Key::from(name))));
     let tree = form
-        .lower(nodes, &resolver, &bridge.index(), &mut bridge)
+        .lower(nodes, &resolver, Bridge::index(), &mut bridge)
         .unwrap();
     // Every per-tick vector holds the whole replay before timing starts, so
     // a replay-wide interval never includes a reallocation.
@@ -85,7 +109,7 @@ fn replay_once(
     };
     let mut interval_start = 0.0;
     for (tick, events) in workload.events.iter().enumerate() {
-        let (calls, dispatches) = (bridge.module_calls, bridge.dispatches);
+        let (calls, dispatches) = (counts.module_calls.get(), counts.dispatches.get());
         if mode == TimingMode::Replay && tick == workload.warm_up {
             interval_start = clock.now();
         }
@@ -117,16 +141,27 @@ fn replay_once(
         if mode == TimingMode::Replay && tick + 1 == workload.events.len() {
             result.replay_us.push(clock.now() - interval_start);
         }
-        result.calls.push(bridge.module_calls - calls);
-        result.dispatches.push(bridge.dispatches - dispatches);
+        result.calls.push(counts.module_calls.get() - calls);
+        result.dispatches.push(counts.dispatches.get() - dispatches);
         if record {
-            result.written.push(values_hash(
-                &workload
-                    .compared
-                    .iter()
-                    .map(|&k| slots[k].get())
-                    .collect::<Vec<_>>(),
-            ));
+            if workload.dynamic_keys {
+                let snapshot = store.snapshot();
+                let mut entries: Vec<_> = snapshot.storage.into_iter().collect();
+                entries.sort_by(|a, b| a.0.get_path().cmp(b.0.get_path()));
+                let values = entries
+                    .into_iter()
+                    .flat_map(|(key, value)| [Some(Value::String(key.get_path().into())), value])
+                    .collect::<Vec<_>>();
+                result.written.push(values_hash(&values));
+            } else {
+                result.written.push(values_hash(
+                    &workload
+                        .compared
+                        .iter()
+                        .map(|&k| slots[k].get())
+                        .collect::<Vec<_>>(),
+                ));
+            }
         }
     }
     result.mean_us = if mode == TimingMode::Tick {
@@ -444,4 +479,42 @@ pub fn record(workload: &Workload, measurements: &[Measurement]) -> serde_json::
         })
         .collect();
     serde_json::json!({"schema": 1, "platform": format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS), "warmUp": workload.warm_up, "ticks": workload.events.len(), "dt": workload.dt, "phases": workload.phase_names, "forms": forms, "clock": {"stepUs": measurements[0].runs[0].step_us, "modes": measurements.iter().map(|m| (m.form.clone(), serde_json::json!(m.runs.iter().map(|r| r.timing_mode).collect::<Vec<_>>()))).collect::<serde_json::Map<_, _>>()}})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Replays prepare real per-node sites, but the next replay starts with
+    /// none of their decoded parameters, layouts or retained runtime.
+    #[test]
+    fn replays_start_with_empty_dataflow_sites() {
+        let workload = crate::synthetic::workload();
+        for form in crate::forms::FORMS {
+            let mut previous: Option<Replay> = None;
+            for _ in 0..2 {
+                let run = with_fresh_dataflow(|dataflow| {
+                    assert_eq!(dataflow.sites(), 0, "a replay inherited prepared sites");
+                    let run = replay_on(
+                        &workload,
+                        *form,
+                        true,
+                        &crate::clock::Monotonic::default(),
+                        TimingMode::Tick,
+                        dataflow,
+                    );
+                    assert!(
+                        dataflow.sites() > 1,
+                        "real nodes must have prepared their sites"
+                    );
+                    run
+                });
+                if let Some(previous) = previous {
+                    assert_counts(&previous, &run);
+                    assert_eq!(previous.written, run.written);
+                }
+                previous = Some(run);
+            }
+        }
+    }
 }

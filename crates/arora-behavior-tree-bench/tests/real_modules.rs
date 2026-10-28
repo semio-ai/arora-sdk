@@ -5,132 +5,61 @@ use arora_behavior_tree_bench::{
     model::Workload,
 };
 use serde_json::{json, Value};
-
-fn say() -> Value {
-    // Parameter order deliberately differs from the declaration.
-    json!({"k":"call", "module":"silent-say", "op":"say",
-        "args":[["voice", {"value":""}], ["text", {"key":1}]],
-        "outputs":[["viseme",2]]})
-}
-
 fn fixture() -> Value {
-    json!({"keys":[{"name":"clock","initial":0.0},
-        {"name":"text","initial":"Hi"}, {"name":"viseme","initial":""},
-        {"name":"done","initial":false}],
-        "calls":[], "tree":{"k":"seq", "children":[say(),
-            {"k":"call", "op":"set", "args":[["v", {"value":1.0}]],
-             "outputs":[["v",3]], "state":0}]},
-        "clock":0, "dt":0.02, "ticks":16, "warmUp":0, "events":[],
-        "phases":{"names":["speech"], "runs":[[0,0]]}})
+    json!({"keys":[{"name":"clock","initial":0.0}, {"name":"text","initial":"Hi"},
+        {"name":"viseme","initial":""},{"name":"done","initial":false}],
+        "text":"sequence\n  say(voice: \"\", text: {text}, viseme: {viseme})\n  unpack(values: f64[1], out_0: {done})\n",
+        "clock":"clock","dt":0.02,"ticks":16,"warmUp":0,"events":[],"phases":{"names":["speech"],"runs":[[0,0]]}})
 }
 
-macro_rules! rejection {
-    ($test:ident, $change:expr, $message:expr) => {
-        #[test]
-        fn $test() {
-            let mut raw = fixture();
-            let call = &mut raw["tree"]["children"][0];
-            ($change)(call);
-            let error = Workload::parse(&raw.to_string())
-                .err()
-                .expect("must reject");
-            assert!(error.contains($message), "{error}");
-        }
-    };
-}
-
-rejection!(
-    unknown_module,
-    |c: &mut Value| c["module"] = "missing".into(),
-    "unknown module"
-);
-rejection!(
-    unknown_function,
-    |c: &mut Value| c["op"] = "missing".into(),
-    "unknown function"
-);
-rejection!(
-    unknown_argument,
-    |c: &mut Value| c["args"][0][0] = "missing".into(),
-    "unknown parameter"
-);
-rejection!(
-    unknown_output,
-    |c: &mut Value| c["outputs"][0][0] = "missing".into(),
-    "unknown parameter"
-);
-rejection!(
-    duplicate_argument,
-    |c: &mut Value| c["args"]
-        .as_array_mut()
-        .unwrap()
-        .push(json!(["text", {"value":"Hi"}])),
-    "bound twice: text"
-);
-rejection!(
-    duplicate_output,
-    |c: &mut Value| c["outputs"]
-        .as_array_mut()
-        .unwrap()
-        .push(json!(["viseme", 2])),
-    "bound twice: viseme"
-);
-rejection!(
-    missing_argument,
-    |c: &mut Value| {
-        c["args"].as_array_mut().unwrap().pop();
-    },
-    "not bound: text"
-);
-rejection!(
-    missing_output,
-    |c: &mut Value| c["outputs"] = json!([]),
-    "not bound: viseme"
-);
-rejection!(
-    immutable_output,
-    |c: &mut Value| {
-        c["args"].as_array_mut().unwrap().pop();
-        c["outputs"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!(["text", 1]));
-    },
-    "immutable parameter text"
-);
-rejection!(
-    mutable_argument,
-    |c: &mut Value| {
-        c["outputs"] = json!([]);
-        c["args"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!(["viseme", {"value":""}]));
-    },
-    "mutable parameter viseme"
-);
-rejection!(
-    number_for_string,
-    |c: &mut Value| c["args"][1][1] = json!({"value":3.0}),
-    "literal kind does not match parameter text"
-);
-rejection!(
-    boolean_for_string,
-    |c: &mut Value| c["args"][1][1] = json!({"value":false}),
-    "literal kind does not match parameter text"
-);
-rejection!(
-    real_call_state,
-    |c: &mut Value| c["state"] = 0.into(),
-    "no state field"
-);
-
+/// Missing bindings and literal mutable cells follow the text language's
+/// contract; the benchmark imposes no additional module binding vocabulary.
 #[test]
-fn real_functions_are_tree_calls_only() {
+fn loader_diagnostics_reach_workload_errors() {
+    for (text, message) in [
+        ("missing::say()", "module"),
+        ("missing_function()", "function"),
+        ("say(missing: 0f64)", "parameter"),
+        ("say(text: \"a\", text: \"b\")", "twice"),
+        ("say(viseme: {viseme}, viseme: {viseme})", "twice"),
+        ("say(text: 3f64)", "type str"),
+        ("say(text: false)", "type str"),
+        ("say(state: ())", "parameter"),
+        ("running\n\nx: add(operand_0: @x)", "own"),
+        (
+            "running\n\nx: add(operand_0: @y)\ny: add(operand_0: @x)",
+            "cycle",
+        ),
+        ("say(text:", "expected"),
+    ] {
+        let mut raw = fixture();
+        raw["text"] = text.into();
+        let error = Workload::parse(&raw.to_string())
+            .err()
+            .expect("must reject loader errors");
+        assert!(
+            error.contains(message) && error.contains("1:")
+                || error.contains(message) && error.contains("3:"),
+            "{error}"
+        );
+    }
+    for text in [
+        "say()",
+        "say(text: {text})",
+        "say(text: {text}, viseme: \"\")",
+    ] {
+        let mut raw = fixture();
+        raw["text"] = text.into();
+        assert!(Workload::parse(&raw.to_string()).is_ok());
+    }
+}
+
+/// Module calls can be detached when the text leaves them outside the tree.
+#[test]
+fn real_functions_can_be_detached() {
     let mut raw = fixture();
-    raw["calls"] = json!([{"module":"silent-say", "op":"first", "args":[["x", {"value":1.0}]], "publishes":null}]);
-    let error = Workload::parse(&raw.to_string()).err().unwrap();
-    assert!(error.contains("tree calls only"), "{error}");
+    raw["text"] = "running\n\nspeech: {.status} = say(text: {text}, viseme: {viseme})".into();
+    assert!(Workload::parse(&raw.to_string()).is_ok());
 }
 
 /// A sequence exposes the module's completion through a key, beyond agreement
@@ -140,12 +69,7 @@ fn say_timing_is_observed_through_the_tree() {
     let workload = Workload::parse(&fixture().to_string()).unwrap();
     for form in FORMS {
         let run = measure::replay(&workload, *form, true, &Monotonic::default());
-        assert_eq!(
-            run.calls,
-            [vec![1; 9], vec![2; 7]].concat(),
-            "{}",
-            form.name()
-        );
+        assert_eq!(run.calls, vec![1; 16], "{}", form.name());
         let expected = (0..16)
             .map(|tick| {
                 measure::values_hash(&[
@@ -201,7 +125,7 @@ fn parallel_replays_hold_one_device_through_lowering_and_ticks() {
         fn lower(
             &self,
             nodes: Nodes,
-            resolver: &VariableResolver<'_>,
+            resolver: &std::rc::Rc<VariableResolver<'static>>,
             functions: &FunctionIndex,
             bridge: &mut dyn CallBridge,
         ) -> Result<LoweredTree, BehaviorTreeError> {

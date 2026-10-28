@@ -20,7 +20,7 @@ fn every_registered_form_agrees_and_meets_its_count_contract() {
                 "fixture {fixture}: {} writes different values",
                 form.name()
             );
-            let counts = (
+            let counts: (u64, u64) = (
                 m.runs[0].calls.iter().sum(),
                 m.runs[0].dispatches.iter().sum(),
             );
@@ -46,35 +46,75 @@ fn selection_keeps_the_detached_agreement_reference() {
 }
 
 #[test]
-fn parser_rejects_invalid_dimensions_references_and_signatures() {
+fn parser_rejects_invalid_envelope() {
+    for (field, value, message) in [
+        ("warmUp", serde_json::json!(160), "warmUp"),
+        ("ticks", serde_json::json!(0), "ticks"),
+        ("dt", serde_json::json!(0), "dt"),
+        ("clock", serde_json::json!("unknown"), "unknown key"),
+        (
+            "events",
+            serde_json::json!([[0, "missing", 0]]),
+            "unknown key",
+        ),
+        ("events", serde_json::json!([[160, "input", 0]]), "tick"),
+        (
+            "phases",
+            serde_json::json!({"names":[],"runs":[]}),
+            "phase names",
+        ),
+        (
+            "phases",
+            serde_json::json!({"names":["x"],"runs":[[0,1]]}),
+            "phase run",
+        ),
+    ] {
+        let mut raw = synthetic::json();
+        raw[field] = value;
+        assert!(Workload::parse(&raw.to_string())
+            .err()
+            .unwrap()
+            .contains(message));
+    }
+    for name in ["", "input", ".target"] {
+        let mut raw = synthetic::json();
+        raw["keys"][3]["name"] = name.into();
+        assert!(Workload::parse(&raw.to_string()).is_err());
+    }
+}
+#[test]
+fn parser_rejects_shared_outputs_but_accepts_loader_warnings() {
     let mut raw = synthetic::json();
-    raw["warmUp"] = raw["ticks"].clone();
-    assert!(Workload::parse(&raw.to_string()).is_err());
-    let mut raw = synthetic::json();
-    raw["calls"][0]["args"][0][1] = serde_json::json!({"node": 0});
-    assert!(Workload::parse(&raw.to_string()).is_err());
-    let mut raw = synthetic::json();
-    raw["calls"][0]["op"] = "unknown".into();
-    assert!(Workload::parse(&raw.to_string()).is_err());
-    let mut raw = synthetic::json();
-    raw["tree"] =
-        serde_json::json!({"k": "call", "op": "pulse", "args": [], "outputs": [], "state": 0});
-    assert!(Workload::parse(&raw.to_string()).is_err());
-    let mut raw = synthetic::json();
-    raw["events"][0][1] = 9000.into();
-    assert!(Workload::parse(&raw.to_string()).is_err());
+    raw["text"] = "unpack(values: f32[1,0], out_0: {target}, out_1: {target})".into();
+    let error = Workload::parse(&raw.to_string()).err().unwrap();
+    assert!(error.contains("two of Unpack's ports"), "{error}");
+    raw["text"] = "pulse(out: {target}, state: {target})".into();
+    assert!(Workload::parse(&raw.to_string())
+        .err()
+        .unwrap()
+        .contains("at most one output"));
+    raw["text"] = "parallel\n  unpack(values: f32[1], out_0: {target})\n  unpack(values: f32[2], out_0: {target})".into();
+    assert!(Workload::parse(&raw.to_string()).is_ok());
 }
 
 #[test]
-fn parser_rejects_tree_local_keys_and_shared_outputs() {
-    let error = |raw: serde_json::Value| Workload::parse(&raw.to_string()).err().unwrap();
+fn parser_rejects_a_second_writer_of_a_graph_calls_key() {
     let mut raw = synthetic::json();
-    raw["keys"][3]["name"] = ".target".into();
-    assert!(error(raw).contains("tree-local"));
-    let mut raw = synthetic::json();
-    raw["tree"] = serde_json::json!({"k": "call", "op": "set", "args": [["a", {"value": 1.0}], ["b", {"value": 0.0}]],
-        "outputs": [["o0", 3], ["o1", 3]], "state": 0});
-    assert!(error(raw).contains("at most one output"));
+    let error = |raw: &serde_json::Value| Workload::parse(&raw.to_string()).err().unwrap();
+    // Two graph calls writing one key.
+    raw["text"] = "running\n\na: {target} = add(node: \"a\", operand_0: 1f32)\nb: {target} = add(node: \"b\", operand_0: 2f32)".into();
+    assert!(
+        error(&raw).contains("no other writer: target"),
+        "{}",
+        error(&raw)
+    );
+    // A tree output on a key a graph call writes.
+    raw["text"] = "parallel\n  unpack(values: f32[5], out_0: {target})\n  running\n\na: {target} = add(node: \"a\", operand_0: 1f32)".into();
+    assert!(
+        error(&raw).contains("no other writer: target"),
+        "{}",
+        error(&raw)
+    );
 }
 
 #[test]
@@ -111,24 +151,16 @@ fn summary_excludes_warm_up_and_uses_tick_medians_then_linear_quantiles() {
 }
 
 // The store must win over the host's last write when another writer intervenes.
-fn write_fixture(sink: bool) -> Workload {
-    let tree = if sink {
-        serde_json::json!({"k":"run"})
+fn write_raw(sink: bool) -> serde_json::Value {
+    let text = if sink {
+        "running\n\nobserved: {observed} = add(operand_0: {out})\nwriter: {out} = add(operand_0: 2f64)"
     } else {
-        serde_json::json!({"k":"fallback", "children":[
-            {"k":"seq", "children":[{"k":"equal", "key":2, "value":true},
-                {"k":"call", "op":"set", "args":[["v", {"value":2.0}]], "outputs":[["v",1]], "state":0}]},
-            {"k":"run"}]})
+        "fallback\n  sequence\n    equal(a: {gate}, b: true)\n    unpack(values: f64[2], out_0: {out})\n  running"
     };
-    Workload::parse(&serde_json::json!({
-        "keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0},{"name":"gate","initial":true},{"name":"observed","initial":0.0}],
-        "calls": if sink { serde_json::json!([{"op":"first", "args":[["x",{"key":1}]], "publishes":3},{"op":"first", "args":[["x",{"value":2.0}]], "publishes":1}]) } else { serde_json::json!([]) },
-        "tree":tree, "ticks":3,"warmUp":0,"clock":0,"dt":1.0/60.0,
-        "events":[[0,1,1.0],[1,2,false],[2,1,1.0]],
-        "phases":{"names":["one"],"runs":[]}
-    }).to_string()).unwrap()
+    serde_json::json!({"keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0},{"name":"gate","initial":true},{"name":"observed","initial":0.0}],
+        "text":text,"ticks":3,"warmUp":0,"clock":"clock","dt":1.0/60.0,
+        "events":[[0,"out",1.0],[1,"gate",false],[2,"out",1.0]],"phases":{"names":["one"],"runs":[]}})
 }
-
 #[test]
 fn host_reapplies_events_after_tree_writes() {
     assert_host_write(false);
@@ -139,7 +171,7 @@ fn host_reapplies_events_after_sink_writes() {
 }
 fn assert_host_write(sink: bool) {
     use arora_types::value::Value;
-    let workload = write_fixture(sink);
+    let workload = Workload::parse(&write_raw(sink).to_string()).unwrap();
     for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
         let expected: Vec<_> = (if sink {
             vec![vec![2.0, 1.0], vec![2.0, 2.0], vec![2.0, 1.0]]
@@ -159,20 +191,17 @@ fn assert_host_write(sink: bool) {
         assert_eq!(row.runs[0].written, expected, "{}", row.form);
     }
 }
-
 #[test]
 fn tree_written_values_change_the_digest() {
-    let mut workload = write_fixture(false);
+    let mut raw = write_raw(false);
+    let workload = Workload::parse(&raw.to_string()).unwrap();
     let first = measure::replay(&workload, FORMS[0], true, &Monotonic::default());
-    if let arora_behavior_tree_bench::model::Tree::Composite(_, children) = &mut workload.tree {
-        if let arora_behavior_tree_bench::model::Tree::Composite(_, seq) = &mut children[0] {
-            if let arora_behavior_tree_bench::model::Tree::Call(_, _, args, _, _) = &mut seq[1] {
-                args[0] = arora_behavior_tree_bench::model::Source::Value(
-                    arora_types::value::Value::F64(3.0),
-                );
-            }
-        }
-    }
+    raw["text"] = raw["text"]
+        .as_str()
+        .unwrap()
+        .replace("f64[2]", "f64[3]")
+        .into();
+    let workload = Workload::parse(&raw.to_string()).unwrap();
     let second = measure::replay(&workload, FORMS[0], true, &Monotonic::default());
     assert_ne!(first.written[0], second.written[0]);
 }
@@ -180,45 +209,128 @@ fn tree_written_values_change_the_digest() {
 #[test]
 fn timed_actions_progress_at_thirty_hz() {
     use arora_types::value::Value;
-    let mut raw = serde_json::json!({
-        "keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0}],
-        "calls":[],"ticks":5,"warmUp":0,"clock":0,"dt":1.0/30.0,"events":[],
-        "phases":{"names":["one"],"runs":[]},
-        "tree":{"k":"seq","children":[
-            {"k":"call","op":"hold","args":[["t",{"key":0}],["duration",{"value":0.05}]],"outputs":[],"state":2},
-            {"k":"call","op":"set","args":[["v",{"value":2.0}]],"outputs":[["v",1]],"state":0}]}
-    });
-    for keyframes in [false, true] {
-        if keyframes {
-            raw["tree"] = serde_json::json!({"k":"call","op":"keyframes","args":[["t",{"key":0}],["n",{"value":1.0}],["offset",{"value":0.0}],["v",{"value":1.0}],["offset",{"value":0.05}],["v",{"value":2.0}]],"outputs":[["v",1]],"state":3});
-        }
+    for text in [
+        "sequence\n  hold(t: {clock}, duration: 0.05, state: ())\n  unpack(values: f64[2], out_0: {out})",
+        "unpack(values: @frame, out_0: {out})\n\nlate: greaterthan(lhs: {clock}, rhs: 0.09f32)\nframe: if(cond: @late, then: f64[2], else: f64[1])",
+    ] {
+        let mut raw = write_raw(false);
+        raw["text"] = text.into(); raw["dt"] = (1.0/30.0).into(); raw["events"] = serde_json::json!([]);
         let workload = Workload::parse(&raw.to_string()).unwrap();
         for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
-            assert_eq!(
-                row.runs[0].written[2],
-                measure::values_hash(&[Some(Value::F64(2.0))])
-            );
-            assert_eq!(row.differing, 0);
+            assert_eq!(row.runs[0].written[2],measure::values_hash(&[Some(Value::F64(2.0))]));
+            assert_eq!(row.differing,0);
         }
     }
 }
-
+/// Native frame selection leaves only the frame due at the device time.
 #[test]
 fn a_tree_call_leaves_its_last_write_to_an_output() {
     use arora_types::value::Value;
-    // Two keyframes due on the first tick write 1 then 0 to an output that
-    // already holds 0.
-    let raw = serde_json::json!({
-        "keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0}],
-        "calls":[],"ticks":1,"warmUp":0,"clock":0,"dt":1.0/30.0,"events":[],
-        "phases":{"names":["one"],"runs":[]},
-        "tree":{"k":"call","op":"keyframes","args":[["t",{"key":0}],["n",{"value":1.0}],["offset",{"value":0.0}],["v",{"value":1.0}],["offset",{"value":0.0}],["v",{"value":0.0}]],"outputs":[["v",1]],"state":3}
-    });
+    let mut raw = write_raw(false);
+    raw["text"] = "unpack(values: @frame, out_0: {out})\n\ndue: greaterthan(lhs: {clock}, rhs: 0f32)\nframe: if(cond: @due, then: f64[0], else: f64[1])".into();
+    raw["events"] = serde_json::json!([]);
     let workload = Workload::parse(&raw.to_string()).unwrap();
     for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
         assert_eq!(
             row.runs[0].written[0],
             measure::values_hash(&[Some(Value::F64(0.0))])
         );
+    }
+}
+
+/// By hand: each tick has one hold and one say. The detached constant runs
+/// once; the two native unpacks demand its same value. The nested parallel
+/// has six indirect ticks (root, hold, inner parallel, two unpacks, say).
+/// Attached adds its wrapper and its graph leaf, and runs the constant each tick.
+#[test]
+fn counting_includes_reentrant_dataflow_host_and_real_calls_once() {
+    let mut raw = write_raw(false);
+    raw["text"] = "parallel\n  hold(t: {clock}, duration: 0, state: ())\n  parallel\n    unpack(values: @values, out_0: {out})\n    unpack(values: @values, out_0: {observed})\n  say(text: \"\", voice: \"\", viseme: {viseme})\n\nvalues: constant(param.value: f64[3])".into();
+    raw["keys"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"name":"viseme","initial":""}));
+    raw["events"] = serde_json::json!([]);
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    for form in FORMS {
+        let run = measure::replay(&workload, *form, true, &Monotonic::default());
+        let detached = form.name() == "detached";
+        assert_eq!(
+            run.calls,
+            if detached {
+                vec![3, 2, 2]
+            } else {
+                vec![3, 3, 3]
+            }
+        );
+        assert_eq!(run.dispatches, vec![if detached { 6 } else { 8 }; 3]);
+    }
+}
+
+/// A backwards reference and a graph reading a tree output must be ordered
+/// around the tree; the naive form still runs even an unused graph every tick.
+#[test]
+fn attached_transform_orders_calls_and_replaces_return_ports() {
+    let mut raw = write_raw(false);
+    raw["text"] = "unpack(values: f64[4], out_0: {out})\n\nlast: {observed} = add(operand_0: @first)\nfirst: add(operand_0: {out}, operand_1: 1f32)\nunused: add(operand_0: 9f32)".into();
+    raw["events"] = serde_json::json!([]);
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    let rows = measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap();
+    assert!(rows.iter().all(|r| r.differing == 0));
+    assert_eq!(rows[1].runs[0].calls, vec![3; 3]);
+    let nodes = FORMS[1].build(&workload);
+    for node in &nodes.0 {
+        assert!(node
+            .arguments
+            .values()
+            .all(|e| !matches!(e, arora_behavior_tree::schema::Expression::NodeArgument(_))));
+    }
+}
+
+/// A state port read through a selector shares the attached call's private
+/// cell, while a text-only output key still participates in agreement.
+#[test]
+fn attached_transform_preserves_state_ports_and_text_only_keys() {
+    let mut raw = write_raw(false);
+    raw["text"] = "{introduced} = add(operand_0: @smooth.state[.0])\n\nsmooth: damp(in: f32[1,2], dt: 0.1f32, param.half_life: 0.1f32, state: ())".into();
+    raw["events"] = serde_json::json!([]);
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    assert_eq!(workload.keys.last().unwrap().0, "introduced");
+    let rows = measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap();
+    assert!(rows.iter().all(|r| r.differing == 0));
+    let expected = measure::values_hash(&[Some(arora_types::value::Value::F32(1.0))]);
+    for row in rows {
+        assert_eq!(row.runs[0].written, vec![expected.clone(); 3]);
+    }
+}
+
+/// Scatter's runtime key resolver writes names outside the envelope. Its
+/// writes enter the digest, and an event must restore a key it overwrote.
+#[test]
+fn scatter_writes_dynamic_keys_and_host_events_remain_authoritative() {
+    use arora_types::value::Value;
+    let mut raw = write_raw(false);
+    raw["text"] = "fallback\n  sequence\n    equal(a: {gate}, b: true)\n    scatter(keys: str[\"out\",\"extra\"], values: f64[2,3])\n  running".into();
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    let expected = (0..3)
+        .map(|tick| {
+            let entries = [
+                ("clock", Value::F64((tick + 1) as f64 / 60.0)),
+                ("extra", Value::F64(3.0)),
+                ("gate", Value::Boolean(tick == 0)),
+                ("observed", Value::F64(0.0)),
+                ("out", Value::F64(if tick == 2 { 1.0 } else { 2.0 })),
+            ];
+            measure::values_hash(
+                &entries
+                    .into_iter()
+                    .flat_map(|(name, value)| [Some(Value::String(name.into())), Some(value)])
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
+        assert_eq!(row.differing, 0);
+        assert_eq!(row.runs[0].written, expected);
     }
 }

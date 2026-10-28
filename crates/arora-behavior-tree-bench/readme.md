@@ -43,7 +43,9 @@ Digests come from the first sample's recording replay. Coarse agreement runs sep
 measured intervals.
 
 A digest covers every sink key and every key the tree can write after each tick,
-in key-index order, including warm-up. Scale keys follow graph-call order.
+in key-index order, including warm-up. Scale keys follow graph-call order. With
+native `scatter`, whose destination names are runtime data, it covers the whole
+store, sorted by key name and including those names.
 Digests include absent values, boolean tags, UTF-8 strings with their byte
 lengths, and little-endian f64 bits, with signed zero and NaNs canonicalized,
 using FNV-1a. `differing` counts ticks whose digest
@@ -62,194 +64,170 @@ The registered forms are:
   other calls precede it, in data order. A reader uses a sink's store key or an
   unpublished call's tree-local return binding.
 - `detached`: graph calls are detached nodes referenced by node return ports.
-  Sinks run after the tree; a branch's `publish` leaves demand its graph calls.
+  Sinks run after the tree; a branch's publishing leaves demand its graph calls.
   The executor caches unchanged inputs and evaluates a demanded node at most once
   per tick. This is the agreement reference.
 
 ## Workload format
 
-This README defines the JSON contract. Labels and other descriptive properties
-are optional and ignored. Numbers become f64, booleans remain booleans, strings
-remain strings (in literals, initial values and events), and null
-initial values mean absent keys. All indices are zero-based.
+A workload is a JSON replay envelope containing a tree and graph in the
+[behavior text language](../arora-behavior-tree/docs/text.md). The text loader
+resolves functions and parameters by name against the benchmark's function
+index. Any error diagnostic rejects the workload, with the loader's locations
+and messages; warnings remain loadable.
 
 | field | meaning |
 |---|---|
-| `keys` | `[{"name": "input/x", "initial": 0.0}, ...]`; unique, nonempty names, none starting with `.`, which names a tree-local variable the store never sees |
-| `calls` | graph calls in data order, each `{"op": "sum", "args": [["a0", source], ...], "publishes": key_or_null}` |
-| `tree` | a tree node from the vocabulary below |
-| `ticks`, `warmUp` | total replay ticks and the initial ticks excluded from timing summaries; `0 <= warmUp < ticks` |
-| `clock`, `dt` | a key index and positive seconds per tick; before tick t, the host writes `(t + 1) * dt` |
-| `events` | `[[tick, key, scalar], ...]`, applied in listed order within a tick, after its clock write |
-| `phases` | `{"names": ["idle", "active"], "runs": [[0, 0], [80, 1]]}`; sorted starts, phase 0 before the first start |
+| `ticks`, `warmUp` | total ticks and the initial ticks excluded from timing; `0 <= warmUp < ticks` |
+| `dt` | finite, positive seconds per tick |
+| `clock` | the name of a declared key; before tick t the host writes `(t + 1) * dt` |
+| `keys` | `[{"name":"input/x","initial":0.0}, ...]`; unique, nonempty store names; names starting with `.` are tree-local and refused |
+| `events` | `[[tick,"input/x",scalar], ...]`; known keys, applied in listed order after the clock write |
+| `phases` | `{"names":["idle","active"],"runs":[[0,0],[80,1]]}`; nondecreasing starts, phase 0 before the first start |
+| `text` | the tree, detached calls and sinks in the behavior text language |
 
-A source is exactly one of `{"key": k}`, `{"node": c}` or `{"value": scalar}`.
-A graph source may reference only an earlier graph call. Argument and output role
-strings on host stand-ins are descriptive: position determines the parameter's
-UUID. Real module calls bind by the declared parameter name. A tree call binds
-each key to at most one output, because the executor's order between two writes
-to one key is undefined.
+Envelope numbers become f64, booleans and strings retain their kinds, and null
+initial values mean absent keys. Text literals use the language's types;
+dataflow arithmetic computes in f32. A module's dynamic parameters need typed
+numeric literals such as `0.12f32`. Store keys introduced by text without an
+initial envelope entry start absent and are included in the digest after the
+declared keys, sorted by name. Clock and event keys must be declared.
+A tree call binds each store key to at most one output. A key a graph call
+writes has no other writer, neither a second graph call nor a tree output:
+detached writes graph calls' keys after the tree, in data order, while
+attached-naive runs graph calls around the tree in its own order, so a second
+writer would leave whichever write the form orders last.
 
-Tree nodes:
+```json
+{
+  "ticks": 160, "warmUp": 16, "dt": 0.016666666666666666,
+  "clock": "arora/time",
+  "keys": [{"name":"arora/time","initial":0},
+           {"name":"input/x","initial":0},
+           {"name":"output/x","initial":null}],
+  "events": [[40,"input/x",1]],
+  "phases": {"names":["idle","active"],"runs":[[0,0],[40,1]]},
+  "text": "running\n\nsmooth: {output/x} = damp(node: \"smooth\", in: {input/x}, param.half_life: 0.12f32, dt: 0.016666667f32, state: ())\n"
+}
+```
 
-| `k` | other fields and behavior |
-|---|---|
-| `parallel`, `seq`, `fallback` | `children: [node, ...]`; nonempty native composites |
-| `equal` | `key`, `value`: native equality check |
-| `call` | `op`, `args: [[role, source], ...]`, `outputs: [[role, key], ...]`, `state: n`; a host action returning Status. With `module`, a real function: named parameter bindings and no `state` |
-| `publish` | `node`, `key`: calls the host's identity function with its return bound to the key |
-| `calls` | `calls: [c, ...]`: placement markers for forms that use explicit placement; the two current forms ignore them |
-| `run` | native RUN |
+The index is the union of
+[`arora-dataflow-nodes::functions::function_index()`](../arora-dataflow-nodes/README.md),
+the linked modules in [modules.rs](src/modules.rs), and the host actions below.
+The dataflow dependency disables `urdf_ik`, keeping the WASI build plain Rust.
+`DataflowNodes::bridge` answers the dataflow calls in process and forwards other
+calls to the host bridge. Each replay owns a fresh `DataflowNodes`, including
+its per-node caches, state and pending requests. Generated workloads give each
+dataflow call its own `node` name so its prepared site can be reused.
 
-Graph operations, with arguments in order:
+Only these host stand-ins are needed:
 
-| operation | result |
-|---|---|
-| `sum`, `product`, `max` | reduction of one or more arguments |
-| `sub(x,y)`, `div(x,y)` | subtraction, division; division by zero returns zero |
-| `clamp(x,lo,hi)` | `max(x,lo).min(hi)` |
-| `remap(x,inLo,inHi,outLo,outHi)` | affine remap; a zero input range returns outLo |
-| `overlay(x,unused,unused,base)` | `base + x` |
-| `first(x)`, `publish(x)` | x |
-| `mix(x...)` | sum of `x[i] * 0.5^(i+1)` |
-| `noise(x,y)` | `sin(1.3*x + 0.7*y)` |
-| `osc(frequency,phase,time)` | `sin(2*pi*frequency*time + phase)` |
-| `damp(target,halfLife)` | starts at target; updates state by `state + (target-state)*(1-exp2(-(1/30)/halfLife))`, snapping within 1e-4 |
-| `chain-add(x,y)`, `chain-mul(x,y)` | x+y, x*y; signature also has unbound mutable state and output |
-| `chain-clamp(x,y)`, `chain-remap(x,y)` | `max(x,0).min(abs(y)+1)`, `(x-y)*0.5`, with the same chain signature |
+| action | parameters and behavior | reason |
+|---|---|---|
+| `hold` | `t`, `duration`, `value`, mutable `out`, mutable `state`; writes once on entry; Running until a positive duration elapses; duration zero stays Running | no workspace function combines entry-only assignment, a status timer and restart after interruption |
+| `pulse` | `t`, `gap_min`, `gap_max`, `low`, `high`, `width`, `salt`, mutable `out`, mutable `state`; emits a random level, then zero, after seeded random gaps; Running | oscillators and noise do not schedule random-gap pulses with release deadlines and interruption restart |
+| `wander` | `t`, `gap_min`, `gap_max`, `salt`, `low`, `high`, mutable `out`, mutable `state`; emits a random level after seeded random gaps; Running | noise samples do not retain a random-gap schedule and held output across calls |
 
-Damping state is a mutable literal initialized to NaN, private to its call. The
-fixed 1/30-second damping time base is independent of the workload clock step.
+Host numeric parameters are f64; initialize each private `state` with `()`.
+The actions restart after a missed tick (a time gap greater than `1.5 * dt`).
+Random choices are deterministic functions of time and salt; [host.rs](src/host.rs)
+defines the hash. Outputs are written only when changed.
+Assignments and frame selection use native `unpack` and real dataflow calls;
+comparisons use `greaterthan` with native `equal`; a branch publishes a graph
+value with a one-operand `add` whose return is bound to a key.
 
-Tree actions have private mutable states initialized to NaN, and change output
-keys only when the action writes a different value. Timed actions restart when
-their last-call state is NaN or more than 1.5 × `dt` seconds before t
-(0.025 seconds at 60 Hz); the executor has
-no halt callback.
-
-| action | outputs; state parameters; result |
-|---|---|
-| `above(x,threshold)` | no outputs or state; Success if x>threshold, else Failure |
-| `hold(t,duration,v...)` | one output per v; since,last; writes v on restart, Running until positive duration elapses, then Success; duration 0 remains Running |
-| `follow(v...)` | one output per v, no state; writes v, Running |
-| `pulse(t,gapMin,gapMax,low,high,width,salt)` | one output; last,next,release; after random gaps writes a level in [low,high], then zero after width, Running |
-| `wander(t,gapMin,gapMax,salt,(low,high)...)` | one output per range; last,next; writes a new level per range after random gaps, Running |
-| `keyframes(t,n,(offset,v1..vn)...)` | n outputs; since,last,frame; writes frames at offsets after restart, Success after the last frame, otherwise Running |
-| `set(v...)` | one output per v, no state; writes v, Success |
-
-Random choices are deterministic functions of time and salt. The host rounds t to
-microseconds, XORs it with the hashed rounded salt, then hashes using xor-shifts
-16,15,16 and wrapping u32 multipliers 0x7feb352d and 0x846ca68b, dividing by 2^32.
-Pulse draws gaps at salt and salt+2, and levels at salt+1. Wander draws gaps at
-salt on restart and salt+100 thereafter, and levels at salt+1+output-index.
-Offsets and durations use a 1e-9 tolerance. See [host.rs](src/host.rs) for the
-arithmetic and [model.rs](src/model.rs) for validation.
-
-The built-in synthetic workload is generated by [synthetic.rs](src/synthetic.rs).
-It has 18 graph calls, two graph sinks, damping, and four host-event phases with
-follow, pulse/wander, hold/keyframes and set branches. A root-parallel `silent-say`
-leaf runs every tick, reading `speech/text` and writing `speech/viseme`. Events
-include completed sentences, an interrupted sentence and empty text. The existing
-RUN leaf keeps the root Running when its branches succeed; say never fails, so
-the four phases retain their control semantics. It contains no device data.
+The [synthetic workload](src/synthetic.rs) has 21 detached graph calls, two
+sinks, real damping, a clock oscillator and four event-driven phases: follow,
+pulse/wander, hold/frame selection and set. A root-parallel `say` leaf reads
+sentences from `speech/text` and writes `speech/viseme`. Events exercise completed,
+interrupted and empty sentences. Native `running` keeps the root Running.
+It contains no device data.
 
 ## Real modules
 
-A real module is a workspace crate declaring its exports with
-`#[arora_module::module]`. The benchmark links those functions in process and
-uses their frozen signatures: the module's parameter ids, names, types,
-mutability and return type. The first is `silent-say`, whose `say` takes strings
-`text`, `voice` and mutable `viseme`, returning Status.
+The benchmark links workspace functions in process using their declared ids,
+names and frozen signatures. `say-silent` supplies `say`, unchanged: `text` and
+`voice` are strings, mutable `viseme` is a string, and the return is Status.
 
-```json
-{"k":"call", "module":"silent-say", "op":"say",
- "args":[["text", {"key":7}], ["voice", {"value":""}]],
- "outputs":[["viseme",8]]}
+```text
+parallel
+  running
+  say(voice: "", text: {speech/text}, viseme: {speech/viseme})
 ```
 
-Bindings use parameter names in any order. Every parameter must be bound exactly
-once: immutable parameters in `args`, mutable parameters in `outputs` to key
-variables. Literal kinds must match primitive parameter types. Unknown modules,
-functions or parameter names are errors. A real call has no `state` field;
-the module owns its state.
+The text loader owns binding and literal checks. Module parameters that are not
+bound follow the language's absent-argument semantics. Both tree and detached
+calls can use linked functions. Mutable outputs pass through unfiltered,
+including unchanged values, as the production module contract requires.
 
-To add a module, add its workspace path dependency in Cargo.toml and one entry
-in [modules.rs](src/modules.rs)'s `MODULES`: workload name, generated module id,
-`exports` function and reset function. Use the declaration's ids, never copied
-UUID literals. Its reset must clear every piece of state a fresh device owns.
+To add a module, add its workspace path dependency and an entry in
+[modules.rs](src/modules.rs)'s `MODULES`, using the declaration's module id,
+exports function and reset function. Every replay resets the registered modules
+and holds one process-wide lock through lowering and ticking, since module state
+can be global. The bridge calls `invoke` directly, without engine serialization
+or transport; borrowed calls to these exports copy their arguments.
 
-- Mutated parameters pass through unfiltered, including unchanged values. That
-  is the production module contract; unchanged-write filtering belongs to the
-  host stand-ins only.
-- Every replay resets every registered module before lowering. Replays hold one
-  process-wide lock through reset, lowering and ticking because module state
-  can be process-global and tests run on parallel threads.
-- There is no engine buffer encoding: the bridge calls `invoke` directly. A
-  borrowed call costs the function plus an owned argument copy, including string
-  copies; this measures executor scheduling with real actions, without the
-  serialization and transport cost of engine dispatch.
-- Real functions are tree calls only. Graph calls remain host stand-ins so their
-  arithmetic and data-order contract remain fixed.
+The counting observer is reinstalled by a proxy around every registered
+callable, since the dataflow bridge invokes its callables through itself.
+Dataflow calls count at that observer; host and linked calls count where answered.
+Forwarding adds no second count. Every `arora_call_indirect` counts once, including
+the root and natives. The hand-derived mixed-call test in
+[agreement.rs](tests/agreement.rs) checks both forms.
 
 ## Scale scenarios
 
-Default sizes are 10, 30, 100, 300 and 1000 graph calls. Every scenario uses the
-same model, host, form construction and measurement code as JSON workloads.
+Default sizes are 10, 30, 100, 300 and 1000 graph calls. Scenarios generate text
+and pass through the same loader, host, forms and measurement code as JSON files.
 
-- `settled`, `one-input`, `all-inputs`: K=max(2,N/10) independent chains of add,
-  multiply, clamp and remap, chosen by position within each chain, with 1.1 as
-  their second argument. Chain depth is ten for N≥30 at the default sizes (five
-  at N=10). Settled work falls to zero; one-input work depends on chain depth,
-  and all-inputs work grows with the number of chains. Unchanged intermediate
-  results stop propagation, so changing an input need not run its whole chain. The last call of
-  each chain is a sink. Inputs remain constant, input 0 changes, or every input
-  changes to `tick % 17`.
-- `clock`: a deterministic random graph; one tenth of its calls are oscillators
-  reading time. Other calls are sum, product, clamp, remap or damping.
-- `branches`, `branches-switching`: eight graphs of ceil(N/8) calls guarded by
-  native equality checks under a fallback. Every graph input changes every tick;
-  one branch remains active or the active branch changes every 50 ticks. Only
-  the active branch publishes.
+- `settled`, `one-input`, `all-inputs`: K=max(2,N/10) independent chains of real
+  add, multiply, clamp and remap calls, chosen by depth. Depth is ten for N≥30
+  at the default sizes, five at N=10. Each chain ends in a sink. Inputs remain
+  constant, input 0 changes, or all inputs change to `tick % 17`. Settled work
+  falls to zero; one-input work depends on depth; all-inputs work grows with K.
+  Unchanged intermediate values stop propagation.
+- `clock`: the same chains, with an oscillator reading the clock at the head of
+  each chain. Work grows with K and depth; clamping can stop propagation.
+- `branches`, `branches-switching`: eight graphs of ceil(N/8) real calls guarded
+  by native equality checks under a fallback. Every input changes each tick.
+  One branch stays active or the active branch changes every 50 ticks. Only the
+  active branch publishes. Branch graphs use add, multiply, clamp, remap and damp.
 
-The random generator is a u32 LCG with seed 332396, multiplier 1664525 and
-increment 1013904223. Each graph has max(2,n/10) inputs. Calls read an input or a
-previous call within 32 positions. Unread calls publish, with at least ceil(n/10)
-published calls. Generation is deterministic; branch sizes can round above N.
-Every scenario includes the host clock update in its timing.
+Branch topology uses a u32 LCG: seed 332396, multiplier 1664525, increment
+1013904223. Each graph has max(2,n/10) inputs. Calls read an input or a previous
+call within 32 positions. Unread calls publish, with at least ceil(n/10) published
+calls. Branch sizes can round above N. Every scenario times the host clock write.
 
-The switching scenario replaces damping with identity while preserving its graph
-edges. Continuously running inactive damping and pausing it on inactive branches
-have different reentry semantics. Stateless switching isolates branch scheduling
-and permits tick-for-tick agreement. Fixed branches and the clock graph retain
-damping; the synthetic workload also exercises stateful tree actions and sinks.
+Switching uses one-operand add in place of damping, preserving graph edges.
+Continuously running inactive smoothers and pausing them have different reentry
+semantics; stateless switching isolates branch scheduling and preserves agreement.
+Fixed branches retain damping, and synthetic exercises smoothing and timed actions.
 
-Calls per measured tick with the default 200 warm-up and 500 measured ticks:
+Calls per measured tick with 200 warm-up and 500 measured ticks:
 
 | form / scenario | N=10 | N=30 | N=100 | N=300 | N=1000 |
 |---|---:|---:|---:|---:|---:|
 | detached / settled | 0 | 0 | 0 | 0 | 0 |
 | detached / one-input | 3.240 | 3.840 | 3.840 | 3.840 | 3.840 |
 | detached / all-inputs | 6.480 | 11.520 | 38.400 | 115.200 | 384.000 |
-| detached / clock | 3.000 | 9.000 | 19.000 | 106.916 | 293.000 |
+| detached / clock | 7.044 | 10.566 | 35.220 | 105.660 | 352.200 |
 | detached / branches | 4.000 | 6.000 | 18.000 | 58.000 | 188.000 |
 | detached / branches-switching | 4.000 | 6.500 | 19.800 | 59.400 | 188.900 |
 | attached-naive / settled, one-input, all-inputs, clock | 10 | 30 | 100 | 300 | 1000 |
 | attached-naive / branches | 18.000 | 34.000 | 109.000 | 324.000 | 1063.000 |
 | attached-naive / branches-switching | 18.000 | 34.500 | 110.800 | 325.400 | 1063.900 |
 
-The chain scenarios isolate settling, a fixed-depth change and changes across K
-chains. Clock graphs grow with N; random topology and settling affect their exact
-fraction of active calls. Branch graphs round up to eight equal parts. Detached
-runs demanded calls in the active part plus its publish actions; attached-naive
-runs all graph calls plus active publish actions.
+Detached runs demanded calls in the active branch plus its publishing leaves;
+attached-naive runs every graph call plus active publishing leaves.
 
 ## Adding a form
 
 1. Add a module under [src/forms](src/forms) implementing `Form`.
-2. Implement `build(&Workload) -> Nodes`. Shared attached/detached construction is
-   available in `forms::build`; the model and schema nodes are public.
+2. Implement `build(&Workload) -> Nodes`. The workload holds the text loader's
+   schema nodes, variable names and attached-node ids. Transform them in the
+   form's module; detached returns them unchanged.
 3. Override `lower` when needed. It receives nodes, names, the variable resolver,
-   function index and mutable bridge. A placement pass can run before loading;
+   function index and mutable bridge. The resolver is shared and owned so native
+   `scatter` can resolve runtime keys. A placement pass can run before loading;
    a form can choose lowering options or set flags on the lowered tree before
    returning it. These choices stay in the form's module.
 4. Declare `fixture_counts`: total (module calls, dispatches), warm-up included,

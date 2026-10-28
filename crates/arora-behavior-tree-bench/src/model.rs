@@ -1,70 +1,27 @@
-//! Workload model. The crate README defines its JSON format.
-use crate::{host::Op, modules::MODULES};
+//! Workload envelope around the behavior text language.
+use crate::{forms::Nodes, host::Bridge};
+use arora_behavior_tree::schema::{Expression, _RET_PARAM_ID};
 use arora_behavior_tree::{
-    nodes::{FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, SEQ_FUNCTION_ID},
-    variable::is_tree_local,
+    graph::graph_to_bt_nodes, load_behavior_tree_text, text, variable::is_tree_local,
 };
-use arora_types::record::ty::PrimitiveKind;
 use arora_types::value::Value;
 use std::collections::{HashMap, HashSet};
-use uuid::Uuid;
-/// Where an argument's value comes from.
-#[derive(Clone)]
-pub enum Source {
-    /// A store key, by its index in [`Workload::keys`].
-    Key(usize),
-    /// A graph call's return, by its index in [`Workload::calls`].
-    Call(usize),
-    Value(Value),
-}
-#[derive(Clone)]
-pub struct GraphCall {
-    pub op: Op,
-    pub arguments: Vec<(Uuid, Source)>,
-    /// The key a sink publishes its return to.
-    pub publishes: Option<usize>,
-}
-#[derive(Clone)]
-pub enum Tree {
-    Composite(Uuid, Vec<Tree>),
-    Equal(usize, Value),
-    /// A module call returning a status: its call site, arguments, output
-    /// keys and number of state parameters.
-    Call(usize, Op, Vec<Source>, Vec<usize>, usize),
-    /// A real function with bindings keyed by its declared parameter ids.
-    RealCall(Uuid, Vec<(Uuid, Source)>, Vec<(Uuid, usize)>),
-    Publish(usize, usize),
-    Calls(Vec<usize>),
-    Run,
-}
+
 #[derive(Clone)]
 pub struct Workload {
-    /// Store keys and their initial values.
     pub keys: Vec<(String, Option<Value>)>,
-    /// Every graph call, in data order: a call reads only calls before it.
-    pub calls: Vec<GraphCall>,
-    pub tree: Tree,
-    /// The calls a `calls` marker places in the tree.
-    pub marked: HashSet<usize>,
-    /// The key each `publish` leaf writes its call's value to.
-    pub published: HashMap<usize, usize>,
-    /// The calls that read a key the tree writes, directly or through other
-    /// calls, so they run after the tree.
-    pub after: HashSet<usize>,
-    /// Every key a sink or the tree writes, which the forms must agree on.
+    pub nodes: Nodes,
+    pub attached: HashSet<uuid::Uuid>,
     pub compared: Vec<usize>,
-    /// Keys written by a graph sink or the tree, independently of the host.
     pub writer_keys: HashSet<usize>,
+    pub dynamic_keys: bool,
     pub clock: usize,
     pub dt: f64,
     pub warm_up: usize,
-    /// Each tick's key writes, before it.
     pub events: Vec<Vec<(usize, Value)>>,
     pub phase_names: Vec<String>,
-    /// Each tick's phase, for its statistics and the series.
     pub phases: Vec<usize>,
 }
-
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum Scalar {
@@ -82,69 +39,9 @@ impl Scalar {
     }
 }
 #[derive(serde::Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
-enum RawSource {
-    Key { key: usize },
-    Call { node: usize },
-    Value { value: Scalar },
-}
-impl RawSource {
-    fn resolve(self, keys: usize, calls: usize) -> Result<Source, String> {
-        match self {
-            Self::Key { key } if key < keys => Ok(Source::Key(key)),
-            Self::Call { node } if node < calls => Ok(Source::Call(node)),
-            Self::Value { value } => Ok(Source::Value(value.value())),
-            _ => Err("source index out of range or graph not in data order".into()),
-        }
-    }
-}
-#[derive(serde::Deserialize)]
 struct RawKey {
     name: String,
     initial: Option<Scalar>,
-}
-#[derive(serde::Deserialize)]
-struct RawCall {
-    module: Option<String>,
-    op: String,
-    args: Vec<(String, RawSource)>,
-    publishes: Option<usize>,
-}
-#[derive(serde::Deserialize)]
-#[serde(tag = "k", rename_all = "lowercase")]
-enum RawTree {
-    Parallel {
-        children: Vec<RawTree>,
-    },
-    Seq {
-        children: Vec<RawTree>,
-    },
-    Fallback {
-        children: Vec<RawTree>,
-    },
-    Equal {
-        key: usize,
-        value: Scalar,
-    },
-    Call {
-        module: Option<String>,
-        op: String,
-        args: Vec<(String, RawSource)>,
-        outputs: Vec<(String, usize)>,
-        #[serde(default, deserialize_with = "present_state")]
-        state: Option<usize>,
-    },
-    Publish {
-        node: usize,
-        key: usize,
-    },
-    Calls {
-        calls: Vec<usize>,
-    },
-    Run,
-}
-fn present_state<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<usize>, D::Error> {
-    <usize as serde::Deserialize>::deserialize(d).map(Some)
 }
 #[derive(serde::Deserialize)]
 struct RawPhases {
@@ -155,316 +52,153 @@ struct RawPhases {
 #[serde(rename_all = "camelCase")]
 struct RawWorkload {
     keys: Vec<RawKey>,
-    calls: Vec<RawCall>,
-    tree: RawTree,
-    clock: usize,
+    text: String,
+    clock: String,
     dt: f64,
     ticks: usize,
     warm_up: usize,
-    events: Vec<(usize, usize, Scalar)>,
+    events: Vec<(usize, String, Scalar)>,
     phases: RawPhases,
 }
-
-fn operation(
-    name: &str,
-    n: usize,
-    outputs: usize,
-    states: usize,
-    action: bool,
-) -> Result<Op, String> {
-    let valid = match name {
-        "sum" | "product" | "max" | "mix" => !action && n > 0,
-        "first" | "publish" => !action && n == 1,
-        "sub" | "div" | "noise" | "damp" | "chain-add" | "chain-mul" | "chain-clamp"
-        | "chain-remap" => !action && n == 2,
-        "clamp" | "osc" => !action && n == 3,
-        "overlay" => !action && n == 4,
-        "remap" => !action && n == 5,
-        "above" => action && n == 2 && outputs == 0 && states == 0,
-        "hold" => action && n == 2 + outputs && states == 2,
-        "follow" | "set" => action && n == outputs && states == 0,
-        "pulse" => action && n == 7 && outputs == 1 && states == 3,
-        "wander" => action && n == 4 + 2 * outputs && states == 2,
-        "keyframes" => {
-            action
-                && outputs > 0
-                && n >= 3 + outputs
-                && (n - 2).is_multiple_of(1 + outputs)
-                && states == 3
-        }
-        _ => false,
-    };
-    if !valid {
-        return Err(format!("invalid operation or signature: {name} ({n} arguments, {outputs} outputs, {states} states)"));
-    }
-    Ok(Op::parse(name))
-}
-
-/// Two outputs of one tree call bound to one key would leave whichever write
-/// the executor applies last, which no form defines.
-fn distinct_outputs(keys: &[usize]) -> Result<(), String> {
-    if keys.iter().collect::<HashSet<_>>().len() == keys.len() {
-        Ok(())
-    } else {
-        Err("a tree call binds each key to at most one output".into())
-    }
-}
-
-struct Parser {
-    marked: HashSet<usize>,
-    published: HashMap<usize, usize>,
-    written: HashSet<usize>,
-    sites: usize,
-    keys: usize,
-    calls: usize,
-}
-impl Parser {
-    fn key(&self, key: usize) -> Result<usize, String> {
-        if key < self.keys {
-            Ok(key)
-        } else {
-            Err("key index out of range".into())
-        }
-    }
-    fn call(&self, call: usize) -> Result<usize, String> {
-        if call < self.calls {
-            Ok(call)
-        } else {
-            Err("call index out of range".into())
-        }
-    }
-    fn node(&mut self, node: RawTree) -> Result<Tree, String> {
-        match node {
-            RawTree::Parallel { children }
-            | RawTree::Seq { children }
-            | RawTree::Fallback { children }
-                if children.is_empty() =>
-            {
-                Err("empty composite".into())
-            }
-            RawTree::Parallel { children } => Ok(Tree::Composite(
-                PARALLEL_FUNCTION_ID,
-                self.children(children)?,
-            )),
-            RawTree::Seq { children } => {
-                Ok(Tree::Composite(SEQ_FUNCTION_ID, self.children(children)?))
-            }
-            RawTree::Fallback { children } => Ok(Tree::Composite(
-                FALLBACK_FUNCTION_ID,
-                self.children(children)?,
-            )),
-            RawTree::Equal { key, value } => Ok(Tree::Equal(self.key(key)?, value.value())),
-            RawTree::Call {
-                module,
-                op,
-                args,
-                outputs,
-                state,
-            } => {
-                if let Some(module) = module {
-                    if state.is_some() {
-                        return Err("a real call has no state field".into());
-                    }
-                    return self.real_call(&module, &op, args, outputs);
-                }
-                let state = state.ok_or("a host call requires state")?;
-                let op = operation(&op, args.len(), outputs.len(), state, true)?;
-                let args = args
-                    .into_iter()
-                    .map(|(_, a)| a.resolve(self.keys, self.calls))
-                    .collect::<Result<_, _>>()?;
-                let outputs = outputs
-                    .into_iter()
-                    .map(|(_, k)| self.key(k))
-                    .collect::<Result<Vec<_>, _>>()?;
-                distinct_outputs(&outputs)?;
-                self.written.extend(&outputs);
-                let site = self.sites;
-                self.sites += 1;
-                Ok(Tree::Call(site, op, args, outputs, state))
-            }
-            RawTree::Publish { node, key } => {
-                let (node, key) = (self.call(node)?, self.key(key)?);
-                self.published.insert(node, key);
-                self.written.insert(key);
-                Ok(Tree::Publish(node, key))
-            }
-            RawTree::Calls { calls } => {
-                let calls = calls
-                    .into_iter()
-                    .map(|c| self.call(c))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.marked.extend(&calls);
-                Ok(Tree::Calls(calls))
-            }
-            RawTree::Run => Ok(Tree::Run),
-        }
-    }
-    fn real_call(
-        &mut self,
-        module: &str,
-        name: &str,
-        args: Vec<(String, RawSource)>,
-        outputs: Vec<(String, usize)>,
-    ) -> Result<Tree, String> {
-        let module = MODULES
-            .iter()
-            .find(|m| m.name == module)
-            .ok_or_else(|| format!("unknown module: {module}"))?;
-        let function = (module.exports)()
-            .into_iter()
-            .find(|f| f.name == name)
-            .ok_or_else(|| format!("unknown function: {}::{name}", module.name))?;
-        let mut bound = HashSet::new();
-        let mut parameter = |name: &str, output: bool| {
-            let (id, p) = function
-                .signature
-                .parameters
-                .iter()
-                .find(|(_, p)| p.name == name)
-                .ok_or_else(|| format!("unknown parameter: {name}"))?;
-            if !bound.insert(*id) {
-                return Err(format!("parameter bound twice: {name}"));
-            }
-            if p.mutable != output {
-                return Err(format!(
-                    "{} parameter {name} must be bound as {}",
-                    if p.mutable { "mutable" } else { "immutable" },
-                    if p.mutable {
-                        "an output"
-                    } else {
-                        "an argument"
-                    }
-                ));
-            }
-            Ok((*id, p))
-        };
-        let args = args
-            .into_iter()
-            .map(|(name, source)| {
-                let (id, p) = parameter(&name, false)?;
-                let source = source.resolve(self.keys, self.calls)?;
-                if let (Source::Value(value), Some(primitive)) = (&source, p.ty.as_primitive()) {
-                    if PrimitiveKind::from_id(&value.type_uuid()) != Some(primitive.kind) {
-                        return Err(format!(
-                            "literal kind does not match parameter {name}: expected {}",
-                            primitive.kind
-                        ));
-                    }
-                }
-                Ok((id, source))
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        let outputs = outputs
-            .into_iter()
-            .map(|(name, key)| {
-                let (id, _) = parameter(&name, true)?;
-                Ok((id, self.key(key)?))
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        for (id, p) in &function.signature.parameters {
-            if !bound.contains(id) {
-                return Err(format!("parameter not bound: {}", p.name));
-            }
-        }
-        distinct_outputs(&outputs.iter().map(|(_, k)| *k).collect::<Vec<_>>())?;
-        self.written.extend(outputs.iter().map(|(_, k)| k));
-        Ok(Tree::RealCall(function.id, args, outputs))
-    }
-    fn children(&mut self, children: Vec<RawTree>) -> Result<Vec<Tree>, String> {
-        children.into_iter().map(|node| self.node(node)).collect()
-    }
+/// Whether a call's parameter is one it writes: its return or a mutable
+/// parameter of its function or native.
+pub(crate) fn is_output(
+    functions: &arora_behavior::FunctionIndex,
+    function: &uuid::Uuid,
+    parameter: &uuid::Uuid,
+) -> bool {
+    *parameter == _RET_PARAM_ID
+        || functions
+            .get(function)
+            .and_then(|f| f.function.parameters.get(parameter))
+            .is_some_and(|p| p.mutable)
+        || text::natives()
+            .find(|f| f.function_id == *function)
+            .and_then(|f| f.function.parameters.get(parameter))
+            .is_some_and(|p| p.mutable)
 }
 
 impl Workload {
-    /// Parse and validate indices, operation signatures and replay dimensions.
-    pub fn parse(text: &str) -> Result<Self, String> {
-        let raw: RawWorkload = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        let keys: Vec<_> = raw
+    pub fn parse(source: &str) -> Result<Self, String> {
+        let raw: RawWorkload = serde_json::from_str(source).map_err(|e| e.to_string())?;
+        let mut keys: Vec<_> = raw
             .keys
             .into_iter()
             .map(|k| (k.name, k.initial.map(Scalar::value)))
             .collect();
-        if raw.ticks == 0
-            || raw.warm_up >= raw.ticks
-            || raw.clock >= keys.len()
-            || !raw.dt.is_finite()
-            || raw.dt <= 0.0
-        {
-            return Err("invalid ticks, warmUp, clock or dt".into());
+        if raw.ticks == 0 || raw.warm_up >= raw.ticks || !raw.dt.is_finite() || raw.dt <= 0.0 {
+            return Err("invalid ticks, warmUp or dt".into());
         }
-        let unique: HashSet<_> = keys.iter().map(|(name, _)| name).collect();
-        if unique.len() != keys.len() || keys.iter().any(|(name, _)| name.is_empty()) {
+        let by_name: HashMap<_, _> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.clone(), i))
+            .collect();
+        if by_name.len() != keys.len() || keys.iter().any(|(name, _)| name.is_empty()) {
             return Err("key names must be nonempty and unique".into());
         }
-        // A tree-local name never reaches the store the digests read.
         if keys.iter().any(|(name, _)| is_tree_local(name)) {
             return Err("key names must name store keys, not tree-local variables".into());
         }
-        let calls = raw
-            .calls
-            .into_iter()
-            .enumerate()
-            .map(|(c, call)| {
-                if call.module.is_some() {
-                    return Err("real functions are tree calls only".into());
+        let clock = *by_name
+            .get(raw.clock.as_str())
+            .ok_or("clock names an unknown key")?;
+        let functions = Bridge::index();
+        // The loader owns syntax, resolution, types and diagnostics.
+        load_behavior_tree_text(&raw.text, functions, &|_| None).map_err(|e| e.to_string())?;
+        let loaded = text::resolve(&text::parse(&raw.text).document, functions);
+        let nodes = graph_to_bt_nodes(&loaded.graph).map_err(|e| e.to_string())?;
+        let dynamic_keys = nodes
+            .iter()
+            .any(|n| n.function == arora_behavior_tree::nodes::SCATTER_FUNCTION_ID);
+        let attached = loaded
+            .nodes
+            .iter()
+            .filter(|n| n.attached)
+            .map(|n| n.id)
+            .collect::<HashSet<_>>();
+        let mut written_names = HashSet::new();
+        // Per store key, the graph calls and the tree nodes that write it.
+        let mut writers: HashMap<&String, (usize, usize)> = HashMap::new();
+        for node in &nodes {
+            let mut outputs = HashSet::new();
+            for (id, expr) in &node.arguments {
+                if !is_output(functions, &node.function, id) {
+                    continue;
                 }
-                let op = operation(&call.op, call.args.len(), 0, 0, false)?;
-                let arguments = call
-                    .args
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, (_, a))| Ok((op.role(i), a.resolve(keys.len(), c)?)))
-                    .collect::<Result<_, String>>()?;
-                if call.publishes.is_some_and(|k| k >= keys.len()) {
-                    return Err("sink key out of range".into());
+                if let Expression::VariableId(variable) = expr {
+                    if let Some(name) = loaded
+                        .graph
+                        .variables
+                        .get(variable)
+                        .filter(|n| !is_tree_local(n))
+                    {
+                        if attached.contains(&node.id) && !outputs.insert(name) {
+                            return Err("a tree call binds each key to at most one output".into());
+                        }
+                        written_names.insert(name.clone());
+                    }
                 }
-                Ok(GraphCall {
-                    op,
-                    arguments,
-                    publishes: call.publishes,
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        let mut parser = Parser {
-            marked: HashSet::new(),
-            published: HashMap::new(),
-            written: HashSet::new(),
-            sites: 0,
-            keys: keys.len(),
-            calls: calls.len(),
-        };
-        let tree = parser.node(raw.tree)?;
-        if matches!(tree, Tree::Calls(_)) {
-            return Err("root must be executable".into());
-        }
-        let mut after = HashSet::new();
-        for (c, call) in calls.iter().enumerate() {
-            if call.arguments.iter().any(|(_, s)| match s {
-                Source::Key(k) => parser.written.contains(k),
-                Source::Call(c) => after.contains(c),
-                _ => false,
-            }) {
-                if parser.marked.contains(&c) {
-                    return Err("a calls marker reads a tree output".into());
+            }
+            for name in outputs.iter().copied().chain(
+                node.arguments
+                    .iter()
+                    .filter(|_| !attached.contains(&node.id))
+                    .filter(|(id, _)| is_output(functions, &node.function, id))
+                    .filter_map(|(_, expr)| match expr {
+                        Expression::VariableId(v) => loaded.graph.variables.get(v),
+                        _ => None,
+                    })
+                    .filter(|n| !is_tree_local(n)),
+            ) {
+                let entry = writers.entry(name).or_default();
+                if attached.contains(&node.id) {
+                    entry.1 += 1;
+                } else {
+                    entry.0 += 1;
                 }
-                after.insert(c);
             }
         }
-        let mut compared: Vec<_> = calls
+        // Detached writes graph calls' keys after the tree, in data order;
+        // attached-naive runs graph calls in its own order around the tree.
+        // A second writer of a key a graph call writes would leave whichever
+        // write the form orders last, so the forms could not be compared.
+        if let Some((name, _)) = writers
             .iter()
-            .filter_map(|c| c.publishes)
-            .chain(parser.written.iter().copied())
-            .collect();
-        compared.sort_unstable();
-        compared.dedup();
+            .find(|(_, (graph, tree))| *graph > 0 && graph + tree > 1)
+        {
+            return Err(format!(
+                "a key a graph call writes has no other writer: {name}"
+            ));
+        }
         let mut events = vec![Vec::new(); raw.ticks];
-        for (tick, key, value) in raw.events {
-            if tick >= raw.ticks || key >= keys.len() {
-                return Err("event index out of range".into());
+        for (tick, name, value) in raw.events {
+            let key = *by_name
+                .get(name.as_str())
+                .ok_or("event names an unknown key")?;
+            if tick >= raw.ticks {
+                return Err("event tick out of range".into());
             }
             events[tick].push((key, value.value()));
         }
+        // Text can introduce store keys without an initial envelope value.
+        let mut introduced: Vec<_> = written_names
+            .iter()
+            .filter(|name| !by_name.contains_key(*name))
+            .cloned()
+            .collect();
+        introduced.sort();
+        keys.extend(introduced.into_iter().map(|name| (name, None)));
+        let compared: Vec<_> = keys
+            .iter()
+            .enumerate()
+            .filter_map(|(k, (name, _))| written_names.contains(name).then_some(k))
+            .collect();
+        let written = if dynamic_keys {
+            (0..keys.len()).collect()
+        } else {
+            compared.iter().copied().collect()
+        };
         if raw.phases.names.is_empty()
             || raw
                 .phases
@@ -483,17 +217,14 @@ impl Workload {
             phases[start..].fill(phase);
             last = start;
         }
-        let writer_keys = compared.iter().copied().collect();
         Ok(Self {
             keys,
-            calls,
-            tree,
-            marked: parser.marked,
-            published: parser.published,
-            after,
+            nodes: (nodes, loaded.graph.variables),
+            attached,
             compared,
-            writer_keys,
-            clock: raw.clock,
+            writer_keys: written,
+            dynamic_keys,
+            clock,
             dt: raw.dt,
             warm_up: raw.warm_up,
             events,
@@ -501,7 +232,6 @@ impl Workload {
             phases,
         })
     }
-
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
         Self::parse(&std::fs::read_to_string(path).map_err(|e| e.to_string())?)
     }

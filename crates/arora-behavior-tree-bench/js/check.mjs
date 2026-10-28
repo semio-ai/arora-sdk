@@ -19,7 +19,7 @@ assert.equal(x.bench_measure(10, 0, 0, 0, 10, 2), 1);
 assert.equal(x.bench_minimum_sample_us(-1), 1);
 assert.equal(x.bench_minimum_sample_us(NaN), 1);
 assert.throws(() => wasm.loadWorkload('{'), /rejected/);
-const badRoot = JSON.parse(text); badRoot.tree = { k: 'calls', calls: [] };
+const badRoot = JSON.parse(text); badRoot.text = 'missing_function()';
 assert.throws(() => wasm.loadWorkload(JSON.stringify(badRoot)), /rejected/);
 const one = wasm.loadWorkload(text).measure('attached-naive', { samples: 1 });
 assert.equal(one.forms['attached-naive'].differing, 0, 'detached reference when not selected');

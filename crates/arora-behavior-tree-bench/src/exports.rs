@@ -146,7 +146,12 @@ fn load(workload: Workload) {
         "{};{};{},{},{},{}",
         form_names(),
         workload.phase_names.join(","),
-        workload.calls.len(),
+        workload
+            .nodes
+            .0
+            .iter()
+            .filter(|n| !workload.attached.contains(&n.id))
+            .count(),
         workload.events.len(),
         workload.warm_up,
         workload.dt

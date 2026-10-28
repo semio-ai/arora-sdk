@@ -3,7 +3,7 @@ use crate::{
     clock::Clock,
     forms::{self, Form, Nodes},
     measure,
-    model::{Tree, Workload},
+    model::Workload,
     scale::Scenario,
 };
 use std::cell::Cell;
@@ -14,9 +14,10 @@ impl Form for Wrong {
         "test-wrong"
     }
     fn build(&self, workload: &Workload) -> Nodes {
-        let mut wrong = workload.clone();
-        wrong.tree = Tree::Run;
-        forms::build::build(&wrong, true)
+        let mut nodes = workload.nodes.clone();
+        nodes.0[0].function = arora_behavior_tree::nodes::RUN_FUNCTION_ID;
+        nodes.0[0].children = None;
+        nodes
     }
     fn fixture_counts(&self) -> [(u64, u64); 7] {
         [(0, 0); 7]
@@ -129,12 +130,18 @@ mod tests {
 
     #[test]
     fn wrong_form_is_rejected_alone_and_with_reference() {
-        let workload = crate::synthetic::workload();
-        for selected in [vec![&Wrong as &dyn Form], vec![forms::FORMS[0], &Wrong]] {
-            let rows =
-                measure::measure(&workload, &selected, 1, &crate::clock::Monotonic::default())
-                    .unwrap();
-            assert!(rows.last().unwrap().differing > 0);
+        let mut scatter = crate::synthetic::json();
+        scatter["text"] = "scatter(keys: str[\"dynamic\"], values: f32[1])".into();
+        for workload in [
+            crate::synthetic::workload(),
+            Workload::parse(&scatter.to_string()).unwrap(),
+        ] {
+            for selected in [vec![&Wrong as &dyn Form], vec![forms::FORMS[0], &Wrong]] {
+                let rows =
+                    measure::measure(&workload, &selected, 1, &crate::clock::Monotonic::default())
+                        .unwrap();
+                assert!(rows.last().unwrap().differing > 0);
+            }
         }
     }
 }

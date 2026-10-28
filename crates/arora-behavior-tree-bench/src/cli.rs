@@ -16,7 +16,12 @@ fn time(value: Option<f64>) -> String {
 pub fn workload_table(workload: &Workload, rows: &[Measurement]) -> String {
     let mut out = format!(
         "{} calls, {} ticks at {:.0} Hz, warm-up={}; µs per tick includes host writes\n",
-        workload.calls.len(),
+        workload
+            .nodes
+            .0
+            .iter()
+            .filter(|n| !workload.attached.contains(&n.id))
+            .count(),
         workload.events.len(),
         1.0 / workload.dt,
         workload.warm_up

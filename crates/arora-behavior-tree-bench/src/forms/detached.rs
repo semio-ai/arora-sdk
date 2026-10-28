@@ -1,4 +1,4 @@
-use super::{build, Form, Nodes};
+use super::{Form, Nodes};
 use crate::model::Workload;
 
 pub struct Detached;
@@ -7,15 +7,15 @@ impl Form for Detached {
         super::REFERENCE
     }
     fn build(&self, workload: &Workload) -> Nodes {
-        build::build(workload, true)
+        workload.nodes.clone()
     }
     fn fixture_counts(&self) -> [(u64, u64); 7] {
         [
-            (2006, 1960),
+            (1934, 2000),
             (10, 160),
             (525, 160),
             (1040, 160),
-            (487, 160),
+            (1144, 160),
             (640, 1120),
             (640, 1480),
         ]

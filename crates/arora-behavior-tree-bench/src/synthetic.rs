@@ -1,72 +1,81 @@
 //! A public, deterministic workload with graph sinks and event-driven branches.
 use crate::model::Workload;
 use serde_json::{json, Value};
-
 pub const TICKS: usize = 160;
 pub const WARM_UP: usize = 16;
 
 pub fn json() -> Value {
-    let key = |k| json!({"key": k});
-    let node = |n| json!({"node": n});
-    let value = |v: f64| json!({"value": v});
-    let args = |a: Vec<Value>| {
-        a.into_iter()
-            .enumerate()
-            .map(|(i, s)| json!([format!("a{i}"), s]))
-            .collect::<Vec<_>>()
-    };
-    let call = |op, a: Vec<Value>, publishes: Option<usize>| json!({"op": op, "args": args(a), "publishes": publishes});
-    let mut calls = vec![
-        call("sum", vec![key(1), value(0.3)], None),
-        call("product", vec![node(0), value(0.8)], None),
-        call("osc", vec![value(2.0), value(0.1), key(0)], None),
-        call("mix", vec![node(1), node(2)], None),
-        call("damp", vec![key(3), value(0.12)], Some(5)),
-        call("sum", vec![node(4), node(1)], Some(6)),
-    ];
+    let mut text = String::from("\
+parallel
+  fallback
+    sequence
+      equal(a: {mode}, b: 0f64)
+      parallel
+        {target} = add(operand_0: @mixed)
+        {branch/output} = add(operand_0: @n17)
+        running
+    sequence
+      equal(a: {mode}, b: 1f64)
+      parallel
+        pulse(t: {arora/time}, gap_min: 0.04, gap_max: 0.10, low: 0.2, high: 0.8, width: 0.025, salt: 7, out: {target}, state: ())
+        wander(t: {arora/time}, gap_min: 0.05, gap_max: 0.08, salt: 9, low: -0.4, high: 0.4, out: {branch/output}, state: ())
+    sequence
+      equal(a: {mode}, b: 2f64)
+      parallel
+        hold(t: {arora/time}, duration: 0, value: 0.6, out: {target}, state: ())
+        unpack(values: @frames, out_0: {branch/output})
+    sequence
+      equal(a: {mode}, b: 3f64)
+      parallel
+        unpack(values: f32[-0.25], out_0: {target})
+        equal(a: @above, b: true)
+        {branch/output} = add(operand_0: @n17)
+  running
+  say(text: {speech/text}, voice: \"\", viseme: {speech/viseme})
+
+input_sum: add(node: \"input_sum\", operand_0: {input}, operand_1: 0.3f32)
+gain: multiply(node: \"gain\", operand_0: @input_sum, operand_1: 0.8f32)
+wave: oscillator(node: \"wave\", frequency: 2f32, phase: 0.1f32, t: {arora/time})
+mixed: add(node: \"mixed\", operand_0: @gain, operand_1: @wave)
+damped: {graph/damped} = damp(node: \"damped\", in: {target}, param.half_life: 0.12f32, dt: 0.016666667f32, state: ())
+output: {graph/mixed} = add(node: \"output\", operand_0: @damped, operand_1: @gain)
+above: greaterthan(node: \"above\", lhs: {input}, rhs: -1f32)
+frame_time: greaterthan(node: \"frame_time\", lhs: {arora/time}, rhs: 1.55f32)
+frames: if(node: \"frames\", cond: @frame_time, then: f32[0.9], else: f32[0.2])
+");
     for i in 6..18 {
-        calls.push(call(
-            "sum",
-            vec![node(if i == 6 { 3 } else { i - 1 }), value(0.02)],
-            None,
+        let previous = if i == 6 {
+            "mixed".to_string()
+        } else {
+            format!("n{}", i - 1)
+        };
+        text.push_str(&format!(
+            "n{i}: add(node: \"n{i}\", operand_0: @{previous}, operand_1: 0.02f32)\n"
         ));
     }
-    let action = |op, a: Vec<Value>, outputs: Vec<usize>, state| json!({"k": "call", "op": op, "args": args(a), "outputs": outputs.into_iter().enumerate().map(|(i, k)| json!([format!("o{i}"), k])).collect::<Vec<_>>(), "state": state});
-    let branch = |mode, children: Vec<Value>| json!({"k": "seq", "children": [{"k": "equal", "key": 2, "value": mode}, {"k": "parallel", "children": children}]});
-    let tree = json!({"k": "parallel", "children": [
-        {"k": "fallback", "children": [
-            branch(0, vec![action("follow", vec![node(3)], vec![3], 0), json!({"k": "publish", "node": 17, "key": 4}), json!({"k": "calls", "calls": (6..18).collect::<Vec<_>>()})]),
-            branch(1, vec![action("pulse", vec![key(0), value(0.04), value(0.10), value(0.2), value(0.8), value(0.025), value(7.0)], vec![3], 3), action("wander", vec![key(0), value(0.05), value(0.08), value(9.0), value(-0.4), value(0.4)], vec![4], 2)]),
-            branch(2, vec![action("hold", vec![key(0), value(0.0), value(0.6)], vec![3], 2), action("keyframes", vec![key(0), value(1.0), value(0.0), value(0.2), value(0.2), value(0.9)], vec![4], 3)]),
-            branch(3, vec![action("set", vec![value(-0.25)], vec![3], 0), action("above", vec![key(1), value(-1.0)], vec![], 0), json!({"k": "publish", "node": 17, "key": 4})])
-        ]}, {"k": "run"},
-        {"k": "call", "module": "silent-say", "op": "say", "args": [["text", {"key": 7}], ["voice", {"value": ""}]], "outputs": [["viseme", 8]]}
-    ]});
     let mut events: Vec<_> = (0..TICKS)
         .flat_map(|tick| {
             [
-                json!([tick, 1, ((tick / 7) % 11) as f64 / 10.0]),
-                json!([tick, 2, tick / 40]),
+                json!([tick, "input", ((tick / 7) % 11) as f64 / 10.0]),
+                json!([tick, "mode", tick / 40]),
             ]
         })
         .collect();
     events.extend([
-        json!([5, 7, "Hi."]),
-        json!([30, 7, "This sentence is interrupted."]),
-        json!([40, 7, "Done."]),
-        json!([80, 7, ""]),
-        json!([100, 7, "Hello."]),
+        json!([5, "speech/text", "Hi."]),
+        json!([30, "speech/text", "This sentence is interrupted."]),
+        json!([40, "speech/text", "Done."]),
+        json!([80, "speech/text", ""]),
+        json!([100, "speech/text", "Hello."]),
     ]);
-    json!({"name": "synthetic", "dt": 1.0 / 60.0, "ticks": TICKS, "warmUp": WARM_UP, "clock": 0,
-        "keys": [
-            {"name": "arora/time", "initial": 0.0}, {"name": "input", "initial": 0.0}, {"name": "mode", "initial": 0.0},
-            {"name": "target", "initial": 0.0}, {"name": "branch/output", "initial": 0.0},
-            {"name": "graph/damped", "initial": null}, {"name": "graph/mixed", "initial": null},
-            {"name": "speech/text", "initial": ""}, {"name": "speech/viseme", "initial": ""}
-        ], "calls": calls, "tree": tree, "events": events,
-        "phases": {"names": ["follow", "pulse", "hold", "set"], "runs": [[0, 0], [40, 1], [80, 2], [120, 3]]}})
+    json!({"dt":1.0/60.0,"ticks":TICKS,"warmUp":WARM_UP,"clock":"arora/time",
+        "keys":[{"name":"arora/time","initial":0.0},{"name":"input","initial":0.0},{"name":"mode","initial":0.0},
+            {"name":"target","initial":0.0},{"name":"branch/output","initial":0.0},
+            {"name":"graph/damped","initial":null},{"name":"graph/mixed","initial":null},
+            {"name":"speech/text","initial":""},{"name":"speech/viseme","initial":""}],
+        "text":text,"events":events,
+        "phases":{"names":["follow","pulse","hold","set"],"runs":[[0,0],[40,1],[80,2],[120,3]]}})
 }
-
 pub fn workload() -> Workload {
     Workload::parse(&json().to_string()).expect("valid synthetic workload")
 }
