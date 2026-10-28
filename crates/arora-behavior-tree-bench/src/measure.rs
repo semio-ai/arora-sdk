@@ -67,11 +67,14 @@ fn replay_once(
     let tree = form
         .lower(nodes, &resolver, &bridge.index(), &mut bridge)
         .unwrap();
+    // Every per-tick vector holds the whole replay before timing starts, so
+    // a replay-wide interval never includes a reallocation.
+    let ticks = workload.events.len();
     let mut result = Replay {
-        times: Vec::new(),
-        calls: Vec::new(),
-        dispatches: Vec::new(),
-        written: Vec::new(),
+        times: Vec::with_capacity(ticks),
+        calls: Vec::with_capacity(ticks),
+        dispatches: Vec::with_capacity(ticks),
+        written: Vec::with_capacity(if record { ticks } else { 0 }),
         repetitions: 1,
         replay_times: Vec::new(),
         timing_mode: mode,

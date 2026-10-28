@@ -190,3 +190,23 @@ fn timed_actions_progress_at_thirty_hz() {
         }
     }
 }
+
+#[test]
+fn a_tree_call_leaves_its_last_write_to_an_output() {
+    use arora_types::value::Value;
+    // Two keyframes due on the first tick write 1 then 0 to an output that
+    // already holds 0.
+    let raw = serde_json::json!({
+        "keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0}],
+        "calls":[],"ticks":1,"warmUp":0,"clock":0,"dt":1.0/30.0,"events":[],
+        "phases":{"names":["one"],"runs":[]},
+        "tree":{"k":"call","op":"keyframes","args":[["t",{"key":0}],["n",{"value":1.0}],["offset",{"value":0.0}],["v",{"value":1.0}],["offset",{"value":0.0}],["v",{"value":0.0}]],"outputs":[["v",1]],"state":3}
+    });
+    let workload = Workload::parse(&raw.to_string()).unwrap();
+    for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
+        assert_eq!(
+            row.runs[0].written[0],
+            measure::values_hash(&[Some(Value::F64(0.0))])
+        );
+    }
+}

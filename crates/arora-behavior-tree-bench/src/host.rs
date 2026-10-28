@@ -229,8 +229,12 @@ impl Bridge {
         let n = signature.arguments;
         let a = |i: usize| number(parameter(i)).unwrap_or(0.0);
         let mut mutated = Vec::new();
-        // A tree call's output or state changes only when its new value differs.
+        // A tree call's output or state changes only when its last write in
+        // the call differs from the value it was called with: a later write
+        // replaces an earlier one, so two keyframes due in one tick leave the
+        // second frame's value.
         let mut write = |id: Uuid, value: f64| {
+            mutated.retain(|field: &StructureField| field.id != id);
             let same = number(id).is_some_and(|x| x == value || (x.is_nan() && value.is_nan()));
             if !same {
                 mutated.push(StructureField {
