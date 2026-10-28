@@ -66,6 +66,18 @@ fn parser_rejects_invalid_dimensions_references_and_signatures() {
 }
 
 #[test]
+fn parser_rejects_tree_local_keys_and_shared_outputs() {
+    let error = |raw: serde_json::Value| Workload::parse(&raw.to_string()).err().unwrap();
+    let mut raw = synthetic::json();
+    raw["keys"][3]["name"] = ".target".into();
+    assert!(error(raw).contains("tree-local"));
+    let mut raw = synthetic::json();
+    raw["tree"] = serde_json::json!({"k": "call", "op": "set", "args": [["a", {"value": 1.0}], ["b", {"value": 0.0}]],
+        "outputs": [["o0", 3], ["o1", 3]], "state": 0});
+    assert!(error(raw).contains("at most one output"));
+}
+
+#[test]
 fn summary_excludes_warm_up_and_uses_tick_medians_then_linear_quantiles() {
     let mut workload = synthetic::workload();
     workload.warm_up = 1;

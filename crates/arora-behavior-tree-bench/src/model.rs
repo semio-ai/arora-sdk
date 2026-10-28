@@ -1,6 +1,9 @@
 //! Workload model. The crate README defines its JSON format.
 use crate::host::Op;
-use arora_behavior_tree::nodes::{FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, SEQ_FUNCTION_ID};
+use arora_behavior_tree::{
+    nodes::{FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, SEQ_FUNCTION_ID},
+    variable::is_tree_local,
+};
 use arora_types::value::Value;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -245,6 +248,11 @@ impl Parser {
                     .into_iter()
                     .map(|(_, k)| self.key(k))
                     .collect::<Result<Vec<_>, _>>()?;
+                // Two outputs bound to one key would leave whichever write the
+                // executor applies last, which no form defines.
+                if outputs.iter().collect::<HashSet<_>>().len() != outputs.len() {
+                    return Err("a tree call binds each key to at most one output".into());
+                }
                 self.written.extend(&outputs);
                 let site = self.sites;
                 self.sites += 1;
@@ -292,6 +300,10 @@ impl Workload {
         let unique: HashSet<_> = keys.iter().map(|(name, _)| name).collect();
         if unique.len() != keys.len() || keys.iter().any(|(name, _)| name.is_empty()) {
             return Err("key names must be nonempty and unique".into());
+        }
+        // A tree-local name never reaches the store the digests read.
+        if keys.iter().any(|(name, _)| is_tree_local(name)) {
+            return Err("key names must name store keys, not tree-local variables".into());
         }
         let calls = raw
             .calls
