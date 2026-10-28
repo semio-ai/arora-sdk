@@ -82,7 +82,7 @@ module manifests. See `docs/design_decisions.md`.
 
 Key build concepts:
 - `cargo build` (the default members) is the entry point; `--workspace` also
-  builds the opt-in NAO cross-compile, which needs its own toolchain
+  builds the members kept out of it (polly and the test guests)
 - Cross-compilation happens automatically via artifact dependencies
 - C++ modules use CMake, but invoked from Rust `build.rs`
 - Wasm guests, Rust and C++, are components built for `wasm32-wasip2` against
@@ -156,7 +156,7 @@ cargo test -- --nocapture
 ### Building Modules
 
 ```bash
-# Default members (everything but the opt-in NAO cross-compile)
+# Default members (everything but polly and the test guests)
 cargo build
 
 # Specific module

@@ -36,7 +36,6 @@ jobs:
       test-arora-msgs-ros2: ${{ steps.affected.outputs.test-arora-msgs-ros2 }}
       test-arora-hal-ros2: ${{ steps.affected.outputs.test-arora-hal-ros2 }}
       test-arora-hal-restful: ${{ steps.affected.outputs.test-arora-hal-restful }}
-      test-arora-hal-naoqi: ${{ steps.affected.outputs.test-arora-hal-naoqi }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -121,7 +120,7 @@ jobs:
       - name: Test the ROS 2 bridge on the Zenoh backend
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
 
-  # The robot runners (arora-ros2, arora-restful, arora-naoqi) build only
+  # The robot runners (arora-ros2, arora-restful) build only
   # with their crates' `runner` feature, and arora's Semio Studio connection
   # (which decides whether a runner contacts Studio) only with its
   # `studio-bridge` feature. The test and lint jobs leave both off, so they
@@ -129,14 +128,14 @@ jobs:
   # a change reaches one of their crates.
   runners:
     needs: select
-    if: needs.select.outputs.test-arora || needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful || needs.select.outputs.test-arora-hal-naoqi
+    if: needs.select.outputs.test-arora || needs.select.outputs.test-arora-hal-ros2 || needs.select.outputs.test-arora-hal-restful
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      # Line tables are enough for a failing test's backtrace, and keep three
+      # Line tables are enough for a failing test's backtrace, and keep the
       # linked runtimes within the runner's disk.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      RUNNERS: -p arora-hal-ros2 -p arora-hal-restful -p arora-hal-naoqi --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-naoqi/runner
+      RUNNERS: -p arora-hal-ros2 -p arora-hal-restful --features arora-hal-ros2/runner,arora-hal-restful/runner
     steps:
       - uses: actions/checkout@v6
 

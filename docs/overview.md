@@ -144,8 +144,8 @@ for other uses.
   - [`arora`](../crates/arora/readme.md): the opinionated runtime — the
     step loop (`Arora`), the `run` family, and the headless device runner;
   - [`arora-hal`](../crates/arora-hal): the `Hal` trait, the device boundary;
-  - [`arora-hal-naoqi`](../crates/arora-hal-naoqi/readme.md): NAO and Pepper
-    robots as devices, over NAOqi;
+  - [`arora-hal-naoqi`](https://github.com/semio-ai/arora-aldebaran/blob/main/crates/arora-hal-naoqi/readme.md): NAO and Pepper
+    robots as devices, over NAOqi (in arora-aldebaran);
   - [`arora-bridge`](../crates/arora-bridge): the `Bridge` trait, the remote
     boundary (Semio Studio via the studio-bridge connector);
   - [`arora-behavior`](../crates/arora-behavior): the `BehaviorInterpreter`
