@@ -20,4 +20,5 @@ speaks:
 
 This provider keeps a speaker's timing, counted in ticks (five a character), then logs the
 sentence ([`spoken`](src/lib.rs)) and succeeds. Other providers: `arora-hal-naoqi`'s
-`naoqi-say` (a NAO or Pepper's own voice), and Piper on board in `examples/policy-modules`.
+`naoqi-say` (a NAO or Pepper's own voice, in
+[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran)), and Piper on board in `examples/policy-modules`.

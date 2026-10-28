@@ -28,7 +28,6 @@ arora-sdk/
 │   ├── arora-hal              HAL seam + FakeHal
 │   ├── arora-hal-ros2         ROS 2 HAL
 │   ├── arora-hal-restful      RESTful HAL
-│   ├── arora-hal-naoqi        NAOqi HAL over libqi-vibe; arora-naoqi runner
 │   ├── arora-simple-data-store  trivial owned DataStore
 │   ├── arora-web              browser runtime: the AroraRuntime JS device
 │   │                          over arora + the JS engine surface
@@ -62,7 +61,7 @@ arora-sdk/
 ├── examples/
 │   ├── modules/cpp            example C++ module → a module directory
 │   └── policy-modules         control policies as modules (own workspace)
-├── .cargo/config.toml    unstable flags + i686-musl cross linker (NAO runner)
+├── .cargo/config.toml    unstable flags + wasm32 browser cfg
 ├── rust-toolchain.toml   pins nightly + wasm32-wasip2
 ├── Cargo.toml            workspace root
 └── .github/workflows/    CI
@@ -198,10 +197,10 @@ through guest wasm.
 
 A module is a binary (host cdylib, wasm32-wasip2 component, or cross-compiled
 ELF) plus a header, written at export from the module's declaration. The
-device runners (`arora`, and the robot runners `arora-ros2`, `arora-restful`
-and `arora-naoqi`) load modules from *module directories* — the header as
-`header.json` beside its artifact, and optionally the module's records in
-`records/` — under the device directory's `modules/` and from `--module`,
+device runners (`arora`, and the robot runners `arora-ros2`, `arora-restful`,
+and arora-aldebaran's `arora-naoqi`) load modules from *module directories* —
+the header as `header.json` beside its artifact, and optionally the module's
+records in `records/` — under the device directory's `modules/` and from `--module`,
 through `AroraBuilder::with_module_dirs` (see
 [`crates/arora/readme.md`](../crates/arora/readme.md)). A module's record,
 in the device's registry (`AroraBuilder::with_registry`), gives every export
@@ -364,6 +363,6 @@ Each Rust job restores a dependency cache that only `main` saves. Tests build
 tables only: they run optimised, and LTO over every test binary would otherwise
 dominate the build.
 
-The NAO cross-build of `arora-naoqi` is not exercised in CI; it depends on a
-Homebrew formula not available on the CI image. See
-[Deploy it on the robot](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).
+The NAOqi HAL and its `arora-naoqi` runner live in
+[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran), which runs
+their CI against the published Arora crates.

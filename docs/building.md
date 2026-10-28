@@ -21,8 +21,6 @@ C++ modules each carry their own `CMakeLists.txt` invoked from a
   also requests the `wasm32-wasip2` target.
 - A working C/C++ compiler for the host (Xcode CLT on macOS, gcc/clang on
   Linux).
-- For the NAO target (Mac, opt-in): `brew install messense/macos-cross-toolchains/i686-unknown-linux-musl`
-  and `rustup target add i686-unknown-linux-musl`.
 - The WASI SDK is downloaded automatically by `crates/wasi-sdk` into
   `target/wasi-sdk-33/` on first use; no manual install needed.
 
@@ -46,12 +44,10 @@ This produces:
   (`test-behavior-tree-nodes` is test-only now: the basic control nodes moved
   native into `arora-behavior-tree`.)
 
-The NAO HAL (`crates/arora-hal-naoqi`) is pure Rust and builds for the host
-with the workspace. Its `arora-naoqi` runner (feature `runner`) runs on the
-host against the robot over the network, with no cross-build; running it on the
-robot takes an opt-in cross-build to `i686-unknown-linux-musl`. See
-[Try it on a NAO](../crates/arora-hal-naoqi/readme.md#try-it-on-a-nao) and
-[Deploy it on the robot](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot).
+The NAO HAL (`arora-hal-naoqi`) and its `arora-naoqi` runner live in
+[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran). See
+[Try it on a NAO](https://github.com/semio-ai/arora-aldebaran#try-it-on-a-nao) and
+[Deploy it on the robot](https://github.com/semio-ai/arora-aldebaran#deploy-it-on-the-robot).
 
 ### Testing
 
@@ -231,14 +227,6 @@ What the integration test crate actually declares as artifact dependencies
 
 ### Build flags & options
 
-- `cargo run --release -p arora-hal-naoqi --features runner --bin arora-naoqi --
-  tcp://<nao-ip>:9559` — builds the NAO runner for the host and drives the robot
-  over the network.
-- `cargo build --release -p arora-hal-naoqi --features runner --bin arora-naoqi
-  --target i686-unknown-linux-musl` — cross-builds the NAO runner (opt-in;
-  needs the i686-unknown-linux-musl toolchain and the `CC_`/`CXX_`/`AR_`
-  variables given in the
-  [HAL readme](../crates/arora-hal-naoqi/readme.md#deploy-it-on-the-robot)).
 - `cargo build --release` for an optimized build; the release profile
   pins `lto = "thin"` and `debug = 1`.
 

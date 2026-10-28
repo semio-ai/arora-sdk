@@ -48,8 +48,9 @@ At start the device loads every module in its device directory's `modules/`
 (the layout is [below](#where-a-device-keeps-its-data)), then each `--module`
 directory. A module that cannot be loaded fails the start, naming it. The
 robot runners — `arora-ros2` ([`arora-hal-ros2`](../arora-hal-ros2)),
-`arora-restful` ([`arora-hal-restful`](../arora-hal-restful)) and
-`arora-naoqi` ([`arora-hal-naoqi`](../arora-hal-naoqi)) — load their modules
+`arora-restful` ([`arora-hal-restful`](../arora-hal-restful)), and
+`arora-naoqi` ([`arora-hal-naoqi`](https://github.com/semio-ai/arora-aldebaran/tree/main/crates/arora-hal-naoqi),
+in arora-aldebaran) — load their modules
 the same way, and take `--module <dir>` too.
 
 ## Use it as a library

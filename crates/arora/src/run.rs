@@ -133,8 +133,8 @@ const MODULE_HELP: &str = "A module directory to load besides the device directo
 ///   field). Hand their `StudioArgs::choice` to `AroraBuilder::with_studio`.
 ///
 /// The robot runners of `arora-hal-ros2`, `arora-hal-restful` and
-/// `arora-hal-naoqi` take it; the `arora` binary's [`DeviceCli`] takes the
-/// same options.
+/// `arora-hal-naoqi` (in arora-aldebaran) take it; the `arora` binary's
+/// [`DeviceCli`] takes the same options.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Args)]
 pub struct RunnerArgs {
