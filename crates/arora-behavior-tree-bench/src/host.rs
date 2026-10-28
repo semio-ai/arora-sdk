@@ -1,7 +1,9 @@
 //! Host functions and call accounting for every harness.
+use crate::modules::MODULES;
 use arora_behavior::{status::Status, FunctionIndex, ModuleFunction};
 use arora_types::{
     call::{Call, CallBridge, CallError, CallResult, Callable, CallableId},
+    module::declared::AroraFunction,
     record::{
         module::frozen::{Function, Parameter},
         ty::{FrozenTy, PrimitiveKind},
@@ -169,6 +171,7 @@ impl Arguments for &[(Uuid, &Value)] {
 
 #[derive(Default)]
 pub struct Bridge {
+    real: HashMap<(Uuid, Uuid), AroraFunction>,
     registered: HashMap<u64, Rc<dyn Callable>>,
     next: u64,
     // Restart after a missed tick; Arora has no halt callback.
@@ -181,6 +184,10 @@ impl Bridge {
     pub fn new(functions: HashMap<Uuid, Signature>, dt: f64) -> Self {
         Self {
             functions,
+            real: MODULES
+                .iter()
+                .flat_map(|m| (m.exports)().into_iter().map(|f| ((m.id, f.id), f)))
+                .collect(),
             gap: 1.5 * dt,
             ..Self::default()
         }
@@ -208,6 +215,17 @@ impl Bridge {
                 };
                 (*id, function)
             })
+            .chain(self.real.iter().map(|((module_id, id), f)| {
+                (
+                    *id,
+                    ModuleFunction {
+                        module_id: *module_id,
+                        function_id: *id,
+                        function_name: f.name.into(),
+                        function: f.signature.clone(),
+                    },
+                )
+            }))
             .collect()
     }
     fn answer(
@@ -395,6 +413,17 @@ impl Bridge {
 }
 impl CallBridge for Bridge {
     fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
+        if call
+            .module_id
+            .is_some_and(|id| MODULES.iter().any(|m| m.id == id))
+        {
+            let function = self
+                .real
+                .get_mut(&(call.module_id.unwrap(), call.id))
+                .ok_or(CallError::FunctionNotFound { id: call.id })?;
+            self.module_calls += 1;
+            return (function.invoke)(call);
+        }
         self.answer(call.module_id, call.id, call.args)
     }
     fn arora_call_borrowed(
@@ -403,6 +432,19 @@ impl CallBridge for Bridge {
         id: Uuid,
         args: &[(Uuid, &Value)],
     ) -> Result<CallResult, CallError> {
+        if module_id.is_some_and(|id| MODULES.iter().any(|m| m.id == id)) {
+            return self.arora_call(Call {
+                module_id,
+                id,
+                args: args
+                    .iter()
+                    .map(|(id, value)| StructureField {
+                        id: *id,
+                        value: Box::new((*value).clone()),
+                    })
+                    .collect(),
+            });
+        }
         self.answer(module_id, id, args)
     }
     fn arora_register_callable(&mut self, callable: Rc<dyn Callable>) -> CallableId {

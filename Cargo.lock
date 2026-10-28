@@ -270,6 +270,7 @@ dependencies = [
  "arora-behavior-tree",
  "arora-simple-data-store",
  "arora-types",
+ "say-silent",
  "serde",
  "serde_json",
  "uuid",

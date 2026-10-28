@@ -22,6 +22,7 @@ harness = false
 bench-check = []
 
 [dependencies]
+say-silent = { path = "../../modules/say-silent" }
 arora-behavior = { path = "../arora-behavior" }
 arora-behavior-tree = { path = "../arora-behavior-tree" }
 arora-simple-data-store = { path = "../arora-simple-data-store" }

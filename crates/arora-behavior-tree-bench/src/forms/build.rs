@@ -118,6 +118,18 @@ pub fn build(workload: &Workload, detached: bool) -> (Vec<Node>, HashMap<Uuid, S
                     .collect();
                 vec![tree.push(site_id(*site), arguments, None)]
             }
+            Tree::RealCall(function, arguments, outputs) => {
+                let arguments = arguments
+                    .iter()
+                    .map(|(id, a)| (*id, source(a)))
+                    .chain(
+                        outputs
+                            .iter()
+                            .map(|(id, k)| (*id, Expression::VariableId(key_variable(*k)))),
+                    )
+                    .collect();
+                vec![tree.push(*function, arguments, None)]
+            }
             Tree::Publish(c, k) => {
                 let key = Expression::VariableId(key_variable(*k));
                 let arguments = [(VALUE, source(&Source::Call(*c))), (_RET_PARAM_ID, key)];

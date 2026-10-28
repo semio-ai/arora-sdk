@@ -39,9 +39,10 @@ pub fn json() -> Value {
             branch(1, vec![action("pulse", vec![key(0), value(0.04), value(0.10), value(0.2), value(0.8), value(0.025), value(7.0)], vec![3], 3), action("wander", vec![key(0), value(0.05), value(0.08), value(9.0), value(-0.4), value(0.4)], vec![4], 2)]),
             branch(2, vec![action("hold", vec![key(0), value(0.0), value(0.6)], vec![3], 2), action("keyframes", vec![key(0), value(1.0), value(0.0), value(0.2), value(0.2), value(0.9)], vec![4], 3)]),
             branch(3, vec![action("set", vec![value(-0.25)], vec![3], 0), action("above", vec![key(1), value(-1.0)], vec![], 0), json!({"k": "publish", "node": 17, "key": 4})])
-        ]}, {"k": "run"}
+        ]}, {"k": "run"},
+        {"k": "call", "module": "silent-say", "op": "say", "args": [["text", {"key": 7}], ["voice", {"value": ""}]], "outputs": [["viseme", 8]]}
     ]});
-    let events: Vec<_> = (0..TICKS)
+    let mut events: Vec<_> = (0..TICKS)
         .flat_map(|tick| {
             [
                 json!([tick, 1, ((tick / 7) % 11) as f64 / 10.0]),
@@ -49,11 +50,19 @@ pub fn json() -> Value {
             ]
         })
         .collect();
+    events.extend([
+        json!([5, 7, "Hi."]),
+        json!([30, 7, "This sentence is interrupted."]),
+        json!([40, 7, "Done."]),
+        json!([80, 7, ""]),
+        json!([100, 7, "Hello."]),
+    ]);
     json!({"name": "synthetic", "dt": 1.0 / 60.0, "ticks": TICKS, "warmUp": WARM_UP, "clock": 0,
         "keys": [
             {"name": "arora/time", "initial": 0.0}, {"name": "input", "initial": 0.0}, {"name": "mode", "initial": 0.0},
             {"name": "target", "initial": 0.0}, {"name": "branch/output", "initial": 0.0},
-            {"name": "graph/damped", "initial": null}, {"name": "graph/mixed", "initial": null}
+            {"name": "graph/damped", "initial": null}, {"name": "graph/mixed", "initial": null},
+            {"name": "speech/text", "initial": ""}, {"name": "speech/viseme", "initial": ""}
         ], "calls": calls, "tree": tree, "events": events,
         "phases": {"names": ["follow", "pulse", "hold", "set"], "runs": [[0, 0], [40, 1], [80, 2], [120, 3]]}})
 }

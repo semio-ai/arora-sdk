@@ -1,9 +1,10 @@
 //! Workload model. The crate README defines its JSON format.
-use crate::host::Op;
+use crate::{host::Op, modules::MODULES};
 use arora_behavior_tree::{
     nodes::{FALLBACK_FUNCTION_ID, PARALLEL_FUNCTION_ID, SEQ_FUNCTION_ID},
     variable::is_tree_local,
 };
+use arora_types::record::ty::PrimitiveKind;
 use arora_types::value::Value;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -30,6 +31,8 @@ pub enum Tree {
     /// A module call returning a status: its call site, arguments, output
     /// keys and number of state parameters.
     Call(usize, Op, Vec<Source>, Vec<usize>, usize),
+    /// A real function with bindings keyed by its declared parameter ids.
+    RealCall(Uuid, Vec<(Uuid, Source)>, Vec<(Uuid, usize)>),
     Publish(usize, usize),
     Calls(Vec<usize>),
     Run,
@@ -67,12 +70,14 @@ pub struct Workload {
 enum Scalar {
     Number(f64),
     Boolean(bool),
+    String(String),
 }
 impl Scalar {
     fn value(self) -> Value {
         match self {
             Self::Number(x) => Value::F64(x),
             Self::Boolean(x) => Value::Boolean(x),
+            Self::String(x) => Value::String(x),
         }
     }
 }
@@ -100,6 +105,7 @@ struct RawKey {
 }
 #[derive(serde::Deserialize)]
 struct RawCall {
+    module: Option<String>,
     op: String,
     args: Vec<(String, RawSource)>,
     publishes: Option<usize>,
@@ -121,10 +127,12 @@ enum RawTree {
         value: Scalar,
     },
     Call {
+        module: Option<String>,
         op: String,
         args: Vec<(String, RawSource)>,
         outputs: Vec<(String, usize)>,
-        state: usize,
+        #[serde(default, deserialize_with = "present_state")]
+        state: Option<usize>,
     },
     Publish {
         node: usize,
@@ -134,6 +142,9 @@ enum RawTree {
         calls: Vec<usize>,
     },
     Run,
+}
+fn present_state<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<usize>, D::Error> {
+    <usize as serde::Deserialize>::deserialize(d).map(Some)
 }
 #[derive(serde::Deserialize)]
 struct RawPhases {
@@ -189,6 +200,16 @@ fn operation(
     Ok(Op::parse(name))
 }
 
+/// Two outputs of one tree call bound to one key would leave whichever write
+/// the executor applies last, which no form defines.
+fn distinct_outputs(keys: &[usize]) -> Result<(), String> {
+    if keys.iter().collect::<HashSet<_>>().len() == keys.len() {
+        Ok(())
+    } else {
+        Err("a tree call binds each key to at most one output".into())
+    }
+}
+
 struct Parser {
     marked: HashSet<usize>,
     published: HashMap<usize, usize>,
@@ -234,11 +255,19 @@ impl Parser {
             )),
             RawTree::Equal { key, value } => Ok(Tree::Equal(self.key(key)?, value.value())),
             RawTree::Call {
+                module,
                 op,
                 args,
                 outputs,
                 state,
             } => {
+                if let Some(module) = module {
+                    if state.is_some() {
+                        return Err("a real call has no state field".into());
+                    }
+                    return self.real_call(&module, &op, args, outputs);
+                }
+                let state = state.ok_or("a host call requires state")?;
                 let op = operation(&op, args.len(), outputs.len(), state, true)?;
                 let args = args
                     .into_iter()
@@ -248,11 +277,7 @@ impl Parser {
                     .into_iter()
                     .map(|(_, k)| self.key(k))
                     .collect::<Result<Vec<_>, _>>()?;
-                // Two outputs bound to one key would leave whichever write the
-                // executor applies last, which no form defines.
-                if outputs.iter().collect::<HashSet<_>>().len() != outputs.len() {
-                    return Err("a tree call binds each key to at most one output".into());
-                }
+                distinct_outputs(&outputs)?;
                 self.written.extend(&outputs);
                 let site = self.sites;
                 self.sites += 1;
@@ -274,6 +299,77 @@ impl Parser {
             }
             RawTree::Run => Ok(Tree::Run),
         }
+    }
+    fn real_call(
+        &mut self,
+        module: &str,
+        name: &str,
+        args: Vec<(String, RawSource)>,
+        outputs: Vec<(String, usize)>,
+    ) -> Result<Tree, String> {
+        let module = MODULES
+            .iter()
+            .find(|m| m.name == module)
+            .ok_or_else(|| format!("unknown module: {module}"))?;
+        let function = (module.exports)()
+            .into_iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| format!("unknown function: {}::{name}", module.name))?;
+        let mut bound = HashSet::new();
+        let mut parameter = |name: &str, output: bool| {
+            let (id, p) = function
+                .signature
+                .parameters
+                .iter()
+                .find(|(_, p)| p.name == name)
+                .ok_or_else(|| format!("unknown parameter: {name}"))?;
+            if !bound.insert(*id) {
+                return Err(format!("parameter bound twice: {name}"));
+            }
+            if p.mutable != output {
+                return Err(format!(
+                    "{} parameter {name} must be bound as {}",
+                    if p.mutable { "mutable" } else { "immutable" },
+                    if p.mutable {
+                        "an output"
+                    } else {
+                        "an argument"
+                    }
+                ));
+            }
+            Ok((*id, p))
+        };
+        let args = args
+            .into_iter()
+            .map(|(name, source)| {
+                let (id, p) = parameter(&name, false)?;
+                let source = source.resolve(self.keys, self.calls)?;
+                if let (Source::Value(value), Some(primitive)) = (&source, p.ty.as_primitive()) {
+                    if PrimitiveKind::from_id(&value.type_uuid()) != Some(primitive.kind) {
+                        return Err(format!(
+                            "literal kind does not match parameter {name}: expected {}",
+                            primitive.kind
+                        ));
+                    }
+                }
+                Ok((id, source))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let outputs = outputs
+            .into_iter()
+            .map(|(name, key)| {
+                let (id, _) = parameter(&name, true)?;
+                Ok((id, self.key(key)?))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        for (id, p) in &function.signature.parameters {
+            if !bound.contains(id) {
+                return Err(format!("parameter not bound: {}", p.name));
+            }
+        }
+        distinct_outputs(&outputs.iter().map(|(_, k)| *k).collect::<Vec<_>>())?;
+        self.written.extend(outputs.iter().map(|(_, k)| k));
+        Ok(Tree::RealCall(function.id, args, outputs))
     }
     fn children(&mut self, children: Vec<RawTree>) -> Result<Vec<Tree>, String> {
         children.into_iter().map(|node| self.node(node)).collect()
@@ -310,6 +406,9 @@ impl Workload {
             .into_iter()
             .enumerate()
             .map(|(c, call)| {
+                if call.module.is_some() {
+                    return Err("real functions are tree calls only".into());
+                }
                 let op = operation(&call.op, call.args.len(), 0, 0, false)?;
                 let arguments = call
                     .args

@@ -11,7 +11,7 @@ impl Form for AttachedNaive {
     }
     fn fixture_counts(&self) -> [(u64, u64); 7] {
         [
-            (3240, 4840),
+            (3400, 5000),
             (1600, 1920),
             (1600, 1920),
             (1600, 1920),

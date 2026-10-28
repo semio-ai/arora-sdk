@@ -44,6 +44,7 @@ fn replay_once(
     clock: &dyn Clock,
     mode: TimingMode,
 ) -> Replay {
+    let _device = crate::modules::fresh_device();
     let store = SimpleDataStore::new();
     let slots: Vec<_> = workload
         .keys
@@ -272,6 +273,7 @@ pub fn replay_adaptive(
         clock,
         mode,
     );
+    assert_counts(&pilot, &result);
     if record && mode == TimingMode::Replay {
         struct Untimed;
         impl Clock for Untimed {
@@ -406,8 +408,13 @@ pub fn values_hash(values: &[Option<Value>]) -> String {
                 .to_le_bytes());
             }
             Some(Value::Boolean(b)) => eat(&[2, u8::from(*b)]),
-            Some(other) => {
+            Some(Value::String(s)) => {
                 eat(&[3]);
+                eat(&(s.len() as u64).to_le_bytes());
+                eat(s.as_bytes());
+            }
+            Some(other) => {
+                eat(&[4]);
                 eat(format!("{other:?}").as_bytes());
             }
         }

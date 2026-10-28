@@ -7,6 +7,7 @@ pub mod forms;
 pub mod host;
 pub mod measure;
 pub mod model;
+pub mod modules;
 pub mod scale;
 pub mod synthetic;
 

@@ -11,7 +11,7 @@ impl Form for Detached {
     }
     fn fixture_counts(&self) -> [(u64, u64); 7] {
         [
-            (1846, 1800),
+            (2006, 1960),
             (10, 160),
             (525, 160),
             (1040, 160),
