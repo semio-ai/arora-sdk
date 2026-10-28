@@ -91,7 +91,7 @@ In short:
 | `arora-registry-remote` 1.0 | arora-sdk | `RemoteRegistry` reads records from semio-db through `semio-client`; `RemoteCachedRegistry` puts a `LocalRegistry` in front of it as a cache. Reads the semio-cli login file. | `arora-cli`, `arora-module-cli` | Merged, private; over semio-db |
 | semio-record | semio-record | A record vocabulary over `arora-types`' references and freezing: record kinds — users, organizations, folders, modules, structures, enumerations, animations, scenes — with private, public, unfrozen and frozen facets, the actions that build them, and access control lists. | semio-db and its clients; a newer store client | Maintained, reused |
 | semio-db, semio-client, semio-store-rpc | separate repos | GraphQL record store on ScyllaDB: records by id and version, semver tags with a `yanked` flag, a folder tree rooted at its user and organization records, path-to-id names; a WebSocket blob store; their client. | semio-cli, `arora-registry-remote` | Deprecated |
-| semio-cli | semio-cli | `semio`: resolves, fetches, shows and publishes Studio's assets through the Studio source; signs in by a code a person approves and enrolls devices ([semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11)). Its record commands over semio-db remain. | Developers | Maintained; ships `arora-semio`, Studio's provider, and keeps only `semio db …` (3.11) |
+| semio-cli | semio-cli | `semio`: resolves, fetches, shows and publishes Studio's assets through the Studio source; signs in by a code a person approves and enrolls devices ([semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11)). Its record commands over semio-db remain. | Developers | Maintained; ships `arora-semio`, Studio's provider, and keeps `semio auth`, `semio device` and `semio db …` (3.11) |
 | `arora-cli` 0.1 | arora-sdk, `crates/arora-cli` | Loads modules from headers and executables, calls a function a YAML file describes, repeats and times it; fills its registry from record directories or from semio-db through `arora-registry-remote`. The integration tests drive it. | Developers, the integration tests | Merged, unpublished; becomes `arora call` (3.11) |
 | `arora-index` | arora-sdk, `crates/arora-index` | Resolves an asset `{scopedName, range}` to a release with Studio's selection rules, through an object-safe `Source` trait; verifies each artifact by SHA-256 before use; content-addressed cache with sealed private blobs and `resolved.json`; `resolve_with_fallback`; `DirSource`, a local directory; `build::models_with(source)`. Its pins hold no package id, and `fetch` finds a release only under the pin's exact name. | Nothing yet | Drafted in [#360](https://github.com/semio-ai/arora-sdk/pull/360), closed unmerged; the starting point of stage 3 |
 | Studio source | studio-bridge, `index-source` (to ship as `semio-studio-assets`) | `StudioSource` implements `arora-index`'s `Source` over Firestore and Storage REST: follows a name's claim or alias to its package and lists its releases, fetches artifacts, plans and makes Studio's publish writes. | semio-cli | Drafted in [studio-bridge#109](https://github.com/semio-ai/studio-bridge/pull/109), closed unmerged; the starting point of `semio-studio-assets` |
@@ -997,8 +997,17 @@ unknown verb is an error.
   through `semio-studio-assets`. Semio's runner build (`--studio`) still
   enrolls itself at start
   ([#423](https://github.com/semio-ai/arora-sdk/pull/423)).
+- **`semio` signs in and enrolls on its own.** `semio auth login`,
+  `status` and `logout`, and `semio device enroll`, `list` and `revoke`
+  ([semio-cli#11](https://github.com/semio-ai/semio-cli/pull/11)), work with
+  no `arora` installed, so Studio's sign-in and enrollment never depend on
+  what `arora` offers. They use the same `semio-studio-session` as
+  `arora-semio`'s roles: `semio auth login` and `arora auth login semio`
+  share one session, `semio device enroll` and `arora device enroll semio`
+  save the same credential, and either sign-in writes the `semio` registry
+  entry, the opt-in act.
 - **A verb with no general meaning under `arora` is a `semio` verb**, in
-  semio-cli's `semio` command, never `arora semio …`. Today that is only the
+  semio-cli's `semio` command, never `arora semio …`. Today that is the
   deprecated semio-db commands, `semio db …`, which retire with semio-db.
 
 **The help lists what is built or decided.** Verbs for the workflows still
@@ -1377,7 +1386,9 @@ maps to. `arora`'s verbs are arora's, and a provider program fills roles
 behind them, as git remote helpers, docker credential helpers and Cargo's
 credential providers do. So `arora`'s surface, its help and what a script may
 call, is the same on every machine, and Arora ships nothing that reaches
-Semio until a user installs `arora-semio` and names it.
+Semio until a user installs `arora-semio` and names it. Studio's sign-in and
+enrollment are also `semio`'s own commands, on the same session, so a person
+or a robot can sign in and enroll with Studio whatever `arora` offers.
 
 ### Alternatives considered
 
@@ -1386,9 +1397,11 @@ Semio until a user installs `arora-semio` and names it.
   would then depend on what is installed, and a provider's verbs would
   shadow or pre-empt verbs `arora` defines later. A verb with no general
   meaning under `arora` is a verb of the provider's own command, `semio …`.
-- **A separate `semio` command for Studio's sign-in, devices and packages.**
-  It duplicates `arora`'s verbs with Studio's name in front, and gives a
-  person two tools for one task depending on where a package is published.
+- **A separate `semio` command for Studio's packages.** It duplicates
+  `arora`'s package verbs with Studio's name in front, and gives a person two
+  tools for one task depending on where a package is published. Sign-in and
+  enrollment are the exception: `semio` keeps them, so they work without
+  `arora`.
 - **A project tool under a name of its own** (`arora-cli`, a short coined
   name). `arora-cli` already names the 2022 module runner, whose work is
   running modules, `arora`'s; a coined name has to be learnt and explained,
