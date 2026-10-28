@@ -254,8 +254,9 @@ binds ids in folder registries and writes the alias a move leaves.
 
 Publishing from CI, with its configuration and a publish token, needs no
 Studio project. Studio's database already allows it: a package's
-`sourceProjectId` is optional provenance in its schema and types
-(`docs/new-studio-sharing-tech/03-firestore-schema.md`, `01-types.md`), and
+`sourceProjectId` is optional provenance on the package
+(`docs/new-studio-sharing-tech/01-types.md`) and on its name claim
+(`03-firestore-schema.md`), and
 Studio's server code handles a package without one. Only the client create
 rule, `isPublishBoundToSource`, requires a project, and client creates close
 when the endpoint opens. The token carries the authority, and the endpoint
