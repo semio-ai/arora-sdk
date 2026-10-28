@@ -1,5 +1,5 @@
 use arora_behavior_tree_bench::{
-    clock::{Clock, Monotonic},
+    clock::Monotonic,
     forms::{self, FORMS},
     measure,
     model::Workload,
@@ -79,6 +79,10 @@ fn summary_excludes_warm_up_and_uses_tick_medians_then_linear_quantiles() {
         written: Vec::new(),
         repetitions: 1,
         replay_times: Vec::new(),
+        timing_mode: measure::TimingMode::Tick,
+        replay_us: Vec::new(),
+        mean_us: 0.0,
+        step_us: 0.0,
     };
     let runs = vec![
         replay(vec![100.0, 1.0, 2.0, 3.0]),
@@ -87,33 +91,102 @@ fn summary_excludes_warm_up_and_uses_tick_medians_then_linear_quantiles() {
     ];
     let s = measure::summarize(&workload, &runs);
     assert_eq!(s.mean, 10.0 / 3.0);
-    assert_eq!(s.p50, 3.0);
-    assert!((s.p95 - 4.8).abs() < 1e-12);
+    assert_eq!(s.p50, Some(3.0));
+    assert!((s.p95.unwrap() - 4.8).abs() < 1e-12);
     assert_eq!(s.calls, 2.0);
     assert_eq!(s.dispatches, 5.0);
-    assert_eq!(s.phases, vec![3.0, 3.5]);
+    assert_eq!(s.phases, vec![Some(3.0), Some(3.5)]);
+}
+
+// The store must win over the host's last write when another writer intervenes.
+fn write_fixture(sink: bool) -> Workload {
+    let tree = if sink {
+        serde_json::json!({"k":"run"})
+    } else {
+        serde_json::json!({"k":"fallback", "children":[
+            {"k":"seq", "children":[{"k":"equal", "key":2, "value":true},
+                {"k":"call", "op":"set", "args":[["v", {"value":2.0}]], "outputs":[["v",1]], "state":0}]},
+            {"k":"run"}]})
+    };
+    Workload::parse(&serde_json::json!({
+        "keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0},{"name":"gate","initial":true},{"name":"observed","initial":0.0}],
+        "calls": if sink { serde_json::json!([{"op":"first", "args":[["x",{"key":1}]], "publishes":3},{"op":"first", "args":[["x",{"value":2.0}]], "publishes":1}]) } else { serde_json::json!([]) },
+        "tree":tree, "ticks":3,"warmUp":0,"clock":0,"dt":1.0/60.0,
+        "events":[[0,1,1.0],[1,2,false],[2,1,1.0]],
+        "phases":{"names":["one"],"runs":[]}
+    }).to_string()).unwrap()
 }
 
 #[test]
-fn clock_budget_lengthens_samples_without_changing_counts_or_digests() {
-    use std::cell::Cell;
-    struct TestClock(Cell<f64>);
-    impl Clock for TestClock {
-        fn now(&self) -> f64 {
-            let n = self.0.get();
-            self.0.set(n + 1.0);
-            n
+fn host_reapplies_events_after_tree_writes() {
+    assert_host_write(false);
+}
+#[test]
+fn host_reapplies_events_after_sink_writes() {
+    assert_host_write(true);
+}
+fn assert_host_write(sink: bool) {
+    use arora_types::value::Value;
+    let workload = write_fixture(sink);
+    for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
+        let expected: Vec<_> = (if sink {
+            vec![vec![2.0, 1.0], vec![2.0, 2.0], vec![2.0, 1.0]]
+        } else {
+            vec![vec![2.0], vec![2.0], vec![1.0]]
+        })
+        .into_iter()
+        .map(|values| {
+            measure::values_hash(
+                &values
+                    .into_iter()
+                    .map(|x| Some(Value::F64(x)))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+        assert_eq!(row.runs[0].written, expected, "{}", row.form);
+    }
+}
+
+#[test]
+fn tree_written_values_change_the_digest() {
+    let mut workload = write_fixture(false);
+    let first = measure::replay(&workload, FORMS[0], true, &Monotonic::default());
+    if let arora_behavior_tree_bench::model::Tree::Composite(_, children) = &mut workload.tree {
+        if let arora_behavior_tree_bench::model::Tree::Composite(_, seq) = &mut children[0] {
+            if let arora_behavior_tree_bench::model::Tree::Call(_, _, args, _, _) = &mut seq[1] {
+                args[0] = arora_behavior_tree_bench::model::Source::Value(
+                    arora_types::value::Value::F64(3.0),
+                );
+            }
         }
     }
-    let clock = TestClock(Cell::new(0.0));
-    let workload = synthetic::workload();
-    let run = measure::replay_adaptive(&workload, FORMS[0], true, &clock, 400.0);
-    assert_eq!(run.repetitions, 3);
-    assert_eq!(run.times, vec![1.0; synthetic::TICKS]);
-    assert_eq!(
-        run.calls.iter().sum::<u64>(),
-        FORMS[0].fixture_counts()[0].0
-    );
-    assert_eq!(run.written.len(), synthetic::TICKS);
-    assert_eq!(run.replay_times.len(), 3);
+    let second = measure::replay(&workload, FORMS[0], true, &Monotonic::default());
+    assert_ne!(first.written[0], second.written[0]);
+}
+
+#[test]
+fn timed_actions_progress_at_thirty_hz() {
+    use arora_types::value::Value;
+    let mut raw = serde_json::json!({
+        "keys":[{"name":"clock","initial":0.0},{"name":"out","initial":0.0}],
+        "calls":[],"ticks":5,"warmUp":0,"clock":0,"dt":1.0/30.0,"events":[],
+        "phases":{"names":["one"],"runs":[]},
+        "tree":{"k":"seq","children":[
+            {"k":"call","op":"hold","args":[["t",{"key":0}],["duration",{"value":0.05}]],"outputs":[],"state":2},
+            {"k":"call","op":"set","args":[["v",{"value":2.0}]],"outputs":[["v",1]],"state":0}]}
+    });
+    for keyframes in [false, true] {
+        if keyframes {
+            raw["tree"] = serde_json::json!({"k":"call","op":"keyframes","args":[["t",{"key":0}],["n",{"value":1.0}],["offset",{"value":0.0}],["v",{"value":1.0}],["offset",{"value":0.05}],["v",{"value":2.0}]],"outputs":[["v",1]],"state":3});
+        }
+        let workload = Workload::parse(&raw.to_string()).unwrap();
+        for row in measure::measure(&workload, FORMS, 1, &Monotonic::default()).unwrap() {
+            assert_eq!(
+                row.runs[0].written[2],
+                measure::values_hash(&[Some(Value::F64(2.0))])
+            );
+            assert_eq!(row.differing, 0);
+        }
+    }
 }

@@ -16,11 +16,13 @@ def geomean(values):
     return math.exp(statistics.fmean(math.log(x) for x in values))
 
 
-def load(directory, baseline, chosen=None):
+def load(directory, baseline, chosen=None, allow_odd_rounds=False):
     manifest = json.loads((directory / 'manifest.json').read_text())
     builds, rounds = list(manifest['builds']), manifest['rounds']
-    if baseline not in builds or not isinstance(rounds, int) or rounds < 1:
+    if baseline not in builds or not isinstance(rounds, int) or rounds < 4:
         raise ValueError('invalid baseline or rounds')
+    if rounds % 2 and not allow_odd_rounds:
+        raise ValueError('odd round count requires --allow-odd-rounds')
     forms = chosen or manifest.get('forms')
     values, digests, platform, layout = {}, {}, None, None
     cells_checked = 0
@@ -70,12 +72,23 @@ def load(directory, baseline, chosen=None):
                     digests[key] = written
                     # Agreement is checked before any times are consumed.
                     replays = entry['times']
-                    if not replays or len(replays) % 2 != 1 or any(len(x) != ticks for x in replays):
+                    modes = entry.get('timingMode', ['tick'] * len(replays))
+                    samples = entry.get('sampleMeans')
+                    if not replays or len(replays) % 2 != 1 or len(modes) != len(replays) or any(
+                        mode not in ('tick', 'replay') or len(times) != (ticks if mode == 'tick' else 0)
+                        for mode, times in zip(modes, replays)
+                    ) or (samples is not None and len(samples) != len(replays)):
                         raise ValueError(f'{name}/{form}: incomplete timing sample')
                     measured = [x for replay in replays for x in replay[warm:]]
-                    if any(not isinstance(x, (float, int)) or not math.isfinite(x) or x < 0 for x in measured) or statistics.fmean(measured) <= 0:
+                    if samples is not None:
+                        measured += samples
+                    if any(not isinstance(x, (float, int)) or not math.isfinite(x) or x < 0 for x in measured) or not measured or statistics.fmean(measured) <= 0:
                         raise ValueError(f'{name}/{form}: invalid time')
-                    values.setdefault((name, build, form), []).append(statistics.fmean(measured))
+                    if samples is None:
+                        if 'replay' in modes:
+                            raise ValueError(f'{name}/{form}: missing replay means')
+                        samples = [statistics.fmean(replay[warm:]) for replay in replays]
+                    values.setdefault((name, build, form), []).append(statistics.fmean(samples))
                     cells_checked += 1
             if layout is None:
                 layout = dimensions
@@ -84,8 +97,8 @@ def load(directory, baseline, chosen=None):
     return builds, rounds, forms, values, layout, platform, cells_checked
 
 
-def compare(directory, baseline, forms=None):
-    builds, rounds, forms, values, layout, platform, checked = load(directory, baseline, forms)
+def compare(directory, baseline, forms=None, allow_odd_rounds=False):
+    builds, rounds, forms, values, layout, platform, checked = load(directory, baseline, forms, allow_odd_rounds)
     groups = {}
     kinds = {}
     for name, (kind, *_rest) in layout.items():
@@ -144,10 +157,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     parser.add_argument('--baseline', required=True)
+    parser.add_argument('--allow-odd-rounds', action='store_true', help='allow unbalanced process order with at least four rounds')
     parser.add_argument('--forms', help='comma-separated registered form names')
     args = parser.parse_args()
     try:
-        result, table = compare(args.directory, args.baseline, args.forms.split(',') if args.forms else None)
+        result, table = compare(args.directory, args.baseline, args.forms.split(',') if args.forms else None, args.allow_odd_rounds)
     except (ValueError, KeyError, OSError, TypeError, ZeroDivisionError) as error:
         sys.exit(f'invalid benchmark run: {error}')
     (args.directory / 'compare.json').write_text(json.dumps(result, indent=2) + '\n')

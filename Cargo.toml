@@ -94,6 +94,12 @@ default-members = [
 lto = "thin"
 debug = 1
 
+# Small distributable benchmark module; other release builds retain debug info.
+[profile.bench-wasm]
+inherits = "release"
+debug = 0
+strip = "symbols"
+
 # `arora` depends on the published `arora-studio-bridge-client` (the studio-bridge
 # Zenoh connector) from crates.io, which in turn pulls `arora-types` and
 # `arora-bridge` from crates.io. Redirect both to this workspace's own crates so

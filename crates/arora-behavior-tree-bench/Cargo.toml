@@ -17,6 +17,10 @@ harness = false
 name = "scale"
 harness = false
 
+[features]
+# Additional fixtures and a virtual clock for the WASI agreement checks only.
+bench-check = []
+
 [dependencies]
 arora-behavior = { path = "../arora-behavior" }
 arora-behavior-tree = { path = "../arora-behavior-tree" }

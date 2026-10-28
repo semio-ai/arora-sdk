@@ -12,9 +12,6 @@ use std::{collections::HashMap, f64::consts::PI, rc::Rc};
 use uuid::Uuid;
 /// The damping time base, in seconds.
 const DT: f64 = 1.0 / 30.0;
-/// An action not called within this many seconds restarts: Arora has no halt.
-const GAP: f64 = 0.025;
-
 const MODULE: Uuid = Uuid::from_u128(0xb3ac_0000);
 pub const TARGET: Uuid = Uuid::from_u128(0xb3ac_0001);
 pub const HALF_LIFE: Uuid = Uuid::from_u128(0xb3ac_0002);
@@ -174,14 +171,17 @@ impl Arguments for &[(Uuid, &Value)] {
 pub struct Bridge {
     registered: HashMap<u64, Rc<dyn Callable>>,
     next: u64,
+    // Restart after a missed tick; Arora has no halt callback.
+    gap: f64,
     pub functions: HashMap<Uuid, Signature>,
     pub module_calls: u64,
     pub dispatches: u64,
 }
 impl Bridge {
-    pub fn new(functions: HashMap<Uuid, Signature>) -> Self {
+    pub fn new(functions: HashMap<Uuid, Signature>, dt: f64) -> Self {
         Self {
             functions,
+            gap: 1.5 * dt,
             ..Self::default()
         }
     }
@@ -242,7 +242,7 @@ impl Bridge {
         let s = |i: usize| number(state(i)).unwrap_or(f64::NAN);
         // A tree call restarts when it was not called on the previous tick;
         // `last` is its state parameter `at`.
-        let restart = |at: usize, t: f64| s(at).is_nan() || t - s(at) > GAP;
+        let restart = |at: usize, t: f64| s(at).is_nan() || t - s(at) > self.gap;
         let ret = match signature.op {
             Op::ChainAdd => Value::F64(a(0) + a(1)),
             Op::ChainMul => Value::F64(a(0) * a(1)),

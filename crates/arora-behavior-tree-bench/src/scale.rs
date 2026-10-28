@@ -69,7 +69,7 @@ fn chains(n: usize) -> Graph {
             Source::Call(i - k)
         };
         graph.calls.push(GraphCall {
-            op: [Op::ChainAdd, Op::ChainMul, Op::ChainClamp, Op::ChainRemap][i % 4],
+            op: [Op::ChainAdd, Op::ChainMul, Op::ChainClamp, Op::ChainRemap][(i / k) % 4],
             arguments: vec![x, Source::Value(1.1)],
             publishes: (i + k >= n).then(|| outputs[i % k]),
         });
@@ -334,6 +334,7 @@ impl Scenario {
                 .collect();
             Tree::Composite(FALLBACK_FUNCTION_ID, children)
         };
+        let writer_keys = compared.iter().copied().collect();
         Workload {
             keys: graph.keys,
             calls,
@@ -342,13 +343,31 @@ impl Scenario {
             published,
             after: HashSet::new(),
             compared,
-            tree_keys: HashSet::new(),
+            writer_keys,
             clock,
             dt: DT,
             warm_up,
             phases: vec![0; warm_up + ticks],
             events,
             phase_names: vec![self.name().into()],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn chain_operations_follow_depth_for_every_default_size() {
+        for &n in SIZES {
+            let graph = chains(n);
+            let k = graph.inputs.len();
+            for (i, call) in graph.calls.iter().enumerate() {
+                assert_eq!(
+                    call.op,
+                    [Op::ChainAdd, Op::ChainMul, Op::ChainClamp, Op::ChainRemap][(i / k) % 4]
+                );
+            }
         }
     }
 }

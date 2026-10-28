@@ -1,10 +1,11 @@
 //! C ABI for WASI preview 1. The README specifies indices and pointer lifetimes.
 use crate::{
-    clock::Monotonic,
-    forms::{Form, FORMS},
+    clock::{Monotonic, WithStep},
+    forms::{Form, FORMS, REFERENCE},
     measure::{self, Measurement, Replay},
     model::Workload,
-    scale::Scenario,
+    scale::{Scenario, SIZES},
+    DEFAULT_TICKS, DEFAULT_WARM_UP,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -24,6 +25,7 @@ thread_local! {
     static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
     static ROW: Cell<[f64; 7]> = const { Cell::new([0.0; 7]) };
     static RESULT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static STEP_US: Cell<f64> = const { Cell::new(0.0) };
     static MINIMUM_US: Cell<f64> = const { Cell::new(0.0) };
 }
 fn form_names() -> String {
@@ -48,7 +50,7 @@ fn sample(workload: &Workload, form: &dyn Form, record: bool) -> Replay {
         workload,
         form,
         record,
-        &Monotonic::default(),
+        &WithStep(Monotonic::default(), STEP_US.get()),
         MINIMUM_US.get(),
     )
 }
@@ -212,6 +214,9 @@ pub extern "C" fn bench_workload_sample() -> u32 {
         };
         let first = s.runs[f].is_empty();
         let run = sample(&s.workload, FORMS[f], first);
+        if let Some(first) = s.runs[f].first() {
+            measure::assert_counts(first, &run);
+        }
         s.runs[f].push(run);
         s.runs[f].len() as u32
     })
@@ -229,7 +234,7 @@ pub extern "C" fn bench_workload_finish() -> u32 {
             return 1;
         }
         if s.reference.is_none() {
-            let reference = FORMS.iter().find(|f| f.name() == "detached").unwrap();
+            let reference = FORMS.iter().find(|f| f.name() == REFERENCE).unwrap();
             s.reference =
                 Some(measure::replay(&s.workload, *reference, true, &Monotonic::default()).written);
         }
@@ -239,24 +244,25 @@ pub extern "C" fn bench_workload_finish() -> u32 {
         let h = hash(&runs[0].written);
         s.row = vec![
             summary.mean,
-            summary.p50,
-            summary.p95,
-            summary.p99,
-            summary.max,
+            summary.p50.unwrap_or(f64::NAN),
+            summary.p95.unwrap_or(f64::NAN),
+            summary.p99.unwrap_or(f64::NAN),
+            summary.max.unwrap_or(f64::NAN),
             summary.calls,
             summary.dispatches,
             differing as f64,
             (h >> 32) as f64,
             (h & 0xffff_ffff) as f64,
         ];
-        s.row.extend(&summary.phases);
+        s.row
+            .extend(summary.phases.iter().map(|x| x.unwrap_or(f64::NAN)));
         s.series = summary
             .bins
             .iter()
             .enumerate()
             .flat_map(|(i, (us, calls))| {
                 [
-                    *us,
+                    us.unwrap_or(f64::NAN),
                     *calls,
                     s.workload.phases[s.workload.warm_up + i * measure::BIN] as f64,
                 ]
@@ -312,15 +318,12 @@ pub extern "C" fn bench_measure(
     let runs: Vec<_> = (0..samples)
         .map(|s| sample(&workload, *form, s == 0))
         .collect();
-    let reference = FORMS.iter().find(|f| f.name() == "detached").unwrap();
+    let reference = FORMS.iter().find(|f| f.name() == REFERENCE).unwrap();
     let expected = measure::replay(&workload, *reference, true, &Monotonic::default());
     let differing = measure::differences(&expected.written, &runs[0].written);
     let h = hash(&runs[0].written);
     let summary = measure::summarize(&workload, &runs);
-    let mut means: Vec<_> = runs
-        .iter()
-        .map(|r| measure::mean(r.times[workload.warm_up..].iter().copied()))
-        .collect();
+    let mut means: Vec<_> = runs.iter().map(|r| r.mean_us).collect();
     means.sort_by(f64::total_cmp);
     ROW.set([
         measure::quantile(&means, 0.5),
@@ -345,4 +348,46 @@ pub extern "C" fn bench_measure(
 #[no_mangle]
 pub extern "C" fn bench_row(i: u32) -> f64 {
     ROW.get().get(i as usize).copied().unwrap_or(f64::NAN)
+}
+
+#[no_mangle]
+pub extern "C" fn bench_clock_step_us(us: f64) -> u32 {
+    if !us.is_finite() || us < 0.0 {
+        return 1;
+    }
+    STEP_US.set(us);
+    0
+}
+fn defaults() -> &'static str {
+    static DEFAULTS: OnceLock<String> = OnceLock::new();
+    DEFAULTS.get_or_init(|| {
+        serde_json::json!({"ticks": DEFAULT_TICKS, "warmUp": DEFAULT_WARM_UP,
+        "sizes": SIZES, "reference": REFERENCE})
+        .to_string()
+    })
+}
+#[no_mangle]
+pub extern "C" fn bench_defaults() -> *const u8 {
+    defaults().as_ptr()
+}
+#[no_mangle]
+pub extern "C" fn bench_defaults_len() -> u32 {
+    defaults().len() as u32
+}
+
+#[cfg(feature = "bench-check")]
+#[no_mangle]
+pub extern "C" fn bench_check_virtual(step: f64, seed: u32, samples: u32) {
+    RESULT.set(
+        serde_json::to_vec(&crate::checks::virtual_run(step, seed, samples as usize)).unwrap(),
+    );
+}
+
+#[no_mangle]
+pub extern "C" fn bench_scale_name(n: u32, scenario: u32) -> u32 {
+    let Some(scenario) = Scenario::ALL.get(scenario as usize) else {
+        return 1;
+    };
+    RESULT.set(serde_json::to_vec(&crate::scale_name(scenario.name(), n as usize)).unwrap());
+    0
 }

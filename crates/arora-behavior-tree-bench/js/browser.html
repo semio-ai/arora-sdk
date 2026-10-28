@@ -15,7 +15,7 @@ const yieldBetween = () => new Promise(resolve => setTimeout(resolve, 0));
 run.onclick = async () => {
   run.disabled = true; save.disabled = true; output.textContent = 'Loading…';
   try {
-    const wasm = await loadBenchWasm(await (await fetch('../../../target/wasm32-wasip1/release/arora_behavior_tree_bench.wasm')).arrayBuffer());
+    const wasm = await loadBenchWasm(await (await fetch('../../../target/wasm32-wasip1/bench-wasm/arora_behavior_tree_bench.wasm')).arrayBuffer());
     output.textContent = JSON.stringify(wasm.clock, null, 2) + '\n';
     const file = document.querySelector('#workload').files[0];
     const text = file ? await file.text() : await (await fetch('../../../target/bench-synthetic.json')).text();
@@ -25,7 +25,7 @@ run.onclick = async () => {
     output.textContent += workloadTable(record) + '\n\n' + scaleHeader + '\n';
     for (const scenario of wasm.scenarios) {
       const record = await wasm.loadScale(100, scenario).measureAll({ samples: 7, yieldBetween });
-      results.tests[scenario + '/100'] = { kind: 'scale', size: 100, record };
+      results.tests[wasm.scaleName(100, scenario)] = { kind: 'scale', size: 100, record };
       for (const [form, row] of Object.entries(record.forms)) {
         if (row.differing) throw new Error(`${scenario}/${form}: writes differ from detached`);
         output.textContent += scaleRow(100, scenario, form, row) + '\n';

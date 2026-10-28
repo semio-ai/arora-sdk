@@ -15,12 +15,12 @@ class ComparisonTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.manifest = {'schema': 1, 'rounds': 3, 'builds': {'base': 'a', 'second': 'b', 'third': 'c'}}
+        self.manifest = {'schema': 1, 'rounds': 4, 'builds': {'base': 'a', 'second': 'b', 'third': 'c'}}
         (self.root / 'manifest.json').write_text(json.dumps(self.manifest))
         for build, ratio in [('base', 1), ('second', 2), ('third', 0.5)]:
             folder = self.root / 'runs' / build
             folder.mkdir(parents=True)
-            for round_ in range(1, 4):
+            for round_ in range(1, 5):
                 tests = {}
                 for name, kind, size, factor in [('work', 'workload', 0, 1), ('chain/10', 'scale', 10, 1), ('chain/30', 'scale', 30, 4)]:
                     forms = {}
@@ -44,7 +44,7 @@ class ComparisonTest(unittest.TestCase):
     def test_ratios_size_geomeans_subsets_and_fixed_bootstrap(self):
         result, _ = analyze.compare(self.root, 'base')
         self.assertEqual(result['resamples'], 2000)
-        self.assertEqual(result['agreementCells'], 54)
+        self.assertEqual(result['agreementCells'], 72)
         self.assertEqual(result['tests']['work']['second/detached']['ratio'], 2)
         self.assertAlmostEqual(result['tests']['chain']['second/detached']['ratio'], 4)
         self.assertAlmostEqual(result['tests']['overall']['second/detached']['ratio'], 8 ** 0.5)
@@ -58,7 +58,7 @@ class ComparisonTest(unittest.TestCase):
     def test_chosen_form(self):
         result, _ = analyze.compare(self.root, 'base', ['detached'])
         self.assertEqual(result['forms'], ['detached'])
-        self.assertEqual(result['agreementCells'], 27)
+        self.assertEqual(result['agreementCells'], 36)
 
     def test_missing_round(self):
         self.path().unlink()
@@ -92,6 +92,82 @@ class ComparisonTest(unittest.TestCase):
         self.mutate(lambda d: d['tests']['work']['record']['forms']['detached'].__setitem__('differing', 1))
         with self.assertRaisesRegex(ValueError, 'agreement failed'):
             analyze.compare(self.root, 'base')
+
+    def all_records(self, change):
+        for path in (self.root / 'runs').glob('*/*.json'):
+            data = json.loads(path.read_text())
+            change(data)
+            path.write_text(json.dumps(data))
+
+    def test_too_few_and_unbalanced_rounds(self):
+        for rounds in [1, 2, 3, 5]:
+            manifest = {**self.manifest, 'rounds': rounds}
+            (self.root / 'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'rounds|odd round'):
+                analyze.load(self.root, 'base')
+        for build in self.manifest['builds']:
+            self.put(build, 5, json.loads(self.path(build, 4).read_text()))
+        self.assertEqual(analyze.load(self.root, 'base', allow_odd_rounds=True)[1], 5)
+
+    def test_extra_round_is_rejected(self):
+        self.put('second', 5, json.loads(self.path().read_text()))
+        with self.assertRaisesRegex(ValueError, 'extra round files'):
+            analyze.load(self.root, 'base')
+
+    def test_disagreement_within_first_record_is_rejected(self):
+        data = json.loads(self.path('base').read_text())
+        data['tests']['work']['record']['forms']['attached-naive']['written'][0] = 'ffffffffffffffff'
+        self.put('base', 1, data)
+        with self.assertRaisesRegex(ValueError, 'forms disagree'):
+            analyze.load(self.root, 'base')
+
+    def test_nonfinite_and_negative_times_are_rejected(self):
+        for value in [float('nan'), float('inf'), -1]:
+            self.mutate(lambda d: d['tests']['work']['record']['forms']['detached']['times'][0].__setitem__(1, value))
+            with self.assertRaisesRegex(ValueError, 'invalid time'):
+                analyze.load(self.root, 'base')
+
+    def test_invalid_kind_and_size_are_rejected(self):
+        for field, value in [('kind', 'unknown'), ('size', 0), ('size', 11)]:
+            original = json.loads(self.path().read_text())
+            self.mutate(lambda d: d['tests']['chain/10'].__setitem__(field, value))
+            with self.assertRaisesRegex(ValueError, 'invalid kind or size'):
+                analyze.load(self.root, 'base')
+            self.put('second', 1, original)
+
+    def test_digest_length_must_equal_ticks(self):
+        self.all_records(lambda d: [test['record']['forms'][form]['written'].pop()
+            for test in d['tests'].values() for form in test['record']['forms']])
+        with self.assertRaisesRegex(ValueError, 'agreement failed'):
+            analyze.load(self.root, 'base')
+
+    def test_incomplete_replay_count_or_shape_is_rejected(self):
+        for times in [[], [[1, 2, 3]] * 2, [[1, 2]]]:
+            self.mutate(lambda d: d['tests']['work']['record']['forms']['detached'].__setitem__('times', times))
+            with self.assertRaisesRegex(ValueError, 'incomplete timing sample'):
+                analyze.load(self.root, 'base')
+
+    def test_digest_format_is_checked(self):
+        self.all_records(lambda d: [test['record']['forms'][form].__setitem__('written', ['not-a-digest'] * 3)
+            for test in d['tests'].values() for form in test['record']['forms']])
+        with self.assertRaisesRegex(ValueError, 'invalid digest'):
+            analyze.load(self.root, 'base')
+
+    def test_group_collision_is_rejected(self):
+        self.all_records(lambda d: d['tests'].__setitem__('chain', d['tests']['work']))
+        with self.assertRaisesRegex(ValueError, 'group collision'):
+            analyze.compare(self.root, 'base')
+
+    def test_replay_intervals_supply_round_means(self):
+        def change(d):
+            for test in d['tests'].values():
+                for entry in test['record']['forms'].values():
+                    entry['sampleMeans'] = [sum(entry['times'][0][1:]) / 2]
+                    entry['times'] = [[]]
+                    entry['timingMode'] = ['replay']
+        self.all_records(change)
+        result, _ = analyze.compare(self.root, 'base')
+        self.assertEqual(result['tests']['work']['second/detached']['ratio'], 2)
 
 
 if __name__ == '__main__':

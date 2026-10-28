@@ -14,21 +14,45 @@ dispatch is an `arora_call_indirect`, including control nodes and the root.
 Times are microseconds per tick, including clock updates and the host's input
 writes. Loading, lowering, digesting and summarizing are outside the timed
 interval. The host writes only changed values; for keys also written by the tree
-it compares with the store. Each sample replays a freshly lowered tree from its
-initial state, including warm-up. Samples interleave forms. Each logical tick's
-time is its median over samples; the summary reports the mean, p50, p95, p99,
-maximum and phase means of those times after warm-up. Quantiles interpolate
-linearly between neighboring order statistics. Counts are means over measured
-ticks from the first replay. The raw JSON retains every replay's per-tick times,
-module calls and dispatches, including warm-up.
+or a graph sink it compares with the store. Each replay starts from a freshly
+lowered tree and includes its workload warm-up. A discarded pilot runs real work
+before every sample, warming the process's code, allocator and CPU state before
+collecting times. Samples interleave forms.
 
-After each tick of the first replay, a digest covers every sink key and every key
-the tree can write, in key-index order. Scale keys follow graph-call order.
+A clock is coarse when its step exceeds one twentieth of the pilot's measured
+interval divided by its measured tick count; [clock.rs](src/clock.rs) defines this
+rule. Fine clocks time ticks individually: each logical tick's time is its median
+over samples, then summaries report the mean, linearly interpolated quantiles,
+maximum, phase means and 15-tick bins. Native uses the high resolution `Instant`
+clock (step 0 means no coarsening supplied); the WASI loader supplies its calibrated
+step. Coarse clocks time all measured ticks of each replay as one interval, with
+two clock reads, and divide by the measured tick count. A pilot fixes the number
+of replays before collecting a sample, targeting 50 clock steps of total measured
+work. The pilot estimate does not guarantee that budget in subsequent replays.
+The coarse mean averages interval means across replays and samples. Per-tick
+quantiles, maximum, time bins and phase means are unresolved: JSON uses `null`,
+tables print `unresolved`, and numeric C rows use NaN.
+
+Raw JSON records each sample's `timingMode` (`tick` or `replay`), `sampleMeans`,
+`repetitions`, and clock modes. In tick mode, `times` contains per-tick means over
+repetitions and `replayTimes` retains individual repetitions, warm-up included.
+In replay mode these per-tick arrays are empty and `replayUs` retains the measured
+intervals, excluding warm-up. Counts are retained from the first measured replay; call and dispatch arrays
+are checked for equality across repetitions and samples. Digests come from the
+first sample's recording replay. Coarse agreement runs separately, outside
+measured intervals.
+
+A digest covers every sink key and every key the tree can write after each tick,
+in key-index order, including warm-up. Scale keys follow graph-call order.
 Digests include absent values, boolean tags and little-endian f64 bits, with signed
 zero and NaNs canonicalized, using FNV-1a. `differing` counts ticks whose digest
-differs from `detached`, including warm-up. The reference is evaluated even if a
-selection omits it. Front ends fail on disagreement. Hashes detect accidental
-changes; they are not cryptographic proofs of equivalence.
+differs from the registered reference, `detached`, which is evaluated even if a
+selection omits it. The CLI, Node runner and browser page fail on disagreement.
+Library `measure`/`measureAll` calls and the C ABI report `differing`; callers must
+check it. Agreement between forms cannot detect a change that moves all forms'
+values alike. The cross-build digest check in `analyze.py` catches that, only
+within one platform. Hashes are checks for accidental changes, not cryptographic
+proofs of equivalence.
 
 The registered forms are:
 
@@ -94,7 +118,8 @@ fixed 1/30-second damping time base is independent of the workload clock step.
 
 Tree actions have private mutable states initialized to NaN, and change output
 keys only when the action writes a different value. Timed actions restart when
-their last-call state is NaN or more than 0.025 seconds before t; the executor has
+their last-call state is NaN or more than 1.5 × `dt` seconds before t
+(0.025 seconds at 60 Hz); the executor has
 no halt callback.
 
 | action | outputs; state parameters; result |
@@ -125,7 +150,11 @@ Default sizes are 10, 30, 100, 300 and 1000 graph calls. Every scenario uses the
 same model, host, form construction and measurement code as JSON workloads.
 
 - `settled`, `one-input`, `all-inputs`: K=max(2,N/10) independent chains of add,
-  multiply, clamp and remap, with 1.1 as their second argument. The last call of
+  multiply, clamp and remap, chosen by position within each chain, with 1.1 as
+  their second argument. Chain depth is ten for N≥30 at the default sizes (five
+  at N=10). Settled work falls to zero; one-input work depends on chain depth,
+  and all-inputs work grows with the number of chains. Unchanged intermediate
+  results stop propagation, so changing an input need not run its whole chain. The last call of
   each chain is a sink. Inputs remain constant, input 0 changes, or every input
   changes to `tick % 17`.
 - `clock`: a deterministic random graph; one tenth of its calls are oscillators
@@ -146,6 +175,26 @@ edges. Continuously running inactive damping and pausing it on inactive branches
 have different reentry semantics. Stateless switching isolates branch scheduling
 and permits tick-for-tick agreement. Fixed branches and the clock graph retain
 damping; the synthetic workload also exercises stateful tree actions and sinks.
+
+Calls per measured tick with the default 200 warm-up and 500 measured ticks:
+
+| form / scenario | N=10 | N=30 | N=100 | N=300 | N=1000 |
+|---|---:|---:|---:|---:|---:|
+| detached / settled | 0 | 0 | 0 | 0 | 0 |
+| detached / one-input | 3.240 | 3.840 | 3.840 | 3.840 | 3.840 |
+| detached / all-inputs | 6.480 | 11.520 | 38.400 | 115.200 | 384.000 |
+| detached / clock | 3.000 | 9.000 | 19.000 | 106.916 | 293.000 |
+| detached / branches | 4.000 | 6.000 | 18.000 | 58.000 | 188.000 |
+| detached / branches-switching | 4.000 | 6.500 | 19.800 | 59.400 | 188.900 |
+| attached-naive / settled, one-input, all-inputs, clock | 10 | 30 | 100 | 300 | 1000 |
+| attached-naive / branches | 18.000 | 34.000 | 109.000 | 324.000 | 1063.000 |
+| attached-naive / branches-switching | 18.000 | 34.500 | 110.800 | 325.400 | 1063.900 |
+
+The chain scenarios isolate settling, a fixed-depth change and changes across K
+chains. Clock graphs grow with N; random topology and settling affect their exact
+fraction of active calls. Branch graphs round up to eight equal parts. Detached
+runs demanded calls in the active part plus its publish actions; attached-naive
+runs all graph calls plus active publish actions.
 
 ## Adding a form
 
@@ -211,12 +260,16 @@ WASI interface; it requires no npm packages.
 
 ```sh
 rustup target add wasm32-wasip1
-cargo build --release -p arora-behavior-tree-bench --target wasm32-wasip1 --lib
+cargo build --profile bench-wasm -p arora-behavior-tree-bench --target wasm32-wasip1 --lib
 cargo run --release -p arora-behavior-tree-bench --bin synthetic-workload > target/bench-synthetic.json
 node crates/arora-behavior-tree-bench/js/run-node.mjs \
-  target/wasm32-wasip1/release/arora_behavior_tree_bench.wasm target/bench-synthetic.json
+  target/wasm32-wasip1/bench-wasm/arora_behavior_tree_bench.wasm target/bench-synthetic.json
+# Test-only wrong form and virtual clock, excluded from the distributable module:
+cargo build --profile bench-wasm -p arora-behavior-tree-bench --target wasm32-wasip1 --lib --features bench-check
 node crates/arora-behavior-tree-bench/js/check.mjs \
-  target/wasm32-wasip1/release/arora_behavior_tree_bench.wasm target/bench-synthetic.json
+  target/wasm32-wasip1/bench-wasm/arora_behavior_tree_bench.wasm target/bench-synthetic.json
+# Rebuild without test fixtures before running measurements:
+cargo build --profile bench-wasm -p arora-behavior-tree-bench --target wasm32-wasip1 --lib
 ```
 
 Node 18+ is supported. The Node runner accepts additional workload paths, prints
@@ -244,7 +297,9 @@ copying it into the repository. The loader is an ES module usable by other pages
 import { loadBenchWasm } from './bench-wasm.mjs';
 const bench = await loadBenchWasm(bytes);
 const result = await bench.loadWorkload(jsonText).measureAll({ samples: 7 });
+if (Object.values(result.forms).some(r => r.differing)) throw new Error('forms disagree');
 const scale = await bench.loadScale(100, 'clock').measureAll({ samples: 7 });
+if (Object.values(scale.forms).some(r => r.differing)) throw new Error('scale forms disagree');
 ```
 
 Only one workload/scale session is live per module instance. Loading another
@@ -252,15 +307,14 @@ replaces the previous session. Calls are synchronous; use a Worker for an
 interactive page during long replays.
 
 The loader measures the smallest positive `performance.now()` step across 32
-clock transitions, then requires each sample's measured tick intervals to sum to
-at least 50 steps. Short samples repeat the entire workload from a fresh tree;
-per-tick times are means across these repetitions. The outer sample median is
-unchanged. `clock.stepUs`, `clock.minimumSampleUs` and `crossOriginIsolated` are
-recorded with results, along with repetition counts and individual replay times.
-Per-tick quantiles remain limited by clock resolution; averaging repeated ticks
-improves a short sample's total estimate but does not recover sub-step latency
-outliers. Calibration costs at most 32 steps in usual clocks; a clock that never
-advances is rejected.
+clock transitions and passes it to the module. `clock.stepUs`,
+`clock.minimumSampleUs`, `clock.modes` and `crossOriginIsolated` accompany each
+record. The pilot selects tick or replay timing and fixes repetitions before
+measurement, as described above. Isolation usually improves browser precision;
+repeating individual tick timings cannot recover sub-step latency quantiles.
+Calibration costs at most 32 steps on usual clocks; a frozen clock is rejected.
+The module exports scale defaults, the reference name and scale test names so JS
+uses the same definitions as native.
 
 ### C ABI
 
@@ -285,16 +339,22 @@ return 0 on success and 1 for invalid input; an executor failure traps with stde
 | `workload_row(i)` | 0–4 mean/p50/p95/p99/max µs; 5–6 calls/dispatches; 7 differing ticks; 8–9 high/low aggregate digest; 10+ phase means |
 | `workload_series()`, `workload_series_len()` | f64 triples per 15 ticks after warm-up: time, calls, phase; length counts f64 elements |
 | `result()`, `result_len()` | last form's full raw JSON record, identical schema to native |
-| `minimum_sample_us(us)` | nonnegative timed budget per sample; 0 disables repetition |
+| `minimum_sample_us(us)` | nonnegative pilot target per sample; 0 disables repetition |
+| `clock_step_us(us)` | nonnegative clock step used to select timing mode |
+| `defaults()`, `defaults_len()` | borrowed UTF-8 JSON: ticks, warmUp, sizes, reference |
+| `scale_name(n,scenario)` | writes a JSON scale test name to result; status 0 on success |
 
-The cdylib uses the workspace release profile (optimized, thin LTO, debug level
-1). Native and wasm builds use that same profile; comparison runs should record
-any profile overrides and toolchain changes alongside their results.
+The documented WASM build uses `bench-wasm`, inheriting release optimization
+with debug info disabled and symbols stripped. The workspace release profile
+continues to keep debug info for other builds. Record profile overrides and
+toolchain changes alongside comparisons. `bench-check` is a fixture feature for
+`check.mjs`, adding a deliberately wrong form and virtual-clock export; leave it
+disabled for measurements.
 
 ## Comparison protocol
 
 ```sh
-ROUNDS=7 BENCH_FORMS=detached,attached-naive \
+ROUNDS=8 BENCH_FORMS=detached,attached-naive \
   crates/arora-behavior-tree-bench/scripts/run.sh /tmp/bench-results \
   base=<revision> candidate=<revision> another=<revision> -- /path/workload.json
 python3 crates/arora-behavior-tree-bench/scripts/analyze.py /tmp/bench-results \
@@ -303,11 +363,15 @@ python3 crates/arora-behavior-tree-bench/scripts/analyze.py /tmp/bench-results \
 
 Revisions must contain this crate and the chosen forms. The Bash runner creates
 one detached worktree and target directory per revision, builds the round binary
-with `--release --offline --locked`, and runs one process per build per round.
-Order is forward on odd rounds and reversed on even rounds. It leaves worktrees,
-resolved revision IDs, raw rounds and comparison output under the requested output
-directory. Use a new directory for each run. Dependencies must be available locally;
-platform compiler settings may be provided through the invoking environment.
+with `--release --locked`, and runs one process per build per round. Extra cargo
+flags are whitespace-separated in `BENCH_CARGO_FLAGS` (for example, `--offline`).
+The default is eight rounds; the runner requires an even count of at least four.
+Order is forward on odd rounds and reversed on even rounds. Exit traps remove
+created worktrees on success, failure and interruption; target directories,
+resolved revision IDs, raw rounds and comparisons stay under the output directory.
+Use a new directory for each run. Compiler settings may be supplied through the
+invoking environment. Analysis also requires at least four rounds and rejects odd
+counts unless `--allow-odd-rounds` explicitly accepts unbalanced order.
 
 The Python analysis uses the standard library only. It rejects missing or extra
 rounds, missing tests/forms, different replay dimensions, cross-platform input,
@@ -342,9 +406,23 @@ Follow these rules:
   Counts describe executor work; elapsed times depend on hardware and load.
 - **Compare digests only within one platform.** Native and WebAssembly take
   `sin` and `exp2` from different math libraries and can differ in their last bits.
-- **The browser clock is coarsened.** Cross-origin isolation usually improves
-  precision; retain the measured step, isolation flag and repetition counts when
-  interpreting results.
+- **Retain clock metadata.** Coarse measurements resolve replay means; their
+  per-tick latency statistics remain unresolved.
+
+## A/A run
+
+Run the same revision under two build labels to measure this machine's noise
+floor before trusting a difference:
+
+```sh
+ROUNDS=8 crates/arora-behavior-tree-bench/scripts/run.sh /tmp/bench-aa \
+  a=HEAD b=HEAD -- /path/workload.json
+```
+
+A whole process can be an outlier because of startup state, scheduling or thermal
+conditions. Rounds use separate processes, after a discarded real-work pilot, and
+intervals come from bootstrapping rounds together across all tests in a process.
+An A/A interval measures session noise, not a universal threshold for improvement.
 
 ## Checks
 
@@ -354,10 +432,13 @@ cargo clippy -p arora-behavior-tree-bench --all-targets -- -D warnings
 cargo fmt -p arora-behavior-tree-bench --check
 cargo bench -p arora-behavior-tree-bench --bench workload --bench scale --no-run
 python3 -B crates/arora-behavior-tree-bench/scripts/test_analyze.py
+python3 -B crates/arora-behavior-tree-bench/scripts/test_run.py
 ```
 
 The registry test runs synthetic plus N=10 of every scenario, compares every tick
 with detached and asserts each form's total module calls and dispatches. The
-Python checks run under `cargo test` as well. The existing CI package selection
+Python checks run under `cargo test` as well, including runner lifecycle checks
+using local Git and Cargo stand-ins that do not modify a repository. Negative
+agreement fixtures and a quantized virtual clock check the failure paths. The existing CI package selection
 includes this default member and its tests and lint targets. WASI/Node execution
 is a separate local check; there is no additional WASI CI job.

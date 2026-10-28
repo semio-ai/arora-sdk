@@ -13,12 +13,14 @@ pub enum Source {
     Call(usize),
     Value(Value),
 }
+#[derive(Clone)]
 pub struct GraphCall {
     pub op: Op,
     pub arguments: Vec<(Uuid, Source)>,
     /// The key a sink publishes its return to.
     pub publishes: Option<usize>,
 }
+#[derive(Clone)]
 pub enum Tree {
     Composite(Uuid, Vec<Tree>),
     Equal(usize, Value),
@@ -29,6 +31,7 @@ pub enum Tree {
     Calls(Vec<usize>),
     Run,
 }
+#[derive(Clone)]
 pub struct Workload {
     /// Store keys and their initial values.
     pub keys: Vec<(String, Option<Value>)>,
@@ -44,8 +47,8 @@ pub struct Workload {
     pub after: HashSet<usize>,
     /// Every key a sink or the tree writes, which the forms must agree on.
     pub compared: Vec<usize>,
-    /// The keys the tree writes.
-    pub tree_keys: HashSet<usize>,
+    /// Keys written by a graph sink or the tree, independently of the host.
+    pub writer_keys: HashSet<usize>,
     pub clock: usize,
     pub dt: f64,
     pub warm_up: usize,
@@ -369,6 +372,7 @@ impl Workload {
             phases[start..].fill(phase);
             last = start;
         }
+        let writer_keys = compared.iter().copied().collect();
         Ok(Self {
             keys,
             calls,
@@ -377,7 +381,7 @@ impl Workload {
             published: parser.published,
             after,
             compared,
-            tree_keys: parser.written,
+            writer_keys,
             clock: raw.clock,
             dt: raw.dt,
             warm_up: raw.warm_up,

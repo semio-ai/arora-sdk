@@ -38,6 +38,9 @@ pub trait Form: Sync {
 }
 
 /// The reference is first. A form is one module and one entry here.
+pub const REFERENCE: &str = "detached";
+
+#[cfg(not(feature = "bench-check"))]
 pub static FORMS: &[&dyn Form] = &[&detached::Detached, &attached_naive::AttachedNaive];
 
 pub fn selected(names: Option<&str>) -> Result<Vec<&'static dyn Form>, String> {
@@ -63,3 +66,10 @@ pub fn selected(names: Option<&str>) -> Result<Vec<&'static dyn Form>, String> {
             }),
     }
 }
+
+#[cfg(feature = "bench-check")]
+pub static FORMS: &[&dyn Form] = &[
+    &detached::Detached,
+    &attached_naive::AttachedNaive,
+    &crate::checks::Wrong,
+];

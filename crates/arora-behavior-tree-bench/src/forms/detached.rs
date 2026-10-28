@@ -4,7 +4,7 @@ use crate::model::Workload;
 pub struct Detached;
 impl Form for Detached {
     fn name(&self) -> &'static str {
-        "detached"
+        super::REFERENCE
     }
     fn build(&self, workload: &Workload) -> Nodes {
         build::build(workload, true)
@@ -13,8 +13,8 @@ impl Form for Detached {
         [
             (1846, 1800),
             (10, 160),
-            (366, 160),
-            (1161, 160),
+            (525, 160),
+            (1040, 160),
             (487, 160),
             (640, 1120),
             (640, 1480),

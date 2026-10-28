@@ -2,7 +2,7 @@
 use crate::{
     clock::Clock,
     forms::build::signatures,
-    forms::{Form, FORMS},
+    forms::{Form, FORMS, REFERENCE},
     host::Bridge,
     model::Workload,
 };
@@ -24,9 +24,26 @@ pub struct Replay {
     pub written: Vec<String>,
     pub repetitions: usize,
     pub replay_times: Vec<Vec<f64>>,
+    pub timing_mode: TimingMode,
+    pub replay_us: Vec<f64>,
+    pub mean_us: f64,
+    pub step_us: f64,
 }
 
-fn replay_once(workload: &Workload, form: &dyn Form, record: bool, clock: &dyn Clock) -> Replay {
+#[derive(Clone, Copy, PartialEq, Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TimingMode {
+    Tick,
+    Replay,
+}
+
+fn replay_once(
+    workload: &Workload,
+    form: &dyn Form,
+    record: bool,
+    clock: &dyn Clock,
+    mode: TimingMode,
+) -> Replay {
     let store = SimpleDataStore::new();
     let slots: Vec<_> = workload
         .keys
@@ -44,7 +61,7 @@ fn replay_once(workload: &Workload, form: &dyn Form, record: bool, clock: &dyn C
         .iter()
         .map(|(_, initial)| initial.clone())
         .collect();
-    let mut bridge = Bridge::new(signatures(workload));
+    let mut bridge = Bridge::new(signatures(workload), workload.dt);
     let nodes = form.build(workload);
     let resolver = |name: &str| Some(store.slot(&Key::from(name)));
     let tree = form
@@ -57,15 +74,27 @@ fn replay_once(workload: &Workload, form: &dyn Form, record: bool, clock: &dyn C
         written: Vec::new(),
         repetitions: 1,
         replay_times: Vec::new(),
+        timing_mode: mode,
+        replay_us: Vec::new(),
+        mean_us: 0.0,
+        step_us: clock.step_us(),
     };
+    let mut interval_start = 0.0;
     for (tick, events) in workload.events.iter().enumerate() {
         let (calls, dispatches) = (bridge.module_calls, bridge.dispatches);
-        let start = clock.now();
+        if mode == TimingMode::Replay && tick == workload.warm_up {
+            interval_start = clock.now();
+        }
+        let start = if mode == TimingMode::Tick {
+            clock.now()
+        } else {
+            0.0
+        };
         let time = (workload.clock, Value::F64((tick + 1) as f64 * workload.dt));
         for (k, value) in [time].iter().chain(events) {
             // The host writes a key only when its value changes; a key the
-            // tree also writes is compared with the store, not the last write.
-            let changed = if workload.tree_keys.contains(k) {
+            // tree or a graph sink also writes is compared with the store.
+            let changed = if workload.writer_keys.contains(k) {
                 slots[*k].get().as_ref() != Some(value)
             } else {
                 written[*k].as_ref() != Some(value)
@@ -76,7 +105,14 @@ fn replay_once(workload: &Workload, form: &dyn Form, record: bool, clock: &dyn C
             }
         }
         black_box(tree.tick(&mut bridge).unwrap());
-        result.times.push(clock.now() - start);
+        #[cfg(any(test, feature = "bench-check"))]
+        clock.tick_finished();
+        if mode == TimingMode::Tick {
+            result.times.push(clock.now() - start);
+        }
+        if mode == TimingMode::Replay && tick + 1 == workload.events.len() {
+            result.replay_us.push(clock.now() - interval_start);
+        }
         result.calls.push(bridge.module_calls - calls);
         result.dispatches.push(bridge.dispatches - dispatches);
         if record {
@@ -89,6 +125,11 @@ fn replay_once(workload: &Workload, form: &dyn Form, record: bool, clock: &dyn C
             ));
         }
     }
+    result.mean_us = if mode == TimingMode::Tick {
+        mean(result.times[workload.warm_up..].iter().copied())
+    } else {
+        result.replay_us[0] / (workload.events.len() - workload.warm_up) as f64
+    };
     tree.unregister(&mut bridge);
     result
 }
@@ -112,19 +153,47 @@ pub fn mean(values: impl Iterator<Item = f64>) -> f64 {
 #[derive(Serialize)]
 pub struct Summary {
     pub mean: f64,
-    pub p50: f64,
-    pub p95: f64,
-    pub p99: f64,
-    pub max: f64,
+    pub p50: Option<f64>,
+    pub p95: Option<f64>,
+    pub p99: Option<f64>,
+    pub max: Option<f64>,
     pub calls: f64,
     pub dispatches: f64,
-    pub phases: Vec<f64>,
-    pub bins: Vec<(f64, f64)>,
+    pub phases: Vec<Option<f64>>,
+    pub bins: Vec<(Option<f64>, f64)>,
 }
 
 pub fn summarize(workload: &Workload, runs: &[Replay]) -> Summary {
+    for run in runs.iter().skip(1) {
+        assert_counts(&runs[0], run);
+    }
     let ticks = workload.events.len();
     let warm_up = workload.warm_up;
+    if runs.iter().any(|r| r.timing_mode == TimingMode::Replay) {
+        return Summary {
+            mean: mean(runs.iter().map(|r| r.mean_us)),
+            p50: None,
+            p95: None,
+            p99: None,
+            max: None,
+            calls: mean(runs[0].calls[warm_up..].iter().map(|&x| x as f64)),
+            dispatches: mean(runs[0].dispatches[warm_up..].iter().map(|&x| x as f64)),
+            phases: vec![None; workload.phase_names.len()],
+            bins: (warm_up..ticks)
+                .step_by(BIN)
+                .map(|start| {
+                    (
+                        None,
+                        mean(
+                            runs[0].calls[start..(start + BIN).min(ticks)]
+                                .iter()
+                                .map(|&x| x as f64),
+                        ),
+                    )
+                })
+                .collect(),
+        };
+    }
     let per_tick: Vec<f64> = (0..ticks)
         .map(|t| {
             let mut times: Vec<_> = runs.iter().map(|run| run.times[t]).collect();
@@ -137,16 +206,17 @@ pub fn summarize(workload: &Workload, runs: &[Replay]) -> Summary {
     sorted.sort_by(f64::total_cmp);
     Summary {
         mean: mean(sorted.iter().copied()),
-        p50: quantile(&sorted, 0.5),
-        p95: quantile(&sorted, 0.95),
-        p99: quantile(&sorted, 0.99),
-        max: sorted[sorted.len() - 1],
+        p50: Some(quantile(&sorted, 0.5)),
+        p95: Some(quantile(&sorted, 0.95)),
+        p99: Some(quantile(&sorted, 0.99)),
+        max: Some(sorted[sorted.len() - 1]),
         calls: mean(measured.clone().map(|t| runs[0].calls[t] as f64)),
         dispatches: mean(measured.clone().map(|t| runs[0].dispatches[t] as f64)),
         phases: (0..workload.phase_names.len())
             .map(|phase| {
                 let ticks = measured.clone().filter(|&t| workload.phases[t] == phase);
-                mean(ticks.map(|t| per_tick[t]))
+                let value = mean(ticks.map(|t| per_tick[t]));
+                value.is_finite().then_some(value)
             })
             .collect(),
         bins: (warm_up..ticks)
@@ -154,7 +224,7 @@ pub fn summarize(workload: &Workload, runs: &[Replay]) -> Summary {
             .map(|start| {
                 let bin = start..(start + BIN).min(ticks);
                 (
-                    mean(bin.clone().map(|t| per_tick[t])),
+                    Some(mean(bin.clone().map(|t| per_tick[t]))),
                     mean(bin.map(|t| runs[0].calls[t] as f64)),
                 )
             })
@@ -162,15 +232,15 @@ pub fn summarize(workload: &Workload, runs: &[Replay]) -> Summary {
     }
 }
 
-/// The first replay records agreement outside each tick's measured interval.
-/// Additional replays contribute timing only, on freshly lowered trees.
+/// Record agreement outside measured intervals when requested. Additional
+/// samples contribute timing only, on freshly lowered trees.
 pub fn replay(workload: &Workload, form: &dyn Form, record: bool, clock: &dyn Clock) -> Replay {
     replay_adaptive(workload, form, record, clock, 0.0)
 }
 
-/// Lengthen a sample by fresh replays until its timed ticks span the clock
-/// budget. Each logical tick retains the mean across these repetitions.
-/// Lowering, digesting and summary construction do not count toward the budget.
+/// A pilot fixes the timing mode and replay count before collecting a sample.
+/// Coarse clocks time all measured ticks as one interval; agreement is recorded
+/// in a separate replay so digest work never enters that interval.
 pub fn replay_adaptive(
     workload: &Workload,
     form: &dyn Form,
@@ -178,22 +248,64 @@ pub fn replay_adaptive(
     clock: &dyn Clock,
     minimum_us: f64,
 ) -> Replay {
-    let mut result = replay_once(workload, form, record, clock);
-    let mut elapsed: f64 = result.times[workload.warm_up..].iter().sum();
-    if elapsed < minimum_us {
+    let measured = workload.events.len() - workload.warm_up;
+    // Discarding real work before sampling also warms each process's code,
+    // allocator and CPU state; startup transients otherwise dominate first tests.
+    let pilot = replay_once(workload, form, false, clock, TimingMode::Replay);
+    let elapsed = pilot.replay_us[0];
+    let mode = if crate::clock::coarse(clock.step_us(), elapsed, measured) {
+        TimingMode::Replay
+    } else {
+        TimingMode::Tick
+    };
+    // At least one clock step prevents division by zero on an unresolved pilot.
+    let repetitions = (minimum_us / elapsed.max(clock.step_us()).max(f64::MIN_POSITIVE))
+        .ceil()
+        .max(1.0) as usize;
+    let mut result = replay_once(
+        workload,
+        form,
+        record && mode == TimingMode::Tick,
+        clock,
+        mode,
+    );
+    if record && mode == TimingMode::Replay {
+        struct Untimed;
+        impl Clock for Untimed {
+            fn now(&self) -> f64 {
+                0.0
+            }
+        }
+        let recorded = replay_once(workload, form, true, &Untimed, TimingMode::Tick);
+        assert_counts(&result, &recorded);
+        result.written = recorded.written;
+    }
+    if mode == TimingMode::Tick {
         result.replay_times.push(result.times.clone());
     }
-    while elapsed < minimum_us {
-        let next = replay_once(workload, form, false, clock);
-        elapsed += next.times[workload.warm_up..].iter().sum::<f64>();
-        result.repetitions += 1;
+    for _ in 1..repetitions {
+        let next = replay_once(workload, form, false, clock, mode);
+        assert_eq!(
+            result.calls, next.calls,
+            "calls must be identical across replays"
+        );
+        assert_eq!(
+            result.dispatches, next.dispatches,
+            "dispatches must be identical across replays"
+        );
+        result.mean_us += next.mean_us;
         for (sum, time) in result.times.iter_mut().zip(&next.times) {
             *sum += time;
         }
-        result.replay_times.push(next.times);
+        if mode == TimingMode::Tick {
+            result.replay_times.push(next.times);
+        }
+        result.replay_us.extend(next.replay_us);
     }
+    result.repetitions = repetitions;
+    result.mean_us /= repetitions as f64;
     for time in &mut result.times {
-        *time /= result.repetitions as f64;
+        *time /= repetitions as f64;
     }
     result
 }
@@ -219,15 +331,19 @@ pub fn measure(
     }
     let reference_form = FORMS
         .iter()
-        .find(|form| form.name() == "detached")
+        .find(|form| form.name() == REFERENCE)
         .expect("registered detached reference");
     let mut runs: Vec<Vec<Replay>> = forms.iter().map(|_| Vec::new()).collect();
     for sample in 0..samples {
         for (i, form) in forms.iter().enumerate() {
-            runs[i].push(replay(workload, *form, sample == 0, clock));
+            let run = replay(workload, *form, sample == 0, clock);
+            if let Some(first) = runs[i].first() {
+                assert_counts(first, &run);
+            }
+            runs[i].push(run);
         }
     }
-    let reference = if let Some(i) = forms.iter().position(|form| form.name() == "detached") {
+    let reference = if let Some(i) = forms.iter().position(|form| form.name() == REFERENCE) {
         runs[i][0].written.clone()
     } else {
         replay(workload, *reference_form, true, clock).written
@@ -245,6 +361,17 @@ pub fn measure(
             }
         })
         .collect())
+}
+
+pub fn assert_counts(first: &Replay, next: &Replay) {
+    assert_eq!(
+        first.calls, next.calls,
+        "calls must be identical across samples"
+    );
+    assert_eq!(
+        first.dispatches, next.dispatches,
+        "dispatches must be identical across samples"
+    );
 }
 
 pub fn differences(a: &[String], b: &[String]) -> usize {
@@ -295,6 +422,9 @@ pub fn record(workload: &Workload, measurements: &[Measurement]) -> serde_json::
                 serde_json::json!({
                     "summary": m.summary,
                     "times": m.runs.iter().map(|r| &r.times).collect::<Vec<_>>(),
+                    "timingMode": m.runs.iter().map(|r| r.timing_mode).collect::<Vec<_>>(),
+                    "sampleMeans": m.runs.iter().map(|r| r.mean_us).collect::<Vec<_>>(),
+                    "replayUs": m.runs.iter().map(|r| &r.replay_us).collect::<Vec<_>>(),
                     "repetitions": m.runs.iter().map(|r| r.repetitions).collect::<Vec<_>>(),
                     "replayTimes": m.runs.iter().map(|r| &r.replay_times).collect::<Vec<_>>(),
                     "calls": m.runs[0].calls, "dispatches": m.runs[0].dispatches,
@@ -303,5 +433,5 @@ pub fn record(workload: &Workload, measurements: &[Measurement]) -> serde_json::
             )
         })
         .collect();
-    serde_json::json!({"schema": 1, "platform": format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS), "warmUp": workload.warm_up, "ticks": workload.events.len(), "dt": workload.dt, "phases": workload.phase_names, "forms": forms})
+    serde_json::json!({"schema": 1, "platform": format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS), "warmUp": workload.warm_up, "ticks": workload.events.len(), "dt": workload.dt, "phases": workload.phase_names, "forms": forms, "clock": {"stepUs": measurements[0].runs[0].step_us, "modes": measurements.iter().map(|m| (m.form.clone(), serde_json::json!(m.runs.iter().map(|r| r.timing_mode).collect::<Vec<_>>()))).collect::<serde_json::Map<_, _>>()}})
 }

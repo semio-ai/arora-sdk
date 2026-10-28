@@ -2,10 +2,11 @@
 // Exercises the C ABI, interleaving, errors and a deliberately coarsened clock.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { loadBenchWasm, clockStep } from './bench-wasm.mjs';
+import { loadBenchWasm, clockStep, workloadTable, scaleRow } from './bench-wasm.mjs';
 const [modulePath, workloadPath] = process.argv.slice(2);
 const bytes = readFileSync(modulePath), text = readFileSync(workloadPath, 'utf8');
 const wasm = await loadBenchWasm(bytes), x = wasm.exports;
+const selected = wasm.forms.filter(f => f !== 'test-wrong');
 let readings = 0;
 assert.equal(clockStep(() => Math.floor(readings++ / 10)), 1);
 assert.throws(() => clockStep(() => 0), /did not advance/);
@@ -22,28 +23,53 @@ const badRoot = JSON.parse(text); badRoot.tree = { k: 'calls', calls: [] };
 assert.throws(() => wasm.loadWorkload(JSON.stringify(badRoot)), /rejected/);
 const one = wasm.loadWorkload(text).measure('attached-naive', { samples: 1 });
 assert.equal(one.forms['attached-naive'].differing, 0, 'detached reference when not selected');
-const baseline = await wasm.loadWorkload(text).measureAll({ samples: 3 });
-for (const form of wasm.forms) assert.equal(baseline.forms[form].differing, 0);
+const baseline = await wasm.loadWorkload(text).measureAll({ samples: 3, selected });
+for (const form of selected) assert.equal(baseline.forms[form].differing, 0);
 assert.equal(x.bench_workload_row(7), 0);
 assert.equal(x.bench_workload_series_len(), Math.ceil((baseline.ticks - baseline.warmUp) / 15) * 3);
 assert.ok(Number.isNaN(x.bench_workload_row(10000)));
+// This explicit check build supplies a wrong form and a virtual work clock;
+// neither fixture is included in the distributable module.
+assert.equal(typeof x.bench_check_virtual, 'function', 'build the check module with --features bench-check');
+for (const selected of [['test-wrong'], ['detached', 'test-wrong']]) {
+  const wrong = await wasm.loadWorkload(text).measureAll({ samples: 1, selected });
+  assert.ok(wrong.forms['test-wrong'].differing > 0, 'detached reference must detect wrong form even when not selected');
+}
+for (const [step, samples] of [[0, 3], [100, 1], [100, 3]]) {
+  let sum = 0;
+  for (let seed = 1; seed <= 128; seed++) {
+    x.bench_check_virtual(step, seed * 7919, samples);
+    const record = JSON.parse(new TextDecoder().decode(new Uint8Array(x.memory.buffer, x.bench_result(), x.bench_result_len())));
+    sum += record.forms.detached.summary.mean;
+  }
+  const mean = sum / 128;
+  console.log(`virtual clock: step=${step} µs; samples=${samples}; mean=${mean.toFixed(6)} µs; truth=1.000000 µs`);
+  assert.ok(Math.abs(mean - 1) < 0.005, `coarse-clock mean ${mean}`);
+}
+
 const coarse = await loadBenchWasm(bytes, { now: () => Math.floor(performance.now()) });
-const repeated = await coarse.loadWorkload(text).measureAll({ samples: 1 });
+const repeated = await coarse.loadWorkload(text).measureAll({ samples: 1, selected });
 assert.equal(repeated.clock.stepUs, 1000);
-for (const form of coarse.forms) {
+for (const form of selected) {
   const r = repeated.forms[form], base = baseline.forms[form];
   assert.equal(r.differing, 0);
   assert.deepEqual(r.calls, base.calls);
   assert.deepEqual(r.dispatches, base.dispatches);
   assert.deepEqual(r.written, base.written);
-  const span = r.times[0].slice(repeated.warmUp).reduce((a, b) => a + b, 0) * r.repetitions[0];
-  assert.ok(span >= repeated.clock.minimumSampleUs - 1e-6, `${form}: at least 50 clock steps`);
-  assert.equal(r.replayTimes[0].length, r.repetitions[0]);
+  const span = r.replayUs[0].reduce((a, b) => a + b, 0);
+  assert.equal(r.timingMode[0], 'replay');
+  assert.deepEqual(repeated.clock.modes[form], r.timingMode);
+  assert.equal(r.replayUs[0].length, r.repetitions[0]);
+  for (const key of ['p50', 'p95', 'p99', 'max']) assert.equal(r.summary[key], null);
+  assert.ok(r.summary.phases.every(x => x === null));
+  assert.ok(r.summary.bins.every(bin => bin[0] === null));
   console.log(`${form}: clock step ${repeated.clock.stepUs} µs; ${r.repetitions[0]} replays; timed span ${span.toFixed(0)} µs; differing=${r.differing}`);
 }
+assert.ok(workloadTable(repeated).includes('unresolved'));
+assert.ok(scaleRow(10, 'settled', 'detached', repeated.forms.detached).includes('unresolved'));
 for (const scenario of wasm.scenarios) {
-  const r = await wasm.loadScale(10, scenario, { warmUp: 16, ticks: 144 }).measureAll({ samples: 3 });
-  for (const f of wasm.forms) assert.equal(r.forms[f].differing, 0);
+  const r = await wasm.loadScale(10, scenario, { warmUp: 16, ticks: 144 }).measureAll({ samples: 3, selected });
+  for (const f of selected) assert.equal(r.forms[f].differing, 0);
 }
 // Fixed scale row ABI, alongside the full JSON record interface.
 assert.equal(x.bench_measure(10, 0, 0, 16, 144, 1), 0);

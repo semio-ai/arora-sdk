@@ -5,9 +5,13 @@ use crate::{
     measure::{self, Measurement},
     model::Workload,
     scale::{Scenario, SIZES},
-    synthetic,
+    scale_name, synthetic, DEFAULT_TICKS, DEFAULT_WARM_UP,
 };
 use std::{collections::BTreeMap, path::Path};
+
+fn time(value: Option<f64>) -> String {
+    value.map_or_else(|| "unresolved".into(), |x| format!("{x:.3}"))
+}
 
 pub fn workload_table(workload: &Workload, rows: &[Measurement]) -> String {
     let mut out = format!(
@@ -27,11 +31,18 @@ pub fn workload_table(workload: &Workload, rows: &[Measurement]) -> String {
     for m in rows {
         let s = &m.summary;
         out += &format!(
-            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |",
-            m.form, s.mean, s.p50, s.p95, s.p99, s.max, s.calls, s.dispatches
+            "| {} | {:.3} | {} | {} | {} | {} | {:.3} | {:.3} |",
+            m.form,
+            s.mean,
+            time(s.p50),
+            time(s.p95),
+            time(s.p99),
+            time(s.max),
+            s.calls,
+            s.dispatches
         );
         for phase in &s.phases {
-            out += &format!(" {phase:.3} |");
+            out += &format!(" {} |", time(*phase));
         }
         out += &format!(" {} |\n", m.differing);
     }
@@ -46,14 +57,14 @@ pub fn scale_rows(n: usize, scenario: Scenario, rows: &[Measurement]) -> String 
         .map(|m| {
             let s = &m.summary;
             format!(
-                "| {n} | {} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {} |\n",
+                "| {n} | {} | {} | {:.3} | {} | {} | {} | {} | {:.3} | {:.3} | {} |\n",
                 scenario.name(),
                 m.form,
                 s.mean,
-                s.p50,
-                s.p95,
-                s.p99,
-                s.max,
+                time(s.p50),
+                time(s.p95),
+                time(s.p99),
+                time(s.max),
                 s.calls,
                 s.dispatches,
                 m.differing
@@ -112,14 +123,20 @@ pub fn workload_main() {
 
 pub fn scale_main() {
     let args = args();
-    let ticks = number(&args, 0, 500);
+    let ticks = number(&args, 0, DEFAULT_TICKS);
     let samples = number(&args, 1, 7);
-    let warm_up = std::env::var("SCALE_WARM_UP").map_or(200, |x| x.parse().unwrap());
+    let warm_up = std::env::var("SCALE_WARM_UP").map_or(DEFAULT_WARM_UP, |x| x.parse().unwrap());
     let sizes = std::env::var("SCALE_SIZES")
         .ok()
         .map(|s| s.split(',').map(|n| n.parse().unwrap()).collect::<Vec<_>>())
         .unwrap_or_else(|| SIZES.to_vec());
     let forms = chosen("SCALE_FORMS");
+    if let Some(only) = args.get(2) {
+        assert!(
+            valid_cell(only, &sizes, &forms),
+            "unknown or unselected exact scale cell: {only}"
+        );
+    }
     let mut records = Vec::new();
     print!("{}", scale_header());
     for n in sizes {
@@ -144,6 +161,10 @@ pub fn scale_main() {
             agreement(&rows);
         }
     }
+    assert!(
+        !records.is_empty(),
+        "unknown or unselected exact scale cell"
+    );
     if let Ok(path) = std::env::var("SCALE_TIMES") {
         write(path, &serde_json::json!(records));
     }
@@ -155,8 +176,8 @@ pub fn round_main() {
     let args = args();
     let out = args.first().expect("output JSON path");
     let samples = std::env::var("BENCH_SAMPLES").map_or(1, |s| s.parse().unwrap());
-    let ticks = std::env::var("BENCH_TICKS").map_or(500, |s| s.parse().unwrap());
-    let warm_up = std::env::var("BENCH_WARM_UP").map_or(200, |s| s.parse().unwrap());
+    let ticks = std::env::var("BENCH_TICKS").map_or(DEFAULT_TICKS, |s| s.parse().unwrap());
+    let warm_up = std::env::var("BENCH_WARM_UP").map_or(DEFAULT_WARM_UP, |s| s.parse().unwrap());
     let sizes = std::env::var("BENCH_SIZES")
         .ok()
         .map(|s| s.split(',').map(|n| n.parse().unwrap()).collect::<Vec<_>>())
@@ -183,7 +204,7 @@ pub fn round_main() {
     for n in sizes {
         for s in Scenario::ALL {
             run(
-                format!("{}/{n}", s.name()),
+                scale_name(s.name(), n),
                 "scale",
                 n,
                 s.workload(n, warm_up, ticks),
@@ -191,4 +212,36 @@ pub fn round_main() {
         }
     }
     write(out, &serde_json::json!({"schema": 1, "tests": tests}));
+}
+
+fn valid_cell(only: &str, sizes: &[usize], forms: &[&dyn forms::Form]) -> bool {
+    sizes.iter().any(|n| {
+        Scenario::ALL.iter().any(|s| {
+            forms
+                .iter()
+                .any(|f| only == format!("{n}/{}/{}", s.name(), f.name()))
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn exact_scale_selection_rejects_unknown_cells() {
+        assert!(super::valid_cell(
+            "10/clock/detached",
+            &[10],
+            crate::forms::FORMS
+        ));
+        assert!(!super::valid_cell(
+            "10/clok/detached",
+            &[10],
+            crate::forms::FORMS
+        ));
+        assert!(!super::valid_cell(
+            "30/clock/detached",
+            &[10],
+            crate::forms::FORMS
+        ));
+    }
 }

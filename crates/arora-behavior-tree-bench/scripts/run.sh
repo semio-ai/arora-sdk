@@ -22,14 +22,29 @@ done
 for path in "$@"; do
   workloads+=("$(cd "$(dirname "$path")" && pwd)/$(basename "$path")")
 done
-rounds=${ROUNDS:-7}
+rounds=${ROUNDS:-8}
 [[ $rounds =~ ^[1-9][0-9]*$ ]] || { echo 'ROUNDS must be positive' >&2; exit 2; }
+(( rounds >= 4 && rounds % 2 == 0 )) || { echo 'ROUNDS must be even and at least 4' >&2; exit 2; }
+created=()
+cleanup() {
+  local status=$?
+  trap - EXIT
+  for path in ${created[@]+"${created[@]}"}; do git -C "$root" worktree remove --force "$path" || true; done
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# Whitespace-separated cargo flags, e.g. BENCH_CARGO_FLAGS=--offline.
+extra_cargo_flags=()
+read -r -a extra_cargo_flags <<< "${BENCH_CARGO_FLAGS:-}"
 mkdir -p "$out/worktrees" "$out/runs" "$out/targets"
 for (( i=0; i<${#labels[@]}; i++ )); do
   label=${labels[i]}
   git -C "$root" worktree add --detach "$out/worktrees/$label" "${revisions[i]}"
+  created+=("$out/worktrees/$label")
   mkdir -p "$out/runs/$label"
-  (cd "$out/worktrees/$label" && CARGO_TARGET_DIR="$out/targets/$label" cargo build --offline --locked --release -p arora-behavior-tree-bench --bin bench-kit)
+  (cd "$out/worktrees/$label" && CARGO_TARGET_DIR="$out/targets/$label" cargo build --locked ${extra_cargo_flags[@]+"${extra_cargo_flags[@]}"} --release -p arora-behavior-tree-bench --bin bench-kit)
 done
 python3 - "$out/manifest.json" "$rounds" "${BENCH_FORMS:-}" "${labels[@]}" -- "${revisions[@]}" <<'PY'
 import json, sys

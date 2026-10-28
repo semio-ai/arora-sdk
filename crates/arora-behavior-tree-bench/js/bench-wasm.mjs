@@ -45,8 +45,13 @@ export async function loadBenchWasm(bytes, { now = () => performance.now(), rand
   const text = (ptr, len) => decoder.decode(new Uint8Array(memory.buffer, ptr, len));
   const call = (f) => { stderr = ''; try { return f(); } catch (e) { throw new Error(stderr.trim() || e.message); } };
   const check = (f) => { if (call(f) !== 0) throw new Error('benchmark rejected arguments or workload'); };
-  const result = () => ({ ...JSON.parse(text(x.bench_result(), x.bench_result_len())), clock });
+  const result = () => {
+    const record = JSON.parse(text(x.bench_result(), x.bench_result_len()));
+    return { ...record, clock: { ...clock, modes: record.clock.modes } };
+  };
   const [scenarios, forms] = text(x.bench_names(), x.bench_names_len()).split(';').map(s => s.split(','));
+  const defaults = JSON.parse(text(x.bench_defaults(), x.bench_defaults_len()));
+  check(() => x.bench_clock_step_us(clock.stepUs));
   check(() => x.bench_minimum_sample_us(clock.minimumSampleUs));
   const formIndex = form => { const f = forms.indexOf(form); if (f < 0) throw new Error(`unknown form: ${form}`); return f; };
   function loadWorkload(source) {
@@ -75,20 +80,24 @@ export async function loadBenchWasm(bytes, { now = () => performance.now(), rand
         for (const f of selected) workload.begin(f);
         for (let s = 0; s < samples; s++) for (const f of selected) { workload.select(f); workload.sample(); await yieldBetween(); }
         let combined;
-        for (const f of selected) { workload.select(f); const r = workload.finish(); if (!combined) combined = r; else Object.assign(combined.forms, r.forms); }
+        for (const f of selected) { workload.select(f); const r = workload.finish(); if (!combined) combined = r; else { Object.assign(combined.forms, r.forms); Object.assign(combined.clock.modes, r.clock.modes); } }
         return combined;
       },
     };
     return workload;
   }
   return {
-    forms, scenarios, clock, loadWorkload,
-    loadScale(n, scenario, { warmUp = 200, ticks = 500 } = {}) {
+    forms, scenarios, clock, defaults, loadWorkload,
+    scaleName(n, scenario) {
+      check(() => x.bench_scale_name(n, scenarios.indexOf(scenario)));
+      return JSON.parse(text(x.bench_result(), x.bench_result_len()));
+    },
+    loadScale(n, scenario, { warmUp = defaults.warmUp, ticks = defaults.ticks } = {}) {
       const s = scenarios.indexOf(scenario);
       if (s < 0 || ![n, ticks].every(v => Number.isInteger(v) && v > 0) || !Number.isInteger(warmUp) || warmUp < 0) throw new Error('invalid scale cell');
       check(() => x.bench_scale_load(n, s, warmUp, ticks)); return session();
     },
-    measure(n, scenario, form, { warmUp = 200, ticks = 500, samples = 7 } = {}) {
+    measure(n, scenario, form, { warmUp = defaults.warmUp, ticks = defaults.ticks, samples = 7 } = {}) {
       const s = scenarios.indexOf(scenario), f = formIndex(form);
       if (s < 0 || ![n, ticks, samples].every(v => Number.isInteger(v) && v > 0) || !Number.isInteger(warmUp) || warmUp < 0 || samples % 2 === 0) throw new Error('invalid scale cell');
       check(() => x.bench_measure(n, s, f, warmUp, ticks, samples)); return result();
@@ -103,11 +112,11 @@ export function workloadTable(record, forms = Object.keys(record.forms)) {
   const lines = [`${record.ticks} ticks at ${(1 / record.dt).toFixed(0)} Hz, warm-up=${record.warmUp}; µs per tick includes host writes`,
     '| form | mean us | p50 | p95 | p99 | max | calls | dispatches |' + phases.map(p => ` ${p} us |`).join('') + ' ticks differing |',
     '|---|' + '---:|'.repeat(8 + phases.length)];
-  for (const form of forms) { const r = record.forms[form], s = r.summary; lines.push(`| ${form} | ` + [s.mean, s.p50, s.p95, s.p99, s.max, s.calls, s.dispatches, ...s.phases].map(x => x === null ? 'NaN' : x.toFixed(3)).join(' | ') + ` | ${r.differing} |`); }
+  for (const form of forms) { const r = record.forms[form], s = r.summary; lines.push(`| ${form} | ` + [s.mean, s.p50, s.p95, s.p99, s.max, s.calls, s.dispatches, ...s.phases].map(x => x === null ? 'unresolved' : x.toFixed(3)).join(' | ') + ` | ${r.differing} |`); }
   return lines.join('\n');
 }
 export const scaleHeader = '| N | scenario | form | mean us | p50 | p95 | p99 | max | calls | dispatches | ticks differing |\n|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|';
 export function scaleRow(n, scenario, form, r) {
   const s = r.summary;
-  return `| ${n} | ${scenario} | ${form} | ` + [s.mean, s.p50, s.p95, s.p99, s.max, s.calls, s.dispatches].map(x => x.toFixed(3)).join(' | ') + ` | ${r.differing} |`;
+  return `| ${n} | ${scenario} | ${form} | ` + [s.mean, s.p50, s.p95, s.p99, s.max, s.calls, s.dispatches].map(x => x === null ? 'unresolved' : x.toFixed(3)).join(' | ') + ` | ${r.differing} |`;
 }
