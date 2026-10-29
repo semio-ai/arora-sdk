@@ -1,199 +1,211 @@
-# Arora — Detailed Overview
+# Concepts
 
-Semio Arora is a runtime dedicated to Semio's robotics software.
+Arora's ideas, one at a time, each built on the ones before it. Every section
+is short and ends where a crate's own documentation takes over. For how the
+code is laid out, read the [architecture](architecture.md) next; for why it is
+built this way, the [design decisions](design_decisions.md).
 
-For a top-down tour of the codebase see [`docs/architecture.md`](architecture.md);
-for the *why* behind the build setup and engine layout see
-[`docs/design_decisions.md`](design_decisions.md).
+The [Microduck example](../examples/policy-modules/README.md) shows every
+concept on a real robot, simulated: it is the place to see them work together.
 
-## Arora Engine
+## 1. A device
 
-The engine is the core component, capable of putting together heterogenous modules
-under an uniform entry point.
+A **device** is one running Arora: a robot, a simulated robot, a face on a
+screen, a page in a browser. In code it is one `arora::Arora`
+([`arora`](../crates/arora/readme.md)), and everything below is a part it
+owns.
 
-Concretely, the Arora Engine is capable of loading `Module`s
-(as defined in [Arora Types](https://docs.rs/arora-types/latest/arora_types/)
-["low" `Module`](https://docs.rs/arora-types/latest/arora_types/module/low/struct.ModuleDefinition.html)),
-and their binary payload, executed either [natively](../crates/arora-engine/src/executor/native.rs),
-by [`wasmtime`](../crates/arora-engine/src/executor/wasm/mod.rs) or
-a [browser host](../crates/arora-engine/src/executor/browser/mod.rs).
+## 2. Keys, values and the store
 
-It loads and exposes the types declared in the modules (`Enumeration`s or `Structure`s),
-functions, and provides hooks for the modules to call functions
-from the other modules (named `arora_dispatch`),
-or anonymous functions registered on-the-fly
-(named `arora_dispatch_indirect`).
+A device's state is a set of **values** under **keys**, held in one **data
+store**.
 
-Module descriptions and the record forms they resolve to are both defined in
-[`arora-types`](https://docs.rs/arora-types/latest/arora_types/).
-See [modules](#modules) and [records](#type-records).
+- A **key** is a `/`-separated path: `head/yaw`, `arora/time`,
+  `display/face/compressed`. A trailing `.attribute` (`head_yaw.position`) is
+  only a naming convention some HALs follow; to stores, bridges and
+  subscriptions it is one more character of the name.
+- A **value** is an `arora_types::value::Value`: a primitive (`F64`, `Boolean`,
+  `String`, …), an option, an array, or a structure or enumeration of a
+  declared type ([`arora-types`](../crates/arora-types/readme.md#values)).
+- The **store** (`arora_types::data::DataStore`) reads and writes values,
+  reports what changed, and lets a reader subscribe to a key or a subtree.
+  `SimpleDataStore` ([`arora-simple-data-store`](../crates/arora-simple-data-store/readme.md))
+  is the implementation every device uses unless it is given another.
 
-The main command-line tool is [`arora-cli`](../crates/arora-cli/readme.md).
-It is used to start an engine, load modules and run functions.
-In browsers, [`arora-web`](../crates/arora-web/readme.md) hosts the engine on
-the browser's native `WebAssembly` runtime and exposes the same operations to
-JavaScript.
+The store is the only thing the other parts share. None of them talks to
+another directly: each reads the store or writes it.
 
-## Modules
+## 3. Key meta: what a key is, and who may write it
 
-Modules are the building blocks of Semio Arora.
-Each module exports symbols for other modules to use.
-They can be implemented in C++ and in Rust, compiled into WebAssembly libraries.
-A module's interface — its id, its exported functions, their parameters, each
-pinned by id — has one source of truth, and which one depends on the language.
+The store also holds each key's **meta** (`KeyMeta`): its type, unit, range,
+rest value, description, and whether it is **editable**. Meta is the device's
+statement to the outside world:
 
-**In Rust**, the crate that implements the module carries it, declared with
-[`arora-module`](../crates/arora-module/readme.md)'s macros on the Rust module
-and its functions. Everything else comes from that declaration: the header, the
-store record, the functions a host registers, the stubs a caller programs
-against, the entry points an executor looks up. See
-[test-rust-wasm](../modules/test-rust-wasm/readme.md).
+- **A key is closed to remote writers unless its meta opens it.** A remote
+  write to a closed key, or of a value not of the key's declared type, is
+  refused whole.
+- Meta can be stated for one key (`set_meta`) or for a subtree
+  (`set_prefix_meta`); a key's own meta wins over its subtree's. The `arora`
+  runner's `--open` opens every key that has no meta of its own, for a
+  sandbox.
+- The device's own writers — its hardware, its behavior — are never checked:
+  meta constrains the outside, not the device.
 
-**In another language**, the interface is a `module.yaml`, and
-`arora-module-cli` generates the sources to implement it. See the
-[example C++ module](../examples/modules/cpp/readme.md), which builds into
-the module directory a Rust module ships in, or
-[test-cpp](../modules/test-cpp/readme.md) and
-[test-cpp-2](../modules/test-cpp-2/readme.md); a module still authored this way
-regenerates `src/arora_generated/` from the YAML on every build, so edits to
-generated files are lost — change the YAML instead, and list a function you
-call from another module under both `imports:` and `dependencies:`.
+## 4. The HAL: the device's hardware
 
-Either way, what the runtime loads is a "header": the same declaration with
-named symbols stripped, written at export. Use
-`arora-cli --header <module.yaml> --exe <binary>` to try loading a module.
+The **HAL** (hardware abstraction layer, `arora_hal::Hal`,
+[`arora-hal`](../crates/arora-hal/readme.md)) is the boundary between the
+device and its hardware. It reports what the hardware senses as changes to
+keys, receives what the device wants actuated as changes to keys, and
+**describes its keys**: its inputs (actuator targets) editable, its outputs
+(sensed values) not. That description is what opens a robot's joints to a
+remote, with no configuration of its own.
 
-When a function is called (for instance by using `arora-cli --call`),
-the call arguments are passed in via a structure which `id`
-corresponds to the function to call,
-and with arguments `args` represented as structure fields,
-associating an `id` to a `value`.
-The functions return a structure which `id`
-corresponds to the function called.
-The first field must be of the same `id` as the function
-and contains the return value.
-The remaining fields correspond to parameters that the call has mutated.
+A robot HAL talks to motors and sensors; a simulator is another HAL (the
+Microduck runs on a MuJoCo HAL), and so is a renderer drawing a face. Swapping
+the HAL is how the same device runs on a simulator and on the robot.
 
-## Type records
+## 5. Modules: typed functions
 
-Types and modules are declared as **type records** — versioned records of
-`Enumeration`, `Structure` or `Module` defined in
-[`arora_types::record`](https://docs.rs/arora-types/latest/arora_types/record/)
-and served through a [registry](../crates/arora-registry/readme.md).
-See [`docs/records.md`](records.md) for the model (unfrozen/frozen, freezing,
-record files).
+A **module** is a set of **functions** a device can call: a learned policy, a
+speech synthesizer, an animation player. Each module, function and parameter
+is identified by a UUID, so names can change without breaking callers.
 
-Records of the assets produced by Semio users are collected by Semio's hosted
-store; connecting to it is the job of the private `arora-registry-remote`
-crate and the opinionated `arora`/`arora-cli` layer (runtime `--config`,
-produced by Semio Client). No store is needed at build time.
-They can be saved into files that can be included by command-line tools.
+- **A call has in and out parameters.** Arguments go in; the return value and
+  the parameters the function wrote come back. A module never writes keys
+  itself: whoever calls it decides whether its outputs go to keys, and which.
+- **A module runs where its executor runs it.** A WebAssembly component
+  (`wasm32-wasip2`, the `wasm-component` executor) runs natively under
+  wasmtime and unchanged in a browser; a native shared library runs under the
+  `native` executor; and Rust code linked into the host registers as a **host
+  module**. The [engine](../crates/arora-engine/readme.md) loads modules and
+  dispatches calls to them, whatever their executor.
+- **A module carries its interface in a header** (`header.json`): its id, its
+  executor, and its functions with their typed parameters. A device carries a
+  module as a **module directory** — the header, the artifact, and optionally
+  the module's records.
 
-## Behavior Trees
+A module written in Rust declares its interface with the
+[`arora-module`](../crates/arora-module/readme.md) macros, and everything
+else — header, records, client stubs, entry points — comes from that
+declaration:
 
-This project includes
-[a library to run behavior trees](../crates/arora-behavior-tree/readme.md),
-described with references to functions provided by Arora
-[modules](#modules). The basic control nodes (sequence, fallback, …) are
-dispatched natively by the library itself, so a tree of them runs without
-loading any module.
+```rust
+#[arora_module::module(id = "a1a6bb9a-…", name = "polly", version = "0.1.0")]
+pub mod polly {
+  #[export(id = "e1b4bda7-…")]
+  pub fn say(#[param(id = "fb3787f2-…")] text: String) -> Status { … }
+}
+```
 
-Node functions rely on basic types provided as a library by
-[`arora-behavior-tree-types`](../crates/arora-behavior-tree-types/readme.md),
-so that Rust bindings can be generated for them using
-[`arora-module-rust`](../crates/arora-module-authoring/rust/readme.md).
+A module in another language (C++ today) declares it in a `module.yaml`, from
+which [`arora-module-cli`](../crates/arora-module-authoring/cli/readme.md)
+generates the bindings. A function that cannot finish within a step returns
+`Running` and is called again on the next one
+([long-running functions](async-functions.md)).
 
-They are also available in the YAML format in
-[`arora-behavior-tree-types-yaml`](../crates/arora-behavior-tree-types-yaml/readme.md),
-so that Rust or C++ bindings can be generated using
-[`arora-module-cpp`](../crates/arora-module-authoring/cpp/readme.md).
-See [`arora-registry`](../crates/arora-registry/readme.md) to load them
-for other uses.
+## 6. Types and records
 
-## Full Project Layout
+A function's parameters are typed, and a type is identified by its UUID too.
+A **record** is a versioned declaration of a structure, an enumeration or a
+module, as a registry stores and serves it; a **frozen** record pins the
+exact version of every type it refers to, so two machines agree on what a
+value means. The **type registry**
+([`arora-registry`](../crates/arora-registry/readme.md)) holds records and
+resolves them. A device given a module's records describes that module's
+functions with their full signatures. See [records](records.md).
 
-- [Arora Types](../crates/arora-types/readme.md)
-  defines the data formats used to communicate between modules,
-  and to advertise them locally — including the shared
-  [`DataStore`](architecture.md#runtime-an-arora-instance-and-its-seams) vocabulary
-  (`Key`, `State`, `StateChange`).
+## 7. Behaviors: what the device does each step
 
-- [Arora Buffers](../crates/arora-buffers/readme.md),
-  provides Rust, C and C++ implementations to read and write buffers.
-  Relies on the C / C++ libraries provided in [`libs`](../libs).
+A **behavior** is the program a device runs; an **interpreter**
+(`arora_behavior::BehaviorInterpreter`,
+[`arora-behavior`](../crates/arora-behavior/readme.md)) runs it, one tick per
+step, against the store, calling module functions as it goes.
 
-- [`arora-util`](../crates/arora-util/readme.md),
-  provides Arora-related utilities for C libraries,
-  written in Rust.
+- The default interpreter runs **behavior trees**
+  ([`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md)). Each
+  step ticks the tree once, and each node answers `Success`, `Failure` or
+  `Running`. Control nodes (sequence, fallback, parallel, …) and a few data
+  and string nodes are native; every other leaf calls a module function, its
+  arguments read from keys (`{head/yaw}`) or tree-local variables
+  (`{.pose}`), its outputs written back to them. The native `scatter` writes
+  a function's outputs to several keys at once. A tree is written in the
+  `.bt` [text language](../crates/arora-behavior-tree/docs/text.md), as
+  Groot XML, or as YAML.
+- A behavior is **loaded** and **edited** through an ordinary module — the
+  **interpreter module** — so a remote changes what a device does by calling
+  functions, like any other call.
+- Beside the main behavior, a device runs **task runs**: a function call or a
+  graph spawned to run until it ends or is halted, with its status published
+  under `arora/tasks/…` keys.
 
-- [Arora Engine](../crates/arora-engine/readme.md),
-  the library of the engine.
+## 8. Bridges: remote clients
 
-- [Arora Registry](../crates/arora-registry/readme.md),
-  the local registry of [type records](records.md).
+A **bridge** (`arora_bridge::Bridge`,
+[`arora-bridge`](../crates/arora-bridge/readme.md)) is an endpoint through
+which remote clients reach the device: they read keys, write the keys the
+device opens, list keys and functions, and call functions. A bridge keeps no
+state of its own about the device: it relays what the store and the
+device's modules say. A device holds any number of bridges, or none.
 
-- [Arora CLI](../crates/arora-cli/readme.md),
-  the CLI tool to load modules and run functions.
+- The **open local bridge** ([`arora-bridge-ws`](../crates/arora-bridge-ws/README.md))
+  serves JSON messages over a WebSocket on the local machine. It is what a
+  device serves when no other bridge is given.
+- The **ROS 2 bridge** ([`arora-bridge-ros2`](../crates/arora-bridge-ros2/README.md))
+  exposes keys as topics, functions as services and task runs as actions, with
+  exposure profiles such as ROS4HRI.
+- **Semio Studio** connects through a bridge built into `arora` behind the
+  opt-in `studio-bridge` feature: a build without it has no Studio code at
+  all.
 
-- [Arora Web](../crates/arora-web/readme.md),
-  a `wasm-bindgen` entry point that hosts the engine inside a browser
-  (browser-native `WebAssembly` instead of wasmtime).
+## 9. The step
 
-- The device runtime around the engine — see the
-  [runtime architecture](architecture.md#runtime-an-arora-instance-and-its-seams):
-  - [`arora`](../crates/arora/readme.md): the opinionated runtime — the
-    step loop (`Arora`), the `run` family, and the headless device runner;
-  - [`arora-hal`](../crates/arora-hal): the `Hal` trait, the device boundary;
-  - [`arora-hal-naoqi`](https://github.com/semio-ai/arora-aldebaran/blob/main/crates/arora-hal-naoqi/readme.md): NAO and Pepper
-    robots as devices, over NAOqi (in arora-aldebaran);
-  - [`arora-bridge`](../crates/arora-bridge): the `Bridge` trait, the remote
-    boundary (Semio Studio via the studio-bridge connector);
-  - [`arora-behavior`](../crates/arora-behavior): the `BehaviorInterpreter`
-    trait ticked by the runtime each step;
-  - [`arora-simple-data-store`](../crates/arora-simple-data-store): the
-    reference `DataStore`, plus the `NamespacedStore` view for mutualizing
-    one store across runtimes.
+A device advances in **steps**. `Arora::step(dt)` is synchronous and never
+waits:
 
-- [`arora-vfs`](../crates/arora-vfs/readme.md),
-  provides a virtual file system mostly used in code generation.
-  It is potentially useful for WebAssembly modules.
+```mermaid
+flowchart LR
+    clock["publish the clock<br/>arora/time, arora/dt"] --> hal_in["apply the HAL's<br/>readings"]
+    hal_in --> remote_in["apply the bridges'<br/>commands"]
+    remote_in --> tick["tick the behavior<br/>(calls modules)"]
+    tick --> out["send what changed<br/>to the HAL and the bridges"]
+```
 
-- Arora Module libraries:
-  - [`arora-module-core`](../crates/arora-module-authoring/core/readme.md):
-    a library to analyze type and module declarations,
-    and resolve them for code generation.
-  - [`arora-module-cli`](../crates/arora-module-authoring/cli/readme.md):
-    a library to generate code from a module description.
-    It finds the various code generators locally.
-  - [`arora-module-rust`](../crates/arora-module-authoring/rust/readme.md):
-    the Rust code generator for modules.
-    Also works as a library.
-  - [`arora-module-cpp`](../crates/arora-module-authoring/cpp/readme.md):
-    the C++ code generator for modules.
-    Only works as a executable.
+The order is the precedence: when two writers set one key in a step, the
+behavior wins over a remote, and a remote over the hardware. The device is
+the one owner of its state, so nothing locks and nothing races. A runner
+steps it on a fixed period (10 ms by default); a browser page steps it from
+its own frame loop. The [runtime's data flow](../crates/arora/docs/runtime-and-data-flow.md#one-step)
+details every phase.
 
-- Modules:
-  - [`example-cpp`](../examples/modules/cpp/readme.md):
-    an example module in C++, built into a module directory.
-  - [`test-cpp`](../modules/test-cpp/readme.md):
-    a module to test the C++ bindings.
-  - [`test-cpp-2`](../modules/test-cpp-2/readme.md):
-    a module to test the C++ that depends on
-    [`test-cpp`](../modules/test-cpp/readme.md)
-    and [`arora-behavior-tree-types-yaml`](../crates/arora-behavior-tree-types-yaml/readme.md).
-  - [Rust WASM test module](../modules/test-rust-wasm/readme.md):
-    a module to test the Rust bindings, that depends on
-    [`arora-behavior-tree-types`](../crates/arora-behavior-tree-types/readme.md).
-  - [`test-behavior-tree-nodes`](../modules/test-behavior-tree-nodes):
-    behavior-tree node functions as a module, exercising the module path in
-    tests (the basic control nodes themselves are native in
-    [`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md)).
-  - [Polly](../modules/polly): a module providing nodes for AWS Polly TTS.
+## 10. Running a device
 
-- Behavior Tree:
-  - [Types](../crates/arora-behavior-tree-types/readme.md):
-    basic types used in behavior trees.
-  - [Types YAML](../crates/arora-behavior-tree-types-yaml/readme.md):
-    the same types serialized as YAML.
-  - [Behavior Tree](../crates/arora-behavior-tree/readme.md):
-    the Arora-specific library to run behavior trees.
+- The **`arora` runner** ([`arora`](../crates/arora/readme.md#run-the-device-runner))
+  is a device with a stand-in HAL, serving the open local bridge: enough to
+  load behaviors and modules and drive them remotely.
+- A **robot runner** is the same with the robot's HAL: `arora-ros2`
+  ([`arora-hal-ros2`](../crates/arora-hal-ros2/readme.md)) and `arora-restful`
+  ([`arora-hal-restful`](../crates/arora-hal-restful/readme.md)) here, the
+  NAO and Pepper runners in
+  [arora-aldebaran](https://github.com/semio-ai/arora-aldebaran). A new robot
+  gets a runner of its own, in a repository of its own, against the published
+  crates.
+- A device has a name and a **device directory**, which holds what it keeps
+  between runs: the module directories it loads at start.
+- In a browser, [`arora-web`](../crates/arora-web/readme.md) runs the same
+  device, its components executed by the browser's `WebAssembly`.
+
+## 11. Libraries built on the vocabulary
+
+Some crates compute on `Value`s and are usable inside or outside a device:
+
+- [`arora-animation`](../crates/arora-animation/readme.md): keyframed
+  animations and their exact evaluation, served to devices as the module
+  `@arora/animation` ([`modules/animation`](../modules/animation/readme.md)).
+- [`arora-geometry`](../crates/arora-geometry/README.md) and
+  [`arora-graphics-types`](../crates/arora-graphics-types/README.md): vectors,
+  quaternions, transforms and colours as Arora types.
+- [`arora-dataflow-nodes`](../crates/arora-dataflow-nodes/README.md): a
+  vocabulary of dataflow nodes (arithmetic, vectors, kinematics) as the
+  functions of `@arora/dataflow`, `@arora/geometry` and `@arora/kinematics`,
+  which a host serves by wrapping its `CallBridge`.

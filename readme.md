@@ -1,118 +1,183 @@
 # Arora
 
-**Arora is a runtime for robotic devices — live control, data processing and behavior execution on one deterministic loop** — built on a toolkit for defining typed functions as portable modules and calling them across languages and contexts: natively, in WebAssembly, or in the browser.
+<p align="center">
+  <a href="examples/policy-modules/README.md"><img src="examples/policy-modules/docs/images/microduck-walk.webp" alt="The Microduck walking in MuJoCo, driven by a learned policy inside a WebAssembly Arora module" width="480"></a>
+  <br><sub>Robot model and policies: the <a href="https://github.com/pollen-robotics/microduck_rl">Microduck</a> by Pollen Robotics, Apache-2.0.</sub>
+</p>
 
-Write a module in Rust or C++, declare its typed interface once, and any Arora host can load it and call its functions. Orchestrate those calls however you like: by hand, from a CLI, from the web, or as a behavior tree ticking on a robot.
+**Arora runs robots.** It is a runtime for robotic devices: it reads the
+hardware, runs the device's behavior, and lets remote clients watch and drive
+it live, all on one deterministic loop. What the device computes comes as
+**modules** — typed functions written once, in Rust or C++, that run natively,
+in WebAssembly, or in a browser.
 
-Arora resembles robotics runtimes like ROS 2 and [Copper](https://github.com/copper-project/copper-rs) ([study](docs/copper-study/copper_study.md)), but builds on top of them rather than replacing them — ROS 2, for instance, is supported as a HAL.
+Above, Pollen Robotics' **Microduck** walks in the MuJoCo simulator. Its
+gait is a learned policy compiled into a WebAssembly module; a behavior tree
+calls it every 20 ms and hands the joint targets it returns to the simulator.
+The simulator is only the device's hardware layer: a HAL for the robot
+would run the same module and the same tree against real motors. The
+[Microduck example](examples/policy-modules/README.md) runs it on a laptop in
+three commands.
 
-> **In one breath:** [`arora-types`](#the-map) is the shared type system, [`arora-engine`](#the-map) loads and runs modules, [`arora-behavior-tree`](#the-map) orchestrates calls as trees, and [`arora`](#the-map) runs it all as a live device. → [Arora on your device](#arora-on-your-device) · [Getting started](#getting-started).
+## How the duck walks: Arora in five ideas
 
-## Arora on your device
+**1. The device's state is values under keys.** Everything the duck knows is
+in one **store**: `imu.gyro`, `joints.position`, `command.vx`, `arora/time`.
+A key is a path; a value is a typed Arora `Value`.
 
-A device running Arora is a few parts around one shared state:
+**2. The HAL connects the store to the hardware.** The MuJoCo **HAL**
+(hardware abstraction layer) writes what the simulated robot senses —
+orientation, joint positions and velocities — into the store each step, and
+drives the motors from `joints.target_position`. A HAL for the real robot
+would do the same over the robot's motor bus.
 
-- a **HAL** ([`arora-hal`](crates/arora-hal/readme.md)) exposes your hardware — sensors in, actuators out — as typed values on a shared blackboard;
-- **behaviors** ([`arora-behavior`](crates/arora-behavior/readme.md)) execute against that state on every step: behavior trees out of the box, or any interpreter implementing the trait (a node graph, a script host);
-- a **bridge** ([`arora-bridge`](crates/arora-bridge/readme.md)) connects the device for **live control** — reading and writing state, calling functions, streaming updates — whether to Semio Studio (opt-in at build time: a build with the `studio-bridge` feature connects unless its run passes `--no-studio`) or to any editor speaking the protocol;
-- **modules** give behaviors typed functions to call, in wasm or native code, with their types declared as [records](docs/records.md).
-
-The runtime steps these as one deterministic loop — drain the bridge and the HAL into the state, tick the behaviors, flush the changes back out — so there is a single owner of the state and no locking in your control path. Bringing a new device to Arora means writing a HAL for its hardware and picking a bridge:
+**3. A module is a set of typed functions.** The policy module exports
+`walk`, `stand`, `sit`, `rise` and more. A call takes in parameters and gives
+back out parameters; it touches no key:
 
 ```rust
-Arora::builder()
-    .with_hal(Box::new(my_hal))
-    .with_bridge(Box::new(my_bridge))
-    .run()
-    .await?;
+pub fn walk(vx: f64, vy: f64, vyaw: f64, head: Vec<f32>, dt_ns: u64,
+            gyro: Vec<f32>, orientation: Vec<f32>,
+            joint_positions: Vec<f32>, joint_velocities: Vec<f32>,
+            targets: &mut Vec<f32>) -> Status
 ```
 
-A device can boot with no behavior at all and be driven entirely live: behaviors arrive over the bridge, tick against the blackboard, and the device answers with its state.
+**4. A behavior decides what to call, and where the results go.** Each step
+the device ticks its **behavior tree**. The walking tree is one leaf: it reads
+keys into `walk`'s arguments and writes the `targets` it gets back to
+`joints.target_position`, which the HAL then sends to the motors:
 
-## The map
-
-Arora is a single Cargo workspace of focused crates, layered from a neutral core up to opinionated wrappers. Each crate is published independently to crates.io.
-
-| Crate | What it is |
-|---|---|
-| **`arora-types`** | The basic typing system shared by everything in Arora: module headers, type/record references, values, and the `CallBridge` calling interface. Depend on this alone if you only need the vocabulary. |
-| **`arora-module-authoring`** | Produce and import modules — the codegen core, the per-language supports (Rust, C++, …), and the authoring CLI. (Several crates today; they belong together.) |
-| **`arora-registry`** | Resolve modules, their versions and dependencies — locally, or, optionally, against a remote store. |
-| **`arora-hal`** | The hardware abstraction: a device's sensors and actuators as typed state (+ its model for rendering). |
-| **`arora-bridge`** | The live-control link: state reads/writes, function calls and update streams over a remote connection. |
-| **`arora-behavior`** | The `BehaviorInterpreter` trait — what the runtime ticks each step: a behavior tree, a node graph, any interpreter. |
-| **`arora-engine`** | The generic runtime: load modules and call arbitrary typed functions in multiple execution contexts (native via `wasmtime`, in-browser via the platform `WebAssembly`). Implements the `CallBridge`. |
-| **`arora-behavior-tree`** | A standalone crate that uses the `CallBridge` (typically implemented by the engine) to call any function from any module — orchestrated as a behavior tree. Usable **without** the authoring crates; the module-backed node support is feature-gated (opt-out). |
-| **`arora`** | The opinionated wrapper: the engine pre-wired with behavior trees as the entry point, backed by Semio's services. Start here if you want "Arora, batteries included". |
-| **`arora-cli`** | The command line for Arora — drive any engine configuration, with Semio's backend integrated, promoting the opinionated defaults. |
-| **`arora-web`** | The opinionated Arora, packaged for the browser as an NPM package. |
-
-### How they fit together
-
-```
-arora-types ───────────────────── the vocabulary everything shares
-   ├─ arora-module-authoring ───── build & import modules
-   ├─ arora-registry ──────────── resolve modules + dependencies
-   ├─ arora-hal / arora-bridge / arora-behavior ── the device runtime interfaces
-   └─ arora-engine ────────────── load & run modules  (provides the CallBridge)
-         ├─ arora-behavior-tree ── orchestrate calls as trees (consumes the CallBridge)
-         └─ arora ──────────────── opinionated: engine + behavior tree + Semio backend
-               ├─ arora-cli ────── command line
-               └─ arora-web ────── browser / NPM package
+```xml
+<Walk vx="{command.vx}" vy="{command.vy}" vyaw="{command.vyaw}" head="{command.head}"
+      dt_ns="{arora/dt}" gyro="{imu.gyro}" orientation="{imu.orientation}"
+      joint_positions="{joints.position}" joint_velocities="{joints.velocity}"
+      targets="{joints.target_position}" />
 ```
 
-The key seam is the **`CallBridge`** (in `arora-types`): the engine *implements* it (it can call any loaded module function), and the behavior tree *consumes* it (it calls functions without knowing or caring who provides them). That decoupling is why `arora-behavior-tree` can be used on its own, against any `CallBridge`.
+**5. Bridges let remote clients in.** A remote client may write only the keys
+the device opens: the duck opens its `command.*` keys, its HAL the simulator's
+inputs, and every other key stays read-only to remotes. A client of the
+**open local bridge** — JSON messages over a local WebSocket — sets
+`command.vx` to `0.3`, and the duck walks forward. The same device can also
+face a ROS 2 graph, or, in a build that opts in, Semio Studio.
 
-### ROS 2 & ROS4HRI
+All five meet in the **step**, which the device runs on a fixed period: publish the
+clock, apply the HAL's readings, apply the remote writes, tick the behavior,
+send what changed to the HAL and to the clients. One owner, one order, no
+locks — the same loop natively and in a browser page.
 
-ROS 2 plugs in at either side of the device — as a bridge (the remote) or as a HAL (the device's own hardware):
+[Concepts](docs/overview.md) takes these ideas one at a time, in full.
 
-| Crate | Seam | What it is |
-|---|---|---|
-| [`arora-bridge-ros2`](crates/arora-bridge-ros2/README.md) | bridge | ROS 2 as the remote: device keys as topics, methods as ROS 2 services, task runs as ROS 2 actions. |
-| [`arora-hal-ros2`](crates/arora-hal-ros2) | HAL | ROS 2 as the device's own hardware. |
-| [`arora-msgs-ros2`](crates/arora-msgs-ros2/README.md) | — | The ROS 2 message vocabulary: generated types, a registry, a schema-driven CDR codec, and REP-2016 type hashes — including the `hri_msgs` / ROS4HRI family. |
-
-[ROS4HRI](https://ros.org/reps/rep-0155.html), the human-robot-interaction message standard, rides these: `arora-msgs-ros2` carries the `hri_msgs` types and `arora-bridge-ros2` is where a device exposes them. Vizij builds its face standard on this vocabulary — see [vizij-rs's ROS4HRI docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md). (Typed `hri_msgs`-topic exposure with a `ros4hri` naming profile is planned; today the bridge's key topics are `std_msgs` scalars.)
-
-## Getting started
+## Try it
 
 ```sh
-# Build the whole workspace
 cargo build
-
-# Run the test suite (builds the example wasm/C++ modules and calls them)
-cargo test
+./target/debug/arora crates/arora/examples/hello_tree.groot.xml
 ```
 
-See [`docs/building.md`](docs/building.md) for prerequisites, the browser/wasm target, and build flags.
+That is a device with a stand-in HAL, running a small behavior tree and
+serving the open local bridge on `ws://127.0.0.1:9000`. The
+[`arora` runner](crates/arora/readme.md#run-the-device-runner) loads modules
+from module directories (`--module`), and `--open` lets a client write any
+key, for a sandbox. For the duck, follow the
+[Microduck example](examples/policy-modules/README.md#run-it).
 
-- **Embedding the runtime?** Look at `arora-engine` — `EngineBuilder`, the executors, and `load_module_from_parts`.
-- **Writing a module?** Look at `arora-module-authoring` — declare a `module.yaml`, generate bindings, build to wasm.
-- **Behavior trees?** Look at `arora-behavior-tree`.
-- **Just want it to work?** Reach for `arora`, `arora-cli`, or `arora-web`.
+[Building](docs/building.md) lists the prerequisites (a nightly Rust that
+`rust-toolchain.toml` installs, CMake for the C++ modules).
 
-Each crate carries its own `readme.md`. Going deeper:
+## Bring your own robot
 
-- [`docs/overview.md`](docs/overview.md) — engine, modules, records, behavior trees, full layout
-- [`docs/building.md`](docs/building.md) — prerequisites, build, testing, browser target, flags
-- [`docs/records.md`](docs/records.md) — type records: versioned type declarations, freezing, record files
-- [`docs/architecture.md`](docs/architecture.md) — top-down architecture tour
-- [`docs/design_decisions.md`](docs/design_decisions.md) — the *why* behind the build setup
-- [`docs/dispatch.md`](docs/dispatch.md) — how cross-module calls (the `CallBridge` / `arora_dispatch`) work
+A robot comes to Arora as a **HAL**: an implementation of `arora_hal::Hal`
+that reports what the robot senses as keys and drives its actuators from
+keys. Hand it to a device, and the rest — the step, the behaviors, the
+modules, the bridges — is Arora's:
 
-## Where this came from
+```rust
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    arora::Arora::builder()
+        .with_hal(Box::new(MyRobotHal::connect().await?))
+        .run()
+        .await
+}
+```
 
-Arora was split across several repositories while we sorted out what would be
-open source. It now lives as **one public workspace** (`arora-sdk`); the only
-external dependency is Semio's own backend services (the hosted record store),
-which the opinionated `arora` / `arora-cli` / `arora-web` layer integrates and
-which everything below `arora-engine` can be built without.
+**Support a new robot in a repository of its own**, depending on the
+published crates (`arora`, `arora-hal`, …) from crates.io: the robot's HAL
+and its runner change with the robot, and its toolchain stays out of Arora's.
+[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran) carries NAO
+and Pepper this way. [`arora-hal`](crates/arora-hal/readme.md) explains the
+trait, and the [`arora` crate](crates/arora/readme.md#use-it-as-a-library)
+the builder and the command-line options a runner takes.
+
+## Write a module
+
+A Rust module declares its interface on the code itself, and the crate builds
+into a WebAssembly component or a native library:
+
+```rust
+#[arora_module::module(id = "a1a6bb9a-…", name = "polly", version = "0.1.0")]
+pub mod polly {
+  #[export(id = "e1b4bda7-…")]
+  pub fn say(#[param(id = "fb3787f2-…")] text: String) -> Status { … }
+}
+```
+
+Every module, function and parameter is pinned by a UUID, so names can change
+without breaking a caller. A device carries a module as a **module
+directory** — its header, its artifact and optionally its type records —
+and loads it at start. See [`arora-module`](crates/arora-module/readme.md); a C++ module
+starts from [`examples/modules/cpp`](examples/modules/cpp/readme.md).
+
+## The crates
+
+One Cargo workspace; [architecture](docs/architecture.md) shows how the
+layers depend on each other. Crates marked † are not published to crates.io.
+
+| | Crates |
+|---|---|
+| **Vocabulary** | [`arora-types`](crates/arora-types/readme.md) values, types, calls, records · [`arora-buffers`](crates/arora-buffers/readme.md) their binary form |
+| **The device** | [`arora`](crates/arora/readme.md) the runtime and its runner · [`arora-hal`](crates/arora-hal/readme.md) · [`arora-bridge`](crates/arora-bridge/readme.md) · [`arora-behavior`](crates/arora-behavior/readme.md) · [`arora-simple-data-store`](crates/arora-simple-data-store/readme.md) |
+| **Modules** | [`arora-engine`](crates/arora-engine/readme.md) loads and calls them · [`arora-module`](crates/arora-module/readme.md) declares one in Rust · [`arora-module-authoring`](crates/arora-module-authoring/cli/readme.md) generates one from a `module.yaml` · [`arora-registry`](crates/arora-registry/readme.md) the type registry |
+| **Behaviors** | [`arora-behavior-tree`](crates/arora-behavior-tree/readme.md) behavior trees, as text, Groot XML or YAML |
+| **Bridges** | [`arora-bridge-ws`](crates/arora-bridge-ws/README.md) the open local bridge · [`arora-bridge-ros2`](crates/arora-bridge-ros2/README.md) ROS 2 · [`arora-msgs-ros2`](crates/arora-msgs-ros2/README.md) ROS 2 messages |
+| **Robots** | [`arora-hal-ros2`](crates/arora-hal-ros2/readme.md)† · [`arora-hal-restful`](crates/arora-hal-restful/readme.md)† |
+| **Front ends** | [`arora-web`](crates/arora-web/readme.md) the device in a browser · [`arora-cli`](crates/arora-cli/readme.md)† call a module from the command line |
+| **Libraries** | [`arora-animation`](crates/arora-animation/readme.md) and the module [`@arora/animation`](modules/animation/readme.md) · [`arora-geometry`](crates/arora-geometry/README.md) · [`arora-graphics-types`](crates/arora-graphics-types/README.md) · [`arora-dataflow-nodes`](crates/arora-dataflow-nodes/README.md) |
+
+### ROS 2 and ROS4HRI
+
+ROS 2 meets a device on either side. As a bridge,
+[`arora-bridge-ros2`](crates/arora-bridge-ros2/README.md) exposes the
+device's keys as topics, its functions as services and its task runs as
+actions, with exposure profiles that publish typed standard messages — among
+them [ROS4HRI](https://ros.org/reps/rep-0155.html), the human-robot
+interaction standard, whose `hri_msgs` types
+[`arora-msgs-ros2`](crates/arora-msgs-ros2/README.md) carries. As a HAL,
+[`arora-hal-ros2`](crates/arora-hal-ros2/readme.md) drives a robot that
+already speaks ROS 2.
+
+## Documentation
+
+Read top to bottom:
+
+1. [Concepts](docs/overview.md) — the ideas, one at a time.
+2. [Architecture](docs/architecture.md) — the crates, the device, the engine,
+   the module pipelines.
+3. Topics: [building](docs/building.md), [testing](docs/testing.md),
+   [records](docs/records.md), [dispatch](docs/dispatch.md),
+   [long-running functions](docs/async-functions.md), the
+   [runtime's data flow](crates/arora/docs/runtime-and-data-flow.md).
+4. [Design decisions](docs/design_decisions.md) — why it is built this way.
+5. Each crate's readme, for its API.
+
+The other pages under `docs/` — proposals, plans, studies — are designs
+under discussion or research, not descriptions of the code.
 
 ## License
 
-Arora is released under the [Apache License, Version 2.0](LICENSE), copyright Semio
-Community ([NOTICE](NOTICE)), except the example module
-[`say-piper`](examples/policy-modules/modules/say-piper), which links Piper (GPLv3)
-and is licensed GPL-3.0-or-later. Each published crate ships the license and notice
-files.
+Arora is released under the [Apache License, Version 2.0](LICENSE), copyright
+Semio Community ([NOTICE](NOTICE)), except the example module
+[`say-piper`](examples/policy-modules/modules/say-piper), which links Piper
+(GPLv3) and is licensed GPL-3.0-or-later. Each published crate ships the
+license and notice files.
