@@ -2,7 +2,7 @@
 name = "arora-types"
 version = "3.10.0"
 edition = "2021"
-description = "Shared type definitions for the Semio Arora framework"
+description = "The vocabulary every part of Arora shares: values, types, calls, records and the data-store interface."
 license = "Apache-2.0"
 # arora-types lives in the arora-engine workspace since the multi-repo
 # consolidation; the old standalone arora-types repo is gone.

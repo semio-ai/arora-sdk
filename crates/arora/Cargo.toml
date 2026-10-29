@@ -2,7 +2,7 @@
 name = "arora"
 version = "16.0.0"
 edition = "2021"
-description = "Opinionated Arora runtime: an engine pre-wired with the native behavior-tree core nodes and the Semio backend."
+description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
 
 [lib]
@@ -86,8 +86,8 @@ futures = "0.3"
 # Only the runtime-free sync primitives here (the behavior-error watch); the
 # fat, executor-bearing tokio stays native-only below.
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# The default Bridge implementation: the studio-bridge Zenoh connector, published
-# as `arora-studio-bridge-client` (it also provides the Firebase config types the
+# The Semio Studio connection (opt-in, feature `studio-bridge`): the studio-bridge
+# Zenoh connector, published as `arora-studio-bridge-client` (it also provides the Firebase config types the
 # headless runner needs, under `firestore_support::options`). Native-only
 # (zenoh/firestore) and optional, so the wasm build of the library stays lean.
 # arora bundles it so a device-specific binary only has to provide its own HAL.
