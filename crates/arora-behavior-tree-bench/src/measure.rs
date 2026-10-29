@@ -49,7 +49,7 @@ fn replay_once(
 fn with_fresh_dataflow<T>(
     run: impl FnOnce(&mut arora_dataflow_nodes::functions::DataflowNodes) -> T,
 ) -> T {
-    run(&mut arora_dataflow_nodes::functions::DataflowNodes::new())
+    run(&mut Bridge::dataflow_nodes())
 }
 
 fn replay_on(

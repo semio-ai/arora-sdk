@@ -524,6 +524,29 @@ fn a_malformed_saved_state_is_a_tick_error() {
     }
 }
 
+#[test]
+fn a_stand_in_reads_f32_inputs_and_rejects_others() {
+    // A dataflow node writes f32; the stand-in reads it as the number it is,
+    // so the store matches the same value given as an f64 literal.
+    let replay = |value: &str| {
+        let mut raw = synthetic::json();
+        raw["text"] = format!(
+            "parallel\n  hold(t: {{arora/time}}, duration: 0, value: {value}, out: {{target}}, state: ())\n  running\n\nv: constant(node: \"v\", param.value: 0.75f32)"
+        )
+        .into();
+        let workload = Workload::parse(&raw.to_string()).unwrap();
+        measure::replay(&workload, FORMS[0], true, &Monotonic::default())
+    };
+    assert_eq!(
+        replay("@v").unwrap().written,
+        replay("0.75").unwrap().written
+    );
+    // A literal of another kind is the loader's error; a key holding one is
+    // the action's, naming the action and its input.
+    let error = replay("{speech/text}").err().unwrap();
+    assert!(error.contains("hold: `value` must be a number"), "{error}");
+}
+
 /// NaN payloads/signs cannot create disagreements for equal float values,
 /// including specialized float arrays and heterogeneous arrays.
 #[test]

@@ -15,6 +15,19 @@ const HOST: Module = Module {
     id: Uuid::from_u128(0xb3ac_0000),
     name: "bench",
 };
+/// The stand-in actions and their numeric inputs, besides the mutable `out`
+/// and `state` each has: what the index declares and what a call reads.
+const ACTIONS: [(&str, &[&str]); 3] = [
+    ("hold", &["t", "duration", "value"]),
+    (
+        "pulse",
+        &["t", "gap_min", "gap_max", "low", "high", "width", "salt"],
+    ),
+    (
+        "wander",
+        &["t", "gap_min", "gap_max", "salt", "low", "high"],
+    ),
+];
 fn id(name: &str) -> Uuid {
     Uuid::new_v5(&HOST.id, name.as_bytes())
 }
@@ -43,25 +56,27 @@ impl Bridge {
             ..Self::default()
         }
     }
+    /// A fresh `DataflowNodes` whose `external` and `taskrun` calls that name
+    /// no module reach the module the index declares for their function.
+    pub fn dataflow_nodes() -> functions::DataflowNodes {
+        let mut nodes = functions::DataflowNodes::new();
+        nodes.set_function_modules(
+            Self::index()
+                .iter()
+                .map(|(function, f)| (*function, f.module_id))
+                .collect(),
+        );
+        nodes
+    }
     pub fn index() -> &'static FunctionIndex {
         static INDEX: std::sync::OnceLock<FunctionIndex> = std::sync::OnceLock::new();
         INDEX.get_or_init(Self::build_index)
     }
     fn build_index() -> FunctionIndex {
         let mut index = functions::function_index().clone();
-        for (name, inputs) in [
-            ("hold", vec!["t", "duration", "value"]),
-            (
-                "pulse",
-                vec!["t", "gap_min", "gap_max", "low", "high", "width", "salt"],
-            ),
-            (
-                "wander",
-                vec!["t", "gap_min", "gap_max", "salt", "low", "high"],
-            ),
-        ] {
+        for (name, inputs) in ACTIONS {
             let parameters = inputs
-                .into_iter()
+                .iter()
                 .map(|p| (id(p), p.to_string(), false))
                 .chain(
                     [("out", true), ("state", true)]
@@ -111,10 +126,32 @@ impl Bridge {
                 .find(|f| f.id == id(name))
                 .map(|f| &*f.value)
         };
-        let number = |name| match get(name) {
-            Some(Value::F64(x)) => *x,
-            _ => 0.0,
+        let Some((action, inputs)) = ACTIONS.iter().find(|(name, _)| id(name) == call.id) else {
+            return Err(CallError::FunctionNotFound { id: call.id });
         };
+        // Every input is a number, f64 or the f32 a dataflow node writes; a
+        // missing or other input is an error rather than a silent zero.
+        let mut numbers = HashMap::new();
+        for input in *inputs {
+            let x = match get(input) {
+                Some(Value::F64(x)) => *x,
+                Some(Value::F32(x)) => f64::from(*x),
+                Some(other) => {
+                    return Err(CallError::Generic {
+                        message: format!("{action}: `{input}` must be a number, not {other}"),
+                    })
+                }
+                // A hold without a value is a timer that writes nothing.
+                None if *action == "hold" && *input == "value" => continue,
+                None => {
+                    return Err(CallError::Generic {
+                        message: format!("{action}: `{input}` is not bound"),
+                    })
+                }
+            };
+            numbers.insert(*input, x);
+        }
+        let number = |name: &str| numbers[name];
         let t = number("t");
         // A state starts as `()`; after a call it holds what the call wrote.
         let mut state = match get("state") {
@@ -136,7 +173,7 @@ impl Bridge {
         let status = if call.id == id("hold") {
             if restart {
                 state[1] = t;
-                output = Some(number("value"));
+                output = numbers.get("value").copied();
             }
             let duration = number("duration");
             if duration > 0.0 && t - state[1] >= duration - 1e-9 {
@@ -160,12 +197,15 @@ impl Bridge {
             if t >= state[1] {
                 output =
                     Some(number("low") + (number("high") - number("low")) * random(t, salt + 1.0));
-                state[2] = t + number("width");
+                // Only a pulse releases its level.
+                if call.id == id("pulse") {
+                    state[2] = t + number("width");
+                }
                 state[1] = t + gap(salt + if call.id == id("pulse") { 2.0 } else { 100.0 });
             }
             Status::Running
         } else {
-            return Err(CallError::FunctionNotFound { id: call.id });
+            unreachable!("ACTIONS names hold, pulse and wander")
         };
         state[0] = t;
         let mut mutated = vec![StructureField {
@@ -287,6 +327,32 @@ fn random(t: f64, salt: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An `external` call naming only its function reaches the module the
+    /// index declares for it.
+    #[test]
+    fn an_external_call_reaches_a_stand_in_without_naming_its_module() {
+        use arora_dataflow_nodes::{
+            functions::{encode, external_function, input_param},
+            params::Params,
+        };
+        let params = Params {
+            function: Some(id("hold")),
+            param_ids: Some(vec![id("t"), id("duration"), id("value")]),
+            ..Default::default()
+        };
+        let mut args = encode(&params).unwrap();
+        for (i, x) in [1.0, 0.0, 1.0].into_iter().enumerate() {
+            args.push((input_param(&format!("args_{i}")), Value::F64(x)));
+        }
+        let args: Vec<_> = args.iter().map(|(id, value)| (*id, value)).collect();
+        let mut host = Bridge::new(1.0 / 60.0);
+        let result = Bridge::dataflow_nodes()
+            .call_borrowed(external_function(), &args, &mut host)
+            .unwrap();
+        assert_eq!(result.ret, Value::from(Status::Running));
+        assert_eq!(host.counts.module_calls.get(), 1);
+    }
 
     #[test]
     fn draws_vary_past_two_to_the_32_microseconds() {

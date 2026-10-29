@@ -142,7 +142,8 @@ The index is the union of
 the linked modules in [modules.rs](src/modules.rs), and the host actions below.
 The dataflow dependency disables `urdf_ik`, keeping the WASI build plain Rust.
 `DataflowNodes::bridge` answers the dataflow calls in process and forwards other
-calls to the host bridge. Each replay owns a fresh `DataflowNodes`, including
+calls to the host bridge. A dataflow `external` or `taskrun` call that names no module goes to
+the module the index declares for its function. Each replay owns a fresh `DataflowNodes`, including
 its per-node caches, state and pending requests. Generated workloads give each
 dataflow call its own `node` name so its prepared site can be reused.
 
@@ -150,11 +151,13 @@ Only these host stand-ins are needed:
 
 | action | parameters and behavior | reason |
 |---|---|---|
-| `hold` | `t`, `duration`, `value`, mutable `out`, mutable `state`; writes once on entry; Running until a positive duration elapses; duration zero stays Running | no workspace function combines entry-only assignment, a status timer and restart after interruption |
+| `hold` | `t`, `duration`, `value`, mutable `out`, mutable `state`; writes `value` once on entry, or nothing when `value` is left out; Running until a positive duration elapses; duration zero stays Running | no workspace function combines entry-only assignment, a status timer and restart after interruption |
 | `pulse` | `t`, `gap_min`, `gap_max`, `low`, `high`, `width`, `salt`, mutable `out`, mutable `state`; emits a random level, then zero, after seeded random gaps; Running | oscillators and noise do not schedule random-gap pulses with release deadlines and interruption restart |
 | `wander` | `t`, `gap_min`, `gap_max`, `salt`, `low`, `high`, mutable `out`, mutable `state`; emits a random level after seeded random gaps; Running | noise samples do not retain a random-gap schedule and held output across calls |
 
-Host numeric parameters are f64; initialize each private `state` with `()`.
+Host inputs are numbers: an f64, or the f32 a dataflow node writes. Any other
+value, or a missing input other than `hold`'s `value`, is a tick error naming the
+action and input. Initialize each private `state` with `()`.
 A state other than `()` or the three numbers the action wrote is a tick error.
 The actions restart after a missed tick (a time gap greater than `1.5 * dt`).
 Random choices are deterministic functions of time and salt; [host.rs](src/host.rs)
