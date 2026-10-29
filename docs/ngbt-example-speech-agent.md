@@ -248,7 +248,9 @@ Long-running work follows Arora's call contract
   llm waits is another call.
 - **Nothing tells a provider its leaf stopped.** A speech provider plays on
   until it has seen no call for 250 ms, then drops the run; called again with
-  the same text, it starts the sentence over (vizij-arora-tts, say-piper).
+  the same text, it starts the sentence over (vizij-arora-tts, say-piper). The
+  bench's provider keeps synthesized audio by its text, so it starts over at
+  once; vizij-arora-tts fetches the audio again.
 - **Outputs come back with each call.** The speech provider reports the
   viseme at its playhead, sampled every 15 ms, as an output of `play`.
 
