@@ -1540,3 +1540,52 @@ fn parameter_named(function: &arora_behavior::ModuleFunction, name: &str) -> Uui
         .unwrap_or_else(|| panic!("a parameter {name}"))
         .0
 }
+
+/// A reference to a parameter named `_ret`, which its node writes, shows
+/// the parameter's id, since `@node._ret` reads as the node's return value:
+/// the graph reads back as itself.
+#[test]
+fn a_parameter_named_like_the_return_value_is_referenced_by_its_id() {
+    use arora_behavior::graph::Node as GraphNode;
+
+    let named_ret = Uuid::from_u128(0xDD02);
+    let (odd, function) = function(
+        Uuid::from_u128(0xDD00),
+        Uuid::from_u128(0xDD01),
+        "odd",
+        vec![(named_ret, parameter("_ret", f64_ty(), true))],
+    );
+    let mut functions = index();
+    functions.insert(odd, function);
+    let node = |name: &str, source: Source| GraphNode {
+        id: v5(name),
+        function: odd,
+        bind: [(named_ret, source)].into(),
+        children: None,
+    };
+    let graph = Graph {
+        root: Some(v5("a")),
+        nodes: vec![
+            node("a", Source::Port(Port::new(v5("b"), named_ret))),
+            node("b", Source::Value(Value::F64(1.0))),
+        ],
+    };
+    let tree = build_behavior_tree(&graph, &|_| None).expect("the tree builds");
+    let node_names: HashMap<Uuid, String> =
+        ["a", "b"].map(|name| (v5(name), name.to_string())).into();
+    let shown = tree
+        .display(Names {
+            functions: Some(&functions),
+            variables: None,
+            nodes: Some(&node_names),
+        })
+        .to_string();
+    assert!(shown.contains(&format!("@b.{named_ret}")), "{shown}");
+    let read = resolve(&parsed(&shown), &functions);
+    assert_eq!(
+        errors(&read.diagnostics),
+        Vec::<&Diagnostic>::new(),
+        "{shown}"
+    );
+    assert_eq!(sorted(read.graph), sorted(graph), "{shown}");
+}

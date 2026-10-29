@@ -154,7 +154,8 @@ impl<'a> Names<'a> {
             )
             .find_map(|function| function.function.parameters.get(&id))
             .map(|parameter| parameter.name.clone())
-            .filter(|name| is_parameter_name(name))
+            // `@node._ret` reads as the node's return value.
+            .filter(|name| is_parameter_name(name) && name != crate::text::RETURN)
             .unwrap_or_else(|| id.to_string())
     }
 
