@@ -1,18 +1,20 @@
-//! The Semio Studio connection: what [`crate::run_with_hal`] wires around the
-//! runtime loop when the `studio-bridge` feature selects Studio as the bridge
-//! — the device's enrollment with Studio, its sign-in and token rotation, the
-//! Zenoh connection.
+//! The Semio Studio connection: what
+//! [`AroraBuilder::run`](crate::AroraBuilder::run) wires as the default bridge
+//! when a runner built with Studio hands it [`Choice::Studio`]
+//! ([`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio)) — the
+//! device's enrollment with Studio, its sign-in and token rotation, the Zenoh
+//! connection.
 //!
 //! This is what makes `arora` Studio-capable (not just its binary):
 //! the full run — read Firebase config + Zenoh endpoints from the environment,
 //! keep the device's encrypted Studio credential under its name in Semio's
 //! device store, enroll the device when it is not enrolled, build the real
-//! `ZenohDeviceClient` (the studio-bridge Zenoh connector), and drive it via
-//! [`crate::run_with_frontend`] over the caller's [`DataStore`]
-//! (`arora_types::data::DataStore` — the entrypoints default it to a fresh
-//! `SimpleDataStore` for devices that do not care).
+//! `ZenohDeviceClient` (the studio-bridge Zenoh connector), and run the device
+//! over it and the builder's [`DataStore`] (a fresh `SimpleDataStore` when the
+//! builder is given none).
 //!
-//! The binary (`src/main.rs`) is a thin wrapper that just calls [`crate::run`].
+//! The binary (`src/main.rs`) assembles the builder from its command line,
+//! handing it the command line's choice, and runs it.
 //!
 //! # Whether a run connects
 //!

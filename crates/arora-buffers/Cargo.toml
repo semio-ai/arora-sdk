@@ -1,9 +1,13 @@
 [package]
 name = "arora-buffers"
-version = "3.2.0"
+version = "3.3.0"
 edition = "2021"
 description = "Binary read/write buffers and type tags for the Arora module value ABI."
 license = "Apache-2.0"
+# No native library: the key carries the directory of the C header the build
+# script generates to the build scripts of the crates depending on this one,
+# as DEP_ARORA_BUFFERS_INCLUDE.
+links = "arora_buffers"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

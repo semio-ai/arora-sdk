@@ -29,9 +29,20 @@
 //!   on an unknown handle does.
 //!
 //! A guest importing anything else fails to load, naming the import
-//! ([`provided`](crate::component_layout::provided)). A component that traps
-//! is entered no more: every later call fails with the trap it met, until the
-//! module is reloaded, as natively.
+//! ([`provided`](crate::component_layout::provided)). An instance a call
+//! trapped in is entered no more, as natively: the call fails with its trap,
+//! and before the module's next call the executor instantiates the guest
+//! module afresh, from its compiled code, logging a warning to the console
+//! that names the module and the trap. The instance that trapped is released
+//! as soon as no call runs in it, before the new one is made. The new one is
+//! made as the module was loaded: synchronously, or, for one staged by
+//! [`SharedLoader::prepare`] because the browser refuses to instantiate it
+//! synchronously, asynchronously — the call that finds it trapped starts
+//! `WebAssembly.instantiate`, and the module refuses its calls, saying it is
+//! being instantiated afresh, until the instance is ready. A module that
+//! fails to instantiate afresh runs no more calls until it is reloaded.
+//!
+//! [`SharedLoader::prepare`]: super::SharedLoader::prepare
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -45,7 +56,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 use arora_buffers::serde_uuid::serialize as serialize_value;
-use arora_types::module::low::{ExportSymbol, ModuleDefinition};
+use arora_types::module::low::{Header, ModuleDefinition};
 
 use super::{js_to_load_err, SharedLoaderRc};
 use crate::call::{CallBridge, CallableId};
@@ -96,11 +107,14 @@ impl Executor for BrowserComponentExecutor {
         &mut self,
         module_definition: ModuleDefinition,
     ) -> Result<Box<dyn Module>, LoadModuleError> {
-        let prepared = match self.staged(module_definition.header.id) {
-            Some(prepared) => prepared,
-            None => instantiate(self.engine()?, &compile(&module_definition.executable)?)?,
+        let (prepared, asynchronous) = match self.staged(module_definition.header.id) {
+            Some(prepared) => (prepared, true),
+            None => (
+                instantiate(self.engine()?, &compile(&module_definition.executable)?)?,
+                false,
+            ),
         };
-        bind(prepared, &module_definition.header.exports)
+        load(prepared, &module_definition.header, asynchronous)
     }
 
     fn load_compiled_module(
@@ -109,11 +123,11 @@ impl Executor for BrowserComponentExecutor {
     ) -> Result<Box<dyn Module>, LoadModuleError> {
         match &module.code {
             Code::BrowserComponent(guest) => {
-                let prepared = match self.staged(module.header.id) {
-                    Some(prepared) => prepared,
-                    None => instantiate(self.engine()?, guest)?,
+                let (prepared, asynchronous) = match self.staged(module.header.id) {
+                    Some(prepared) => (prepared, true),
+                    None => (instantiate(self.engine()?, guest)?, false),
                 };
-                bind(prepared, &module.header.exports)
+                load(prepared, &module.header, asynchronous)
             }
             Code::Executable(executable) => self.load_module(module_definition_from_parts(
                 module.header.clone(),
@@ -165,13 +179,29 @@ pub(crate) async fn prepare(
             .await?
             .dyn_into()
             .map_err(|_| JsValue::from_str("WebAssembly.compile: no module in result"))?;
-    let imports = Imports::new(engine, &module).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let instance: WebAssembly::Instance =
-        JsFuture::from(WebAssembly::instantiate_module(&module, &imports.object))
-            .await?
-            .dyn_into()
-            .map_err(|_| JsValue::from_str("WebAssembly.instantiate: no instance in result"))?;
-    Ok(imports.with_instance(instance, guest.initialize))
+    let component = BrowserComponent {
+        module,
+        initialize: guest.initialize,
+    };
+    instantiate_asynchronously(engine, component).await
+}
+
+/// Instantiate `component`'s guest module asynchronously
+/// (`WebAssembly.instantiate`), which no main-thread size limit applies to.
+async fn instantiate_asynchronously(
+    engine: EngineRef,
+    component: BrowserComponent,
+) -> Result<PreparedComponent, JsValue> {
+    let imports =
+        Imports::new(engine, &component.module).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let instance: WebAssembly::Instance = JsFuture::from(WebAssembly::instantiate_module(
+        &component.module,
+        &imports.object,
+    ))
+    .await?
+    .dyn_into()
+    .map_err(|_| JsValue::from_str("WebAssembly.instantiate: no instance in result"))?;
+    Ok(imports.with_instance(instance, component))
 }
 
 /// Instantiate `component`'s guest module synchronously (`new
@@ -183,28 +213,48 @@ fn instantiate(
     let imports = Imports::new(engine, &component.module)?;
     let instance = WebAssembly::Instance::new(&component.module, &imports.object)
         .map_err(|e| LoadModuleError::Internal(format!("WebAssembly.Instance: {e:?}")))?;
-    Ok(imports.with_instance(instance, component.initialize))
+    Ok(imports.with_instance(instance, component.clone()))
 }
 
 /// An instantiated guest module and what its imports hold on to, staged for
 /// the synchronous tail of a load.
 pub(crate) struct PreparedComponent {
     instance: WebAssembly::Instance,
-    /// Whether the guest's `_initialize` is to run before its first call.
-    initialize: bool,
+    /// What the instance was instantiated from.
+    component: BrowserComponent,
     host: Rc<Host>,
     closures: Vec<Box<dyn Any>>,
 }
 
-/// Bind the guest's exports, checking that it serves every function its header
-/// declares (`declared`), completing a load.
-fn bind(
+/// Complete the load of the module `header` describes from its `prepared`
+/// instance, made `asynchronous`ly or not.
+fn load(
     prepared: PreparedComponent,
-    declared: &[ExportSymbol],
+    header: &Header,
+    asynchronous: bool,
 ) -> Result<Box<dyn Module>, LoadModuleError> {
+    let component = prepared.component.clone();
+    let engine = prepared.host.engine;
+    let function_ids: Vec<Uuid> = header.exports.iter().map(|e| *e.id()).collect();
+    let instance = bind(prepared, &function_ids)?;
+    Ok(Box::new(ComponentModule {
+        name: header.name.clone(),
+        component,
+        engine,
+        asynchronous,
+        instance: Some(instance),
+        function_ids,
+        state: State::Ready,
+        entered: 0,
+    }))
+}
+
+/// Bind the guest's exports, checking that it serves every function of
+/// `function_ids`.
+fn bind(prepared: PreparedComponent, function_ids: &[Uuid]) -> Result<Instance, LoadModuleError> {
     let PreparedComponent {
         instance,
-        initialize,
+        component,
         host,
         closures,
     } = prepared;
@@ -229,7 +279,7 @@ fn bind(
 
     // The component's initializer runs the guest's `_initialize` (a WASI
     // reactor's static constructors) once, before anything else is called.
-    if initialize {
+    if component.initialize {
         required("_initialize")?
             .call0(&JsValue::NULL)
             .map_err(|e| {
@@ -240,23 +290,20 @@ fn bind(
     let functions = required("functions")?;
     let served = call_functions(&guest, &functions, export("cabi_post_functions")?.as_ref())
         .map_err(|e| LoadModuleError::Internal(format!("functions trapped: {e}")))?;
-    let function_ids: Vec<Uuid> = declared.iter().map(|e| *e.id()).collect();
     if let Some(missing) = function_ids.iter().find(|id| !served.contains(id)) {
         return Err(LoadModuleError::Internal(format!(
             "failed to find function export {missing}: the component does not serve it"
         )));
     }
 
-    Ok(Box::new(ComponentModule {
+    Ok(Instance {
         guest,
         dispatch: required("dispatch")?,
         post_dispatch: export("cabi_post_dispatch")?,
-        function_ids,
-        trapped: None,
         _instance: instance,
         _host: host,
         _closures: closures,
-    }))
+    })
 }
 
 /// The ids the guest's `functions` export returns: a `list<id>`, each id two
@@ -291,19 +338,51 @@ fn call_functions(
 }
 
 struct ComponentModule {
+    /// The module's name, which a warning names.
+    name: String,
+    /// The guest module, compiled, which instantiates afresh after a trap,
+    /// linked to `engine`: asynchronously if it was loaded so.
+    component: BrowserComponent,
+    engine: EngineRef,
+    asynchronous: bool,
+    /// The module's instance; `None` once one a call trapped in is released,
+    /// until it is instantiated afresh.
+    instance: Option<Instance>,
+    /// Functions the module's header declares; dispatch refuses others.
+    function_ids: Vec<Uuid>,
+    state: State,
+    /// How many calls into `instance` are under way: more than one while the
+    /// guest is called back. An instance in use is neither released nor
+    /// replaced: its guest still runs in it.
+    entered: usize,
+}
+
+/// A guest module's instance, its exports bound.
+struct Instance {
     guest: Guest,
     dispatch: Function,
     post_dispatch: Option<Function>,
-    /// Functions the module's header declares; dispatch refuses others.
-    function_ids: Vec<Uuid>,
-    /// Why a call trapped, once one has. A component is entered no more after
-    /// a trap, as wasmtime enforces natively: its state is whatever the trap
-    /// left. The module says so, naming the trap, until it is reloaded.
-    trapped: Option<String>,
-    // The instance and its imports live as long as the module.
+    // The instance and its imports live as long as the module's instance.
     _instance: WebAssembly::Instance,
     _host: Rc<Host>,
     _closures: Vec<Box<dyn Any>>,
+}
+
+/// Whether a module's instance may be entered, as natively.
+enum State {
+    Ready,
+    /// A call trapped in it, as the message says: the module instantiates
+    /// afresh before its next call.
+    Trapped(String),
+    /// A call trapped in it, as the message says, and a new instance is being
+    /// made asynchronously: the slot holds it once it is ready.
+    Instantiating(
+        String,
+        Rc<RefCell<Option<Result<PreparedComponent, String>>>>,
+    ),
+    /// Instantiating afresh failed, as the message says: the module runs no
+    /// more calls until it is reloaded.
+    Lost(String),
 }
 
 impl Module for ComponentModule {
@@ -311,25 +390,129 @@ impl Module for ComponentModule {
         if !self.function_ids.contains(method_id) {
             return Err(DispatchError::FunctionNotFound { id: *method_id });
         }
-        if let Some(trap) = &self.trapped {
-            return Err(DispatchError::Trap {
-                message: format!("{TRAPPED} ({trap})"),
-            });
-        }
-        let result = self.call_dispatch(method_id, arg);
+        self.recover()?;
+        let instance = self
+            .instance
+            .as_ref()
+            .expect("a module fit to run a call has an instance");
+        self.entered += 1;
+        let result = instance.call_dispatch(method_id, arg);
+        self.entered -= 1;
         if let Err(DispatchError::Trap { message }) = &result {
-            self.trapped = Some(message.clone());
+            self.state = State::Trapped(message.clone());
+        }
+        // An instance a call trapped in, once no call is under way in it, is
+        // released at once, its memory with it, as natively.
+        if self.entered == 0 && !matches!(self.state, State::Ready) {
+            self.instance = None;
         }
         result
     }
 }
 
-/// What a component that trapped answers each later call with, as natively.
-const TRAPPED: &str =
-    "the module trapped in an earlier call and runs no more calls until it is reloaded";
+/// What a component that trapped answers a call made while its instance that
+/// trapped is still in use, as natively.
+const TRAPPED: &str = "the module trapped in an earlier call and runs no call until the call \
+                       to it under way returns; its next call after that instantiates it afresh";
+
+/// What a component that trapped answers a call made while its new instance
+/// is being made asynchronously.
+const INSTANTIATING: &str = "the module trapped in an earlier call and is being instantiated \
+                             afresh asynchronously: it runs no call until its new instance is \
+                             ready";
+
+/// What a component that trapped, and then failed to instantiate afresh,
+/// answers each later call with, as natively.
+const LOST: &str = "the module trapped in an earlier call and failed to instantiate afresh: \
+                    it runs no more calls until it is reloaded";
 
 impl ComponentModule {
-    fn call_dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
+    /// Make the module fit to run a call: one whose call trapped is
+    /// instantiated afresh first, as it was loaded. The call is refused while
+    /// the instance that trapped is in use, while a new instance is being
+    /// made asynchronously, and once instantiating afresh has failed.
+    fn recover(&mut self) -> Result<(), DispatchError> {
+        let trap = match &self.state {
+            State::Ready => return Ok(()),
+            State::Lost(message) => {
+                return Err(DispatchError::Trap {
+                    message: message.clone(),
+                })
+            }
+            State::Trapped(trap) | State::Instantiating(trap, _) => trap.clone(),
+        };
+        if self.entered > 0 {
+            return Err(DispatchError::Trap {
+                message: format!("{TRAPPED} ({trap})"),
+            });
+        }
+        // The instance a call trapped in is of no further use: released
+        // before the new one is made, the two never hold memory at once.
+        self.instance = None;
+        let prepared = if self.asynchronous {
+            match self.instantiated_asynchronously(&trap) {
+                Some(prepared) => prepared.map_err(LoadModuleError::Internal),
+                None => {
+                    return Err(DispatchError::Trap {
+                        message: format!("{INSTANTIATING} ({trap})"),
+                    })
+                }
+            }
+        } else {
+            instantiate(self.engine, &self.component)
+        };
+        // A guest calling the module back while it initializes finds it in
+        // use.
+        self.entered += 1;
+        let fresh = prepared.and_then(|prepared| bind(prepared, &self.function_ids));
+        self.entered -= 1;
+        match fresh {
+            Ok(fresh) => {
+                self.instance = Some(fresh);
+                self.state = State::Ready;
+                web_sys::console::warn_1(
+                    &format!(
+                        "module '{}' was instantiated afresh after a trap: {trap}",
+                        self.name
+                    )
+                    .into(),
+                );
+                Ok(())
+            }
+            Err(error) => {
+                let message = format!("{LOST} (trap: {trap}; instantiating: {error})");
+                web_sys::console::warn_1(&format!("module '{}': {message}", self.name).into());
+                self.state = State::Lost(message.clone());
+                Err(DispatchError::Trap { message })
+            }
+        }
+    }
+
+    /// The new instance being made asynchronously after the trap `trap`, once
+    /// it is ready; `None` while it is not, the first time starting to make
+    /// it.
+    fn instantiated_asynchronously(
+        &mut self,
+        trap: &str,
+    ) -> Option<Result<PreparedComponent, String>> {
+        if let State::Instantiating(_, slot) = &self.state {
+            return slot.borrow_mut().take();
+        }
+        let slot = Rc::new(RefCell::new(None));
+        let (engine, component, ready) = (self.engine, self.component.clone(), slot.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            let instance = instantiate_asynchronously(engine, component)
+                .await
+                .map_err(js_message);
+            *ready.borrow_mut() = Some(instance);
+        });
+        self.state = State::Instantiating(trap.to_string(), slot);
+        None
+    }
+}
+
+impl Instance {
+    fn call_dispatch(&self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
         let trap = |message: String| DispatchError::Trap {
             message: format!("dispatch trapped: {message}"),
         };
@@ -611,10 +794,14 @@ impl Imports {
         Ok(imports)
     }
 
-    fn with_instance(self, instance: WebAssembly::Instance, initialize: bool) -> PreparedComponent {
+    fn with_instance(
+        self,
+        instance: WebAssembly::Instance,
+        component: BrowserComponent,
+    ) -> PreparedComponent {
         PreparedComponent {
             instance,
-            initialize,
+            component,
             host: self.host,
             closures: self.closures,
         }

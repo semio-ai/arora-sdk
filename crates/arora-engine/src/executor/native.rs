@@ -3,7 +3,7 @@ use std::{collections::HashMap, convert::TryInto};
 use super::{Executor, LoadModuleError, UnloadModuleError};
 use crate::{
     engine::EngineRef,
-    module::{DispatchError, Module},
+    module::{guest_error, DispatchError, Module},
 };
 use tempfile::tempdir;
 use uuid::Uuid;
@@ -94,7 +94,7 @@ impl Module for NativeModule {
         function_id: &uuid::Uuid,
         arg: &[u8],
     ) -> Result<Box<[u8]>, DispatchError> {
-        unsafe {
+        let bytes = unsafe {
             let func: libloading::Symbol<unsafe extern "C" fn(usize) -> usize> = self
                 .lib
                 .get(
@@ -114,7 +114,14 @@ impl Module for NativeModule {
             let size_buf = std::slice::from_raw_parts(res_ptr, 4);
             let size = u32::from_le_bytes(size_buf.try_into().unwrap());
             let res_buf: *const [u8] = std::ptr::slice_from_raw_parts(res_ptr, size as usize);
-            Ok(Box::from_raw(res_buf as *mut [u8]))
+            Box::from_raw(res_buf as *mut [u8])
+        };
+        // A library that answers with an error buffer, as a declared module's
+        // entry point does for an error, has it read as its error, as a
+        // component's is.
+        match guest_error(&bytes) {
+            Some(message) => Err(DispatchError::Guest { message }),
+            None => Ok(bytes),
         }
     }
 }

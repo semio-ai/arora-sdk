@@ -86,8 +86,8 @@ pub struct Include {
 /// A profile-declared ROS 2 action bound to a device task-run method: the
 /// exterior contract of a **skill** — a standard `.action` type served on a
 /// well-known name — systematically associated with the behavior that
-/// implements it, the association checked at startup against the device's
-/// described methods.
+/// implements it, the association checked against the device's described
+/// methods at start and whenever they change.
 #[derive(Debug, Clone)]
 pub struct ActionBinding {
     /// Absolute ROS 2 action name, e.g. `/skill/look_at`.
@@ -118,8 +118,8 @@ pub struct ActionBinding {
 /// Nothing answers the publisher. The latest message wins: the run the
 /// previous message spawned is halted, if it has not ended, before the new
 /// one is spawned, and messages arriving while a spawn is in flight collapse
-/// to the newest. The association is checked at startup against the device's
-/// described methods, like an action binding's.
+/// to the newest. The association is checked against the device's described
+/// methods, like an action binding's.
 #[derive(Debug, Clone)]
 pub struct TopicSkillBinding {
     /// Absolute ROS 2 topic name, e.g. `/skill/set_expression`.

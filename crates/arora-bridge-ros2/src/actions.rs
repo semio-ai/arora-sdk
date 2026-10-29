@@ -53,12 +53,13 @@
 //! **standard** `.action` contract instead of the synthesised one: the goal,
 //! result and feedback are registry message types (e.g.
 //! `interaction_skills/LookAt`), the action lives on its own absolute name
-//! (`/skill/look_at`), and the binding is checked at startup against the
-//! device's described methods ([`resolve_bound`]) — the exterior contract
-//! systematically associated with the behavior that implements it. Bound
-//! actions serve **one goal at a time**: `std_skills/Meta.priority`
-//! arbitrates, an equal-or-higher replacement preempting the active run (it
-//! reports `ROS_EINTR`) and a lower one being rejected. The terminal answer
+//! (`/skill/look_at`), and the binding is checked against the device's
+//! described methods ([`resolve_bound`]) at start and whenever they change —
+//! the exterior contract systematically associated with the behavior that
+//! implements it. Bound actions serve **one goal at a time**:
+//! `std_skills/Meta.priority` arbitrates, an equal-or-higher replacement
+//! preempting the active run (it reports `ROS_EINTR`) and a lower one being
+//! rejected. The terminal answer
 //! is the bound Result message carrying the `std_skills` errno of the goal's
 //! lifecycle — unless the run wrote the Result (or an errno) itself.
 
@@ -196,7 +197,7 @@ pub(crate) enum Wire {
     Bound(Box<Bound>),
 }
 
-/// The registry-typed wire of a bound action, resolved once at startup by
+/// The registry-typed wire of a bound action, resolved by
 /// [`resolve_bound`].
 #[derive(Clone)]
 pub(crate) struct Bound {
@@ -380,8 +381,8 @@ pub(crate) fn routed_args(
 }
 
 /// Resolve every profile-declared [`profile::ActionBinding`] against the
-/// device's described methods and the message registry — the startup check
-/// that a skill's exterior contract is actually implemented. Returns the
+/// device's described methods and the message registry — the check that a
+/// skill's exterior contract is actually implemented. Returns the
 /// resolved actions plus one error per binding that does not hold (an
 /// unregistered type, a missing or mis-shaped function, an unroutable goal
 /// field), so the caller can refuse the binding loudly.
@@ -1429,21 +1430,41 @@ type ResultOutbox = Outbox<RmwRequestId, Vec<u8>>;
 // The action task — one per action, driving its endpoints and its goal book.
 // =============================================================================
 
+/// What the node task sends a skill task — an action's or a topic skill's —
+/// in the order it happens: each outbound state change, which says how the
+/// task's runs are going, and the task's endpoint resolved anew whenever the
+/// device's functions change, which the next goal or message takes. The
+/// channel closing ends the task: the device no longer has the function, or
+/// the bridge stopped.
+///
+/// One endpoint name keeps one task for as long as the device has its
+/// function: a reloaded function reaches the task as a new resolution rather
+/// than a new task, so its goals and runs stay in one book and one task
+/// decides which run is the latest.
+pub(crate) enum Watch<T> {
+    Change(StateChange),
+    Resolved(T),
+}
+
 /// Serve one action: the task the node task spawns per resolved
 /// [`MethodAction`]. Owns the action's endpoints, its [`GoalBook`] and its
 /// [`Outboxes`] (single-owner, no locks) and selects over the four things
 /// that advance a goal: a SendGoal request (decode → SPAWN → accept), a
 /// CancelGoal request (stop calls → `Canceling`), a GetResult request
-/// (queued until terminal), and the device's outbound state changes (the
-/// run's status/feedback/result keys), forwarded by the node task on
-/// `changes` — plus, while a writer's send window is full, the retry of
-/// what its outbox holds back.
+/// (queued until terminal), and what the node task sends on `watch` (the
+/// run's status/feedback/result keys, and the action resolved anew) — plus,
+/// while a writer's send window is full, the retry of what its outbox holds
+/// back.
+///
+/// A goal is taken only once everything the node task sent before it has
+/// been applied: it spawns the function as the device last described it, and
+/// an action retired in the meantime takes no goal.
 pub(crate) async fn action_task(
     server: RawActionServer,
-    action: MethodAction,
+    mut action: MethodAction,
     registry: Arc<Ros2Registry>,
     cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
-    mut changes: tmpsc::UnboundedReceiver<StateChange>,
+    mut watch: tmpsc::UnboundedReceiver<Watch<MethodAction>>,
 ) {
     let mut book = GoalBook::default();
     let mut outboxes = Outboxes::default();
@@ -1451,6 +1472,23 @@ pub(crate) async fn action_task(
         tokio::select! {
             goal = server.receive_goal_request() => match goal {
                 Ok((request, bytes)) => {
+                    let mut retired = false;
+                    loop {
+                        match watch.try_recv() {
+                            Ok(Watch::Change(change)) => observe_change(
+                                &server, &action, &registry, &mut book, &mut outboxes, &change,
+                            ),
+                            Ok(Watch::Resolved(resolved)) => action = resolved,
+                            Err(tmpsc::error::TryRecvError::Empty) => break,
+                            Err(tmpsc::error::TryRecvError::Disconnected) => {
+                                retired = true;
+                                break;
+                            }
+                        }
+                    }
+                    if retired {
+                        break;
+                    }
                     if handle_goal(&server, &action, &registry, &cmd_tx, &mut book, request, &bytes)
                         .await
                     {
@@ -1485,11 +1523,13 @@ pub(crate) async fn action_task(
                     break;
                 }
             },
-            change = changes.recv() => match change {
-                Some(change) => {
+            watched = watch.recv() => match watched {
+                Some(Watch::Change(change)) => {
                     observe_change(&server, &action, &registry, &mut book, &mut outboxes, &change);
                 }
-                // The node task ended; so does this action.
+                Some(Watch::Resolved(resolved)) => action = resolved,
+                // The device no longer has the function, or the node task
+                // ended; so does this action.
                 None => break,
             },
             _ = tokio::time::sleep_until(outboxes.retry_at().unwrap_or_else(Instant::now)),

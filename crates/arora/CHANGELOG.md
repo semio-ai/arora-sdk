@@ -16,6 +16,20 @@ All notable changes to `arora`. The format follows
   the nodes it sets and removes and the ports it binds and unbinds.
 - Requires arora-bridge 6.3, on arora-behavior 10.
 
+## [16.0.1] - 2026-10-29
+
+### Fixed
+
+- The runtime's own keys are closed to remote writers whatever wider prefix
+  the host opens: `AroraBuilder::build` states the `arora` subtree
+  (`arora_behavior::built_in`) closed in the device's store, so neither
+  `arora --open` nor a host opening the empty prefix lets a remote write the
+  device's clock (`arora/time`, `arora/dt`) or its task runs' keys
+  (`arora/tasks/…`). A host opens one of those keys by stating that key's own
+  meta, before the build or after it. Over a `NamespacedStore`, the statement
+  covers the device's own subtree alone. A store that refuses the statement
+  fails the build.
+
 ## [16.0.0] - 2026-10-23
 
 ### Added

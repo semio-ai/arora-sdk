@@ -42,10 +42,9 @@ use crate::server::AroraWSServer;
 
 /// The WebSocket server as an Arora [`Bridge`].
 ///
-/// Note: the server's `validate_paths` (on by default) checks written key
-/// paths against its `Registry`, which this bridge does not populate — either
-/// mirror the runtime's keys into the registry or disable `validate_paths`
-/// when serving purely through the bridge.
+/// The server keeps nothing of the device's own: a write goes to the runtime,
+/// which accepts or refuses it, and `list_keys`, `list_methods` and `invoke`
+/// ask the device when a client asks.
 pub struct WsBridge {
     server: Arc<AroraWSServer>,
     /// The inbound command receiver, moved out (once) by [`take_inbound`].
@@ -54,7 +53,8 @@ pub struct WsBridge {
 
 impl WsBridge {
     /// Wrap a server: register handlers that turn each incoming message into a
-    /// [`BridgeCommand`] on the [`commands`](Bridge::commands) stream.
+    /// [`BridgeCommand`] on the stream [`take_inbound`](Bridge::take_inbound)
+    /// returns.
     pub async fn new(server: Arc<AroraWSServer>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded::<BridgeCommand>();
 
@@ -103,8 +103,8 @@ impl WsBridge {
             }))
             .await;
 
-        // The device plane: what `list_keys` reaches, and what `list_methods` and
-        // `invoke` reach for every name the server's own registry does not own.
+        // The device plane: what `list_keys`, `list_methods` and `invoke`
+        // reach.
         // It holds a sender, not the bridge, so it lives on the server while the
         // device owns the bridge.
         server

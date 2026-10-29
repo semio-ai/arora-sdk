@@ -9,6 +9,13 @@ build = "build.rs"
 [lib]
 path = "src/lib.rs"
 
+# For the directories of their C headers, which their `links` metadata gives
+# the build script (DEP_ARORA_BUFFERS_INCLUDE, DEP_ARORA_UTIL_INCLUDE): cargo
+# passes it through a regular dependency, not through the artifact ones below.
+[dependencies]
+arora-buffers = { path = "../../crates/arora-buffers" }
+arora-util = { path = "../../crates/arora-util" }
+
 [build-dependencies]
 anyhow = "1"
 wasi-sdk = { path = "../../crates/wasi-sdk" }

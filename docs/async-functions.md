@@ -26,8 +26,8 @@ step loop its executor, each call one `poll`, and a terminal status
 cheap calls.
 
 A guest that blocks instead does not just stall the device: on wasmtime its
-call is interrupted at the end of the step's budget, and the module refuses
-every later call until it is reloaded
+call is interrupted at the end of the step's budget, and the module is
+instantiated afresh before its next call, losing whatever state it held
 ([time limits](../crates/arora-engine/readme.md#time-and-memory-a-guest-may-spend)).
 
 ## Why the loop drives the poll

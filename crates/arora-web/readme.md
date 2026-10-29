@@ -198,7 +198,23 @@ version, and on Apple Silicon a `geckodriver` built for x86_64: install a
 native driver (`brew install geckodriver`) and name it with `GECKODRIVER` (or
 `CHROMEDRIVER`).
 
-`www/` holds two demo pages over `Engine` and `BehaviorTreeRunner`, staged and
-served by `www/serve.sh` (wasm-pack and Python 3). The script copies a
-generated `module.yaml` for `test-rust-wasm` that the module's build does not
-write, so it stops at that step.
+## Demo pages
+
+`www/` holds two pages: `index.html`, a module explorer over `Engine` and
+`Registry`, and `demo.html`, behavior trees ticked by `BehaviorTreeRunner`.
+`www/serve.sh` builds and stages them, then serves `www/` on port 8080 (`PORT`
+sets another); it needs wasm-pack, jq and Python 3.
+
+```sh
+crates/arora-web/www/serve.sh   # http://localhost:8080/index.html, /demo.html
+```
+
+The script builds arora-web into `www/pkg/` and stages each guest as a module
+directory, `www/modules/<name>/` — `header.json`, the guest and `records/` —
+from what its build or its declaration writes: `test-rust-wasm`'s `module_dir`
+example writes its header and records from the module's Rust declaration;
+`test-behavior-tree-nodes`' build writes its header to
+`src/arora_generated/header.json` and its records to `records/`. A static
+server lists no directory, so each module directory also gets
+`record-files.json`, the paths of its records, from which the explorer gives
+`Registry` each record's name.

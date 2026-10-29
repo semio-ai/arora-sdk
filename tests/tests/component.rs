@@ -60,6 +60,10 @@ past-instant-waited=true";
 
 const MODULE_ID: &str = "0cd3f0c6-95d4-4ab1-90fa-7fbcca25c2c6";
 
+/// The module whose `spin` the guest's `functions` calls, when one is loaded
+/// under this id.
+const LOAD_HOOK_ID: &str = "6f3a9c2e-1b84-4d07-a5e2-8c9d0b7f4e16";
+
 fn header() -> Header {
     header_as(MODULE_ID, "test-rust-component")
 }
@@ -263,9 +267,10 @@ fn component_error_buffer_is_a_guest_error() {
     );
 }
 
-/// After a trap a component runs no call, saying why, until it is reloaded.
+/// A call that traps fails with its trap; the component, instantiated
+/// afresh, serves the next call, without a reload.
 #[test]
-fn component_that_traps_refuses_calls_until_it_is_reloaded() {
+fn a_component_that_traps_is_instantiated_afresh_for_its_next_call() {
     let mut engine = EngineBuilder::new()
         .add_executor(ComponentExecutor::new().unwrap())
         .build();
@@ -273,17 +278,120 @@ fn component_that_traps_refuses_calls_until_it_is_reloaded() {
     engine.load_compiled_module(&compiled).unwrap();
     let (module, echo) = (MODULE_ID.parse().unwrap(), ECHO_FN.parse().unwrap());
 
-    let trap = engine
+    for _ in 0..2 {
+        let trap = engine
+            .dispatch(&module, &TRAP_FN.parse().unwrap(), &[])
+            .unwrap_err();
+        assert!(format!("{trap}").contains("dispatch trapped"), "{trap}");
+        assert_eq!(
+            &*engine.dispatch(&module, &echo, b"after").unwrap(),
+            b"after"
+        );
+    }
+}
+
+/// A component instantiated afresh after a trap is capped by the memory limit
+/// the engine holds for it then, as a reload is: a cap lowered after the load
+/// leaves the instance under way as it was, and holds the new one.
+#[test]
+fn a_component_instantiated_afresh_takes_its_module_s_current_memory_cap() {
+    use arora_engine::limits::GuestLimits;
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    let (module, grow): (Uuid, Uuid) = (MODULE_ID.parse().unwrap(), GROW_FN.parse().unwrap());
+    engine.set_guest_limits(
+        module,
+        GuestLimits {
+            memory: 32 << 20,
+            ..GuestLimits::default()
+        },
+    );
+    assert_eq!(&*engine.dispatch(&module, &grow, &[]).unwrap(), &[1]);
+    engine
         .dispatch(&module, &TRAP_FN.parse().unwrap(), &[])
         .unwrap_err();
-    assert!(format!("{trap}").contains("dispatch trapped"), "{trap}");
-    let refused = engine.dispatch(&module, &echo, b"after").unwrap_err();
-    assert!(
-        format!("{refused}").contains("trapped in an earlier call"),
-        "{refused}"
-    );
+    assert_eq!(&*engine.dispatch(&module, &grow, &[]).unwrap(), &[0]);
+}
 
-    engine.reload_module(&compiled).unwrap();
+/// A component instantiated afresh after a trap is loaded within the call that
+/// triggers it: its instantiation, and a guest it calls, end by the earlier of
+/// that call's deadline — the step's, in a step — and the load budget, never
+/// by the long budgets the modules have. Running out of time leaves the
+/// module trapped, not lost: once instantiating it takes no time, its next
+/// call is served.
+#[test]
+fn instantiating_a_trapped_component_afresh_ends_by_its_call_s_deadline() {
+    use arora_engine::limits::{GuestLimits, DEFAULT_CALL_BUDGET, EPOCH};
+    use std::time::{Duration, Instant};
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    let (module, hook, echo): (Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        LOAD_HOOK_ID.parse().unwrap(),
+        ECHO_FN.parse().unwrap(),
+    );
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    // Instantiating the guest afresh now calls the hook's `spin`.
+    load_module_from_parts(&mut engine, header_as(LOAD_HOOK_ID, "hook"), guest_bytes()).unwrap();
+    for id in [module, hook] {
+        engine.set_guest_limits(
+            id,
+            GuestLimits {
+                call_budget: Some(Duration::from_secs(30)),
+                ..GuestLimits::default()
+            },
+        );
+    }
+    engine
+        .dispatch(&module, &TRAP_FN.parse().unwrap(), &[])
+        .unwrap_err();
+
+    let step = Duration::from_millis(20);
+    for (in_step, bound) in [(None, DEFAULT_CALL_BUDGET), (Some(step), step)] {
+        let started = Instant::now();
+        engine.set_step_budget(in_step);
+        let refused = engine.dispatch(&module, &echo, b"after").unwrap_err();
+        engine.set_step_budget(None);
+        let took = started.elapsed();
+        assert!(
+            took >= bound && took < bound + 2 * EPOCH + Duration::from_millis(300),
+            "step {in_step:?}: {took:?}"
+        );
+        assert!(
+            format!("{refused}").contains("no time was left"),
+            "{refused}"
+        );
+    }
+
+    engine.unload_module(&hook).unwrap();
+    assert_eq!(
+        &*engine.dispatch(&module, &echo, b"after").unwrap(),
+        b"after"
+    );
+}
+
+/// A component that traps in a call it made back into itself is instantiated
+/// afresh once that call returns: its next call is served.
+#[test]
+fn a_component_trapped_in_its_own_callback_serves_its_next_call() {
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    let (module, echo, trap): (Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        ECHO_FN.parse().unwrap(),
+        TRAP_FN.parse().unwrap(),
+    );
+    let mut arg = module.as_bytes().to_vec();
+    arg.extend_from_slice(trap.as_bytes());
+    let failed = engine
+        .dispatch(&module, &CALL_FN.parse().unwrap(), &arg)
+        .unwrap_err();
+    assert!(format!("{failed}").contains("trapped"), "{failed}");
     assert_eq!(
         &*engine.dispatch(&module, &echo, b"after").unwrap(),
         b"after"
@@ -410,7 +518,7 @@ fn a_declared_component_refuses_an_argument_that_is_not_an_arora_buffer() {
 }
 
 /// A call to a component that loops forever is interrupted within its budget
-/// and one epoch; the component then refuses calls until it is reloaded.
+/// and one epoch; the component, instantiated afresh, serves the next call.
 #[test]
 fn a_component_call_that_overruns_its_budget_is_interrupted() {
     use arora_engine::limits::{GuestLimits, EPOCH};
@@ -447,14 +555,10 @@ fn a_component_call_that_overruns_its_budget_is_interrupted() {
         format!("{overran}").contains("of 'test-rust-component' overran its budget of 50 ms"),
         "{overran}"
     );
-    let refused = engine.dispatch(&module, &echo, &[]).unwrap_err();
-    assert!(
-        format!("{refused}").contains("trapped in an earlier call"),
-        "{refused}"
+    assert_eq!(
+        &*engine.dispatch(&module, &echo, b"after").unwrap(),
+        b"after"
     );
-
-    engine.reload_module(&compiled).unwrap();
-    assert!(engine.dispatch(&module, &echo, &[]).is_ok());
 }
 
 /// A component whose allocator grows its memory past the module's cap sees
@@ -479,7 +583,7 @@ fn a_component_growing_its_memory_past_its_cap_sees_the_allocation_fail() {
 
 /// A component calling another through `host.dispatch` gives its callee no
 /// more than its own deadline: the callee is interrupted at the caller's
-/// budget and refuses calls until it is reloaded.
+/// budget, and serves its next call instantiated afresh.
 #[test]
 fn a_component_s_callee_ends_by_its_caller_s_deadline() {
     use arora_engine::limits::{GuestLimits, EPOCH};
@@ -521,10 +625,11 @@ fn a_component_s_callee_ends_by_its_caller_s_deadline() {
         format!("{failed}").contains("overran its budget"),
         "{failed}"
     );
-    let refused = engine.dispatch(&callee, &spin, &[]).unwrap_err();
-    assert!(
-        format!("{refused}").contains("trapped in an earlier call"),
-        "{refused}"
+    assert_eq!(
+        &*engine
+            .dispatch(&callee, &ECHO_FN.parse().unwrap(), b"after")
+            .unwrap(),
+        b"after"
     );
 }
 
@@ -705,7 +810,8 @@ impl arora_engine::executor::Executor for CallsWhileLoading {
 
 /// A guest loading gives the guests it calls no more than the load's own
 /// budget: a component allowed 30 s, called while another module loads, is
-/// interrupted when the load's second is out.
+/// interrupted when the load's second is out, and serves its next call
+/// instantiated afresh.
 #[test]
 fn a_guest_called_while_another_loads_ends_by_the_load_s_budget() {
     use arora_engine::limits::{GuestLimits, DEFAULT_CALL_BUDGET};
@@ -736,10 +842,11 @@ fn a_guest_called_while_another_loads_ends_by_the_load_s_budget() {
         took < DEFAULT_CALL_BUDGET + Duration::from_millis(500),
         "{took:?}"
     );
-    let refused = engine.dispatch(&spinner, &spin, &[]).unwrap_err();
-    assert!(
-        format!("{refused}").contains("trapped in an earlier call"),
-        "{refused}"
+    assert_eq!(
+        &*engine
+            .dispatch(&spinner, &ECHO_FN.parse().unwrap(), b"after")
+            .unwrap(),
+        b"after"
     );
 }
 

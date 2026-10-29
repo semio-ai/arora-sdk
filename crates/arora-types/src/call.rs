@@ -11,8 +11,10 @@ use crate::value::{StructureField, Value};
 #[cfg_attr(feature = "derive", derive(crate::AroraType))]
 #[cfg_attr(feature = "derive", arora(id = "9fe95b4c-08f9-48cf-8c10-99686e7b2afd"))]
 pub struct Call {
-  /// The ID of the module where to find the function ID.
-  /// If absent, look for it locally.
+  /// The ID of the module the function ID belongs to. Dispatch routes on it:
+  /// [`CallBridge::arora_call`] refuses a call that names no module. A call a
+  /// module decodes from its own dispatch carries `None`, the dispatch having
+  /// routed it already.
   #[cfg_attr(feature = "derive", arora(id = "8c4633be-578a-405e-9c58-75c3bbf194be"))]
   #[serde(default)]
   pub module_id: Option<Uuid>,

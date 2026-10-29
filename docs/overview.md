@@ -47,7 +47,11 @@ statement to the outside world:
 - Meta can be stated for one key (`set_meta`) or for a subtree
   (`set_prefix_meta`); a key's own meta wins over its subtree's. The `arora`
   runner's `--open` opens every key that has no meta of its own, for a
-  sandbox.
+  sandbox — every key but the runtime's.
+- The runtime's own keys under `arora/` — its clock (`arora/time`,
+  `arora/dt`) and its task runs' (`arora/tasks/…`) — are closed: the runtime
+  states their subtree closed when the device is built, so no wider prefix
+  opens them. A host opens one by stating that key's own meta.
 - The device's own writers — its hardware, its behavior — are never checked:
   meta constrains the outside, not the device.
 

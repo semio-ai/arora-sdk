@@ -1,9 +1,13 @@
 [package]
 name = "arora-util"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Internal utility helpers for the Arora runtime."
 license = "Apache-2.0"
+# No native library: the key carries the directory of the C header the build
+# script generates to the build scripts of the crates depending on this one,
+# as DEP_ARORA_UTIL_INCLUDE.
+links = "arora_util"
 
 [lib]
 crate-type = ["staticlib", "rlib"]

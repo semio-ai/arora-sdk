@@ -20,11 +20,13 @@
 //! generated module readers consume fields positionally in that order, so this
 //! walk must match them.
 //!
-//! Supported: primitive scalars (incl. string), nested structures, and
-//! homogeneous arrays — a [`TypeRef::Array`] of a scalar element maps to a typed
-//! [`Value::ArrayU8`]/`…`, of a structure element to a [`Value::ArrayStructure`].
-//! Enumerations, options and maps error explicitly rather than mis-encode; they
-//! extend the trait and walk the same way.
+//! Supported: primitive scalars other than uuid (string included), nested
+//! structures, homogeneous arrays — a [`TypeRef::Array`] of a scalar element
+//! maps to a typed [`Value::ArrayU8`]/`…`, of a structure element to a
+//! [`Value::ArrayStructure`] — fixed-length arrays, and options, framed by the
+//! format's presence flag ([`ValueWriter::begin_option`]). Uuids, enumerations
+//! and maps error explicitly rather than mis-encode; they extend the trait and
+//! walk the same way.
 
 use uuid::Uuid;
 

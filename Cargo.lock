@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ros2"
-version = "11.2.0"
+version = "11.3.0"
 dependencies = [
  "arora",
  "arora-behavior",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "arora-types",
@@ -402,20 +402,20 @@ dependencies = [
 
 [[package]]
 name = "arora-engine"
-version = "7.0.0"
+version = "7.1.0"
 dependencies = [
  "anyhow",
  "arora-buffers",
  "arora-types",
  "async-trait",
  "bytes",
- "cbindgen",
  "console_error_panic_hook",
  "derive_more 2.1.1",
  "getrandom 0.4.3",
  "js-sys",
  "lazy_static",
  "libloading 0.9.0",
+ "log",
  "rand 0.10.2",
  "serde",
  "serde-wasm-bindgen",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "arora-util"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cbindgen",
  "uuid",
@@ -7343,7 +7343,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arora-module",
+ "arora-registry",
  "arora-types",
+ "futures",
+ "serde_json",
 ]
 
 [[package]]

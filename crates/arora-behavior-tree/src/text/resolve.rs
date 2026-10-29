@@ -503,8 +503,8 @@ impl<'a> Resolver<'a> {
             given.insert(parameter);
         }
         // A native's parameters a node must bind are known; a module
-        // function declares no default, and is passed `()` or `None` for a
-        // parameter a node leaves out, which it may mean.
+        // function declares no default, and a parameter a node leaves out is
+        // not passed at all: the function decides what its absence means.
         if let Some(native) = native(function.id()) {
             let parameters = &native.function.function.parameters;
             let missing: Vec<String> = native

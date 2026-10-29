@@ -87,7 +87,7 @@ use crate::Arora;
                   the per-user directory of the device --device (ARORA_DEVICE) names, \
                   `default` when unset — then each --module directory. A module directory holds header.json (the module's header) \
                   beside its artifact, the one file with the extension the header's executor \
-                  names: .wasm for wasm-component and wasm, the platform's dynamic library \
+                  names: .wasm for wasm-component, the platform's dynamic library \
                   for native — and \
                   optionally records/, the module's record and the records it depends on, \
                   which describe every function it exports. Entries whose name starts with \
@@ -100,11 +100,12 @@ pub struct DeviceCli {
     /// carries.
     pub groot: Option<std::path::PathBuf>,
 
-    /// Let any bridge write any key that has no meta of its own. A key is
-    /// closed to remote writers unless the device opens it; this opens every
-    /// key at once, for a sandbox or a bench — never a device on a network
-    /// others share. A key with meta of its own keeps it: a HAL's outputs it
-    /// describes stay closed, and its inputs take only their declared type.
+    /// Let any bridge write any key that has no meta of its own, outside the
+    /// runtime's `arora/` keys. A key is closed to remote writers unless the
+    /// device opens it; this opens every other key at once, for a sandbox or a
+    /// bench — never a device on a network others share. A key with meta of
+    /// its own keeps it: a HAL's outputs it describes stay closed, and its
+    /// inputs take only their declared type.
     #[arg(long)]
     pub open: bool,
 
@@ -123,7 +124,7 @@ pub struct DeviceCli {
 /// What `--module` says in a runner's help.
 #[cfg(feature = "native")]
 const MODULE_HELP: &str = "A module directory to load besides the device directory's: \
-                           header.json beside the one .wasm (executor wasm-component or wasm) or dynamic library \
+                           header.json beside the one .wasm (executor wasm-component) or dynamic library \
                            (executor native), and optionally records/. Repeatable.";
 
 /// The options every device runner takes besides its own, as a clap helper to
