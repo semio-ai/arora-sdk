@@ -79,10 +79,21 @@ const GROW_FN: Id = Id {
     lo: 0x8e61_f4a2_c9d7_b053,
 };
 
+/// The module whose `spin` this guest's `functions` calls, when one is loaded
+/// under this id, so that a test makes instantiating the guest call a guest
+/// that loops. With none loaded the call fails at once, and the failure is
+/// ignored.
+/// 6f3a9c2e-1b84-4d07-a5e2-8c9d0b7f4e16
+const LOAD_HOOK_MODULE: Id = Id {
+    hi: 0x6f3a_9c2e_1b84_4d07,
+    lo: 0xa5e2_8c9d_0b7f_4e16,
+};
+
 struct Component;
 
 impl Guest for Component {
     fn functions() -> Vec<Id> {
+        let _ = arora::module::host::dispatch(LOAD_HOOK_MODULE, SPIN_FN, &[]);
         vec![
             ECHO_FN,
             CALL_INDIRECT_FN,

@@ -60,6 +60,10 @@ past-instant-waited=true";
 
 const MODULE_ID: &str = "0cd3f0c6-95d4-4ab1-90fa-7fbcca25c2c6";
 
+/// The module whose `spin` the guest's `functions` calls, when one is loaded
+/// under this id.
+const LOAD_HOOK_ID: &str = "6f3a9c2e-1b84-4d07-a5e2-8c9d0b7f4e16";
+
 fn header() -> Header {
     header_as(MODULE_ID, "test-rust-component")
 }
@@ -284,6 +288,64 @@ fn a_component_that_traps_is_instantiated_afresh_for_its_next_call() {
             b"after"
         );
     }
+}
+
+/// A component instantiated afresh after a trap is loaded within the call that
+/// triggers it: its instantiation, and a guest it calls, end by the earlier of
+/// that call's deadline — the step's, in a step — and the load budget, never
+/// by the long budgets the modules have. Running out of time leaves the
+/// module trapped, not lost: once instantiating it takes no time, its next
+/// call is served.
+#[test]
+fn instantiating_a_trapped_component_afresh_ends_by_its_call_s_deadline() {
+    use arora_engine::limits::{GuestLimits, DEFAULT_CALL_BUDGET, EPOCH};
+    use std::time::{Duration, Instant};
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    let (module, hook, echo): (Uuid, Uuid, Uuid) = (
+        MODULE_ID.parse().unwrap(),
+        LOAD_HOOK_ID.parse().unwrap(),
+        ECHO_FN.parse().unwrap(),
+    );
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    // Instantiating the guest afresh now calls the hook's `spin`.
+    load_module_from_parts(&mut engine, header_as(LOAD_HOOK_ID, "hook"), guest_bytes()).unwrap();
+    for id in [module, hook] {
+        engine.set_guest_limits(
+            id,
+            GuestLimits {
+                call_budget: Some(Duration::from_secs(30)),
+                ..GuestLimits::default()
+            },
+        );
+    }
+    engine
+        .dispatch(&module, &TRAP_FN.parse().unwrap(), &[])
+        .unwrap_err();
+
+    let step = Duration::from_millis(20);
+    for (in_step, bound) in [(None, DEFAULT_CALL_BUDGET), (Some(step), step)] {
+        let started = Instant::now();
+        engine.set_step_budget(in_step);
+        let refused = engine.dispatch(&module, &echo, b"after").unwrap_err();
+        engine.set_step_budget(None);
+        let took = started.elapsed();
+        assert!(
+            took >= bound && took < bound + 2 * EPOCH + Duration::from_millis(300),
+            "step {in_step:?}: {took:?}"
+        );
+        assert!(
+            format!("{refused}").contains("no time was left"),
+            "{refused}"
+        );
+    }
+
+    engine.unload_module(&hook).unwrap();
+    assert_eq!(
+        &*engine.dispatch(&module, &echo, b"after").unwrap(),
+        b"after"
+    );
 }
 
 /// A component that traps in a call it made back into itself is instantiated

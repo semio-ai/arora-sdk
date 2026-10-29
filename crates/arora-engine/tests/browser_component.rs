@@ -689,10 +689,12 @@ fn a_component_that_traps_is_instantiated_afresh_for_its_next_call_in_browser() 
     }
 }
 
-/// A component prepared asynchronously, whose call trapped, is instantiated
-/// afresh from the module the loader compiled.
+/// A component prepared asynchronously, which the browser may refuse to
+/// instantiate synchronously, is instantiated afresh asynchronously after a
+/// trap: its calls are refused, saying so, until the new instance is ready,
+/// then served.
 #[wasm_bindgen_test]
-async fn a_prepared_component_that_traps_is_instantiated_afresh_in_browser() {
+async fn a_prepared_component_that_traps_is_instantiated_afresh_asynchronously_in_browser() {
     console_error_panic_hook::set_once();
     let (mut engine, loader) = engine();
     loader
@@ -703,10 +705,43 @@ async fn a_prepared_component_that_traps_is_instantiated_afresh_in_browser() {
 
     let trap = dispatch(&mut engine, TRAP_FN, &[]).unwrap_err();
     assert!(trap.contains("dispatch trapped"), "{trap}");
-    assert_eq!(
-        &*dispatch(&mut engine, ECHO_FN, b"after").expect("echo"),
-        b"after"
+    let refused = dispatch(&mut engine, ECHO_FN, b"after").unwrap_err();
+    assert!(
+        refused.contains("being instantiated afresh asynchronously"),
+        "{refused}"
     );
+    for _ in 0..100 {
+        next_task().await;
+        match dispatch(&mut engine, ECHO_FN, b"after") {
+            Ok(echoed) => {
+                assert_eq!(&*echoed, b"after");
+                return;
+            }
+            Err(refused) => assert!(
+                refused.contains("being instantiated afresh asynchronously"),
+                "{refused}"
+            ),
+        }
+    }
+    panic!("the component was not instantiated afresh");
+}
+
+/// Resolve once the browser has run its next task: a `setTimeout` of 0.
+async fn next_task() {
+    use wasm_bindgen::JsCast;
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        let set_timeout: js_sys::Function =
+            js_sys::Reflect::get(&js_sys::global(), &"setTimeout".into())
+                .expect("setTimeout")
+                .dyn_into()
+                .expect("setTimeout is a function");
+        set_timeout
+            .call2(&wasm_bindgen::JsValue::NULL, &resolve, &0.into())
+            .expect("setTimeout");
+    });
+    wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .expect("the timeout resolves");
 }
 
 /// A guest calls a function of a module — here its own — through

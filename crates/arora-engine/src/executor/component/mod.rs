@@ -24,9 +24,17 @@
 //! before the module's next call, the executor instantiates the component
 //! afresh, from its compiled code, and that call runs in the new instance,
 //! from the module's initial state. The executor logs a warning naming the
-//! module and the trap. Instantiating afresh runs, as loading does, under
-//! [`DEFAULT_CALL_BUDGET`](limits::DEFAULT_CALL_BUDGET); a module that fails
-//! to instantiate afresh runs no more calls until it is reloaded.
+//! module and the trap.
+//!
+//! Instantiating afresh is a load of the module within the call that
+//! triggers it: it ends by the earlier of that call's deadline and
+//! [`DEFAULT_CALL_BUDGET`](limits::DEFAULT_CALL_BUDGET) from its start, and
+//! a guest its initializer calls ends by that deadline too. One that runs
+//! out of time — the deadline already past, or its initializer interrupted
+//! at it — is not a failure of the module: the call fails as one with no
+//! time left, and the module's next call instantiates it afresh again. A
+//! module that fails to instantiate afresh otherwise runs no more calls
+//! until it is reloaded.
 
 use std::sync::OnceLock;
 
@@ -249,7 +257,10 @@ impl ComponentExecutor {
             .and_then(ModulePre::new)
             .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
         let function_ids: Vec<Uuid> = header.exports.iter().map(|e| *e.id()).collect();
-        let instance = instance(&pre, engine, limits.memory, &function_ids)?;
+        // The engine has opened the load, whose initializer calls end by its
+        // deadline.
+        let deadline = std::time::Instant::now() + limits::DEFAULT_CALL_BUDGET;
+        let instance = instance(&pre, engine, limits.memory, &function_ids, deadline)?;
         Ok(Box::new(ComponentModule {
             id: header.id,
             name: header.name.clone(),
@@ -271,22 +282,56 @@ struct Instance {
     store: Store<HostState>,
 }
 
+/// Why a component did not instantiate.
+enum Failure {
+    /// Its initializer or its `functions` ran past the deadline and was
+    /// interrupted.
+    Interrupted(LoadModuleError),
+    /// Anything else: a trap, a missing function, a link error.
+    Failed(LoadModuleError),
+}
+
+impl From<Failure> for LoadModuleError {
+    fn from(failure: Failure) -> Self {
+        match failure {
+            Failure::Interrupted(error) | Failure::Failed(error) => error,
+        }
+    }
+}
+
+impl Failure {
+    /// The failure `error` of a step of instantiating, `doing`.
+    fn of(doing: &str, error: wasmtime::Error) -> Self {
+        let interrupted = matches!(
+            error.downcast_ref::<wasmtime::Trap>(),
+            Some(wasmtime::Trap::Interrupt)
+        );
+        let error = LoadModuleError::Internal(format!("{doing}: {error:#}"));
+        if interrupted {
+            Failure::Interrupted(error)
+        } else {
+            Failure::Failed(error)
+        }
+    }
+}
+
 /// An instance of `pre` in a store of its own, linked to the Arora engine
 /// `engine`, each of its memories held to `memory` bytes, serving every
 /// function of `function_ids`. Instantiating runs the component's initializer
-/// and its `functions`, under [`DEFAULT_CALL_BUDGET`](limits::DEFAULT_CALL_BUDGET).
+/// and its `functions`, which end by `deadline`.
 fn instance(
     pre: &ModulePre<HostState>,
     engine: EngineRef,
     memory: usize,
     function_ids: &[Uuid],
-) -> Result<Instance, LoadModuleError> {
+    deadline: std::time::Instant,
+) -> Result<Instance, Failure> {
     let state = HostState {
         wasi: WasiCtxBuilder::new().inherit_stdio().build(),
         table: ResourceTable::new(),
         limits: StoreLimitsBuilder::new().memory_size(memory).build(),
         engine: EnginePtr(engine),
-        deadline: std::time::Instant::now() + limits::DEFAULT_CALL_BUDGET,
+        deadline,
     };
     let mut store = Store::new(pre.engine(), state);
     store.limiter(|state| &mut state.limits);
@@ -294,19 +339,19 @@ fn instance(
 
     let bindings = pre
         .instantiate(&mut store)
-        .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
+        .map_err(|e| Failure::of("instantiate", e))?;
 
     // Every function the header declares is one the component serves.
     let served = bindings
         .call_functions(&mut store)
-        .map_err(|e| LoadModuleError::Internal(format!("functions trapped: {e:#}")))?;
+        .map_err(|e| Failure::of("functions trapped", e))?;
     if let Some(missing) = function_ids
         .iter()
         .find(|id| !served.iter().any(|served| id_to_uuid(*served) == **id))
     {
-        return Err(LoadModuleError::Internal(format!(
+        return Err(Failure::Failed(LoadModuleError::Internal(format!(
             "failed to find function export {missing}: the component does not serve it"
-        )));
+        ))));
     }
     Ok(Instance { bindings, store })
 }
@@ -395,17 +440,19 @@ enum State {
     /// A call trapped in it, as the message says: the module instantiates
     /// afresh before its next call.
     Trapped(String),
-    /// Instantiating afresh failed, as the message says: the module runs no
-    /// more calls until it is reloaded.
+    /// Instantiating afresh failed, as the message says, other than by
+    /// running out of time: the module runs no more calls until it is
+    /// reloaded.
     Lost(String),
 }
 
 impl ComponentModule {
     /// Make the module fit to run a call to `function`: one whose call
-    /// trapped is instantiated afresh first, its call's deadline carried over.
-    /// The call is refused while the instance that trapped is in use, once
-    /// instantiating afresh has failed, and when no time is left before the
-    /// call's deadline.
+    /// trapped is instantiated afresh first, within a load the engine opens
+    /// for it, its call's deadline carried over. The call is refused while
+    /// the instance that trapped is in use, once instantiating afresh has
+    /// failed, and when no time is left before the call's deadline — then
+    /// the module, still trapped, instantiates afresh before its next call.
     fn recover(&mut self, function: &Uuid) -> Result<(), DispatchError> {
         let trap = match &self.state {
             State::Ready => return Ok(()),
@@ -421,15 +468,34 @@ impl ComponentModule {
                 message: format!("{TRAPPED} ({trap})"),
             });
         }
-        let deadline = self.instance.store.data().deadline;
-        // A guest calling the module back while it instantiates finds it in
-        // use.
-        self.entered += 1;
-        let fresh = instance(&self.pre, self.engine, self.memory, &self.function_ids);
-        self.entered -= 1;
+        let no_time_left = || DispatchError::Trap {
+            message: limits::no_time_left(&self.id, function),
+        };
+        let call_deadline = self.instance.store.data().deadline;
+        // SAFETY: re-entrant access to the engine, which dispatches this
+        // call further up the stack; see `HostState::engine`.
+        let deadline = unsafe { (*self.engine).begin_load(self.id) };
+        let fresh = if deadline > std::time::Instant::now() {
+            // A guest calling the module back while it instantiates finds it
+            // in use.
+            self.entered += 1;
+            let fresh = instance(
+                &self.pre,
+                self.engine,
+                self.memory,
+                &self.function_ids,
+                deadline,
+            );
+            self.entered -= 1;
+            Some(fresh)
+        } else {
+            None
+        };
+        // SAFETY: as above.
+        unsafe { (*self.engine).end_load() };
         match fresh {
-            Ok(mut fresh) => {
-                fresh.store.data_mut().deadline = deadline;
+            Some(Ok(mut fresh)) => {
+                fresh.store.data_mut().deadline = call_deadline;
                 self.instance = fresh;
                 self.state = State::Ready;
                 log::warn!(
@@ -437,7 +503,15 @@ impl ComponentModule {
                     self.name
                 );
             }
-            Err(error) => {
+            None | Some(Err(Failure::Interrupted(_))) => {
+                log::warn!(
+                    "module '{}' trapped and was not instantiated afresh before its call's \
+                     deadline; its next call tries again ({trap})",
+                    self.name
+                );
+                return Err(no_time_left());
+            }
+            Some(Err(Failure::Failed(error))) => {
                 let message = format!("{LOST} (trap: {trap}; instantiating: {error})");
                 log::warn!("module '{}': {message}", self.name);
                 self.state = State::Lost(message.clone());
@@ -446,10 +520,8 @@ impl ComponentModule {
         }
         // Instantiating may have taken the call's time: the new instance,
         // never entered, serves the next call.
-        if deadline <= std::time::Instant::now() {
-            return Err(DispatchError::Trap {
-                message: limits::no_time_left(&self.id, function),
-            });
+        if call_deadline <= std::time::Instant::now() {
+            return Err(no_time_left());
         }
         Ok(())
     }
