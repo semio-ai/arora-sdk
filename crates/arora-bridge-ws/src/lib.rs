@@ -27,7 +27,9 @@
 //! {"type": "read_values", "keys": ["face/mouth"]}
 //! {"type": "list_keys", "path": "face"}
 //! {"type": "list_methods"}
+//! {"type": "describe_methods", "path": "say"}
 //! {"type": "invoke", "method": "say", "args": {"text": {"str": "hello"}}, "request_id": "req-1"}
+//! {"type": "call", "module_id": "0195e1f2-...", "id": "0195e1f3-...", "args": [], "request_id": "req-3"}
 //! {"type": "halt", "run": "0195e1f2-...", "request_id": "req-2"}
 //! {"type": "subscribe", "keys": ["face/mouth"]}
 //!
@@ -36,7 +38,9 @@
 //! {"type": "read_values_resp", "values": {"face/mouth": {"f64": 0.5}}}
 //! {"type": "list_keys_resp", "keys": [...]}
 //! {"type": "list_methods_resp", "methods": [...]}
+//! {"type": "describe_methods_resp", "methods": [...]}
 //! {"type": "invoke_resp", "success": true, "request_id": "req-1", "value": {...}}
+//! {"type": "call_resp", "success": true, "request_id": "req-3", "ret": {...}, "mutated": []}
 //! {"type": "halt_resp", "success": true, "request_id": "req-2"}
 //! {"type": "subscribe_resp", "keys": ["face/mouth"]}
 //!
@@ -58,9 +62,18 @@
 //! `MethodInfo::task`) answers with the run named, and `halt` stops it by that
 //! run's id.
 //!
+//! `describe_methods` gives the same methods as full signatures
+//! ([`MethodSignature`](arora_bridge::MethodSignature)), with the module and
+//! function ids a `call` names; `call` makes an
+//! [`arora_types::call::Call`] as it is sent and answers with its
+//! [`CallResult`](arora_types::call::CallResult). A client holding no Rust code
+//! resolves a behavior against the signatures and loads it with a call to the
+//! behavior interpreter's `load`, by its fixed ids.
+//!
 //! A write reaches the device, which refuses a key it writes itself
 //! (`KeyMeta::editable`) rather than letting a client set what the next tick
-//! would undo.
+//! would undo. A call, by name or by ids, reaches any function the device
+//! dispatches, as the in-process caller's does: the link is trusted as local.
 //!
 //! # Server Example
 //!

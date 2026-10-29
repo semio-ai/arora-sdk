@@ -3,8 +3,9 @@
 //!
 //! What these pin is what a client can count on — the device's keys listed with
 //! their meta, a write reaching only the keys the device opened, its methods
-//! called by name, a run started and halted, and a subscription deciding which
-//! pushes arrive — so the pins survive any reshuffling of the server's internals.
+//! described and called by name or by ids, a run started and halted, and a
+//! subscription deciding which pushes arrive — so the pins survive any
+//! reshuffling of the server's internals.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -226,15 +227,24 @@ impl Device {
                         }
                         BridgeOp::Call(call) => {
                             calls.lock().expect("the call log").push(call.clone());
-                            let ret = if interpreter_module::decode_spawn(call).is_ok() {
-                                interpreter_module::encode_spawn_result(&handle())
+                            // The runtime routes on the module id, and a module
+                            // it does not have refuses the call.
+                            let known = [SAY_MODULE, OTHER_MODULE, interpreter_module::ID];
+                            if !call.module_id.is_some_and(|id| known.contains(&id)) {
+                                Err(format!("call failed: no module {:?}", call.module_id))
+                            } else if interpreter_module::decode_spawn(call).is_ok() {
+                                Ok(CallResult {
+                                    ret: interpreter_module::encode_spawn_result(&handle()),
+                                    mutated: Vec::new(),
+                                })
                             } else {
-                                Value::F32(1.0)
-                            };
-                            Ok(CallResult {
-                                ret,
-                                mutated: Vec::new(),
-                            })
+                                // Every argument comes back as mutated, so a
+                                // client sees what a call's out parameters carry.
+                                Ok(CallResult {
+                                    ret: Value::F32(1.0),
+                                    mutated: call.args.clone(),
+                                })
+                            }
                         }
                         _ => Ok(CallResult {
                             ret: Value::Unit,
@@ -342,6 +352,98 @@ async fn the_device_methods_are_listed() {
     assert_eq!(say["params"][0]["required"], true);
 
     assert_eq!(by_name("cos")["task"], false, "cos answers at once");
+}
+
+/// `describe_methods` answers with the device's signatures as it describes
+/// them — the ids a call names and the frozen function record — under the
+/// name prefix asked for.
+#[tokio::test]
+async fn the_device_methods_are_described_with_their_ids() {
+    let device = Device::serve().await;
+    let mut client = Client::connect(&device.url).await;
+
+    client
+        .send(serde_json::json!({"type": "describe_methods"}))
+        .await;
+    let answer = client.answer().await;
+    assert_eq!(answer["type"], "describe_methods_resp");
+    let described: Vec<MethodSignature> =
+        serde_json::from_value(answer["methods"].clone()).expect("signatures");
+    let mut expected = signatures();
+    expected.sort_by(|left, right| {
+        (&left.name, left.module_id, left.id).cmp(&(&right.name, right.module_id, right.id))
+    });
+    assert_eq!(described, expected, "every signature, as the device has it");
+
+    client
+        .send(serde_json::json!({"type": "describe_methods", "path": "co"}))
+        .await;
+    let answer = client.answer().await;
+    let described: Vec<MethodSignature> =
+        serde_json::from_value(answer["methods"].clone()).expect("signatures");
+    assert_eq!(described.len(), 1, "{answer}");
+    assert_eq!(described[0].id, COS);
+    assert_eq!(described[0].module_id, SAY_MODULE);
+}
+
+/// A call by ids reaches the runtime as it was sent — a task-shaped function
+/// is called, not spawned — and answers with the call's result, its return
+/// value and mutated arguments beside the request id.
+#[tokio::test]
+async fn a_call_by_ids_reaches_the_runtime_as_sent() {
+    let device = Device::serve().await;
+    let mut client = Client::connect(&device.url).await;
+
+    let call = Call {
+        module_id: Some(SAY_MODULE),
+        id: SAY,
+        args: vec![arora_types::value::StructureField {
+            id: SAY_TEXT,
+            value: Box::new(Value::String("hello".to_string())),
+        }],
+    };
+    let mut message = serde_json::to_value(&call).expect("a call in JSON");
+    message["type"] = "call".into();
+    message["request_id"] = "req-3".into();
+    client.send(message).await;
+    let answer = client.answer().await;
+    assert_eq!(
+        answer,
+        serde_json::json!({
+            "type": "call_resp",
+            "success": true,
+            "request_id": "req-3",
+            "ret": {"f32": 1.0},
+            "mutated": [{"id": SAY_TEXT.to_string(), "value": {"str": "hello"}}]
+        })
+    );
+    assert_eq!(device.calls(), vec![call], "called as sent, not spawned");
+}
+
+/// A call the runtime refuses answers `success: false` with its reason.
+#[tokio::test]
+async fn a_refused_call_answers_the_runtime_s_reason() {
+    let device = Device::serve().await;
+    let mut client = Client::connect(&device.url).await;
+
+    let unknown = Uuid::from_u128(0xdead);
+    client
+        .send(serde_json::json!({
+            "type": "call", "module_id": unknown, "id": SAY, "request_id": "req-4"
+        }))
+        .await;
+    let answer = client.answer().await;
+    assert_eq!(answer["type"], "call_resp");
+    assert_eq!(answer["success"], false, "{answer}");
+    assert_eq!(answer["request_id"], "req-4");
+    assert!(answer.get("ret").is_none(), "{answer}");
+    assert!(
+        answer["message"]
+            .as_str()
+            .expect("a message")
+            .contains("no module"),
+        "{answer}"
+    );
 }
 
 /// An invoke of a task-shaped method spawns it with the arguments bound to the
