@@ -24,7 +24,12 @@
 //! before the module's next call, the executor instantiates the component
 //! afresh, from its compiled code, and that call runs in the new instance,
 //! from the module's initial state. The executor logs a warning naming the
-//! module and the trap.
+//! module and the trap. The instance that trapped is released as soon as no
+//! call runs in it, before the new one is made, so the two never hold memory
+//! at once; the new one's memory cap is the one the engine holds for the
+//! module then ([`Engine::set_guest_limits`]), as a reload's is.
+//!
+//! [`Engine::set_guest_limits`]: crate::engine::Engine::set_guest_limits
 //!
 //! Instantiating afresh is a load of the module within the call that
 //! triggers it: it ends by the earlier of that call's deadline and
@@ -267,8 +272,8 @@ impl ComponentExecutor {
             budget: limits::DEFAULT_CALL_BUDGET,
             pre,
             engine,
-            memory: limits.memory,
-            instance,
+            deadline,
+            instance: Some(instance),
             function_ids,
             state: State::Ready,
             entered: 0,
@@ -420,17 +425,22 @@ struct ComponentModule {
     /// The budget of the call under way, which an overrun's error names.
     budget: std::time::Duration,
     /// The compiled component, linked, which instantiates it afresh after a
-    /// trap, linked to `engine`, each memory held to `memory` bytes.
+    /// trap, linked to `engine`, under the limits the engine holds for the
+    /// module then.
     pre: ModulePre<HostState>,
     engine: EngineRef,
-    memory: usize,
-    instance: Instance,
+    /// The deadline of the call under way, kept for it whether or not the
+    /// module has an instance.
+    deadline: std::time::Instant,
+    /// The module's instance; `None` once one a call trapped in is released,
+    /// until it is instantiated afresh.
+    instance: Option<Instance>,
     /// Functions the module's header declares; dispatch refuses others.
     function_ids: Vec<Uuid>,
     state: State,
     /// How many calls into `instance` are under way: more than one while the
-    /// guest is called back. An instance in use is not replaced: its guest
-    /// still runs in it.
+    /// guest is called back. An instance in use is neither released nor
+    /// replaced: its guest still runs in it.
     entered: usize,
 }
 
@@ -471,21 +481,21 @@ impl ComponentModule {
         let no_time_left = || DispatchError::Trap {
             message: limits::no_time_left(&self.id, function),
         };
-        let call_deadline = self.instance.store.data().deadline;
+        // The instance a call trapped in is of no further use: released
+        // before the new one is made, the two never hold memory at once.
+        self.instance = None;
+        let call_deadline = self.deadline;
         // SAFETY: re-entrant access to the engine, which dispatches this
-        // call further up the stack; see `HostState::engine`.
+        // call further up the stack; see `HostState::engine`. The new
+        // instance's memory cap is the one the engine holds for the module
+        // now, as a reload's is.
+        let memory = unsafe { (*self.engine).guest_limits(&self.id) }.memory;
         let deadline = unsafe { (*self.engine).begin_load(self.id) };
         let fresh = if deadline > std::time::Instant::now() {
             // A guest calling the module back while it instantiates finds it
             // in use.
             self.entered += 1;
-            let fresh = instance(
-                &self.pre,
-                self.engine,
-                self.memory,
-                &self.function_ids,
-                deadline,
-            );
+            let fresh = instance(&self.pre, self.engine, memory, &self.function_ids, deadline);
             self.entered -= 1;
             Some(fresh)
         } else {
@@ -496,7 +506,7 @@ impl ComponentModule {
         match fresh {
             Some(Ok(mut fresh)) => {
                 fresh.store.data_mut().deadline = call_deadline;
-                self.instance = fresh;
+                self.instance = Some(fresh);
                 self.state = State::Ready;
                 log::warn!(
                     "module '{}' was instantiated afresh after a trap: {trap}",
@@ -529,7 +539,10 @@ impl ComponentModule {
 
 impl AroraModule for ComponentModule {
     fn set_call_deadline(&mut self, deadline: std::time::Instant, budget: std::time::Duration) {
-        self.instance.store.data_mut().deadline = deadline;
+        self.deadline = deadline;
+        if let Some(instance) = &mut self.instance {
+            instance.store.data_mut().deadline = deadline;
+        }
         self.budget = budget;
     }
 
@@ -538,15 +551,18 @@ impl AroraModule for ComponentModule {
             return Err(DispatchError::FunctionNotFound { id: *method_id });
         }
         self.recover(method_id)?;
+        let instance = self
+            .instance
+            .as_mut()
+            .expect("a module fit to run a call has an instance");
         self.entered += 1;
-        let result = self.instance.bindings.call_dispatch(
-            &mut self.instance.store,
-            uuid_to_id(method_id),
-            arg,
-        );
+        let result =
+            instance
+                .bindings
+                .call_dispatch(&mut instance.store, uuid_to_id(method_id), arg);
         self.entered -= 1;
         let result = match result {
-            Ok(result) => result,
+            Ok(result) => Ok(result),
             Err(e) => {
                 let message = match e.downcast_ref::<wasmtime::Trap>() {
                     Some(wasmtime::Trap::Interrupt) => {
@@ -555,9 +571,15 @@ impl AroraModule for ComponentModule {
                     _ => format!("dispatch trapped: {e:#?}"),
                 };
                 self.state = State::Trapped(message.clone());
-                return Err(DispatchError::Trap { message });
+                Err(DispatchError::Trap { message })
             }
         };
+        // An instance a call trapped in, once no call is under way in it, is
+        // released at once, its memory with it.
+        if self.entered == 0 && !matches!(self.state, State::Ready) {
+            self.instance = None;
+        }
+        let result = result?;
         match result {
             // A guest that writes its error as an error buffer, the form Arora
             // Buffers give an error, has it read as its error.
