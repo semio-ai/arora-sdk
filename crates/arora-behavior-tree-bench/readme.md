@@ -29,11 +29,16 @@ step. Coarse clocks time all measured ticks of each replay as one interval, with
 two clock reads, and divide by the measured tick count. A pilot fixes the number
 of replays before collecting a sample, targeting 50 clock steps of total measured
 work. The pilot estimate does not guarantee that budget in subsequent replays.
-The coarse mean averages interval means across replays and samples; a quantized
-reading's error averages out only when the intervals start at varying points
-within a clock step. When the pilot's and every replay's readings are identical
-and span fewer than 20 steps, the replay's length is locked to the step and the
-mean is unresolved, as are any quantiles of sample means that include it. Per-tick
+The coarse mean averages interval means across replays and samples. It assumes
+each interval starts at a uniformly random point within a clock step, so that
+quantization errors cancel. A real clock satisfies this: lowering and host work
+vary from replay to replay, and browsers jitter their coarsened timers. A clock
+whose phase is a function of the replay does not. When the pilot's and every
+replay's readings are identical and span fewer than 20 steps, the replay's
+length is locked to the step, and the mean is unresolved, as are any quantiles
+of sample means that include it. A deterministic clock whose phase cycles
+through q values instead gives readings that vary, yet can still bias the mean
+by up to one step divided by q; measure such a clock with fine timing. Per-tick
 quantiles, maximum, time bins and phase means are unresolved: JSON uses `null`,
 tables print `unresolved`, and numeric C rows use NaN.
 

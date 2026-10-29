@@ -327,9 +327,11 @@ pub fn replay_adaptive(
     result.repetitions = repetitions;
     result.mean_us /= repetitions as f64;
     // A quantized interval's error averages out only when the intervals start
-    // at varying points within a clock step. Readings that never vary, from
-    // the pilot through every replay, over fewer than 20 steps, mean the
-    // replay's length is locked to the step: the mean is unresolved.
+    // at uniformly random points within a clock step, as a real clock's do.
+    // Readings that never vary, from the pilot through every replay, over
+    // fewer than 20 steps, mean the replay's length is locked to the step: the
+    // mean is unresolved. A clock whose phase cycles through a few values
+    // passes this check and can still bias the mean; the README states the bound.
     if mode == TimingMode::Replay {
         let first = pilot.replay_us[0];
         if first < 20.0 * clock.step_us() && result.replay_us.iter().all(|&x| x == first) {
