@@ -308,3 +308,26 @@ nodes:
         ]
     );
 }
+
+/// A port written twice in one node's bindings is refused as the node is
+/// read, in JSON as in YAML, rather than kept as its last binding.
+#[test]
+fn a_port_written_twice_is_refused() {
+    let json = r#"{"nodes": [{"id": "cm", "function": "clamp",
+        "bind": {"lo": {"key": "a"}, "lo": {"key": "b"}}}]}"#;
+    let error = serde_json::from_str::<Graph>(json).unwrap_err();
+    assert!(
+        error.to_string().contains("port `lo` is bound twice"),
+        "{error}"
+    );
+    let yaml = "
+nodes:
+- id: cm
+  function: clamp
+  bind:
+    lo: {key: a}
+    lo: {key: b}
+";
+    let error = serde_yaml::from_str::<Graph>(yaml).unwrap_err();
+    assert!(error.to_string().contains("lo"), "{error}");
+}

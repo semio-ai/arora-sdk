@@ -70,14 +70,53 @@ pub enum Source {
 pub struct Node {
     pub id: String,
     pub function: String,
+    /// A port written twice is refused when the node is read, as a port
+    /// two references name is when it is resolved.
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        with = "serde_yaml::with::singleton_map_recursive"
+        serialize_with = "serde_yaml::with::singleton_map_recursive::serialize",
+        deserialize_with = "bindings"
     )]
     pub bind: BTreeMap<String, Source>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<String>>,
+}
+
+/// A node's bindings, each port written once.
+fn bindings<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, Source>, D::Error> {
+    struct Once(BTreeMap<String, Source>);
+    impl<'de> Deserialize<'de> for Once {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct Visitor;
+            impl<'de> serde::de::Visitor<'de> for Visitor {
+                type Value = Once;
+                fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    f.write_str("a map of ports to what they are bound to")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<Once, A::Error> {
+                    let mut bind = BTreeMap::new();
+                    while let Some((port, source)) = map.next_entry::<String, Source>()? {
+                        if bind.contains_key(&port) {
+                            return Err(serde::de::Error::custom(format!(
+                                "port `{port}` is bound twice"
+                            )));
+                        }
+                        bind.insert(port, source);
+                    }
+                    Ok(Once(bind))
+                }
+            }
+            deserializer.deserialize_map(Visitor)
+        }
+    }
+    serde_yaml::with::singleton_map_recursive::deserialize::<Once, D>(deserializer)
+        .map(|once| once.0)
 }
 
 /// A graph, by references: see [`graph::Graph`].
