@@ -7,7 +7,9 @@ only an executable.
 For a module `example-cpp`, it writes:
 
 - `include/example-cpp.hpp` — the exported functions to implement, in the
-  namespace `example_cpp`, every parameter a `const std::optional<T> &`;
+  namespace `example_cpp`: a parameter is a `const std::optional<T> &`, and a
+  `mutable` one a `std::optional<T> &`, whose value the function leaves goes
+  back with the result;
 - `source/example-cpp.cpp` — the code that decodes a call's argument buffer,
   calls the function and encodes its result, and the table
   `arora_module_exports` ([`arora/module.hpp`](../../../libs/cpp/include/arora/module.hpp))
