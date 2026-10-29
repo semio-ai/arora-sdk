@@ -1655,31 +1655,14 @@ impl AroraBuilder {
         // statement is on their subtree, which a prefix names without the
         // trailing `/`, so a key's own meta still wins; and it goes through
         // the device's store, so over a `NamespacedStore` it covers that
-        // device's subtree alone. A store that refuses the statement keeps no
-        // meta, which leaves every key closed; one that still resolves a
-        // reserved key open would expose it, and fails the build.
+        // device's subtree alone. A store that refuses the statement fails the
+        // build: no query of its meta can show that every key of the subtree
+        // is closed, and one it left open would hand remotes the device's time.
         let built_in = arora_behavior::built_in::PREFIX.trim_end_matches('/');
-        if let Err(e) = arora
+        arora
             .store
             .set_prefix_meta(HashMap::from([(built_in.to_string(), KeyMeta::new())]))
-        {
-            let reserved = [
-                Key::from(arora_behavior::built_in::TIME),
-                Key::from(arora_behavior::built_in::DT),
-                Key::from(format!("{built_in}/tasks")),
-            ];
-            if let Some((key, _)) = reserved
-                .iter()
-                .zip(arora.store.meta(&reserved))
-                .find(|(_, meta)| meta.as_ref().is_some_and(|meta| meta.editable))
-            {
-                anyhow::bail!(
-                    "the store does not keep the runtime's keys closed ({e}) and \
-                     resolves {} open to remote writers",
-                    key.get_path()
-                );
-            }
-        }
+            .map_err(|e| anyhow::anyhow!("the store cannot keep the runtime's keys closed: {e}"))?;
         // What the HAL says of its keys, stated to the store once nothing can
         // fail the build, and before anything can write: a device's inputs are
         // open, and listed, from its first step.
@@ -3719,8 +3702,8 @@ mod hal_key_tests {
         assert!(open("arora/time"), "the shared store's own");
     }
 
-    /// A store that refuses to state the runtime's keys closed, yet resolves
-    /// every key open, fails the build rather than expose them.
+    /// A store that refuses to state the runtime's keys closed fails the
+    /// build, whatever its meta answers: here it resolves every key open.
     #[test]
     fn a_store_that_cannot_close_the_runtime_s_keys_fails_the_build() {
         #[derive(Clone)]
@@ -3752,7 +3735,7 @@ mod hal_key_tests {
             .with_data_store(Box::new(OpenToAll(SimpleDataStore::new())))
             .build();
         let error = built.err().expect("the build fails").to_string();
-        assert!(error.contains("arora/time"), "{error}");
+        assert!(error.contains("runtime's keys closed"), "{error}");
     }
 
     /// A key's own meta the host stated before the build is the host's: the
