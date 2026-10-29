@@ -15,15 +15,15 @@
 //!
 //! ```text
 //! raw: mul(a: {sensor/distance}, b: 100f64)
-//! cm: clamp(x: @raw, lo: 0f64)
-//! level: {face/level} = add(a: @cm, b: 1f64)
+//! cm: clamp(x: @raw._ret, lo: 0f64)
+//! level: {face/level} = add(a: @cm._ret, b: 1f64)
 //! ```
 //!
 //! # What reads a detached node
 //!
 //! Nothing marks a read. A node reads a detached node when one of its
 //! arguments reads a tree-local cell the detached node writes: its return
-//! value, as `@node` ([`Expression::NodeArgument`] on `_ret`) or through the
+//! value, as `@node._ret` ([`Expression::NodeArgument`] on `_ret`) or through the
 //! variable `_ret` is bound to, or one of its mutable parameters, as
 //! `@node.parameter` or through its variable. Lowering finds the writer of
 //! every such cell, and gives each node the detached nodes it reads. A
@@ -34,7 +34,7 @@
 //! written.
 //!
 //! A store key is not such a cell. A port bound to a store key keeps a
-//! tree-local cell of its own, which `@node` reads, and publishes to the key
+//! tree-local cell of its own, which `@node._ret` reads, and publishes to the key
 //! after the tree ticks. The key itself is read as the store holds it, so a
 //! value fed back through a key, or passed from one graph to another through a
 //! key, reaches its reader at the next tick. Feedback goes only through a key:

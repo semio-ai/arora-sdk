@@ -19,7 +19,7 @@
 //! | a structure, an enumeration | `json("…")`: the value's serde JSON |
 //! | a variable | `{name}`, or `{<uuid>}` when its name is not known |
 //! | an anonymous cell | `{= value}`: the value it holds now |
-//! | another node's return value | `@node` |
+//! | another node's return value | `@node._ret` |
 //! | another node's argument | `@node.parameter` |
 //! | a selection | `source[path]` |
 //! | a call | `function(parameter: value, …)` |
@@ -46,9 +46,9 @@
 //! detached nodes show alike:
 //!
 //! ```text
-//! cm: clamp(x: @raw, lo: 0f64)
-//! level: {face/level} = add(a: @cm, b: 1f64)
-//! below(x: @cm, limit: 30f64)
+//! cm: clamp(x: @raw._ret, lo: 0f64)
+//! level: {face/level} = add(a: @cm._ret, b: 1f64)
+//! below(x: @cm._ret, limit: 30f64)
 //! ```
 //!
 //! A [`BehaviorTree`] shows as a text: its root and the nodes under it, each
@@ -482,7 +482,7 @@ fn expression(expression: &Expression, names: &Names, form: Form, indent: usize)
         },
         Expression::VariableId(id) => names.variable(*id),
         Expression::NodeArgument(port) if port.parameter == _RET_PARAM_ID => {
-            format!("@{}", names.node(port.node))
+            format!("@{}.{}", names.node(port.node), crate::text::RETURN)
         }
         Expression::NodeArgument(port) => format!(
             "@{}.{}",

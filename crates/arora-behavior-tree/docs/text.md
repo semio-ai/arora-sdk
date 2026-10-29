@@ -11,14 +11,14 @@ fallback                                   # the first node is the root
   sequence
     equal(a: {person/visible}, b: true)    # {key}: a store key
     set_string(variable: {.mood}, value: "happy")   # {.x}: a tree-local variable
-    below(x: @cm, limit: 30)               # @node: a node's return value
-    smooth(x: @raw, alpha: 0.2, state: @s.state)    # @node.parameter: a node's parameter
+    below(x: @cm._ret, limit: 30)          # @node._ret: a node's return value
+    smooth(x: @raw._ret, alpha: 0.2, state: @s.state)   # @node.parameter: a node's parameter
   succeed
 
 raw: mul(a: {sensor/distance}, b: 100)     # name: … names a node; no node holds it: detached
-cm: clamp(x: @raw, lo: 0)
-level: {face/level} = add(a: @cm, b: 1)    # {target} = …: where its return value goes
-s: smooth(x: @cm, alpha: 0.5, state: 0)
+cm: clamp(x: @raw._ret, lo: 0)
+level: {face/level} = add(a: @cm._ret, b: 1)   # {target} = …: where its return value goes
+s: smooth(x: @cm._ret, alpha: 0.5, state: 0)
 sway: {rig/arm_wave} = mul(a: oscillator(t: {arora/time}, frequency: 1.6), b: 0.6)   # a call in an argument
 ```
 
@@ -77,7 +77,7 @@ expression = primary { "[" path "]" } ;              (* a selection *)
 primary    = literal | variable | port | call ;
 call       = function "(" [ arguments ] ")" ;
 variable   = "{" key "}" | "{" string "}" | "{" id "}" ;
-port       = "@" word [ "." parameter ] ;
+port       = "@" word "." parameter ;                (* "@node._ret": its return value *)
 literal    = number | string | "true" | "false" | "()" | "none" | "some" "(" expression ")"
            | [ element ] "[" [ expression { "," expression } [ "," ] ] "]"
            | "uuid" "(" id ")" | "json" "(" string ")" ;
@@ -122,9 +122,9 @@ word       = identifier | id ;
 | an id | `uuid(…)` | `Value(Value::Uuid)` |
 | a structure, an enumeration | `json("…")`: the value's serde JSON | `Value` |
 | a variable | `{person/visible}` (a store key), `{.mood}` (tree-local), `{"a key"}` (quoted), `{<uuid>}` | `Source::Key` |
-| a node's return value | `@cm` | `Source::Port` on `_ret` |
+| a node's return value | `@cm._ret` | `Source::Port` on `_ret` |
 | a node's parameter | `@s.state` | `Source::Port` on the parameter |
-| a selection | `@record[.name]`, `{pose}[.0]`, `@step[.<field id>]` | `Source::Select` |
+| a selection | `@record._ret[.name]`, `{pose}[.0]`, `@step._ret[.<field id>]` | `Source::Select` |
 | a call | `oscillator(t: {arora/time}, frequency: 1.6)` | a node of its own, read by its return value |
 
 An argument binds its parameter, on the node it is written on: each graph
@@ -160,8 +160,9 @@ using either is told so.
 - **Targets.** `{key} = f(…)` binds `_ret` (`5f726574-0000-4000-8000-000000000000`)
   to the key. `@n.p = f(…)` binds it to another node's input, which then
   reads this node.
-- **Ports.** `@n` is node `n`'s `_ret`; `@n.p` its parameter `p`, by name or
-  id. `n` is a node of the text, by its name or its id. A node no node holds
+- **Ports.** `@n.p` is node `n`'s parameter `p`, by name or id, and
+  `@n._ret` its return value. A bare `@n` is an error: it names no port. `n`
+  is a node of the text, by its name or its id. A node no node holds
   outputs its return value and the parameters it writes, and those alone are
   read from it; a tree node's argument is a cell any node reads.
 - **Cycles.** Nodes no node holds that read one another in a cycle, or a
@@ -286,12 +287,12 @@ both. This is the graph of a text:
 ```text
 watch: fallback
   calm: sequence
-    near: below(x: @cm, limit: 30)
-    settle: smooth(x: @cm, alpha: 0.5, state: {.s})
+    near: below(x: @cm._ret, limit: 30)
+    settle: smooth(x: @cm._ret, alpha: 0.5, state: {.s})
   done: succeed
 
 cm: clamp(x: {sensor/distance}, lo: 0)
-level: {face/level} = add(a: @cm, b: 1)
+level: {face/level} = add(a: @cm._ret, b: 1)
 ```
 
 ```yaml
@@ -402,9 +403,9 @@ A pure mapping: sinks beside a tree that does nothing.
 running
 
 amount: clamp(x: {face/smile}, min: 0, max: 1)
-corner: remap(x: @amount, in_min: 0, in_max: 1, out_min: -0.2, out_max: 1)
-mouth: {rig/mouth_corner} = damp(target: @corner, half_life: 0.12)
-cheeks: {rig/cheek_raise} = mul(a: @amount, b: 0.6)
+corner: remap(x: @amount._ret, in_min: 0, in_max: 1, out_min: -0.2, out_max: 1)
+mouth: {rig/mouth_corner} = damp(target: @corner._ret, half_life: 0.12)
+cheeks: {rig/cheek_raise} = mul(a: @amount._ret, b: 0.6)
 ```
 
 Breathing, driven by time: the wave runs every tick, the amplitude and the
@@ -415,7 +416,7 @@ running
 
 wave: oscillator(t: {arora/time}, frequency: {face/breath_rate})
 amplitude: remap(x: {face/energy}, in_min: 0, in_max: 1, out_min: 0.03, out_max: 0.2)
-chest: {rig/chest} = add(a: mul(a: @wave, b: @amplitude), b: 0.5)
+chest: {rig/chest} = add(a: mul(a: @wave._ret, b: @amplitude._ret), b: 0.5)
 flush: {face/flush} = remap(x: {face/energy}, in_min: 0, in_max: 1, out_min: 0.15, out_max: 0.85)
 ```
 
@@ -426,7 +427,7 @@ a key writes it each time it ticks, and succeeds.
 fallback                                   # greet or rest
   sequence                                 # greet
     truthy(x: {person/visible})
-    truthy(x: @fresh)                      # not greeted yet
+    truthy(x: @fresh._ret)                 # not greeted yet
     parallel                               # wave until the timer ends
       {rig/arm_raise} = damp(target: 1, half_life: 0.12, initial: {rig/arm_raise})
       {rig/arm_wave} = mul(a: oscillator(t: {arora/time}, frequency: 1.6), b: 0.6)

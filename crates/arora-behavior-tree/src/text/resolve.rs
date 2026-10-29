@@ -36,6 +36,9 @@ use crate::variable::{is_tree_local, TREE_LOCAL_PREFIX};
 
 /// The namespace node ids derive in: a node's id is the UUID v5 of its name,
 /// or of its path, under it.
+/// The name of a node's return value as a port: `@node._ret`.
+pub(crate) const RETURN: &str = "_ret";
+
 const NODE_NAMESPACE: Uuid = uuid::uuid!("cd5d3316-594e-459a-b1a5-6061fadc477e");
 
 /// A resolved text: the graph to run, where each of its nodes is written,
@@ -529,10 +532,7 @@ impl<'a> Resolver<'a> {
             }
             ExprKind::Port { node, parameter } => {
                 let (id, declared) = self.referenced(node)?;
-                let port = match parameter {
-                    None => _RET_PARAM_ID,
-                    Some(parameter) => self.parameter(node, parameter, declared)?,
-                };
+                let port = self.parameter(node, parameter, declared)?;
                 Some(Source::Port(Port::new(id, port)))
             }
             _ => {
@@ -568,13 +568,17 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// The parameter of the node `node` names that `parameter` names.
+    /// The port of the node `node` names that `parameter` names: `_ret` its
+    /// return value, else a parameter of its function.
     fn parameter(
         &mut self,
         node: &super::ast::Name,
         parameter: &super::ast::Name,
         declared: Declared<'a>,
     ) -> Option<Uuid> {
+        if parameter.text == RETURN {
+            return Some(_RET_PARAM_ID);
+        }
         let found = match declared.function {
             Some(Found::Known(function)) => parameter_named(function, &parameter.text),
             _ => Uuid::parse_str(&parameter.text).ok(),
@@ -607,10 +611,9 @@ impl<'a> Resolver<'a> {
             }
             ExprKind::Port { node, parameter } => {
                 let (id, declared) = self.referenced(node)?;
-                let port = match parameter {
-                    None => _RET_PARAM_ID,
-                    Some(parameter) => {
-                        let port = self.parameter(node, parameter, declared)?;
+                let port = match self.parameter(node, parameter, declared)? {
+                    _RET_PARAM_ID => _RET_PARAM_ID,
+                    port => {
                         // A detached node outputs its return value and the
                         // parameters it writes; a tree node's argument is a
                         // cell any node reads.
@@ -626,7 +629,7 @@ impl<'a> Resolver<'a> {
                             self.error(
                                 format!(
                                     "`{}` is held by no node: what it outputs is its return \
-                                     value `@{}` and the parameters it writes, and it does not \
+                                     value `@{}._ret` and the parameters it writes, and it does not \
                                      write `{}`",
                                     node.text, node.text, parameter.text
                                 ),

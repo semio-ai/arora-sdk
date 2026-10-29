@@ -43,7 +43,7 @@ fn id(node: u128) -> Uuid {
     Uuid::from_u128(node)
 }
 
-/// `@node`: a node's return value.
+/// `@node._ret`: a node's return value.
 fn read(node: u128) -> Expression {
     port(node, _RET_PARAM_ID)
 }
@@ -140,7 +140,7 @@ fn take(calls: &Calls) -> HashMap<&'static str, usize> {
     counts
 }
 
-/// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw, lo: 0)`:
+/// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw._ret, lo: 0)`:
 /// the distance in centimetres, never negative.
 fn centimetres_nodes() -> Vec<Node> {
     vec![
@@ -196,7 +196,7 @@ fn a_node_read_by_several_leaves_calls_its_function_once_per_tick() {
     assert_eq!((counts["mul"], counts["clamp"], counts["below"]), (3, 3, 3));
 }
 
-/// `l: mul({left}, 2)`, `r: mul({right}, 3)`, `sum: add(@l, @r)`, read by
+/// `l: mul({left}, 2)`, `r: mul({right}, 3)`, `sum: add(@l._ret, @r._ret)`, read by
 /// one leaf.
 fn two_branches(store: &SimpleDataStore) -> BehaviorTree {
     build(
@@ -771,7 +771,7 @@ fn sinks_publish_after_every_sink_is_up_to_date() {
     );
 }
 
-/// A port bound to a store key keeps a tree-local cell: `@node` reads the
+/// A port bound to a store key keeps a tree-local cell: `@node._ret` reads the
 /// node's current result, while the key reads as the store holds it.
 #[test]
 fn a_port_bound_to_a_store_key_reads_its_current_value() {
@@ -1119,7 +1119,7 @@ fn a_call_computing_an_id_keeps_its_call_site_state() {
 }
 
 /// Attached and detached nodes show alike: one line per node, its name in
-/// front when it has one, its bound return before `=`, and `@node` for
+/// front when it has one, its bound return before `=`, and `@node._ret` for
 /// another node's return value. The graph shows in the order it is listed.
 #[test]
 fn a_graph_shows_one_node_per_line() {
@@ -1147,12 +1147,12 @@ fn a_graph_shows_one_node_per_line() {
     assert_eq!(
         tree.display_detached(names),
         "raw: mul(a: {sensor/distance}, b: 100f64)\n\
-         cm: clamp(x: @raw, lo: 0f64)\n\
-         level: {face/level} = add(a: @cm, b: 1f64)\n"
+         cm: clamp(x: @raw._ret, lo: 0f64)\n\
+         level: {face/level} = add(a: @cm._ret, b: 1f64)\n"
     );
     assert_eq!(
         tree.node_index[&id(1)].display(names).to_string(),
-        "below(x: @cm, limit: 30f64)"
+        "below(x: @cm._ret, limit: 30f64)"
     );
 }
 

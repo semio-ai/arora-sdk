@@ -1265,7 +1265,7 @@ pub fn load_behavior_tree_nodes_with(
                 names,
             )?;
             // A detached node's port bound to a store key keeps a tree-local
-            // cell of its own, which `@node` reads; the key is published to
+            // cell of its own, which `@node._ret` reads; the key is published to
             // after the tree ticks. A return bound to another node's input
             // feeds the input its chain of ports ends at: when that input
             // names a store key, the two share a tree-local cell, every port

@@ -2,15 +2,15 @@
 //! text, the form [`display`](crate::display) writes, read back.
 //!
 //! ```text
-//! fallback                                  # the first node is the root
+//! fallback                                     # the first node is the root
 //!   sequence
 //!     equal(a: {person/visible}, b: true)
-//!     below(x: @cm, limit: 30)
+//!     below(x: @cm._ret, limit: 30)
 //!   succeed
 //!
-//! raw: mul(a: {sensor/distance}, b: 100)    # a node no node holds: detached
-//! cm: clamp(x: @raw, lo: 0)
-//! level: {face/level} = add(a: @cm, b: 1)   # its return value written to a key
+//! raw: mul(a: {sensor/distance}, b: 100)       # a node no node holds: detached
+//! cm: clamp(x: @raw._ret, lo: 0)
+//! level: {face/level} = add(a: @cm._ret, b: 1)  # its return value written to a key
 //! ```
 //!
 //! - [`parse`] reads a text into a [`Document`], the syntax tree of what was
@@ -43,7 +43,7 @@ pub use resolve::{resolve, Loaded, LoadedNode};
 pub(crate) use format::variable;
 pub(crate) use lexer::{is_name, is_parameter_name};
 pub(crate) use natives::{native, native_named};
-pub(crate) use resolve::{node_id, Functions};
+pub(crate) use resolve::{node_id, Functions, RETURN};
 
 use serde::{Deserialize, Serialize};
 

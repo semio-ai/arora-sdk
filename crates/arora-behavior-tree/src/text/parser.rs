@@ -665,22 +665,27 @@ impl<'s> Parser<'s> {
         })
     }
 
-    /// `@node`, or `@node.parameter`.
+    /// `@node.parameter`, `@node._ret` the node's return value.
     fn port(&mut self, token: Token) -> Parse<Expr> {
         self.bump();
         let node = self.reference("expected a node name after `@`")?;
-        let parameter = if self.eat(Kind::Dot).is_some() {
-            if !matches!(self.peek().kind, Kind::Ident | Kind::Uuid) {
-                let span = self.peek().span;
-                return self.fail("expected a parameter name after `.`".to_string(), span);
-            }
-            Some(self.parameter_name())
-        } else {
-            None
-        };
-        let end = parameter.as_ref().map_or(node.span, |name| name.span);
+        if self.eat(Kind::Dot).is_none() {
+            return self.fail(
+                format!(
+                    "`@{0}` names no port: a node's return value is `@{0}._ret`, \
+                     a parameter `@{0}.parameter`",
+                    node.text
+                ),
+                token.span.to(node.span),
+            );
+        }
+        if !matches!(self.peek().kind, Kind::Ident | Kind::Uuid) {
+            let span = self.peek().span;
+            return self.fail("expected a parameter name after `.`".to_string(), span);
+        }
+        let parameter = self.parameter_name();
         Ok(Expr {
-            span: token.span.to(end),
+            span: token.span.to(parameter.span),
             kind: ExprKind::Port { node, parameter },
         })
     }

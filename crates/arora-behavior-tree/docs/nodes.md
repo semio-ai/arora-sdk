@@ -282,7 +282,7 @@ runs when its parent ticks it. A detached node runs when what it outputs is
 about to be read:
 
 - **before its reader**: a node brings up to date the detached nodes it
-  reads, through `@node` or `@node.parameter`, or through the tree-local
+  reads, through `@node._ret` or `@node.parameter`, or through the tree-local
   variable a detached node's output is bound to;
 - **once per tick**: the first read of a tick brings it up to date, and later
   reads of the tick reuse that result;

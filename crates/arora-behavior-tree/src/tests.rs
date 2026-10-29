@@ -946,9 +946,9 @@ mod task_runs {
         );
     }
 
-    /// A graph whose leaf `below(x: @cm, limit: 30)` reads a detached chain,
-    /// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw, lo: 0)`,
-    /// beside a sink `{out} = mul(a: @cm, b: 2)`: the nodes `ids`, in that
+    /// A graph whose leaf `below(x: @cm._ret, limit: 30)` reads a detached chain,
+    /// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw._ret, lo: 0)`,
+    /// beside a sink `{out} = mul(a: @cm._ret, b: 2)`: the nodes `ids`, in that
     /// order.
     fn detached_graph(ids: [u128; 4]) -> arora_behavior::graph::Graph {
         use crate::call_expression_tests::{

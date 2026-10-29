@@ -32,14 +32,14 @@ fallback                                   # the first top-level node is the roo
   sequence
     equal(a: {person/visible}, b: true)
     set_string(variable: {.mood}, value: \"happy\")
-    below(x: @cm, limit: 30)
-    smooth(x: @raw, alpha: 0.2, state: @s.state)
+    below(x: @cm._ret, limit: 30)
+    smooth(x: @raw._ret, alpha: 0.2, state: @s.state)
   succeed
 
 raw: mul(a: {sensor/distance}, b: 100)
-cm: clamp(x: @raw, lo: 0)
-level: {face/level} = add(a: @cm, b: 1)
-s: smooth(x: @cm, alpha: 0.5, state: 0)
+cm: clamp(x: @raw._ret, lo: 0)
+level: {face/level} = add(a: @cm._ret, b: 1)
+s: smooth(x: @cm._ret, alpha: 0.5, state: 0)
 sway: {rig/arm_wave} = mul(a: add(a: {arora/time}, b: 1.6), b: 0.6)
 ";
 
@@ -174,7 +174,7 @@ fn every_part_has_the_span_of_its_text() {
         panic!("a port");
     };
     assert_eq!(at(text, read.span), "raw");
-    assert_eq!(at(text, parameter.as_ref().unwrap().span), "state");
+    assert_eq!(at(text, parameter.span), "state");
     assert_eq!(
         alpha.value.kind,
         ExprKind::Number {
@@ -305,7 +305,7 @@ fn any_text_is_read_to_its_end() {
         "sequence\r\n  succeed\r\n",
         "  indented\nfirst",
         "a: b: c: d",
-        "@x = @y = f",
+        "@x._ret = @y._ret = f",
         "f(a: g(b: h(c: [[[[1]]]], d: some(some(none)))))",
         "f(a: 1)[x]",
         ")))(((",
@@ -413,13 +413,13 @@ fn formatting_is_canonical_and_idempotent() {
     let text = "\
 # the root
 fallback()
-    below( limit : 30 , x:@cm )   # a check
+    below( limit : 30 , x:@cm._ret )   # a check
     succeed
 cm: clamp(lo: 0.0, x: mul(b: 100, a: {sensor/distance}))
 
 
 # the level
-{face/level} = add(b: 1.5f64, a: @cm)
+{face/level} = add(b: 1.5f64, a: @cm._ret)
 # the end
 ";
     let functions = index();
@@ -429,13 +429,13 @@ cm: clamp(lo: 0.0, x: mul(b: 100, a: {sensor/distance}))
         "\
 # the root
 fallback
-  below(x: @cm, limit: 30)  # a check
+  below(x: @cm._ret, limit: 30)  # a check
   succeed
 
 cm: clamp(x: mul(a: {sensor/distance}, b: 100), lo: 0.0)
 
 # the level
-{face/level} = add(a: @cm, b: 1.5f64)
+{face/level} = add(a: @cm._ret, b: 1.5f64)
 
 # the end
 "
@@ -512,7 +512,33 @@ below(x: 1, limit: 2)
     );
 }
 
-/// A variable binds its key; a target binds `_ret`; `@n` reads a node's
+/// A bare `@node` names no port: it is refused where it is written, with the
+/// return value's spelling, `@node._ret`, in the message.
+#[test]
+fn a_bare_node_reference_is_refused_with_its_return_value_s_spelling() {
+    for (text, reference) in [
+        (
+            "below(x: @cm, limit: 30)\n\ncm: clamp(x: 1, lo: 0)\n",
+            "@cm",
+        ),
+        ("@cm = add(a: 1, b: 2)\n", "@cm"),
+        ("below(x: @cm[.0], limit: 30)\n", "@cm"),
+    ] {
+        let parsed = parse(text);
+        let [diagnostic] = parsed.diagnostics.as_slice() else {
+            panic!("one error: {:?}", parsed.diagnostics);
+        };
+        assert_eq!(diagnostic.severity, Severity::Error, "{text}");
+        assert_eq!(at(text, diagnostic.span), reference, "{text}");
+        assert!(
+            diagnostic.message.contains("`@cm._ret`"),
+            "{text}: {}",
+            diagnostic.message
+        );
+    }
+}
+
+/// A variable binds its key; a target binds `_ret`; `@n._ret` reads a node's
 /// return value, `@n.p` its parameter; a call in an argument is a node read
 /// by its return value.
 #[test]
@@ -646,7 +672,7 @@ fn literals_take_the_type_of_their_parameter() {
 #[test]
 fn unknown_and_ambiguous_names_are_errors_at_the_name() {
     let text =
-        "sequence\n  nope(x: 1)\n  below(y: 1, x: 2, limit: 3)\n  below(x: @nobody, limit: 1)\n";
+        "sequence\n  nope(x: 1)\n  below(y: 1, x: 2, limit: 3)\n  below(x: @nobody._ret, limit: 1)\n";
     let loaded = resolve(&parsed(text), &index());
     let refused: Vec<&str> = errors(&loaded.diagnostics)
         .iter()
@@ -874,12 +900,12 @@ fn a_cascade_read_by_three_conditions_runs_once() {
     let store = store_with(&[("sensor/distance", 0.2)]);
     let text = "\
 parallel
-  below(x: @cm, limit: 10)
-  below(x: @cm, limit: 30)
-  below(x: @cm, limit: 50)
+  below(x: @cm._ret, limit: 10)
+  below(x: @cm._ret, limit: 30)
+  below(x: @cm._ret, limit: 50)
 
 raw: mul(a: {sensor/distance}, b: 100)
-cm: clamp(x: @raw, lo: 0)
+cm: clamp(x: @raw._ret, lo: 0)
 ";
     let tree = tree(&store, text);
     let mut engine = Engine::default();
@@ -918,8 +944,8 @@ fn under_a_fallback_only_what_a_ticking_condition_reads_runs() {
     let store = store_with(&[("left", 1.0), ("right", 1.0)]);
     let text = "\
 fallback
-  below(x: @l, limit: 100)
-  below(x: @r, limit: 100)
+  below(x: @l._ret, limit: 100)
+  below(x: @r._ret, limit: 100)
 
 l: mul(a: {left}, b: 2)
 r: mul(a: {right}, b: 3)
@@ -1007,7 +1033,7 @@ s: {out} = smooth(x: {target}, alpha: 1, state: 0)
 /// A text with an error does not load, and says where.
 #[test]
 fn a_text_with_an_error_does_not_load() {
-    let text = "sequence\n  below(x: @nobody, limit: 1)\n";
+    let text = "sequence\n  below(x: @nobody._ret, limit: 1)\n";
     let error = match load_behavior_tree_text(text, &index(), &|_| None) {
         Err(error) => error.to_string(),
         Ok(_) => panic!("the text does not load"),
@@ -1258,7 +1284,7 @@ fn a_return_value_written_to_an_input_feeds_it() {
 fn what_lowering_refuses_is_an_error_where_written() {
     for (text, refused) in [
         (
-            "below(x: @00000000-0000-4000-8000-0000000000ee, limit: 1)\n",
+            "below(x: @00000000-0000-4000-8000-0000000000ee._ret, limit: 1)\n",
             vec!["00000000-0000-4000-8000-0000000000ee"],
         ),
         (
@@ -1266,12 +1292,12 @@ fn what_lowering_refuses_is_an_error_where_written() {
             vec!["a"],
         ),
         (
-            "below(x: @a, limit: 1)\n\na: add(a: @b, b: 1)\nb: add(a: @a, b: 1)\n",
-            vec!["a: add(a: @b, b: 1)", "b: add(a: @a, b: 1)"],
+            "below(x: @a._ret, limit: 1)\n\na: add(a: @b._ret, b: 1)\nb: add(a: @a._ret, b: 1)\n",
+            vec!["a: add(a: @b._ret, b: 1)", "b: add(a: @a._ret, b: 1)"],
         ),
         (
-            "succeed\n\ne: add(a: @e, b: 1)\n",
-            vec!["e: add(a: @e, b: 1)"],
+            "succeed\n\ne: add(a: @e._ret, b: 1)\n",
+            vec!["e: add(a: @e._ret, b: 1)"],
         ),
     ] {
         let loaded = resolve(&parsed(text), &index());
@@ -1281,7 +1307,7 @@ fn what_lowering_refuses_is_an_error_where_written() {
             .collect();
         assert_eq!(errors, refused, "{text}: {:?}", loaded.diagnostics);
     }
-    loaded("sequence\n  t: below(x: 1, limit: 4)\n  below(x: @m, limit: 100)\n\nm: mul(a: @t.limit, b: 10)\n");
+    loaded("sequence\n  t: below(x: 1, limit: 4)\n  below(x: @m._ret, limit: 100)\n\nm: mul(a: @t.limit, b: 10)\n");
     loaded("below(x: @s.state, limit: 1)\n\ns: smooth(x: 1, alpha: 1, state: 0)\n");
 }
 
@@ -1309,7 +1335,7 @@ fn some_holds_literals() {
 /// An error's column counts characters.
 #[test]
 fn an_error_column_counts_characters() {
-    let text = "sequence\n  set_string(variable: {\"é\"}, value: @nobody)\n";
+    let text = "sequence\n  set_string(variable: {\"é\"}, value: @nobody._ret)\n";
     let error = match load_behavior_tree_text(text, &index(), &|_| None) {
         Err(error) => error.to_string(),
         Ok(_) => panic!("the text does not load"),
@@ -1446,7 +1472,7 @@ fn a_dataflow_node_reads_back() {
 below(x: 1, limit: @d.state[0])
 
 d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, t: {arora/time}, state: ())
-s: spring(in: @d, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}, state: ())
+s: spring(in: @d._ret, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}, state: ())
 ";
     let mut index = index();
     index.extend(
@@ -1490,7 +1516,7 @@ s: spring(in: @d, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}
     else {
         panic!("a port");
     };
-    assert_eq!(parameter.as_ref().unwrap().text, "param.half_life");
+    assert_eq!(parameter.text, "param.half_life");
 }
 
 /// The parameter of `function` named `name`.

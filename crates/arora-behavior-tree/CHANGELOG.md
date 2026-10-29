@@ -25,6 +25,11 @@ All notable changes to `arora-behavior-tree`. The format follows
   - A key starting with `.` is one cell of the interpreter's tree, shared
     by the main behavior and its runs, as a text's `{.x}` was: a Groot
     tree's `{.x}` is now that cell too, rather than one of its own.
+- **Breaking:** the text reads a node's return value as `@node._ret`, in
+  the shape of a parameter, `@node.parameter`. A bare `@node` is an error
+  naming `@node._ret`, and `ExprKind::Port::parameter` is a `Name`, no
+  longer optional. `BehaviorTree::display` and `text::format` write
+  `@node._ret`.
 - `text::resolve` binds `{key}` to the key itself, and lists the graph's
   nodes in the order the text writes them. `{<uuid>}`, a variable known by
   its id alone, binds the tree-local key `.<uuid>`. The graph carries no

@@ -37,7 +37,7 @@ pub struct Document {
 pub struct Node {
     /// The node's line, from its first token to its last.
     pub span: Span,
-    /// The name it is referenced by, as `@name`.
+    /// The name it is referenced by, as `@name.parameter`.
     pub name: Option<Name>,
     /// Where its return value goes: `{key}` or `@node.parameter`.
     pub target: Option<Expr>,
@@ -150,10 +150,10 @@ pub enum ExprKind {
     VariableId {
         value: uuid::Uuid,
     },
-    /// `@node`, or `@node.parameter`.
+    /// `@node.parameter`, `@node._ret` the node's return value.
     Port {
         node: Name,
-        parameter: Option<Name>,
+        parameter: Name,
     },
     /// `source[path]`.
     Select {

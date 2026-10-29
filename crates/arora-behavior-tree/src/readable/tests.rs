@@ -54,12 +54,12 @@ const READABLE_JSON: &str = r#"{
 const EDITED: &str = "\
 watch: fallback
   calm: sequence
-    near: below(x: @cm, limit: 20)
-    settle: smooth(x: @cm, alpha: 0.5)
+    near: below(x: @cm._ret, limit: 20)
+    settle: smooth(x: @cm._ret, alpha: 0.5)
   done: succeed
 
 cm: clamp(x: {sensor/distance}, lo: 0, hi: 50)
-pulse: {face/pulse} = mul(a: @cm, b: 2)
+pulse: {face/pulse} = mul(a: @cm._ret, b: 2)
 ";
 
 /// The documented diff, as readable JSON.

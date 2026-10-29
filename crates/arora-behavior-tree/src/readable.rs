@@ -44,7 +44,7 @@ use uuid::Uuid;
 
 use crate::display::Names;
 use crate::schema::_RET_PARAM_ID;
-use crate::text::{native, node_id, FunctionName, Functions, Name};
+use crate::text::{native, node_id, FunctionName, Functions, Name, RETURN};
 
 /// A port on a node, by references: see [`graph::Port`].
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -345,7 +345,7 @@ fn port_named(function: Option<&ModuleFunction>, text: &str) -> Result<Uuid, Str
         .iter()
         .filter(|(_, parameter)| parameter.name == text)
         .map(|(id, _)| *id)
-        .chain((text == "_ret").then_some(_RET_PARAM_ID));
+        .chain((text == RETURN).then_some(_RET_PARAM_ID));
     match (named.next(), named.next()) {
         (Some(id), None) => Ok(id),
         (Some(_), Some(_)) => Err(format!(
@@ -523,7 +523,7 @@ impl<'a> Writer<'a> {
     fn port_name(&self, function: Option<Uuid>, id: Uuid) -> String {
         let function = function.and_then(|function| known(self.index, function));
         let name = match function {
-            Some(_) if id == _RET_PARAM_ID => Some("_ret".to_string()),
+            Some(_) if id == _RET_PARAM_ID => Some(RETURN.to_string()),
             Some(function) => function
                 .function
                 .parameters

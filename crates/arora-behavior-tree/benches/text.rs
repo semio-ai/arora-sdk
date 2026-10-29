@@ -81,15 +81,15 @@ fn function_index() -> FunctionIndex {
 fn text(groups: usize) -> String {
     let mut text = String::from("parallel\n  sequence\n");
     for group in 0..groups {
-        let _ = writeln!(text, "    below(x: @level_{group}, limit: 30)");
+        let _ = writeln!(text, "    below(x: @level_{group}._ret, limit: 30)");
     }
     text.push('\n');
     for group in 0..groups {
         let _ = writeln!(
             text,
             "raw_{group}: mul(a: {{sensor/distance_{group}}}, b: 100)\n\
-             cm_{group}: clamp(x: @raw_{group}, lo: 0, hi: 500.5)\n\
-             level_{group}: {{face/level_{group}}} = add(a: @cm_{group}, b: mul(a: {{face/gain}}, b: 1.5f64))"
+             cm_{group}: clamp(x: @raw_{group}._ret, lo: 0, hi: 500.5)\n\
+             level_{group}: {{face/level_{group}}} = add(a: @cm_{group}._ret, b: mul(a: {{face/gain}}, b: 1.5f64))"
         );
     }
     text
