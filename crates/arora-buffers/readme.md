@@ -1,16 +1,46 @@
-# Arora Buffers
+# arora-buffers
 
-`arora-buffers` is the binary exchange format used across arora **module
-boundaries** — host ↔ WASM guest, and any producer/consumer that speaks the ABI.
-It encodes an arora `Value` (or, via serde, a Rust type) into a **self-describing**
-`[u8]` and reads it back. Self-describing means the bytes carry their own type
-tags and ids, so a reader can reconstruct the value with no schema in hand.
+The binary form of an Arora [`Value`](../arora-types/readme.md#values) at a
+module boundary: an **Arora Buffer**. A host hands a guest module a call's
+arguments as one buffer and gets the result back as another — as the component
+model's `list<u8>`, or through a native module's C ABI. A buffer is
+self-describing: it carries its own type tags and ids, so a reader rebuilds the
+value with no schema in hand.
+
+Hosts and guests built separately, in Rust and in C++, all read and write this
+layout: it is a contract, and this page describes it.
+
+## Smallest use
+
+```rust
+use arora_buffers::{froto_value, well_formed};
+use arora_types::value::Value;
+
+let bytes = froto_value::serialize(&Value::F64(1.5));
+assert!(well_formed(&bytes).is_ok());
+assert_eq!(froto_value::deserialize(&bytes), Value::F64(1.5));
+```
+
+`froto_value::deserialize` panics on bytes that are not a buffer, and a
+guest's panic is a trap. Code handed a buffer it did not write — a guest, given
+its caller's argument — checks it with `well_formed` first, which says why a
+buffer is not one without decoding it. `value_end` steps over one value the
+same way, to read a buffer in place.
+
+## A call as buffers
+
+A guest's `dispatch(method, arg)` receives a call's arguments as one structure
+under the function's id, each argument a field under its parameter's id. It
+returns one structure under the same id: the return value as a field under the
+function's id, then each mutated parameter under its own id. Those are the
+`args`, `ret` and `mutated` of an
+[`arora_types::call`](../arora-types/readme.md#calls) `Call` and `CallResult`.
 
 ## Buffer layout
 
 A buffer is a length-prefixed byte stream:
 
-```
+```text
 ┌──────────────┬──────────────────────────────┐
 │ size: u32 LE │ payload (one tagged value)    │
 └──────────────┴──────────────────────────────┘
@@ -48,9 +78,11 @@ Every value is a **1-byte type tag** followed by its payload:
 | 19 `VALUE` | dynamic | the element tag of a heterogeneous array |
 | 20 `ERROR` | error | `u32` length + UTF-8 message |
 
+The tags are the `TYPE_*` constants of [`format`](src/format.rs).
+
 ### Structure
 
-```
+```text
 [STRUCTURE][type id: 16][field_count: u32]   then per field:   [field id: 16][value]
 ```
 
@@ -58,21 +90,21 @@ Fields are in the type's declared order; each field value is a full tagged value
 
 ### Enumeration
 
-```
+```text
 [ENUMERATION][type id: 16][variant id: 16][value]
 ```
 
 ### Map (keyvalue)
 
-```
+```text
 [MAP][id: 16][field_count: u32]   then per entry:   [key_len: u32][key bytes][field id: 16][value]
 ```
 
 Entries are written sorted by key, for a deterministic encoding.
 
-### Array — the element type is tagged **once**
+### Array — the element type is tagged once
 
-```
+```text
 [ARRAY][element tag: u8][count: u32]   then the elements
 ```
 
@@ -94,45 +126,52 @@ The element bodies depend on the element tag:
 
 ## Which serializer?
 
-Four modules map between this wire format and different in-memory shapes. For the
+Four modules map between this layout and different in-memory shapes. For the
 same data they all produce **byte-identical** output.
 
 | module | maps | ownership | ids | reach for it when |
 |---|---|---|---|---|
 | [`froto_value`](src/froto_value.rs) | `arora_types::Value` ⇄ bytes | owned | `Uuid` | you hold a runtime `Value` and want it on the wire — the canonical path |
-| [`froto_borrowed_value`](src/froto_borrowed_value.rs) | a borrowing `Value<'a>` ⇄ bytes | **borrowed / zero-copy** | raw `[u8]` | you want zero-copy reads (`Cow<[f64]>` straight from the buffer), or to (de)serialize a value from YAML/JSON (it derives `serde`) |
-| [`froto_serde`](src/froto_serde.rs) | any `serde` type `T` ⇄ bytes | owned | **names, not ids** | you have a concrete Rust type and want it on the wire without building a `Value` — with no declared type, an id-less struct is written as a **keyvalue** (its field names), not a structure |
-| [`froto_checked_value`](src/froto_checked_value.rs) | `arora_types::Value` ⇄ bytes, **type-directed** | owned | `Uuid` (declared) | you want the encoding *validated* against a runtime `ty::low::Type`, sharing the `arora_types::value_serde` walk with other backends (e.g. ROS 2 CDR) |
+| [`froto_borrowed_value`](src/froto_borrowed_value.rs) | a borrowing `Value<'a>` ⇄ bytes | **borrowed / zero-copy** | raw `[u8]` | you want zero-copy reads (`Cow<[f64]>` straight from the buffer), or to (de)serialize a value from YAML/JSON (it derives `serde`); it has no option, map, uuid, error or mixed-type array |
+| [`froto_serde`](src/froto_serde.rs) | any `serde` type `T` ⇄ bytes (`to_bytes` / `from_bytes`) | owned | **names, not ids** | you have a concrete Rust type and want it on the wire without building a `Value` |
+| [`froto_checked_value`](src/froto_checked_value.rs) | `arora_types::Value` ⇄ bytes, **type-directed** | owned | `Uuid` (declared) | you want the encoding *validated* against a runtime `ty::low::Type`, through the `arora_types::value_serde` walk other wire formats (ROS 2 CDR) share |
 
 (`froto` = *from/to*: each converts one in-memory shape to and from the bytes.)
-`froto_checked_value` does not change the format — it adds a type contract on top
-of the same bytes `froto_value` writes; a test pins the two equal.
+`froto_checked_value` adds a type contract on top of the bytes `froto_value`
+writes; a test pins the two equal. Its `BuffersValueWriter` and
+`BuffersValueReader` are what `value_serde::write_value` and `read_value` drive.
+`serde_uuid` is `froto_value` under another name, the one generated module code
+and the engine reach it by.
 
 **Untyped vs. typed — keyvalue vs. structure.** `froto_serde` has no declared
-type, so an id-less struct is written as a **keyvalue** (the map form above, keyed
-by field name), exactly as `arora_types::value_serde` produces a `Value::KeyValue`
-for the same struct. Minting ids by hashing names would be a false identity that
-breaks the moment a field or struct is renamed. The **structure** form — real
-type and field ids — is what the *typed* path writes: `froto_checked_value`,
-driven by a declared `ty::low::Type` whose ids come from `#[derive(AroraType)]`.
-Same rule as the value layer: **no ids ⇒ keyvalue; declared ids ⇒ structure.**
+type, so a struct is written as a **keyvalue** (the map form above, keyed by
+field name), exactly as `arora_types::value_serde::to_value` makes a
+`Value::KeyValue` of it. An id hashed from a name would break the moment a
+field or struct is renamed. The **structure** form — real type and field ids —
+is what the *typed* path writes: `froto_checked_value`, driven by a declared
+`ty::low::Type` whose ids come from `#[derive(AroraType)]`. Same rule as the
+value layer: **no ids ⇒ keyvalue; declared ids ⇒ structure.**
 
 ## C ABI
 
-The reader, writer and allocator are exposed as a stable `#[no_mangle] extern "C"`
-surface — the common interop point across binary formats, so a native C++ guest
-(`arora-sdk/libs`) and a WASM guest can both drive the same buffers. The
-reader/writer entry points are in [`ffi`](src/ffi/); the buffer allocator (for
-WASM linear memory) is in [`alloc`](src/alloc.rs). The safe Rust API they wrap is
-[`BufferWriter`](src/writer.rs) / [`BufferReader`](src/reader.rs).
+The reader and writer are a `#[no_mangle] extern "C"` surface
+([`ffi`](src/ffi/mod.rs)) over the safe Rust
+[`BufferWriter`](src/writer.rs) / [`BufferReader`](src/reader.rs): the
+`arora_buffer_writer_*` and `arora_buffer_reader_*` functions, and
+`arora_buffer_well_formed`. The crate builds as a `staticlib` as well as an
+`rlib`; its build script writes the C header `target/include/arora/buffers.h`,
+naming the tags `ARORA_BUFFER_TYPE_*`. A C++ guest links the `wasm32-wasip2`
+static library, with the C++ helpers of [`libs/cpp`](../../libs/cpp) over it.
 
 ## Modules
 
-- [`format`](src/format.rs) — the type tags, alignment and size-prefix constants
-  (the spec above, in code).
+- [`format`](src/format.rs) — the type tags, alignment and size-prefix
+  constants: the layout above, in code.
 - [`writer`](src/writer.rs) / [`reader`](src/reader.rs) — the low-level
   `BufferWriter` / `BufferReader` cursor.
-- [`ffi`](src/ffi/) / [`alloc`](src/alloc.rs) — the C ABI over them.
+- [`well_formed`](src/well_formed.rs) — `well_formed` and `value_end`, which
+  walk a buffer without decoding it, values nested at most `MAX_DEPTH` deep.
+- [`ffi`](src/ffi/mod.rs) — the C ABI.
 - [`froto_value`](src/froto_value.rs) / [`froto_borrowed_value`](src/froto_borrowed_value.rs) /
   [`froto_serde`](src/froto_serde.rs) / [`froto_checked_value`](src/froto_checked_value.rs) —
-  the four (de)serializers above.
+  the four serializers above.

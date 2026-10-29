@@ -1,120 +1,133 @@
 # arora-msgs-ros2
 
-The ROS 2 message types for Arora. It lets an Arora device speak ROS 2: it
-carries the standard message packages as arora types, a registry that maps them
-by name and id, and the CDR codec that moves a value on and off the ROS 2 wire.
-It is shared by [`arora-bridge-ros2`](../arora-bridge-ros2) (ROS as a device's
-remote data plane) and [`arora-hal-ros2`](../arora-hal-ros2) (ROS as a device's
-own hardware), so both agree on one set of message types and one codec.
+The ROS 2 messages as Arora types. An Arora value travels on a ROS 2 wire only
+as a real ROS message, and this crate gives the two sides one vocabulary: the
+standard message packages as Arora types, a registry that finds them by name,
+and the CDR codec that moves a value on and off the wire. The ROS 2 bridge
+([`arora-bridge-ros2`](../arora-bridge-ros2/README.md)) and the ROS 2 HAL
+([`arora-hal-ros2`](../arora-hal-ros2/readme.md)) both speak through it.
 
-## One type, four faces
+## One type per message
 
-Every ROS message reduces to a single thing — an arora `ty::low::Type` carrying
-its ROS-qualified name (`geometry_msgs/msg/Point`) — from which everything else
-follows:
+Every ROS message is one Arora type description, a `low::Type`
+(`arora_types::ty::low::Type`) carrying the message's ROS name
+(`geometry_msgs/msg/Point`). Everything else follows from it:
 
-| face | how |
+| To | Use |
 |---|---|
-| **on the wire** | `cdr::encode` / `cdr::decode` turn a `Value` into ROS 2 CDR bytes and back, type-directed by the `low::Type` — no per-message Rust needed |
-| **its identity** | `rihs01` (the `interop` feature) computes the message's REP-2016 type hash, so an arora publisher reaches native C++ ROS nodes |
-| **in Rust** | for the bundled messages, a generated struct (`geometry_msgs::Point`) you hold, mutate, and (de)serialize with `serde` — what ros2-client's typed pub/sub uses |
-| **by name** | `Ros2Registry` resolves `"geometry_msgs/Point"` to the type — what a node editor needs to type a key |
+| put a value on the wire | `cdr::encode` / `cdr::decode` turn a `Value` into ROS 2 CDR bytes and back, directed by the type: no Rust per message. |
+| find a type by name | `Ros2Registry` resolves `"geometry_msgs/Point"` (or `geometry_msgs/msg/Point`) to its type and id. |
+| hold a message in Rust | each bundled message is a generated struct (`geometry_msgs::Point`) with `serde`, implementing `RosMessage`. |
+| reach native ROS nodes over Zenoh | `rihs01` (under the `dds` or `zenoh` feature) computes the message's REP-2016 type hash. |
 
-The type id is `gen_uuid_from_str("geometry_msgs/msg/Point")` — a pure function
-of the ROS name, so a message has the **same** id whether it is a bundled type
-or [defined at runtime](#types-defined-at-runtime), and across builds.
+A message's type id is the UUID of its ROS name
+(`gen_uuid_from_str("geometry_msgs/msg/Point")`), so it is the same for a
+bundled message and for one defined at run time, and across builds.
+
+## Smallest use
+
+A `geometry_msgs/Point`, found by name, to CDR bytes and back:
+
+```rust
+use arora_msgs_ros2::{cdr, geometry_msgs::Point};
+use arora_types::value_serde::bridge::to_value_seeded;
+use arora_types::AroraType;
+
+let registry = arora_msgs_ros2::registry();
+let ty = registry.get_by_name("geometry_msgs/Point").unwrap();
+
+let (point_ty, point_types) = Point::arora_type_with_registry();
+let value = to_value_seeded(&Point { x: 1.0, y: 2.0, z: 3.0 }, &point_ty, &point_types).unwrap();
+
+let bytes = cdr::encode(ty, registry.types(), &value).unwrap();
+assert_eq!(cdr::decode(ty, registry.types(), &bytes).unwrap(), value);
+```
+
+`tests/use_cases.rs` walks through the five uses: a bridge skipping a value ROS
+cannot carry, a type defined at run time, a message held in Rust, a type picked
+by name, and a type defined on the fly and saved.
 
 ## The bundled messages
 
-Generated at build time from the vendored `.msg` files under `msgs/` (ROS 2
-Jazzy), one Rust module per ROS package:
+`build.rs` generates one Rust module per ROS package from the vendored `.msg`
+and `.action` files under `msgs/` (ROS 2 Jazzy): `builtin_interfaces`,
+`std_msgs`, `geometry_msgs`, `sensor_msgs`, `trajectory_msgs`,
+`diagnostic_msgs`, `naoqi_bridge_msgs`, `hri_msgs`, `hri_actions_msgs`,
+`std_skills`, `interaction_skills`, `communication_skills` and
+`vizij_face_msgs`. A `.msg` constant becomes an associated `const`
+(`sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_FULL`), and `registry()`
+returns a `Ros2Registry` holding every bundled type.
 
-```
-arora_msgs_ros2::builtin_interfaces::Time
-arora_msgs_ros2::std_msgs::Header
-arora_msgs_ros2::geometry_msgs::Point
-arora_msgs_ros2::sensor_msgs::Imu
-arora_msgs_ros2::hri_msgs::LiveSpeech
-```
+- `hri_msgs` is [ROS4HRI](https://ros.org/reps/rep-0155.html)'s
+  human-robot-interaction vocabulary (`Expression`, `FacialActionUnits`,
+  `Gaze`, `LiveSpeech`, …), the message layer Vizij's face standard is built
+  on (see [vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
+  ROS4HRI's skill packages (`std_skills`, `interaction_skills`,
+  `communication_skills`) and `hri_actions_msgs/ClosedCaption` sit beside it.
+- `vizij_face_msgs` is Vizij's own package: a face's content (action units,
+  expression, viseme) as types shared by perception, commands and state, with
+  observation and timing as separate wrappers, and the
+  `SetFacialActionUnits`, `SetViseme` and `PlayVisemes` skills on them.
 
-`.msg` constants become associated `const`s (`sensor_msgs::BatteryState::POWER_SUPPLY_STATUS_FULL`).
-`arora_msgs_ros2::registry()` returns a `Ros2Registry` with every bundled type.
+To add a message, put its `.msg` under `msgs/<package>/` and rebuild; the
+packages it depends on must be there too.
 
-The `hri_msgs` package is [ROS4HRI](https://ros.org/reps/rep-0155.html)'s human-robot-interaction
-vocabulary — `Expression`, `FacialActionUnits`, `Gaze`, `LiveSpeech`, `Viseme`,
-and the rest — the message layer Vizij's face standard is built on (see
-[vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
-ROS4HRI's skill packages (`std_skills`, `interaction_skills`,
-`communication_skills`) and its `hri_actions_msgs/ClosedCaption` sit beside it,
-and `diagnostic_msgs` carries the `/diagnostics` report every ROS node may
-publish.
-
-The `vizij_face_msgs` package is Vizij's own: a face's content (action units,
-expression, viseme) as one type shared by perception, commands and state, with
-observation and timing as separate wrappers, and the `set_facial_action_units`,
-`set_viseme` and `play_visemes` skills built on them (see the table below).
-
-**To add a message**, drop its `.msg` into `msgs/<package>/` and rebuild — the
-`build.rs` parser and code generator do the rest. Its dependency packages must
-be present too (the closure here is builtin_interfaces,
-std/geometry/sensor/diagnostic/hri and the skill packages).
-
-A `.msg` `byte`, `char` and `uint8` are all an arora `u8` — the same value and
-the same CDR bytes — but REP-2016 hashes `byte` as a type of its own (the IDL
-`octet`). The build records which bundled fields a `.msg` declares `byte`, and
-the hash reads that record, so `diagnostic_msgs/DiagnosticStatus.level` hashes
-as ROS 2 does. A type [defined at runtime](#types-defined-at-runtime) carries no
-such record: its `u8` fields hash as `uint8`.
+A `.msg` `byte`, `char` and `uint8` are all an Arora `u8`, with the same CDR
+bytes, but REP-2016 hashes `byte` as a type of its own. The build records
+which bundled fields are `byte`, so they hash as ROS 2 does; a type defined at
+run time has no such record, and its `u8` fields hash as `uint8`.
 
 ## Departures from upstream
 
-The vendored files are the standards' own, byte-for-byte where they can be —
-a client built from the upstream package must match ours on the wire. Where
-using a standard in a new context has shown it a change, the vendored copy
-carries that change, marked in the file as Vizij's, and this table is the
-record of it: what differs, why, and where it stands upstream. A row leaves
-this table when upstream adopts it or we drop it.
+The vendored files are the standards' own, byte for byte, except these. A
+changed message has another REP-2016 hash than upstream's, so on the Zenoh
+backend, which matches endpoints by hash, a node built from the upstream
+package does not match an endpoint of the changed message.
 
-| File | Upstream | Departure | Why | Upstream status |
-|---|---|---|---|---|
-| `communication_skills/Say.action` | [ros4hri/communication_skills](https://github.com/ros4hri/communication_skills/blob/main/action/Say.action) | Feedback gains `string viseme` and `float32 intensity` after the standard's `std_skills/Feedback feedback`. | A face speaking under `/skill/say` shapes its mouth per viseme; a client mirroring the lips or captioning the speech needs that stream, and the standard's generic feedback has no place for it. Additive, so a goal from an upstream client still parses. | Not yet proposed. |
-| `hri_msgs/Viseme.msg`, `hri_msgs/Visemes.msg` | None — [ros4hri/hri_msgs](https://github.com/ros4hri/hri_msgs/tree/master/msg) has no viseme message on any branch. | New files: `Viseme` carries the 15-shape constants, a `value`, and the `time`/`duration` that place it in the utterance; `Visemes` is a sequence of them. | A TTS node aligning speech to lip shapes publishes them on `/tts/viseme` and `/tts/visemes`, which is how a face lipsyncs to speech synthesized elsewhere, and upstream has no vocabulary for it. The fields and the constants are the ones the ROS4HRI TTS nodes in the field already publish under these names, so a face built from these files hears them. | Not yet proposed; the shape to propose is this one, since it is what is deployed. |
-| `vizij_face_msgs/*` | None — Vizij's own package, not a modified standard type. | New package. Content (`FacialActionUnits`, `Expression`, `Viseme`: what a face is, no confidence, no timing), observation (`Perceived*`: a header, the content, a confidence), timing (`Timing`, `TimedViseme`, `VisemeTimeline`), and the skills on them: `SetFacialActionUnits` and `SetViseme` (topics), `PlayVisemes` (an action whose result is `std_skills/Result`, as `LookAt`'s). | ROS4HRI's face messages mix what a face is with how it was observed and timed, which fits perception but not commanding a face; a standard type cannot be extended under its own name (rmw_zenoh matches by hash), so a new capability needs its own package. Layered this way, adopting a standard later changes a package name and nothing else. | Counter-proposal for the standard (vizij-docs `ros4hri_face/face-interfaces-proposal.md`). |
+| File | Upstream | Departure | Upstream status |
+|---|---|---|---|
+| `communication_skills/Say.action` | [ros4hri/communication_skills](https://github.com/ros4hri/communication_skills/blob/main/action/Say.action) | The feedback carries `string viseme` and `float32 intensity` after the standard's `std_skills/Feedback feedback`: the mouth shape the utterance makes as it plays. A goal from an upstream client still parses; its feedback endpoint's hash differs from upstream's. | Not proposed. |
+| `hri_msgs/Viseme.msg`, `hri_msgs/Visemes.msg` | None: [ros4hri/hri_msgs](https://github.com/ros4hri/hri_msgs/tree/master/msg) has no viseme message. | New files: `Viseme` carries the 15-shape constants, a `value`, and the `time` and `duration` that place it in the utterance; `Visemes` is a sequence of them. They are the fields and constants that ROS4HRI TTS nodes publish on `/tts/viseme` and `/tts/visemes`. | Not proposed. |
+| `vizij_face_msgs/*` | None: Vizij's own package. | A new package, so no standard type changes. | Written up as a counter-proposal for the standard (vizij-docs, `ros4hri_face/face-interfaces-proposal.md`). |
 
-A device exposes the extended contract only under the ROS4HRI exposure
-profile — the skill is ROS4HRI's, and so is the extension.
+A device serves the departed `Say` only under the ROS4HRI exposure profile of
+the ROS 2 bridge.
 
-## Types defined at runtime
+## Types defined at run time
 
-The registry is not limited to the bundled messages:
+The registry also takes types that were never bundled:
 
-- a ROS developer adds a type that was never a `.msg` here —
+- from the text of a `.msg`:
   `registry.define_from_msg("my_msgs", "Reading", "std_msgs/Header header\nfloat64 value")`;
-- a behavior loads a type it authored on the fly — `registry.define_from_json(blob)`,
-  where the blob is a serialized `low::Type`.
+- from a JSON array of `low::Type`s, the type and every type it nests, as a
+  behavior saves a type it authored: `registry.define_from_json(json)`;
+- from a type and its dependencies: `registry.define(ty, deps)`, or any
+  `#[derive(AroraType)]` type with `registry.register_arora::<T>()`.
 
-Either joins the registry with exactly the id it would have as a bundled message,
-so a topic typed with it is immediately encodable, hashable, and — with a ROS
-bridge enabled — speakable to real ROS clients.
+Each joins with the id it would have as a bundled message, so a topic of that
+type is at once encodable, hashable and, through the ROS 2 bridge, reachable by
+ROS clients. `ros2_representable` says whether a type can ride ROS 2 at all
+(and `NotRepresentable` why not).
 
 ## Features
 
-The core — the codec, the registry, the generated types, `ros2_representable` —
-depends on **no** ROS middleware, so a modeling consumer (a node editor, a wasm
-build) stays lean. The `dds` / `zenoh` features add `interop`: the REP-2016 hash
-and the live-ROS surface, pulling `ros2-client` with the matching backend.
+The core — codec, registry, generated types, `ros2_representable` — depends on
+no ROS middleware, so a modelling consumer (an editor, a wasm build) stays
+lean.
 
-```toml
-arora-msgs-ros2 = { path = "../arora-msgs-ros2" }                        # core only
-arora-msgs-ros2 = { path = "../arora-msgs-ros2", features = ["zenoh"] }  # + hash
-```
+| Feature | Effect |
+|---|---|
+| `dds` | The REP-2016 hash (`rihs01`, `service_rihs01`, `action_hashes`, `type_hash::<T>()`), with `ros2-client` on its DDS backend. |
+| `zenoh` | The same, with `ros2-client` on its Zenoh backend. |
+| `interop` | What `dds` and `zenoh` turn on; not usable alone, as `ros2-client` needs exactly one backend. |
 
 ## Layout
 
-- `msgs/` — the vendored `.msg` sources (the source of truth).
-- `build.rs` + `schema.rs` — the `.msg` parser (shared with runtime `define_from_msg`) and the code generator.
-- `cdr.rs` — the ROS 2 CDR codec, a backend of the `arora_types::value_serde` walk.
-- `registry.rs` — `Ros2Registry` and the runtime type-definition paths.
-- `representable.rs` — `ros2_representable`, the "can this ride ROS 2" predicate.
-- `hash.rs` (`interop`) — the REP-2016 `RIHS01_…` type hash.
-- `tests/use_cases.rs` — the five worked scenarios above, as runnable tests.
+- `msgs/`: the vendored `.msg` and `.action` sources, the source of truth.
+- `build.rs` and `src/schema.rs`: the `.msg` parser, shared with
+  `define_from_msg`, and the code generator.
+- `src/cdr.rs`: the ROS 2 CDR codec, a backend of the
+  `arora_types::value_serde` walk.
+- `src/registry.rs`: `Ros2Registry` and the run-time definitions.
+- `src/representable.rs`: `ros2_representable`.
+- `src/hash.rs` (`interop`): the REP-2016 `RIHS01_…` type hash.

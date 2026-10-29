@@ -2,8 +2,8 @@
 
 A behavior tree and the nodes beside it, as text. The tree is nested by
 indentation; the nodes no node holds, which compute what the tree reads, are
-listed after it. No id is needed anywhere: nodes are named, and functions,
-parameters and variables are written by name.
+listed after it. Nodes are named, and functions, parameters and variables are
+written by name; an id is needed only to select a field out of a structure.
 
 ```text
 # comment to end of line
@@ -100,7 +100,14 @@ word       = identifier | id ;
   string's escapes. `{<uuid>}` is the variable of that id, which names none;
   `{"<uuid>"}` is the key that reads as that id.
 - A **path**, in a selection, runs from `[` to the first `]` on its line and
-  may hold any other character: `{pose}[a#b(c]` selects `a#b(c`.
+  may hold any other character: the path of `{pose}[.a#b(c]` is `.a#b(c`. It is a
+  [`Key`](../../arora-types/src/data/state.rs) whose attributes, the
+  `.`-separated parts after its first `.`, are read in turn
+  ([`Key::select`](../../arora-types/src/data/state.rs)): a structure's field
+  by the field's id, a key-value record's field by its key, an array's element
+  by its index. `[.0]` is the first element and `[.name]` a record's field
+  `name`; a path with no `.`, such as `[0]`, selects nothing out of its
+  value and reads it whole.
 - A **parameter's name** is words joined by dots, as a module may declare
   them (`param.half_life`). In `@node.parameter`, the parameter is everything
   after the first dot: a node's name is one word.
@@ -117,7 +124,7 @@ word       = identifier | id ;
 | a variable | `{person/visible}` (a store key), `{.mood}` (tree-local), `{"a key"}` (quoted), `{<uuid>}` | `LinkSource::Variable` |
 | a node's return value | `@cm` | `LinkSource::Port` on `_ret` |
 | a node's parameter | `@s.state` | `LinkSource::Port` on the parameter |
-| a selection | `@record[.name]`, `{pose}[/0]` | `LinkSource::Select` |
+| a selection | `@record[.name]`, `{pose}[.0]`, `@step[.<field id>]` | `LinkSource::Select` |
 | a call | `oscillator(t: {arora/time}, frequency: 1.6)` | a node of its own, read by its return value |
 
 The display writes two more forms, which a text does not: `{= value}`, a cell
@@ -169,12 +176,14 @@ using either is told so.
   its type's range (`1e999f64`) is refused, not made infinite.
 - **Natives' own state** is seeded when a node leaves it out:
   `sequence_star`'s `current_index` at `0u16`, `run_status`'s `latch` at `()`.
-- **Slots.** A node's inputs are its function's parameters, its outputs its
-  return value (`_ret`) and the parameters it writes, each with its type.
+- **Inputs and outputs.** A node's inputs are its function's parameters,
+  its outputs its return value (`_ret`) and the parameters it writes, each
+  with its type.
 - **Unstated parameters.** A native's parameters a node must bind are known,
   and leaving one out is warned about. A module function declares no
-  default: a parameter a node leaves out is passed `()`, or `None` when
-  optional, which the function may mean, so it is not warned about.
+  default: a parameter a node leaves out is not in the call, which the
+  function may mean (a module declared with `arora-module` reads it as `None`
+  when it is optional), so it is not warned about.
 - **One key, several writers.** A node no node holds publishes its keys
   after the tree ticks, so it wins over a tree node writing the same key;
   of several such nodes, the one with the greatest id publishes last, and
@@ -251,7 +260,16 @@ quoted when it needs it. A float shows in its shortest form that reads back:
 The examples of [The NGBT spectrum](../../../docs/ngbt-spectrum.html), with
 the operations it names (`clamp`, `remap`, `damp`, `oscillator`, `mul`,
 `add`, `not`, `truthy`, `wait`, `identity`) as functions of the device's
-modules.
+modules, their parameters named for reading. The functions of
+`@arora/dataflow` ([arora-dataflow-nodes](../../arora-dataflow-nodes/README.md))
+name theirs after a node graph's ports and parameters, and take the clock and
+their state as arguments:
+
+```text
+running
+
+d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, t: {arora/time}, state: ())
+```
 
 A pure mapping: sinks beside a tree that does nothing.
 

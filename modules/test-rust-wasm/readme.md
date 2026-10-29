@@ -1,19 +1,15 @@
-# Test Rust -> WASM module
+# test-rust-wasm
 
-This is a module written in Rust and compiled to WASM to be executed by arora-engine.
-It relies on [wasmtime for Rust](https://docs.wasmtime.dev/lang-rust.html).
+The reference Rust guest the tests load: a module declared in Rust with
+[`arora-module`](../../crates/arora-module/readme.md), built as a
+`wasm32-wasip2` component for the `wasm-component` executor and as a shared
+library for the `native` one, from the same source.
 
-The module declares its Arora interface in Rust, with
-[`arora-module`](../../crates/arora-module/readme.md)'s macros: the ids, the
-header the engine loads it with, and the `arora_function_<id>` entry points
-the executor calls all come from `src/lib.rs`.
+Everything a host needs comes from [`src/lib.rs`](src/lib.rs): the module's
+ids, its header (`test_rust_wasm::header(executor)`), its records, and the
+component's exports (`arora_module::artifact!`).
 
-This module exports symbols imported by the module
-[Behavior Tree Nodes](https://github.com/semio-ai/arora-sdk),
-and is used in the tests of the
-[Behavior Tree library](https://github.com/semio-ai/arora-sdk).
-
-Exported functions:
+## Functions
 
 | Name | Signature | Notes |
 |------|-----------|-------|
@@ -41,49 +37,15 @@ Reading`), in the `navigation` scope, so a device can load two modules of
 different scopes sharing a type: both ship the same `Reading` and `Quadrant`
 records.
 
-## Requirements
-
-You need Rust installed, and `cargo component` to be installed first.
-
-```bash
-$ cargo install cargo-component
-```
-
-For basic tests,
-[have `wasmtime` installed](https://docs.wasmtime.dev/cli-install.html) too.
-
 ## Build
 
-Build for the host machine, for development and testing:
-
 ```bash
-$ cargo build [...]
+# the shared library, for the native executor
+cargo build -p test-rust-wasm
+# the component, for the wasm-component executor
+cargo build -p test-rust-wasm --target wasm32-wasip2
 ```
 
-> **Note:**
-> Building the module for the host works here because
-> this module does not depend on other modules,
-> and therefore not on [the Arora Engine](../../crates/arora-engine/readme.md)
-> and its functions `arora_dispatch` and `arora_dispatch_indirect`.
-
-Build into WASM so that it can be loaded by `wasmtime`,
-and therefore by the Arora engine, which uses it:
-
-```bash
-$ cargo component build
-```
-
-It is also automatically built via the parent project (Arora engine),
-via CMake targets that include the build for the host,
-the build into WASM, and the tests.
-The resulting `.wasm` executable should be found under
-`<this_dir>/target/wasm32-wasip2/<debug_or_release>/test_rust_wasm.wasm`.
-
-## Run
-
-The build produces a library, which exported functions can be called with `wasmtime`.
-For instance, to call the `ping()` function:
-
-```bash
-wasmtime --invoke arora_function_5f423ba9_d5f9_46d7_a9b5_fb7d28f99ea6 test_rust_wasm.wasm 0
-```
+The crates that test with it build it themselves, as an artifact dependency:
+`arora-engine` loads the shared library through `NativeExecutor`, while
+`arora`, `arora-web` and the integration tests load the component.

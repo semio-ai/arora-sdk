@@ -1,17 +1,16 @@
-# Test C++ Module #2
+# test-cpp-2
 
-This is another example module for the
-[Arora Engine](../../crates/arora/../../readme.md),
-required for the automated tests of the project.
+A C++ module the tests load, which calls another module: it imports
+`test_2_args` from [`test-cpp`](../test-cpp/readme.md) and takes a structure
+argument whose record it carries. It builds as `test-cpp` does.
 
-It also calls [`arora-module-cli`](../../crates/arora-module-authoring/cli/readme.md)
-to generate the C++ bindings used in the implementation,
-and [`arora-cli`](../../crates/arora-cli/readme.md)
-to perform a sanity check of the module.
+It exports `test_structured(a: bool, b: TestStructure1) -> i32`.
+[`module.yaml`](module.yaml) declares the export and the import;
+`TestStructure1`'s record is in [`records/`](records/structure).
 
-It imports a function from the [the first C++ test module](../test-cpp/readme.md).
-
-It builds as [the first C++ test module](../test-cpp/readme.md) does, and
-writes its module directory to `target/<profile>/modules/test-cpp-2/`: its
-`records/` holds its own record and the records of the types its functions
-name, from this directory's `records/`.
+Its build reads test-cpp's records from `target/<profile>/modules/test-cpp/records/`
+and its own from `records/` (`arora-module-cli --include`), so cargo builds
+`test-cpp` first. The generated bindings hold `test-cpp`'s function too,
+calling it through the engine. The module directory it writes,
+`target/<profile>/modules/test-cpp-2/`, holds `header.json`,
+`test-cpp-2.wasm`, and in `records/` its own record and `TestStructure1`'s.
