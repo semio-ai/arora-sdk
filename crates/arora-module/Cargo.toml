@@ -1,6 +1,6 @@
 [package]
 name = "arora-module"
-version = "2.3.0"
+version = "2.3.1"
 edition = "2021"
 description = "Write an Arora module in Rust: the declaration macros and the traits they implement."
 license = "Apache-2.0"
@@ -23,7 +23,7 @@ arora-buffers = { path = "../arora-buffers", version = "3.1" }
 # The `arora:module` world's guest bindings, for a module built as a
 # `wasm32-wasip2` component.
 [target.'cfg(all(target_arch = "wasm32", target_os = "wasi", target_env = "p2"))'.dependencies]
-wit-bindgen = "0.58"
+wit-bindgen = "0.63"
 
 [dev-dependencies]
 # The record round-trip test reads the store's wire form back.
