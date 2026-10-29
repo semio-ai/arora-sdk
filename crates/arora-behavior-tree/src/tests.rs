@@ -2700,6 +2700,59 @@ mod kept_state {
         assert_eq!(device.calls(a1), 3, "a re-keyed seq_star restarts");
     }
 
+    /// Removing a node a binding reads unbinds it, and restarts its node as
+    /// unbinding it would.
+    #[test]
+    fn removing_a_node_a_binding_reads_restarts_the_reader() {
+        let [a1, a2] = [0xA1, 0xA2].map(Uuid::from_u128);
+        let mut device = Device::new(&[(a1, Status::Success), (a2, Status::Running)]);
+        let root = Uuid::from_u128(0x20);
+        let producer = Uuid::from_u128(0x30);
+        let mut graph = seq_star([0x20, 0x21, 0x22], [a1, a2]);
+        graph
+            .nodes
+            .push(leaf_node(producer, nodes::EQUAL_FUNCTION_ID));
+        bind_all(
+            &mut graph,
+            vec![
+                binding(
+                    Port::new(producer, nodes::EQUAL_A_PARAM_ID),
+                    Source::Value(Value::U8(1)),
+                ),
+                binding(
+                    Port::new(producer, nodes::EQUAL_B_PARAM_ID),
+                    Source::Value(Value::U8(1)),
+                ),
+                binding(
+                    Port::new(root, Uuid::from_u128(0xE0)),
+                    Source::Port(Port::new(producer, nodes::EQUAL_A_PARAM_ID)),
+                ),
+            ],
+        );
+        device.interp.load(graph).unwrap();
+        device.tick();
+        device.tick();
+        assert_eq!(
+            device.calls(a1),
+            1,
+            "the seq_star resumes at its second child"
+        );
+
+        device
+            .interp
+            .apply(GraphDiff {
+                remove: vec![producer],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(
+            device.calls(a1),
+            2,
+            "the seq_star unbound by a removal restarts"
+        );
+    }
+
     /// A refused edit restarts nothing, at the next lowering either.
     #[test]
     fn a_refused_edit_restarts_nothing() {

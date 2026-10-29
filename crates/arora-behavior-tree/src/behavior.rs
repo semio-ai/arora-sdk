@@ -70,7 +70,8 @@
 //! keeps the state of every node the change left in place — a `seq_star`'s
 //! index, a run's latch, a tree-local variable such a node reads — so changing
 //! one run leaves the main behavior and every other run where they were. A
-//! node the change sets, or whose bindings it changes, starts afresh, and so
+//! node the change sets, or whose bindings it changes (a binding reading a
+//! node it removes goes with that node), starts afresh, and so
 //! does a tree-local variable only such nodes read. A load thus restarts the
 //! main behavior's nodes, but a tree-local variable a run also reads keeps its
 //! value, as the run left in place sees it; an edit restarts the nodes it
@@ -360,6 +361,22 @@ fn changed_nodes(diff: &GraphDiff) -> impl Iterator<Item = Uuid> + '_ {
         .chain(bind.iter().map(|binding| binding.node))
 }
 
+/// The nodes of `graph` that removing `remove` leaves but unbinds: those
+/// with a binding reading a removed node, which goes with it as an unbind
+/// would take it.
+fn unbound_by_removal<'a>(graph: &'a Graph, remove: &'a [Uuid]) -> impl Iterator<Item = Uuid> + 'a {
+    graph
+        .nodes
+        .iter()
+        .filter(|node| !remove.contains(&node.id))
+        .filter(|node| {
+            node.bind
+                .values()
+                .any(|source| source_port(source).is_some_and(|port| remove.contains(&port.node)))
+        })
+        .map(|node| node.id)
+}
+
 fn behavior_error(message: impl Into<String>) -> BehaviorError {
     BehaviorError {
         message: message.into(),
@@ -489,7 +506,8 @@ impl BehaviorTreeInterpreter {
     /// every tick of the device until it is halted. A function that index
     /// does not have fails its node when it runs, as at any lowering.
     fn edit_lowering(&mut self, diff: GraphDiff, detached: bool) -> Result<(), BehaviorError> {
-        let changed: Vec<Uuid> = changed_nodes(&diff).collect();
+        let mut changed: Vec<Uuid> = changed_nodes(&diff).collect();
+        changed.extend(unbound_by_removal(&self.graph, &diff.remove));
         let mut graph = self.graph.clone();
         graph
             .apply(diff)
