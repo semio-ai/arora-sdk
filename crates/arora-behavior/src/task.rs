@@ -59,11 +59,11 @@ impl TryFrom<arora_types::value::Value> for TaskId {
 
 /// How a run coexists with the runs an interpreter already hosts.
 ///
-/// Only [`Concurrent`](Self::Concurrent) is honoured today; the enum is
-/// `#[non_exhaustive]` so conflict-resolution policies that need resource-claims
-/// (preempt, queue, blend, reject) can be added later without a breaking change.
-/// Arbitration, when those land, is the interpreter's — it is the only thing
-/// that sees every run.
+/// [`Concurrent`](Self::Concurrent) is the one policy. The enum is
+/// `#[non_exhaustive]` so a conflict-resolution policy that needs resource
+/// claims (preempt, queue, blend, reject) is not a breaking change to add.
+/// Arbitrating between runs is the interpreter's: it is the only thing that
+/// sees every run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RunPolicy {

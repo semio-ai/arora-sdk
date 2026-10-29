@@ -505,8 +505,8 @@ impl<'a> Resolver<'a> {
             given.insert(parameter);
         }
         // A native's parameters a node must bind are known; a module
-        // function declares no default, and is passed `()` or `None` for a
-        // parameter a node leaves out, which it may mean.
+        // function declares no default, and a parameter a node leaves out is
+        // not passed at all: the function decides what its absence means.
         if let Some(native) = native(function.id()) {
             let parameters = &native.function.function.parameters;
             let missing: Vec<String> = native
@@ -908,7 +908,7 @@ impl Read<'_> {
     }
 }
 
-/// A function's slots: every parameter an input, and its return value and
+/// A function's ports: every parameter an input, and its return value and
 /// every parameter it writes an output.
 fn slots(function: &ModuleFunction) -> (Vec<Io>, Vec<Io>) {
     let slot = |id: Uuid, ty: &FrozenTy| Io {
@@ -931,8 +931,8 @@ fn slots(function: &ModuleFunction) -> (Vec<Io>, Vec<Io>) {
     (inputs, outputs)
 }
 
-/// A frozen type as a graph slot's type: a primitive by its name, a record
-/// by its id. `None` for an optional of anything but a scalar, which a slot's
+/// A frozen type as a graph port's type: a primitive by its name, a record
+/// by its id. `None` for an optional of anything but a scalar, which a port's
 /// type does not write.
 fn type_ref(ty: &FrozenTy) -> Option<TypeRef> {
     Some(match ty {

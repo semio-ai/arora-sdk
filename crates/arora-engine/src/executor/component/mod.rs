@@ -2,10 +2,9 @@
 //!
 //! Hosts guest modules built as WebAssembly Components (e.g. Rust's
 //! `wasm32-wasip2` target) against the `arora:module` WIT world defined in
-//! `crates/arora-engine/wit/arora-module.wit`. Unlike the core-module executor in
-//! [`super::wasm`], data crosses the boundary through the canonical ABI
-//! (`list<u8>`), so there is no guest allocator to drive and no raw linear
-//! memory to read.
+//! `crates/arora-engine/wit/arora-module.wit`. Data crosses the boundary
+//! through the canonical ABI (`list<u8>`), so there is no guest allocator to
+//! drive and no raw linear memory to read.
 //!
 //! Selected by `executor.name: wasm-component` in a module's header.
 //!
@@ -141,11 +140,10 @@ fn config() -> Config {
 }
 
 /// The wasmtime engine every component compiles on and every instance runs
-/// in: one per process, created on first use, as the core-module executor's
-/// is. Unlike that one it allocates instances on demand, reserving address
-/// space per live instance: a pool reserves it for every slot when it is
-/// created, and a second pool would reserve as much again as the core-module
-/// engine's. A `Component` instantiates only in a store of the engine that compiled
+/// in: one per process, created on first use. It allocates instances on
+/// demand, reserving address space per live instance, where a pooling
+/// allocator reserves it up front for every instance the pool can hold. A
+/// `Component` instantiates only in a store of the engine that compiled
 /// it, so one engine is what lets the devices of a process share a compiled
 /// module; each instance keeps a store of its own. A failure to create it is
 /// kept: every later executor and compilation fails with it.

@@ -1,12 +1,13 @@
 //! The default `arora` binary: the device runner, headless (no HAL-attached
-//! display — a head like Vizij embeds [`arora::run_with_hal`] instead).
+//! display — a head like Vizij embeds [`arora::Arora::builder`] instead).
 //!
 //! It reads its configuration from its options and the environment (the
 //! device's name, directory and local bridge port, Firebase options, Zenoh
 //! endpoints), loads the modules in its device directory and those `--module`
 //! names, serves the open local bridge, and runs the arora runtime. A `studio-bridge` build connects to Semio Studio
-//! over Zenoh instead, unless the run passes `--no-studio`. See
-//! [`arora::run_with_hal`] for the configuration env vars and the full run.
+//! over Zenoh instead, unless the run passes `--no-studio`. [`arora::RunnerArgs`]
+//! documents the device options and their variables, `arora::studio` the
+//! Studio connection's.
 //!
 //! A device-specific build is a thin downstream binary that depends on `arora`
 //! plus its own HAL/bridge crates and calls [`arora::run_with_hal`] /

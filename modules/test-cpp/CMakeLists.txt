@@ -3,10 +3,10 @@ project(test-cpp CXX)
 
 # Required cache vars (normally passed by the wrapping build.rs):
 #   ARORA_MODULE_CLI            host bin that codegens C++ from module.yaml
-#   records dir for arora-behavior-tree-types-yaml
 #   ARORA_BUFFERS_LIB           wasm32-wasip2 static lib (.a) of arora-buffers
 #   ARORA_UTIL_LIB              wasm32-wasip2 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp (built inline below)
+#   ARORA_INCLUDE_DIR           target/include (generated arora C headers)
 #   ARORA_MODULE_DIR            the module directory to write (see below)
 # CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip2 toolchain file.
 foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB

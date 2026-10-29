@@ -10,8 +10,9 @@
 //!   those: a behavior-tree interpreter, a node-graph interpreter. It is the
 //!   thing the runtime actually ticks.
 //!
-//! The runtime holds one `Box<dyn BehaviorInterpreter>` and ticks it — swapping
-//! the interpreter replaces the behavior. The behavior tree is one interpreter
+//! The runtime holds one `Box<dyn BehaviorInterpreter>`, set when the device is
+//! built, and ticks it each step; a behavior is loaded into it, and edited in
+//! place, through the interpreter. The behavior tree is one interpreter
 //! (`arora-behavior-tree`'s [`BehaviorTreeInterpreter`]); a Vizij node graph is
 //! another. Adding a new *kind of authored behavior* means adding a new
 //! interpreter here. Hand-implementing the trait to hard-code a single behavior
@@ -33,7 +34,7 @@
 //!
 //! Timing is not a tick argument. The runtime publishes the frame's clock into
 //! the store under the [`built_in`] keys before it ticks, so an interpreter that
-//! needs `dt` or elapsed time reads it from the store like any other slot.
+//! needs `dt` or elapsed time reads it from the store like any other key.
 
 use std::collections::HashMap;
 

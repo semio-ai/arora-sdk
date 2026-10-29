@@ -9,14 +9,12 @@ description = "End-to-end tests that exercise built modules via arora-cli"
 [lib]
 path = "src/lib.rs"
 
-# The integration tests spawn `arora-cli` against artifacts that the rest
-# of the workspace produces at known paths under <workspace>/target. We
-# use bindeps on arora-cli (a bin artifact) to ensure it's always built,
-# but intentionally do NOT declare bindeps on the cdylib modules (polly,
-# etc) as those produce duplicate compilation units and cargo "output
-# filename collision" warnings (cargo#6313). The build.rs detects arora-cli
-# via CARGO_BIN_FILE_ARORA_CLI from bindeps, with fallback to the target
-# directory in case it's pre-built.
+# The integration tests drive `arora-cli` and the engine against built guests.
+# arora-cli is a bin artifact build-dependency, and the Rust guests are cdylib
+# artifact build-dependencies for wasm32-wasip2: build.rs hands the tests the
+# paths cargo gives them. The C++ guests (test-cpp, test-cpp-2, example-cpp)
+# are dev-dependencies whose build scripts write their module directories under
+# <workspace>/target/<profile>/modules, where the tests read them.
 
 [dev-dependencies]
 anyhow = "1"

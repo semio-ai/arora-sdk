@@ -109,8 +109,8 @@ pub struct TypedInput {
 /// `domain_id`, and the typed conversions a profile adds. The keys themselves
 /// need no declaration here: each key the device's store opens to remote
 /// writers (`KeyMeta::editable`) is subscribed as an input topic typed from its
-/// meta, and [`send_data`](Bridge::send_data) creates a publisher from each
-/// changed value's type on first use.
+/// meta, and each changed key [`try_send`](Bridge::try_send) hands the bridge
+/// is published on a publisher created from its value's type on first use.
 #[derive(Debug, Clone)]
 pub struct Ros2BridgeConfig {
     pub namespace: String,

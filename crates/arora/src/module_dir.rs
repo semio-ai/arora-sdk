@@ -5,8 +5,8 @@
 //! <module directory>/
 //! ├── header.json      the module's low-level Header, as JSON
 //! ├── <artifact>       the one file with the executor's extension: `.wasm`
-//! │                    for `wasm-component` and `wasm`, the platform's
-//! │                    dynamic library (`.so`, `.dylib`, `.dll`) for `native`
+//! │                    for `wasm-component`, the platform's dynamic
+//! │                    library (`.so`, `.dylib`, `.dll`) for `native`
 //! └── records/         optional: the module's record and the records it
 //!                      depends on, in arora-registry's layout
 //!                      (`module/<id>@<version>.yaml`, `structure/…`,
