@@ -10,7 +10,7 @@
 //! `Reading` too: `Reading` states its scope, `trigonometry`.
 
 use super::*;
-use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node, Port};
+use arora_behavior::graph::{Graph, Node, Source};
 use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID};
 use arora_behavior_tree::schema::_RET_PARAM_ID;
 use arora_registry::local::ROOT_ID;
@@ -114,75 +114,46 @@ fn device(registry: Option<LocalRegistry>) -> Result<Arora> {
 /// halted: what Studio's stepping behavior is to `step_values`.
 fn reading_graph() -> Graph {
     let [parallel, reading, readings, run] = [0x1, 0x2, 0x3, 0x4].map(Uuid::from_u128);
-    let [reading_out, readings_out] = [0x11, 0x12].map(Uuid::from_u128);
-    let mut graph = Graph::empty();
-    graph.root = Some(parallel);
-    graph.nodes.insert(
-        parallel,
-        Node {
-            id: parallel,
-            function: PARALLEL_FUNCTION_ID,
-            children: Some(vec![reading, readings, run]),
-            ..Node::default()
-        },
-    );
-    graph.nodes.insert(
-        reading,
-        Node {
-            id: reading,
-            function: declared::ids::reading::FUNCTION,
-            inputs: vec![
-                Io::new(declared::ids::reading::ANGLE),
-                Io::new(_RET_PARAM_ID),
-            ],
-            ..Node::default()
-        },
-    );
-    graph.nodes.insert(
-        readings,
-        Node {
-            id: readings,
-            function: declared::ids::readings::FUNCTION,
-            inputs: vec![
-                Io::new(declared::ids::readings::COUNT),
-                Io::new(_RET_PARAM_ID),
-            ],
-            ..Node::default()
-        },
-    );
-    graph.nodes.insert(
-        run,
-        Node {
-            id: run,
-            function: RUN_FUNCTION_ID,
-            ..Node::default()
-        },
-    );
-    graph.links = vec![
-        Link::new(
-            Port::new(reading, declared::ids::reading::ANGLE),
-            LinkSource::Literal(Value::F32(0.0)),
-        ),
-        Link::new(
-            Port::new(reading, _RET_PARAM_ID),
-            LinkSource::Variable(reading_out),
-        ),
-        Link::new(
-            Port::new(readings, declared::ids::readings::COUNT),
-            LinkSource::Literal(Value::U32(4)),
-        ),
-        Link::new(
-            Port::new(readings, _RET_PARAM_ID),
-            LinkSource::Variable(readings_out),
-        ),
-    ];
-    graph
-        .variables
-        .insert(reading_out, "trig/reading".to_string());
-    graph
-        .variables
-        .insert(readings_out, "trig/readings".to_string());
-    graph
+    let key = |key: &str| Source::Key(key.to_string());
+    Graph {
+        root: Some(parallel),
+        nodes: vec![
+            Node {
+                id: parallel,
+                function: PARALLEL_FUNCTION_ID,
+                children: Some(vec![reading, readings, run]),
+                ..Node::default()
+            },
+            Node {
+                id: reading,
+                function: declared::ids::reading::FUNCTION,
+                bind: [
+                    (
+                        declared::ids::reading::ANGLE,
+                        Source::Value(Value::F32(0.0)),
+                    ),
+                    (_RET_PARAM_ID, key("trig/reading")),
+                ]
+                .into(),
+                children: None,
+            },
+            Node {
+                id: readings,
+                function: declared::ids::readings::FUNCTION,
+                bind: [
+                    (declared::ids::readings::COUNT, Source::Value(Value::U32(4))),
+                    (_RET_PARAM_ID, key("trig/readings")),
+                ]
+                .into(),
+                children: None,
+            },
+            Node {
+                id: run,
+                function: RUN_FUNCTION_ID,
+                ..Node::default()
+            },
+        ],
+    }
 }
 
 fn read(arora: &Arora, key: &str) -> Option<Value> {

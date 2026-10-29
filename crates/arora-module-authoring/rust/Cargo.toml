@@ -29,7 +29,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
-arora-behavior = { path = "../../arora-behavior", version = "9.4" }
+arora-behavior = { path = "../../arora-behavior", version = "10" }
 indexmap = "2"
 
 # Declared explicitly because the `include` field above disables target

@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-ros2"
-version = "6.0.0"
+version = "6.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/UR5, G1) as Arora devices"
@@ -43,11 +43,12 @@ arora-types = { path = "../arora-types", version = "3.1" }
 # shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
 # a Zenoh publisher keys on. Core only here — a backend is selected via [features].
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
-# 16: `AroraBuilder::with_studio` and `studio::StudioArgs`, the run's
+# 17, the current major, whose device reads `behavior-tree` 2.0 graphs. 16:
+# `AroraBuilder::with_studio` and `studio::StudioArgs`, the run's
 # Studio choice, a run of a runner built with Studio connecting unless it
 # passes `--no-studio`; `RunnerArgs::device` and `AroraBuilder::with_device`,
 # the device's name, directory and local bridge port.
-arora = { path = "../arora", version = "16", optional = true }
+arora = { path = "../arora", version = "17", optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"
@@ -66,7 +67,7 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] 
 
 [dev-dependencies]
 # A device over the HAL, for the tests of what it opens to remote writers.
-arora = { path = "../arora", version = "16" }
+arora = { path = "../arora", version = "17" }
 rand = "0.10"
 # `time` (tests only): the DDS round-trip tests sleep and time out around
 # discovery; the HAL itself needs no timers.

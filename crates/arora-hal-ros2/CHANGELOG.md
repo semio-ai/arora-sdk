@@ -4,6 +4,13 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - 2026-10-29
+
+### Changed
+
+- The `arora-ros2` runner requires arora 17: its device reads `behavior-tree`
+  2.0 graphs, a node holding its own bindings, and refuses a 1.x graph.
+
 ## [6.0.0] - 2026-10-23
 
 ### Added

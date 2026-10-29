@@ -12,13 +12,13 @@
 //!   **fragment** — a run-status decorator over a run-call leaf carrying the
 //!   spawned [`Call`] as literal data — beside it;
 //! - [`spawn_graph`](BehaviorInterpreter::spawn_graph) grafts a fragment whose
-//!   decorator sits over the spawned graph's root, with every node and link of
-//!   that graph;
+//!   decorator sits over the spawned graph's root, with every node of that
+//!   graph;
 //! - [`halt`](BehaviorInterpreter::halt)ing prunes the fragment.
 //!
 //! A run is known by its root. Spawning a graph whose root a live run has
 //! grafts nothing: that run takes the graph as its program — the nodes and
-//! links that differ change, and the run's nodes the graph does not have
+//! bindings that differ change, and the run's nodes the graph does not have
 //! leave — and the spawn answers the run's [`TaskHandle`]. The run keeps its
 //! id, status key and [`RunPolicy`]. A client that lost a run's [`TaskId`]
 //! takes the run over by spawning its graph again, and a spawn of the graph a
@@ -70,7 +70,7 @@
 //! keeps the state of every node the change left in place — a `seq_star`'s
 //! index, a run's latch, a tree-local variable such a node reads — so changing
 //! one run leaves the main behavior and every other run where they were. A
-//! node the change adds, replaces, relinks or re-keys starts afresh, and so
+//! node the change sets, or whose bindings it changes, starts afresh, and so
 //! does a tree-local variable only such nodes read. A load thus restarts the
 //! main behavior's nodes, but a tree-local variable a run also reads keeps its
 //! value, as the run left in place sees it; an edit restarts the nodes it
@@ -80,9 +80,7 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use arora_behavior::graph::{
-    source_port, Graph, GraphDiff, GraphType, Io, Link, LinkSource, Node as GraphNode, Port,
-};
+use arora_behavior::graph::{source_port, Graph, GraphDiff, GraphType, Node as GraphNode, Source};
 use arora_behavior::{
     interpreter_module, BehaviorContext, BehaviorError, BehaviorInterpreter, BehaviorStatus,
     RunPolicy, TaskHandle, TaskId,
@@ -112,23 +110,19 @@ pub const GRAPH_TYPE_NAME: &str = "behavior-tree";
 /// The version of the `behavior-tree` format this interpreter reads. A graph
 /// written for it, or for an older minor version of its major, runs.
 ///
-/// - `1.0`: the control nodes, the status leaves, the task-run nodes and
-///   module function leaves;
-/// - `1.1` adds the data nodes `Equal` and `Unpack`
-///   ([`EQUAL_FUNCTION_ID`](crate::nodes::EQUAL_FUNCTION_ID),
-///   [`UNPACK_FUNCTION_ID`](crate::nodes::UNPACK_FUNCTION_ID));
-/// - `1.2` adds the data node `Scatter`
-///   ([`SCATTER_FUNCTION_ID`](crate::nodes::SCATTER_FUNCTION_ID));
-/// - `1.3` runs the calls a graph lists and no node holds, as
-///   [detached nodes](crate::detached).
-pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(1, 3, 0);
+/// `2.0` is `arora-behavior` 10's graph model, a node holding its own
+/// bindings and a binding naming its key: the control nodes, the status
+/// leaves, the data nodes `Equal`, `Unpack` and `Scatter`
+/// ([`EQUAL_FUNCTION_ID`](crate::nodes::EQUAL_FUNCTION_ID),
+/// [`UNPACK_FUNCTION_ID`](crate::nodes::UNPACK_FUNCTION_ID),
+/// [`SCATTER_FUNCTION_ID`](crate::nodes::SCATTER_FUNCTION_ID)), the task-run
+/// nodes, module function leaves, and the calls a graph lists and no node
+/// holds, run as [detached nodes](crate::detached).
+pub const GRAPH_TYPE_VERSION: semver::Version = semver::Version::new(2, 0, 0);
 
 /// The [`GraphType`] this interpreter reads: [`GRAPH_TYPE_NAME`] at
 /// [`GRAPH_TYPE_VERSION`]. A graph states the oldest version that has every
-/// node it uses, so that an interpreter reading an older minor still runs it:
-/// a graph without the data nodes is spawned as `1.0`, one with `Equal` or
-/// `Unpack` but not `Scatter` as `1.1`, and one with `Scatter` but no detached
-/// node as `1.2`.
+/// node it uses, so that an interpreter reading an older minor still runs it.
 pub fn graph_type() -> GraphType {
     GraphType {
         name: GRAPH_TYPE_NAME.to_string(),
@@ -146,9 +140,6 @@ struct Run {
     /// The nodes of the run's graph that no node holds: detached, they leave
     /// with the run.
     detached: Vec<Uuid>,
-    /// The variables the run's spawn declared: they leave with the run when
-    /// no remaining link reads them.
-    variables: Vec<Uuid>,
 }
 
 /// The [`BehaviorInterpreter`] that runs a [`Graph`] as a behavior tree.
@@ -177,9 +168,9 @@ pub struct BehaviorTreeInterpreter {
     lowered: Option<LoweredTree>,
     /// The graph changed since the last lowering.
     dirty: bool,
-    /// The nodes the graph's changes since the last lowering added, replaced
-    /// or relinked: they start afresh at the next lowering, and every other
-    /// node keeps its state.
+    /// The nodes the graph's changes since the last lowering set, or whose
+    /// bindings they changed: they start afresh at the next lowering, and
+    /// every other node keeps its state.
     fresh: HashSet<Uuid>,
     /// The device's function index as of the last lowering: a run's detached
     /// nodes are lowered against it before the run is accepted.
@@ -196,30 +187,31 @@ fn direct_resolver(store: &dyn DataStore) -> Rc<VariableResolver<'static>> {
     Rc::new(move |name: &str| Some(store.slot(&Key::from(name))))
 }
 
+/// The nodes of `graph`, by id.
+fn by_id(graph: &Graph) -> HashMap<Uuid, &GraphNode> {
+    graph.nodes.iter().map(|node| (node.id, node)).collect()
+}
+
 /// `from` and the nodes under it in `graph`, through the children relation.
 fn subtree(graph: &Graph, from: Uuid) -> HashSet<Uuid> {
     reach(graph, [from])
 }
 
-/// The variable a link source reads, through any [`LinkSource::Select`].
-fn source_variable(source: &LinkSource) -> Option<Uuid> {
-    match source {
-        LinkSource::Variable(id) => Some(*id),
-        LinkSource::Select { source, .. } => source_variable(source),
-        _ => None,
-    }
-}
-
-/// Check that `graph` is one tree rooted at `root`, beside which it may list
-/// detached nodes: every child is one of its nodes, no node has two parents or
-/// is the root's parent, and every node is reached from the root, but for a
-/// node no node holds that is a call to a module function with no children,
-/// which runs [detached](crate::detached). Returns the detached nodes.
+/// Check that `graph` lists each node once, and is one tree rooted at `root`,
+/// beside which it may list detached nodes: every child is one of its nodes,
+/// no node has two parents or is the root's parent, and every node is reached
+/// from the root, but for a node no node holds that is a call to a module
+/// function with no children, which runs [detached](crate::detached). Returns
+/// the detached nodes.
 fn check_tree(graph: &Graph, root: Uuid) -> Result<Vec<Uuid>, BehaviorError> {
+    let nodes = by_id(graph);
+    if nodes.len() != graph.nodes.len() {
+        return Err(listed_twice(graph));
+    }
     let mut parent: HashMap<Uuid, Uuid> = HashMap::new();
-    for node in graph.nodes.values() {
+    for node in &graph.nodes {
         for child in node.children.iter().flatten() {
-            if !graph.nodes.contains_key(child) {
+            if !nodes.contains_key(child) {
                 return Err(behavior_error(format!(
                     "node {} has child {child}, which is not one of the graph's nodes",
                     node.id
@@ -240,7 +232,7 @@ fn check_tree(graph: &Graph, root: Uuid) -> Result<Vec<Uuid>, BehaviorError> {
         }
     }
     let mut detached = Vec::new();
-    for node in graph.nodes.values() {
+    for node in &graph.nodes {
         if node.id == root || parent.contains_key(&node.id) {
             continue;
         }
@@ -262,16 +254,28 @@ fn check_tree(graph: &Graph, root: Uuid) -> Result<Vec<Uuid>, BehaviorError> {
     Ok(detached)
 }
 
+/// The refusal of a graph that lists a node twice, naming the first such.
+fn listed_twice(graph: &Graph) -> BehaviorError {
+    let mut seen = HashSet::new();
+    let twice = graph
+        .nodes
+        .iter()
+        .find(|node| !seen.insert(node.id))
+        .map_or(Uuid::nil(), |node| node.id);
+    behavior_error(format!("node {twice} is listed twice"))
+}
+
 /// Check that the nodes under `root` name only nodes as children and hold no
 /// cycle. A node may sit under several parents.
 fn check_acyclic(graph: &Graph, root: Uuid) -> Result<(), BehaviorError> {
+    let nodes = by_id(graph);
     // Depth-first, each node once: `open` holds the path being walked, so a
     // child on it closes a cycle.
     let mut done = HashSet::new();
     let mut open = HashSet::from([root]);
     let mut stack = vec![(root, 0usize)];
     while let Some((id, next)) = stack.last_mut() {
-        let children = graph.nodes[id].children.as_deref().unwrap_or_default();
+        let children = nodes[id].children.as_deref().unwrap_or_default();
         let Some(child) = children.get(*next).copied() else {
             open.remove(id);
             done.insert(*id);
@@ -279,7 +283,7 @@ fn check_acyclic(graph: &Graph, root: Uuid) -> Result<(), BehaviorError> {
             continue;
         };
         *next += 1;
-        if !graph.nodes.contains_key(&child) {
+        if !nodes.contains_key(&child) {
             return Err(behavior_error(format!(
                 "node {id} has child {child}, which is not a node"
             )));
@@ -297,27 +301,27 @@ fn check_acyclic(graph: &Graph, root: Uuid) -> Result<(), BehaviorError> {
     Ok(())
 }
 
-/// Check that no selection is written: a `Select` link reads part of its
-/// source, so it cannot feed a node's return (`_ret`) or a parameter its
+/// Check that no selection is written: a `Select` binding reads part of its
+/// source, so it cannot bind a node's return (`_ret`) or a parameter its
 /// function declares mutable, whose writes would land on the whole source.
 fn check_selections(graph: &Graph, index: &FunctionIndex) -> Result<(), BehaviorError> {
-    for link in &graph.links {
-        if !matches!(link.source, LinkSource::Select { .. }) {
-            continue;
-        }
-        let Port { node, port } = link.target;
-        let written = port == _RET_PARAM_ID
-            || graph
-                .nodes
-                .get(&node)
-                .and_then(|node| index.get(&node.function))
-                .and_then(|function| function.function.parameters.get(&port))
-                .is_some_and(|parameter| parameter.mutable);
-        if written {
-            return Err(behavior_error(format!(
-                "the selection linked to {node}.{port} would be written: a selection is \
-                 read-only, so link a variable there"
-            )));
+    for node in &graph.nodes {
+        for (port, source) in &node.bind {
+            if !matches!(source, Source::Select { .. }) {
+                continue;
+            }
+            let written = *port == _RET_PARAM_ID
+                || index
+                    .get(&node.function)
+                    .and_then(|function| function.function.parameters.get(port))
+                    .is_some_and(|parameter| parameter.mutable);
+            if written {
+                return Err(behavior_error(format!(
+                    "the selection bound to {}.{port} would be written: a selection is \
+                     read-only, so bind a key there",
+                    node.id
+                )));
+            }
         }
     }
     Ok(())
@@ -326,38 +330,34 @@ fn check_selections(graph: &Graph, index: &FunctionIndex) -> Result<(), Behavior
 /// The nodes `starts` reach through the children relation, `starts`
 /// included.
 fn reach(graph: &Graph, starts: impl IntoIterator<Item = Uuid>) -> HashSet<Uuid> {
+    let nodes = by_id(graph);
     let mut found = HashSet::new();
     let mut pending: Vec<Uuid> = starts.into_iter().collect();
     while let Some(id) = pending.pop() {
         if !found.insert(id) {
             continue;
         }
-        let children = graph.nodes.get(&id).and_then(|node| node.children.as_ref());
+        let children = nodes.get(&id).and_then(|node| node.children.as_ref());
         pending.extend(children.into_iter().flatten());
     }
     found
 }
 
-/// The nodes `diff` changes but does not remove: those it adds or replaces,
-/// the targets of the links it adds or removes, and the nodes whose
-/// predetermined keys it sets. Every field of a diff is named, so a new one
+/// The nodes `diff` changes but does not remove: those it sets, and those
+/// whose bindings it changes. Every field of a diff is named, so a new one
 /// must be placed here.
 fn changed_nodes(diff: &GraphDiff) -> impl Iterator<Item = Uuid> + '_ {
     let GraphDiff {
-        add_nodes,
-        remove_nodes: _,
-        add_links,
-        remove_links,
-        set_predetermined,
-        set_root: _,
-        variables: _,
+        remove: _,
+        set,
+        unbind,
+        bind,
+        root: _,
     } = diff;
-    add_nodes
-        .iter()
+    set.iter()
         .map(|node| node.id)
-        .chain(add_links.iter().map(|link| link.target.node))
-        .chain(remove_links.iter().map(|port| port.node))
-        .chain(set_predetermined.iter().map(|(port, _)| port.node))
+        .chain(unbind.iter().map(|port| port.node))
+        .chain(bind.iter().map(|binding| binding.node))
 }
 
 fn behavior_error(message: impl Into<String>) -> BehaviorError {
@@ -380,15 +380,12 @@ impl BehaviorTreeInterpreter {
     pub fn new() -> Self {
         let runner = Uuid::new_v4();
         let mut graph = Graph::empty();
-        graph.nodes.insert(
-            runner,
-            GraphNode {
-                id: runner,
-                function: PARALLEL_FUNCTION_ID,
-                children: Some(Vec::new()),
-                ..GraphNode::default()
-            },
-        );
+        graph.nodes.push(GraphNode {
+            id: runner,
+            function: PARALLEL_FUNCTION_ID,
+            children: Some(Vec::new()),
+            ..GraphNode::default()
+        });
         graph.root = Some(runner);
         Self {
             graph,
@@ -406,7 +403,7 @@ impl BehaviorTreeInterpreter {
 
     /// Load a behavior tree from Groot XML, replacing the main behavior. The
     /// XML lowers onto the shared [`Graph`] (names → arora ids, resolved
-    /// against `functions`; `{var}` → named variables) and grafts through
+    /// against `functions`; `{var}` → the key `var`) and grafts through
     /// [`load`](BehaviorInterpreter::load), so a Groot-loaded behavior is
     /// editable and introspectable like any other.
     pub fn load_groot(
@@ -447,9 +444,9 @@ impl BehaviorTreeInterpreter {
 
     /// The root of `run`'s program: its decorator's one child.
     fn root_of(&self, run: &Run) -> Option<Uuid> {
-        self.graph.nodes[&run.decorator]
-            .children
-            .as_deref()
+        self.graph
+            .node(&run.decorator)
+            .and_then(|decorator| decorator.children.as_deref())
             .and_then(|children| children.first().copied())
     }
 
@@ -475,43 +472,11 @@ impl BehaviorTreeInterpreter {
         self.all_runs().flat_map(|run| self.nodes_of(run)).collect()
     }
 
-    /// The variables a link into a run's nodes reads.
-    fn run_variables(&self) -> HashSet<Uuid> {
-        let nodes = self.run_nodes();
-        self.graph
-            .links
-            .iter()
-            .filter(|link| nodes.contains(&link.target.node))
-            .filter_map(|link| source_variable(&link.source))
-            .collect()
-    }
-
-    /// Refuse a declaration that renames one of `in_use`.
-    fn check_renames(
-        &self,
-        variables: &HashMap<Uuid, String>,
-        in_use: &HashSet<Uuid>,
-        whose: &str,
-    ) -> Result<(), BehaviorError> {
-        for (id, name) in variables {
-            match self.graph.variables.get(id) {
-                Some(declared) if declared != name && in_use.contains(id) => {
-                    return Err(behavior_error(format!(
-                        "variable {id} is declared as '{declared}' and used by {whose}: it \
-                         cannot become '{name}'"
-                    )));
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
     /// Apply `diff` to the scaffold graph and mark it for re-lowering. The
     /// diff applies whole or not at all: it is refused when it fails, when the
     /// tree under the runner would name a child that is not a node or hold a
-    /// cycle, when a selection would feed a return binding, or when the graph
-    /// would not lower. A selection feeding a parameter the function declares
+    /// cycle, when a selection would bind a return, or when the graph would
+    /// not lower. A selection bound to a parameter the function declares
     /// mutable fails the next tick, which holds the device's index.
     fn edit(&mut self, diff: GraphDiff) -> Result<(), BehaviorError> {
         self.edit_lowering(diff, false)
@@ -548,39 +513,36 @@ impl BehaviorTreeInterpreter {
     }
 
     /// Graft a run under the runner: a run-status decorator over `root`, with
-    /// `fragment` — the run's nodes and links — added beside it. The run's keys
-    /// live under `arora/tasks/<module>/<function>/<run>/`.
+    /// `fragment` — the run's nodes — added beside it. The run's keys live
+    /// under `arora/tasks/<module>/<function>/<run>/`.
     fn graft(
         &mut self,
         module: &str,
         function: Uuid,
         root: Uuid,
         detached: Vec<Uuid>,
-        mut fragment: GraphDiff,
+        mut fragment: Vec<GraphNode>,
     ) -> Result<TaskHandle, BehaviorError> {
         let task = TaskId(Uuid::new_v4());
         let prefix = format!("arora/tasks/{module}/{function}/{}", task.0);
         let status_key = Key::from(format!("{prefix}/status"));
-        let variables = fragment.variables.keys().copied().collect();
 
-        // The decorator's status output is predetermined to the run's status
-        // key (the Direct convention binds it to the store); its latch starts
-        // empty.
+        // The decorator writes its status to the run's status key; its latch
+        // starts empty.
         let decorator = Uuid::new_v4();
-        fragment.add_nodes.push(GraphNode {
+        fragment.push(GraphNode {
             id: decorator,
             function: RUN_STATUS_FUNCTION_ID,
-            inputs: vec![Io::new(RUN_STATUS_LATCH_PARAM_ID)],
-            outputs: vec![Io {
-                predetermined_key: Some(status_key.path.clone()),
-                ..Io::new(RUN_STATUS_OUT_PARAM_ID)
-            }],
+            bind: [
+                (RUN_STATUS_LATCH_PARAM_ID, Source::Value(Value::Unit)),
+                (
+                    RUN_STATUS_OUT_PARAM_ID,
+                    Source::Key(status_key.path.clone()),
+                ),
+            ]
+            .into(),
             children: Some(vec![root]),
         });
-        fragment.add_links.push(Link::new(
-            Port::new(decorator, RUN_STATUS_LATCH_PARAM_ID),
-            LinkSource::Literal(Value::Unit),
-        ));
         let handle = TaskHandle {
             id: task,
             stop: interpreter_module::encode_halt(task),
@@ -593,10 +555,13 @@ impl BehaviorTreeInterpreter {
             handle: handle.clone(),
             decorator,
             detached,
-            variables,
         });
-        fragment.add_nodes.push(self.runner_node());
-        self.edit_lowering(fragment, true).inspect_err(|_| {
+        fragment.push(self.runner_node());
+        let diff = GraphDiff {
+            set: fragment,
+            ..GraphDiff::default()
+        };
+        self.edit_lowering(diff, true).inspect_err(|_| {
             self.runs.pop();
         })?;
         Ok(handle)
@@ -610,21 +575,21 @@ impl BehaviorTreeInterpreter {
             &self.graph,
             self.graph
                 .nodes
-                .keys()
-                .filter(|id| **id != self.runner && !leaving.contains(id))
-                .copied()
+                .iter()
+                .map(|node| node.id)
+                .filter(|id| *id != self.runner && !leaving.contains(id))
                 .chain(self.main_root),
         )
     }
 
     /// Bring the live run `self.runs[at]`, whose root is `graph`'s, to run
-    /// `graph`, and answer the run's handle. Only what differs changes: the
-    /// graph's nodes the run lacks or holds otherwise, the links into them,
-    /// the run's nodes the graph does not have (but for those another node
-    /// also holds), and the variables the graph declares anew. A graph the run
-    /// already runs changes nothing. The graph may name only the run's own
-    /// nodes and new ones: a node the main behavior or another run also holds
-    /// is theirs as much as the run's, and stays as they hold it.
+    /// `graph`, and answer the run's handle. Only what differs changes — the
+    /// diff from the run's own nodes to the graph: the graph's nodes the run
+    /// lacks or holds otherwise, the bindings that differ, and the run's nodes
+    /// the graph does not have. A graph the run already runs changes nothing.
+    /// The graph may name only the run's own nodes and new ones: a node the
+    /// main behavior or another run also holds is theirs as much as the
+    /// run's, and stays as they hold it.
     fn respawn(
         &mut self,
         at: usize,
@@ -637,79 +602,48 @@ impl BehaviorTreeInterpreter {
         let mut leaving = held.clone();
         leaving.insert(decorator);
         let staying = self.held_outside(&leaving);
-        if let Some(id) = graph
+        let device = by_id(&self.graph);
+        if let Some(node) = graph
             .nodes
-            .keys()
-            .find(|id| self.graph.nodes.contains_key(id) && !held.contains(id))
+            .iter()
+            .find(|node| device.contains_key(&node.id) && !held.contains(&node.id))
         {
             return Err(behavior_error(format!(
-                "node {id} is already part of the device's behavior"
+                "node {} is already part of the device's behavior",
+                node.id
             )));
         }
-        if let Some(id) = graph.nodes.keys().find(|id| staying.contains(id)) {
+        if let Some(node) = graph.nodes.iter().find(|node| staying.contains(&node.id)) {
             return Err(behavior_error(format!(
-                "node {id} is held by the main behavior or another run too: a graph spawned \
-                 again with its run's root names only the run's own nodes and new ones"
+                "node {} is held by the main behavior or another run too: a graph spawned \
+                 again with its run's root names only the run's own nodes and new ones",
+                node.id
             )));
         }
-        let declared = self.graph.variables.keys().copied().collect();
-        self.check_renames(&graph.variables, &declared, "the device's behavior")?;
 
-        let links: HashMap<Port, &LinkSource> = self
-            .graph
-            .links
-            .iter()
-            .map(|link| (link.target, &link.source))
-            .collect();
-        let linked: HashSet<Port> = graph.links.iter().map(|link| link.target).collect();
-        let diff = GraphDiff {
-            remove_nodes: held
-                .iter()
-                .filter(|id| !graph.nodes.contains_key(id) && !staying.contains(id))
-                .copied()
-                .collect(),
-            remove_links: links
-                .keys()
-                .filter(|port| graph.nodes.contains_key(&port.node) && !linked.contains(port))
-                .copied()
-                .collect(),
-            add_nodes: graph
+        // The run's own nodes, as a graph rooted where the spawned one is.
+        let own = Graph {
+            root: graph.root,
+            nodes: self
+                .graph
                 .nodes
-                .values()
-                .filter(|node| self.graph.nodes.get(&node.id) != Some(*node))
+                .iter()
+                .filter(|node| held.contains(&node.id) && !staying.contains(&node.id))
                 .cloned()
                 .collect(),
-            add_links: graph
-                .links
-                .iter()
-                .filter(|link| links.get(&link.target) != Some(&&link.source))
-                .cloned()
-                .collect(),
-            variables: graph
-                .variables
-                .iter()
-                .filter(|(id, name)| self.graph.variables.get(*id) != Some(*name))
-                .map(|(id, name)| (*id, name.clone()))
-                .collect(),
-            ..GraphDiff::default()
         };
+        let diff = own.diff(&graph);
         if diff != GraphDiff::default() {
             self.edit_lowering(diff, true)?;
         }
         let run = &mut self.runs[at];
         run.detached = detached;
-        for id in graph.variables.keys() {
-            if !run.variables.contains(id) {
-                run.variables.push(*id);
-            }
-        }
         Ok(run.handle.clone())
     }
 
     /// Prune `runs`, already taken out of the live and finished lists: each
     /// decorator and its subtree leave the graph, but for the nodes another
-    /// node — of the main behavior or of a remaining run — also holds; then the
-    /// variables a run declared that no remaining link reads.
+    /// node — of the main behavior or of a remaining run — also holds.
     fn prune(&mut self, runs: Vec<Run>) -> Result<(), BehaviorError> {
         if runs.is_empty() {
             return Ok(());
@@ -718,24 +652,11 @@ impl BehaviorTreeInterpreter {
         leaving.extend(runs.iter().flat_map(|run| &run.detached));
         let staying = self.held_outside(&leaving);
         let diff = GraphDiff {
-            remove_nodes: leaving.difference(&staying).copied().collect(),
-            add_nodes: vec![self.runner_node()],
+            remove: leaving.difference(&staying).copied().collect(),
+            set: vec![self.runner_node()],
             ..GraphDiff::default()
         };
-        self.edit(diff)?;
-
-        let read: HashSet<Uuid> = self
-            .graph
-            .links
-            .iter()
-            .filter_map(|link| source_variable(&link.source))
-            .collect();
-        for id in runs.iter().flat_map(|run| &run.variables) {
-            if !read.contains(id) {
-                self.graph.variables.remove(id);
-            }
-        }
-        Ok(())
+        self.edit(diff)
     }
 
     /// Write the terminal status of the runs halted since the last tick:
@@ -828,8 +749,9 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // An editor's edit, onto the scaffold. It keeps the scaffold's
         // invariants — the root is always the runner, and every run hangs from
         // its decorator:
-        // - `set_root` means "the main behavior's root is now X" — the runner
-        //   re-parents it rather than being dethroned;
+        // - `root` means "the main behavior's root is now X" — the runner
+        //   re-parents it rather than being dethroned; removing the main
+        //   behavior's root unroots it, as removing a graph's root does;
         // - the runner cannot be removed;
         // - an edit that changes a decorator, or removes a run's root, is
         //   refused: halting is how a run leaves.
@@ -837,10 +759,10 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         let mut diff = diff;
         let scaffold = |id: &Uuid| *id == self.runner || self.decorated_by(id).is_some();
         if let Some(id) = diff
-            .set_root
+            .root
             .iter()
             .chain(
-                diff.add_nodes
+                diff.set
                     .iter()
                     .flat_map(|node| node.children.iter().flatten()),
             )
@@ -850,7 +772,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 "node {id} is the runner or a task run's decorator: an edit cannot place it"
             )));
         }
-        let touched = changed_nodes(&diff).chain(diff.remove_nodes.iter().copied());
+        let touched = changed_nodes(&diff).chain(diff.remove.iter().copied());
         for id in touched {
             if let Some(run) = self.decorated_by(&id) {
                 return Err(behavior_error(format!(
@@ -860,9 +782,8 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             }
         }
         for run in self.all_runs() {
-            let roots = self.graph.nodes[&run.decorator].children.iter().flatten();
-            if let Some(root) = roots.into_iter().find(|root| {
-                diff.remove_nodes.contains(root) && !diff.add_nodes.iter().any(|n| n.id == **root)
+            if let Some(root) = self.root_of(run).filter(|root| {
+                diff.remove.contains(root) && !diff.set.iter().any(|node| node.id == *root)
             }) {
                 return Err(behavior_error(format!(
                     "node {root} is the root of task run {}: halt the run to remove it",
@@ -870,20 +791,22 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 )));
             }
         }
-        self.check_renames(&diff.variables, &self.run_variables(), "a task run")?;
 
-        diff.remove_nodes.retain(|id| *id != self.runner);
-        if self.main_root.is_some_and(|root| {
-            diff.remove_nodes.contains(&root) && !diff.add_nodes.iter().any(|n| n.id == root)
-        }) {
+        diff.remove.retain(|id| *id != self.runner);
+        // A fresh main root (or a removed one) re-parents under the runner;
+        // a refused edit leaves the main root as it was.
+        let previous = self.main_root;
+        if self
+            .main_root
+            .is_some_and(|root| diff.remove.contains(&root))
+        {
             self.main_root = None;
         }
-        if let Some(root) = diff.set_root.take() {
+        if let Some(root) = diff.root.take() {
             self.main_root = Some(root);
         }
-        // A fresh main root (or a removed one) re-parents under the runner.
-        diff.add_nodes.push(self.runner_node());
-        self.edit(diff)
+        diff.set.push(self.runner_node());
+        self.edit(diff).inspect_err(|_| self.main_root = previous)
     }
 
     fn load(&mut self, graph: Graph) -> Result<(), BehaviorError> {
@@ -891,40 +814,41 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // that is not the scaffold's or a run's — leaves the scaffold, the new
         // behavior grafts under the runner. Live task runs are untouched — they
         // belong to their callers, not to the behavior — so the new behavior
-        // may not reuse their nodes or rename their variables.
+        // may not reuse their nodes.
         self.prune_finished()?;
+        if by_id(&graph).len() != graph.nodes.len() {
+            return Err(listed_twice(&graph));
+        }
         let run_nodes = self.run_nodes();
-        if let Some(id) = graph
+        if let Some(node) = graph
             .nodes
-            .keys()
-            .find(|id| **id == self.runner || run_nodes.contains(id))
+            .iter()
+            .find(|node| node.id == self.runner || run_nodes.contains(&node.id))
         {
             return Err(behavior_error(format!(
-                "node {id} belongs to the runner or a task run: a loaded behavior cannot \
-                 replace it"
+                "node {} belongs to the runner or a task run: a loaded behavior cannot \
+                 replace it",
+                node.id
             )));
         }
-        self.check_renames(&graph.variables, &self.run_variables(), "a task run")?;
-        let remove_nodes = self
+        let remove = self
             .graph
             .nodes
-            .keys()
-            .filter(|id| **id != self.runner && !run_nodes.contains(id))
-            .copied()
+            .iter()
+            .map(|node| node.id)
+            .filter(|id| *id != self.runner && !run_nodes.contains(id))
             .collect();
-        let mut diff = GraphDiff {
-            remove_nodes,
+        // The loaded root becomes the runner's main child: the scaffold root
+        // stays the runner. A refused load leaves the main root as it was.
+        let previous = std::mem::replace(&mut self.main_root, graph.root);
+        let mut set = graph.nodes;
+        set.push(self.runner_node());
+        self.edit(GraphDiff {
+            remove,
+            set,
             ..GraphDiff::default()
-        };
-        self.main_root = graph.root;
-        let load = GraphDiff::load(graph);
-        diff.add_nodes = load.add_nodes;
-        diff.add_links = load.add_links;
-        diff.variables = load.variables;
-        // `load.set_root` is deliberately not applied: the scaffold root stays
-        // the runner; the loaded root becomes the runner's main child.
-        diff.add_nodes.push(self.runner_node());
-        self.edit(diff)
+        })
+        .inspect_err(|_| self.main_root = previous)
     }
 
     fn spawn(&mut self, call: Call, policy: RunPolicy) -> Result<TaskHandle, BehaviorError> {
@@ -939,25 +863,19 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             .unwrap_or_else(|| "none".to_string());
         let function = call.id;
 
-        // The run is one run-call leaf; the call is literal link data.
+        // The run is one run-call leaf; the call is the value its port is
+        // bound to.
         let call_value = value_serde::to_value(&call).map_err(|e| {
             behavior_error(format!("the spawned call does not convert to a value: {e}"))
         })?;
         self.prune_finished()?;
         let call_node = Uuid::new_v4();
-        let fragment = GraphDiff {
-            add_nodes: vec![GraphNode {
-                id: call_node,
-                function: RUN_CALL_FUNCTION_ID,
-                inputs: vec![Io::new(RUN_CALL_PARAM_ID)],
-                ..GraphNode::default()
-            }],
-            add_links: vec![Link::new(
-                Port::new(call_node, RUN_CALL_PARAM_ID),
-                LinkSource::Literal(call_value),
-            )],
-            ..GraphDiff::default()
-        };
+        let fragment = vec![GraphNode {
+            id: call_node,
+            function: RUN_CALL_FUNCTION_ID,
+            bind: [(RUN_CALL_PARAM_ID, Source::Value(call_value))].into(),
+            children: None,
+        }];
         self.graft(&module, function, call_node, Vec::new(), fragment)
     }
 
@@ -978,7 +896,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         let root = graph
             .root
             .ok_or_else(|| behavior_error("a spawned graph needs a root"))?;
-        if !graph.nodes.contains_key(&root) {
+        if graph.node(&root).is_none() {
             return Err(behavior_error(format!(
                 "the spawned graph's root {root} is not one of its nodes"
             )));
@@ -986,12 +904,12 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // The run is its own region of the scaffold: one tree, and the
         // detached nodes beside it, of nodes the device does not have (or its
         // own, for a live run's root), of functions the interpreter runs,
-        // whose links stay among them and lower, renaming no declared
-        // variable. The detached nodes leave with the run.
+        // whose bindings read only among them and lower. The detached nodes
+        // leave with the run.
         let detached = check_tree(&graph, root)?;
         if let Some(node) = graph
             .nodes
-            .values()
+            .iter()
             .find(|node| is_interpreter_function_id(node.function))
         {
             return Err(behavior_error(format!(
@@ -999,15 +917,16 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 node.id, node.function
             )));
         }
-        if let Some(link) = graph.links.iter().find(|link| {
-            !graph.nodes.contains_key(&link.target.node)
-                || source_port(&link.source)
-                    .is_some_and(|port| !graph.nodes.contains_key(&port.node))
-        }) {
-            return Err(behavior_error(format!(
-                "the spawned graph's link onto {}.{} reaches outside its nodes",
-                link.target.node, link.target.port
-            )));
+        let ids: HashSet<Uuid> = graph.nodes.iter().map(|node| node.id).collect();
+        for node in &graph.nodes {
+            if let Some((port, _)) = node.bind.iter().find(|(_, source)| {
+                source_port(source).is_some_and(|read| !ids.contains(&read.node))
+            }) {
+                return Err(behavior_error(format!(
+                    "the spawned graph's binding of {}.{port} reads outside its nodes",
+                    node.id
+                )));
+            }
         }
         build_behavior_tree(&graph, &|_| None)
             .map_err(|e| behavior_error(format!("the spawned graph does not lower: {e:?}")))?;
@@ -1021,30 +940,23 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         {
             return self.respawn(at, graph, detached);
         }
-        if let Some(id) = graph
+        let device = by_id(&self.graph);
+        if let Some(node) = graph
             .nodes
-            .keys()
-            .find(|id| self.graph.nodes.contains_key(id))
+            .iter()
+            .find(|node| device.contains_key(&node.id))
         {
             return Err(behavior_error(format!(
-                "node {id} is already part of the device's behavior"
+                "node {} is already part of the device's behavior",
+                node.id
             )));
         }
-        let declared = self.graph.variables.keys().copied().collect();
-        self.check_renames(&graph.variables, &declared, "the device's behavior")?;
-        let load = GraphDiff::load(graph);
-        let fragment = GraphDiff {
-            add_nodes: load.add_nodes,
-            add_links: load.add_links,
-            variables: load.variables,
-            ..GraphDiff::default()
-        };
         self.graft(
             &interpreter_module::ID.to_string(),
             interpreter_module::SPAWN_GRAPH,
             root,
             detached,
-            fragment,
+            graph.nodes,
         )
     }
 

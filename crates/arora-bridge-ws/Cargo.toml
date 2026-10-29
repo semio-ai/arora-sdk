@@ -24,4 +24,4 @@ tokio-util = "0.7"
 [dev-dependencies]
 # The interpreter module's ABI and run handle, which the wire tests' fake
 # runtime answers a spawn with.
-arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "10" }

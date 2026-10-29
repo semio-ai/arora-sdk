@@ -1,4 +1,4 @@
-use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
 use arora_types::record::module::frozen::Parameter;
 use arora_types::record::ty::FrozenTy;
 use arora_types::value::Value;
@@ -740,78 +740,78 @@ impl BehaviorTree {
     /// parameters against `index`.
     ///
     /// The Groot front-end already lowers to a [`TreeNode`] (name → arora ids,
-    /// `{var}` → variable ids); this then assigns node ids and turns each node's
-    /// parameters into graph [`Link`]s. Named `{var}`s become
-    /// [`Graph::variables`], so an interpreter can bind them to store slots (the
-    /// Direct convention). This is the promoted import path — the arora runtime
-    /// builds an editable interpreter from the returned graph.
+    /// `{var}` → variable ids); this then assigns node ids, lists the nodes
+    /// root first, each before its children, and binds each node's
+    /// parameters. A `{var}` binds the key `var`, so an interpreter binds it
+    /// to the store slot of that name (the Direct convention). This is the
+    /// promoted import path — the arora runtime builds an editable interpreter
+    /// from the returned graph.
     pub fn into_graph(
         &self,
         index: &HashMap<Uuid, ModuleFunction>,
     ) -> Result<Graph, BehaviorTreeError> {
         let mut names: HashMap<String, Uuid> = HashMap::new();
         let tree_node = self.root.try_into_tree_node(index, &mut names)?;
+        let keys: HashMap<Uuid, String> = names.into_iter().map(|(name, id)| (id, name)).collect();
         let mut graph = Graph::empty();
-        let root_id = lower_tree_node_to_graph(tree_node, &mut graph)?;
+        let root_id = lower_tree_node_to_graph(tree_node, &keys, &mut graph)?;
         graph.root = Some(root_id);
-        graph.variables = names.into_iter().map(|(name, id)| (id, name)).collect();
         Ok(graph)
     }
 }
 
-/// Lower a [`TreeNode`] (and its subtree) into `graph`, returning the assigned id
-/// of the node. Each parameter becomes a graph [`Link`] feeding this node's input
-/// slot; children recurse.
+/// Lower a [`TreeNode`] (and its subtree) into `graph`, after the nodes it
+/// has, its children after it, returning the node's assigned id. Each
+/// parameter binds the node's port; `keys` names each variable.
 fn lower_tree_node_to_graph(
     tree_node: TreeNode,
+    keys: &HashMap<Uuid, String>,
     graph: &mut Graph,
 ) -> Result<Uuid, BehaviorTreeError> {
     let node_id = Uuid::new_v4();
-    let children = match tree_node.children {
-        Some(children) => {
-            let mut ids = Vec::with_capacity(children.len());
-            for child in children {
-                ids.push(lower_tree_node_to_graph(child, graph)?);
-            }
-            Some(ids)
+    let at = graph.nodes.len();
+    let bind = tree_node
+        .parameters
+        .iter()
+        .map(|(param_id, expression)| {
+            groot_expression_to_source(expression, keys).map(|source| (*param_id, source))
+        })
+        .collect::<Result<_, _>>()?;
+    graph.nodes.push(GraphNode {
+        id: node_id,
+        function: tree_node.function,
+        bind,
+        children: None,
+    });
+    if let Some(children) = tree_node.children {
+        let mut ids = Vec::with_capacity(children.len());
+        for child in children {
+            ids.push(lower_tree_node_to_graph(child, keys, graph)?);
         }
-        None => None,
-    };
-    let mut inputs = Vec::with_capacity(tree_node.parameters.len());
-    for (param_id, expression) in &tree_node.parameters {
-        inputs.push(Io::new(*param_id));
-        let source = groot_expression_to_link_source(expression)?;
-        graph
-            .links
-            .push(Link::new(Port::new(node_id, *param_id), source));
+        graph.nodes[at].children = Some(ids);
     }
-    graph.nodes.insert(
-        node_id,
-        GraphNode {
-            id: node_id,
-            function: tree_node.function,
-            inputs,
-            outputs: Vec::new(),
-            children,
-        },
-    );
     Ok(node_id)
 }
 
-/// A Groot-lowered [`Expression`] as a graph [`LinkSource`]. Groot only ever
+/// A Groot-lowered [`Expression`] as a graph [`Source`]. Groot only ever
 /// produces literals, `{var}` references and (for a `_ret` binding) a bare uuid;
 /// a `Uuid` seeds a literal holding its bytes, matching how the tree seeds a
-/// `Uuid` argument cell.
-fn groot_expression_to_link_source(
+/// `Uuid` argument cell. A variable binds its key, the name `keys` gives it.
+fn groot_expression_to_source(
     expression: &Expression,
-) -> Result<LinkSource, BehaviorTreeError> {
+    keys: &HashMap<Uuid, String>,
+) -> Result<Source, BehaviorTreeError> {
     Ok(match expression {
-        Expression::Value(value) => LinkSource::Literal(value.clone()),
-        Expression::Uuid(uuid) => LinkSource::Literal(Value::ArrayU8(uuid.as_bytes().to_vec())),
-        Expression::VariableId(id) => LinkSource::Variable(*id),
-        Expression::NodeArgument(np) => LinkSource::Port(Port::new(np.node, np.parameter)),
-        Expression::Select { source, path } => LinkSource::Select {
-            source: Box::new(groot_expression_to_link_source(source)?),
+        Expression::Value(value) => Source::Value(value.clone()),
+        Expression::Uuid(uuid) => Source::Value(Value::ArrayU8(uuid.as_bytes().to_vec())),
+        Expression::VariableId(id) => Source::Key(
+            keys.get(id)
+                .cloned()
+                .unwrap_or_else(|| format!("{TREE_LOCAL_PREFIX}{id}")),
+        ),
+        Expression::NodeArgument(np) => Source::Port(Port::new(np.node, np.parameter)),
+        Expression::Select { source, path } => Source::Select {
+            source: Box::new(groot_expression_to_source(source, keys)?),
             path: path.clone(),
         },
         Expression::Variable(_) | Expression::Call(_) => {
@@ -1550,11 +1550,17 @@ mod tests {
 
         let again = BehaviorTree::try_from_groot_xml(&xml).unwrap();
         let graph = again.into_graph(&index).unwrap();
-        assert_eq!(graph.variables.len(), 1, "one variable");
-        assert!(graph
-            .variables
-            .values()
-            .all(|name| crate::variable::is_tree_local(name)));
+        let keys: std::collections::HashSet<&str> = graph
+            .nodes
+            .iter()
+            .flat_map(|node| node.bind.values())
+            .filter_map(|source| match source {
+                Source::Key(key) => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        let local = format!(".{local}");
+        assert_eq!(keys, [local.as_str()].into(), "one tree-local key");
         assert!(names_resolved(&graph).is_empty());
     }
 }

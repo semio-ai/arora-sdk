@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree-types"
-version = "2.2.0"
+version = "3.0.0"
 edition = "2021"
 description = "Type records the Arora behavior tree declares (Status, TickId, folder)."
 license = "Apache-2.0"
@@ -11,8 +11,8 @@ license = "Apache-2.0"
 # 3.8: `TickId` states the scope of its record (`ARORA`).
 arora-types = { path = "../arora-types", version = "3.8" }
 # Status moved here (ARORA-82); re-exported for existing consumers.
-# 9.5: `Status`'s record, in the `arora` scope.
-arora-behavior = { path = "../arora-behavior", version = "9.5" }
+# `Status`'s record is in the `arora` scope (9.5); 10 is the current major.
+arora-behavior = { path = "../arora-behavior", version = "10" }
 lazy_static = "1"
 semver = "1"
 uuid = "1"

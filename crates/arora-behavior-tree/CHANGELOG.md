@@ -4,6 +4,38 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.0.0] - 2026-10-29
+
+### Changed
+
+- **Breaking:** on arora-behavior 10's graph model, a node holding its own
+  bindings. The interpreter reads `behavior-tree` 2.0 (`GRAPH_TYPE_VERSION`)
+  and refuses a 1.x graph, which names keys through a variables table and
+  links.
+  - Lowering: each node's bindings are its arguments, a port bound to a key
+    the variable of that key, whichever way the function uses the port.
+  - An edit restarts the nodes it sets and those whose bindings it changes;
+    every other node keeps its state, as before.
+  - Removing the main behavior's root unroots it, even in a diff that sets
+    the node again; the diff's `root` roots it again.
+  - `load` and `spawn_graph` refuse a graph listing a node twice. Variables
+    leaving with a run, and a graph renaming a variable a run reads, are
+    gone with the variables table.
+  - A refused `apply` or `load` leaves the main behavior's root as it was.
+  - A key starting with `.` is one cell of the interpreter's tree, shared
+    by the main behavior and its runs, as a text's `{.x}` was: a Groot
+    tree's `{.x}` is now that cell too, rather than one of its own.
+- `text::resolve` binds `{key}` to the key itself, and lists the graph's
+  nodes in the order the text writes them. `{<uuid>}`, a variable known by
+  its id alone, binds the tree-local key `.<uuid>`. The graph carries no
+  slot types: they are the functions' signatures'.
+- `BehaviorTree::display` names a variable by the key it was built with
+  when `Names::variables` does not name it, so a tree built from a graph
+  reads back to it with no names given.
+- `schema_groot::BehaviorTree::into_graph` lists the nodes root first, each
+  before its children, and binds `{var}` to the key `var`.
+- Requires arora-behavior-tree-types 3.
+
 ## [9.7.0] - 2026-10-28
 
 ### Added

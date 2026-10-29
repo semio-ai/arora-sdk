@@ -146,6 +146,7 @@ impl TreeNode {
             node_arg_variables: Rc::new(node_arg_variables),
             outputs,
             detached: Rc::new(crate::detached::Detached::empty()),
+            variable_names: names.clone(),
         })
     }
 }

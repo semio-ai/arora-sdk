@@ -655,7 +655,7 @@ pub(crate) fn calls_module(call: &Call, module: Uuid, exports: &[Uuid]) -> bool 
         return interpreter_module::decode_spawn_graph(call).is_ok_and(|(_, graph, _)| {
             graph
                 .nodes
-                .values()
+                .iter()
                 .any(|node| exports.contains(&node.function))
         });
     }

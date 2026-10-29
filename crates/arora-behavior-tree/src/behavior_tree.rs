@@ -67,6 +67,9 @@ pub struct BehaviorTree {
     outputs: HashMap<Uuid, Outputs>,
     /// The nodes no node holds, evaluated when what they output is read.
     detached: Rc<Detached>,
+    /// The names of the variables the tree was loaded with, by id: a tree
+    /// built from a graph names each variable by the key it binds.
+    variable_names: HashMap<Uuid, String>,
 }
 
 /// Where a data node writes, bound when the tree is loaded.
@@ -1372,6 +1375,7 @@ pub fn load_behavior_tree_nodes_with(
         node_arg_variables: Rc::new(node_parameters_variables),
         outputs,
         detached: Rc::new(detached),
+        variable_names: names.clone(),
     })
 }
 

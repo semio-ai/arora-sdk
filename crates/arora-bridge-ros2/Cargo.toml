@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "11.1.0"
+version = "11.2.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -15,7 +15,7 @@ arora-bridge = { path = "../arora-bridge", version = "6" }
 # The behavior-tree Status enumeration's well-known ids: the action plane
 # discovers action-shaped methods by their Status return type and maps the
 # status-key values a run writes onto the ROS goal statuses.
-arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "3" }
 # The ROS 2 message types + the shared CDR codec (re-exported as this crate's
 # `cdr`). Core only here — the REP-2016 hash (its `interop` feature) is pulled in
 # where the bridge creates hash-keyed publishers. 2.3 carries the
@@ -53,13 +53,13 @@ zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 # whose described keys the bridge exposes, and the store their meta lives in.
 # Without `native` the runtime carries no wasm engine, which a device of host
 # parts does not need.
-arora = { path = "../arora", version = "16", default-features = false }
+arora = { path = "../arora", version = "17", default-features = false }
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1" }
 # The crate that DEFINES the interpreter-module SPAWN ABI the action plane
 # speaks over the value plane. A dev-dependency only: the ABI-pin test asserts
 # the bridge's ids and encodings match, without a runtime engine dependency.
-arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 rand = "0.10"
 env_logger = "0.11"
 # Serialize the live-DDS tests: running concurrently, their DDS participants pile

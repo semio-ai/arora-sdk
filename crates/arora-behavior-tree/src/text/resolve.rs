@@ -7,8 +7,9 @@
 //! - A function is found by name among the natives, then in the function
 //!   index; `module::name` picks one of several modules' functions of one
 //!   name.
-//! - A variable `{name}` is the graph variable `name`: a store key, or a
-//!   tree-local variable when it starts with `.`.
+//! - A variable `{name}` binds the key `name`: a store key, or a tree-local
+//!   variable when it starts with `.`. `{<uuid>}` binds the tree-local key
+//!   `.<uuid>`.
 //! - A call in an argument is a node of its own that no node holds, read
 //!   through its return value.
 //! - A literal takes its type from the parameter it is given to.
@@ -19,11 +20,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use arora_behavior::graph::{source_port, Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+use arora_behavior::graph::{source_port, Graph, Node as GraphNode, Port, Source};
 use arora_behavior::{FunctionIndex, ModuleFunction};
 use arora_types::data::Key;
-use arora_types::gen_uuid_from_str;
-use arora_types::module::high::TypeRef;
 use arora_types::record::ty::{FrozenTy, PrimitiveKind};
 use arora_types::value::Value;
 use serde::{Deserialize, Serialize};
@@ -33,7 +32,7 @@ use super::ast::{Call, Document, Expr, ExprKind, FunctionName, Node, Span};
 use super::natives::{native, native_named, seed};
 use super::{Diagnostic, MAX_DEPTH};
 use crate::schema::_RET_PARAM_ID;
-use crate::variable::is_tree_local;
+use crate::variable::{is_tree_local, TREE_LOCAL_PREFIX};
 
 /// The namespace node ids derive in: a node's id is the UUID v5 of its name,
 /// or of its path, under it.
@@ -82,7 +81,7 @@ pub fn resolve(document: &Document, functions: &FunctionIndex) -> Loaded {
         named: HashMap::new(),
         declared: HashMap::new(),
         signatures: HashMap::new(),
-        slots: HashMap::new(),
+        positions: HashMap::new(),
     };
     let mut planned = Vec::new();
     for (index, node) in document.nodes.iter().enumerate() {
@@ -264,8 +263,8 @@ struct Resolver<'a> {
     declared: HashMap<Uuid, Declared<'a>>,
     /// The signature of every graph node, by id, when known.
     signatures: HashMap<Uuid, &'a ModuleFunction>,
-    /// Each function's slots, as [`slots`] gives them.
-    slots: HashMap<Uuid, (Vec<Io>, Vec<Io>)>,
+    /// Where each graph node is in the graph's list.
+    positions: HashMap<Uuid, usize>,
 }
 
 impl<'a> Resolver<'a> {
@@ -355,8 +354,8 @@ impl<'a> Resolver<'a> {
         id
     }
 
-    /// Add `plan`'s node to the graph, with its links and the calls in its
-    /// arguments.
+    /// Add `plan`'s node to the graph, with its bindings and the calls in
+    /// its arguments.
     fn build(&mut self, plan: &Planned<'_, 'a>, top: bool) {
         let node = plan.node;
         let Some(function) = plan.function else {
@@ -399,11 +398,15 @@ impl<'a> Resolver<'a> {
         self.node(plan.id, function, children, &node.call, &plan.path, 0);
         if let Some(target) = &node.target {
             if let Some(source) = self.target(target) {
-                self.graph
-                    .links
-                    .push(Link::new(Port::new(plan.id, _RET_PARAM_ID), source));
+                self.bind(plan.id, _RET_PARAM_ID, source);
             }
         }
+    }
+
+    /// Bind `port` of the graph node `id` to `source`.
+    fn bind(&mut self, id: Uuid, port: Uuid, source: Source) {
+        let at = self.positions[&id];
+        self.graph.nodes[at].bind.insert(port, source);
     }
 
     /// The signature of `function`, warning at `span` when it is not known.
@@ -423,7 +426,8 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// Add the graph node `id` calling `function`, and its arguments' links.
+    /// Add the graph node `id` calling `function`, its arguments bound. A
+    /// node of an id the graph has replaces that node, in its place.
     fn node(
         &mut self,
         id: Uuid,
@@ -437,26 +441,22 @@ impl<'a> Resolver<'a> {
             Found::Known(signature) => Some(signature),
             Found::Unknown(_) => None,
         };
-        let (inputs, outputs) = match signature {
-            Some(signature) => {
-                self.signatures.insert(id, signature);
-                self.slots
-                    .entry(signature.function_id)
-                    .or_insert_with(|| slots(signature))
-                    .clone()
-            }
-            None => (Vec::new(), vec![Io::new(_RET_PARAM_ID)]),
-        };
-        self.graph.nodes.insert(
+        if let Some(signature) = signature {
+            self.signatures.insert(id, signature);
+        }
+        let node = GraphNode {
             id,
-            GraphNode {
-                id,
-                function: function.id(),
-                inputs,
-                outputs,
-                children,
-            },
-        );
+            function: function.id(),
+            bind: Default::default(),
+            children,
+        };
+        match self.positions.get(&id) {
+            Some(at) => self.graph.nodes[*at] = node,
+            None => {
+                self.positions.insert(id, self.graph.nodes.len());
+                self.graph.nodes.push(node);
+            }
+        }
         let label = call.function.name.text.as_str();
         let mut given = HashSet::new();
         for argument in &call.arguments {
@@ -490,18 +490,13 @@ impl<'a> Resolver<'a> {
                 depth,
             };
             if let Some(source) = self.source(&argument.value, ty, read) {
-                self.graph
-                    .links
-                    .push(Link::new(Port::new(id, parameter), source));
+                self.bind(id, parameter, source);
             }
         }
         if let Some((parameter, value)) =
             seed(function.id()).filter(|(parameter, _)| !given.contains(parameter))
         {
-            self.graph.links.push(Link::new(
-                Port::new(id, parameter),
-                LinkSource::Literal(value),
-            ));
+            self.bind(id, parameter, Source::Value(value));
             given.insert(parameter);
         }
         // A native's parameters a node must bind are known; a module
@@ -527,7 +522,7 @@ impl<'a> Resolver<'a> {
     /// Where a node's return value is written: a variable, or another node's
     /// input, which then reads the node. `@n.p` names an input of `n`,
     /// whatever `n` outputs.
-    fn target(&mut self, target: &Expr) -> Option<LinkSource> {
+    fn target(&mut self, target: &Expr) -> Option<Source> {
         match &target.kind {
             ExprKind::Variable { .. } | ExprKind::VariableId { .. } => {
                 self.source(target, None, Read::TARGET)
@@ -538,7 +533,7 @@ impl<'a> Resolver<'a> {
                     None => _RET_PARAM_ID,
                     Some(parameter) => self.parameter(node, parameter, declared)?,
                 };
-                Some(LinkSource::Port(Port::new(id, port)))
+                Some(Source::Port(Port::new(id, port)))
             }
             _ => {
                 self.error(
@@ -593,14 +588,9 @@ impl<'a> Resolver<'a> {
         found
     }
 
-    /// The link source `expression` is, read as `read` says, given to a
-    /// parameter of type `ty`.
-    fn source(
-        &mut self,
-        expression: &Expr,
-        ty: Option<&FrozenTy>,
-        read: Read,
-    ) -> Option<LinkSource> {
+    /// The source `expression` is, read as `read` says, given to a parameter
+    /// of type `ty`.
+    fn source(&mut self, expression: &Expr, ty: Option<&FrozenTy>, read: Read) -> Option<Source> {
         if read.depth >= MAX_DEPTH {
             self.error(
                 format!("expressions nest at most {MAX_DEPTH} levels deep"),
@@ -609,12 +599,12 @@ impl<'a> Resolver<'a> {
             return None;
         }
         match &expression.kind {
-            ExprKind::Variable { name } => {
-                let id = gen_uuid_from_str(name);
-                self.graph.variables.insert(id, name.clone());
-                Some(LinkSource::Variable(id))
+            ExprKind::Variable { name } => Some(Source::Key(name.clone())),
+            // A variable known by its id alone names no key: it is a cell of
+            // the tree's own.
+            ExprKind::VariableId { value } => {
+                Some(Source::Key(format!("{TREE_LOCAL_PREFIX}{value}")))
             }
-            ExprKind::VariableId { value } => Some(LinkSource::Variable(*value)),
             ExprKind::Port { node, parameter } => {
                 let (id, declared) = self.referenced(node)?;
                 let port = match parameter {
@@ -647,21 +637,21 @@ impl<'a> Resolver<'a> {
                         port
                     }
                 };
-                Some(LinkSource::Port(Port::new(id, port)))
+                Some(Source::Port(Port::new(id, port)))
             }
             ExprKind::Select {
                 source,
                 path: selected,
             } => {
                 let source = self.source(source, None, read.deeper())?;
-                Some(LinkSource::Select {
+                Some(Source::Select {
                     source: Box::new(source),
                     path: Key::new(selected.as_str()),
                 })
             }
             ExprKind::Call { call } => self.call(call, read),
             _ => match literal(expression, &expected(ty), read.depth) {
-                Ok(value) => Some(LinkSource::Literal(value)),
+                Ok(value) => Some(Source::Value(value)),
                 Err((message, span)) => {
                     self.error(message, span);
                     None
@@ -672,7 +662,7 @@ impl<'a> Resolver<'a> {
 
     /// A call in an argument: a node no node holds, read through its return
     /// value.
-    fn call(&mut self, call: &Call, read: Read) -> Option<LinkSource> {
+    fn call(&mut self, call: &Call, read: Read) -> Option<Source> {
         let function = match self.functions.find(&call.function) {
             Ok(function) => function,
             Err(message) => {
@@ -693,7 +683,7 @@ impl<'a> Resolver<'a> {
         // Warns when the function is not known.
         self.signature(function, call.function.span);
         let id = node_id(read.path);
-        if self.declared.contains_key(&id) || self.graph.nodes.contains_key(&id) {
+        if self.declared.contains_key(&id) || self.positions.contains_key(&id) {
             self.error(
                 format!(
                     "this call has the id of another node: `{}` is the path or the name of both",
@@ -712,7 +702,7 @@ impl<'a> Resolver<'a> {
             path: read.path.to_string(),
         });
         self.node(id, function, None, call, read.path, read.depth + 1);
-        Some(LinkSource::Port(Port::new(id, _RET_PARAM_ID)))
+        Some(Source::Port(Port::new(id, _RET_PARAM_ID)))
     }
 
     /// A node's name for a message: its name, or its path.
@@ -735,14 +725,19 @@ impl<'a> Resolver<'a> {
         let detached = |id: &Uuid| loaded.get(id).is_some_and(|(attached, _)| !attached);
         // Who reads whom, among detached nodes.
         let mut reads: BTreeMap<Uuid, Vec<Uuid>> = BTreeMap::new();
-        for link in &self.graph.links {
-            let (reader, read) = match (&link.source, link.target.port == _RET_PARAM_ID) {
+        let bindings = self.graph.nodes.iter().flat_map(|node| {
+            node.bind
+                .iter()
+                .map(move |(port, source)| (Port::new(node.id, *port), source))
+        });
+        for (bound, source) in bindings {
+            let (reader, read) = match (source, bound.port == _RET_PARAM_ID) {
                 // A return value written to an input: that input's node reads
                 // this one.
-                (LinkSource::Port(port), true) => (port.node, link.target.node),
+                (Source::Port(port), true) => (port.node, bound.node),
                 (source, _) => match source_port(source) {
-                    Some(port) if port == link.target => continue,
-                    Some(port) => (link.target.node, port.node),
+                    Some(port) if port == bound => continue,
+                    Some(port) => (bound.node, port.node),
                     None => continue,
                 },
             };
@@ -821,23 +816,22 @@ impl<'a> Resolver<'a> {
             .map(|node| (node.id, (node.attached, node.span)))
             .collect();
         let mut writers: BTreeMap<&str, Vec<Uuid>> = BTreeMap::new();
-        for link in &self.graph.links {
-            let LinkSource::Variable(variable) = &link.source else {
-                continue;
-            };
-            let Some(key) = self.graph.variables.get(variable) else {
-                continue;
-            };
-            let written = link.target.port == _RET_PARAM_ID
-                || self
-                    .signatures
-                    .get(&link.target.node)
-                    .and_then(|function| function.function.parameters.get(&link.target.port))
-                    .is_some_and(|parameter| parameter.mutable);
-            if written && !is_tree_local(key) {
-                let nodes = writers.entry(key.as_str()).or_default();
-                if !nodes.contains(&link.target.node) {
-                    nodes.push(link.target.node);
+        for node in &self.graph.nodes {
+            for (port, source) in &node.bind {
+                let Source::Key(key) = source else {
+                    continue;
+                };
+                let written = *port == _RET_PARAM_ID
+                    || self
+                        .signatures
+                        .get(&node.id)
+                        .and_then(|function| function.function.parameters.get(port))
+                        .is_some_and(|parameter| parameter.mutable);
+                if written && !is_tree_local(key) {
+                    let nodes = writers.entry(key.as_str()).or_default();
+                    if !nodes.contains(&node.id) {
+                        nodes.push(node.id);
+                    }
                 }
             }
         }
@@ -906,57 +900,6 @@ impl Read<'_> {
             ..self
         }
     }
-}
-
-/// A function's slots: every parameter an input, and its return value and
-/// every parameter it writes an output.
-fn slots(function: &ModuleFunction) -> (Vec<Io>, Vec<Io>) {
-    let slot = |id: Uuid, ty: &FrozenTy| Io {
-        id,
-        ty: type_ref(ty),
-        predetermined_key: None,
-    };
-    let signature = &function.function;
-    let mut inputs = Vec::with_capacity(signature.parameter_ordering.len());
-    let mut outputs = vec![slot(_RET_PARAM_ID, &signature.return_ty)];
-    for id in &signature.parameter_ordering {
-        let Some(parameter) = signature.parameters.get(id) else {
-            continue;
-        };
-        inputs.push(slot(*id, &parameter.ty));
-        if parameter.mutable {
-            outputs.push(slot(*id, &parameter.ty));
-        }
-    }
-    (inputs, outputs)
-}
-
-/// A frozen type as a graph slot's type: a primitive by its name, a record
-/// by its id. `None` for an optional of anything but a scalar, which a slot's
-/// type does not write.
-fn type_ref(ty: &FrozenTy) -> Option<TypeRef> {
-    Some(match ty {
-        FrozenTy::Primitive(primitive) if primitive.kind.is_array() => TypeRef::Array {
-            id: primitive
-                .kind
-                .to_string()
-                .trim_end_matches("[]")
-                .to_string(),
-        },
-        FrozenTy::Primitive(primitive) => TypeRef::Scalar {
-            id: primitive.kind.to_string(),
-        },
-        FrozenTy::FrozenScalar(scalar) => TypeRef::Scalar {
-            id: scalar.reference.id.to_string(),
-        },
-        FrozenTy::FrozenArray(array) => TypeRef::Array {
-            id: array.reference.id.to_string(),
-        },
-        FrozenTy::FrozenOption(option) => match type_ref(&option.element)? {
-            TypeRef::Scalar { id } => TypeRef::Option { id },
-            _ => return None,
-        },
-    })
 }
 
 /// The type a literal is read as.

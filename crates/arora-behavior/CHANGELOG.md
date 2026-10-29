@@ -4,6 +4,49 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.0.0] - 2026-10-29
+
+### Changed
+
+- **Breaking:** the graph model is leaner: a node holds its own bindings, and
+  a binding names its store key.
+  - `Node { id, function, bind, children }`: `bind` maps each bound port to
+    its `Source`. An input's binding is what feeds it; an output's binding is
+    where it is written, a return value written to a key included. Which
+    ports are inputs and which outputs, and their types, is the function
+    signature's to say. `Io` (with `ty` and `predetermined_key`) is gone: a
+    predetermined key is an output bound to a key.
+  - `Source` replaces `LinkSource`: `Value(Value)`, `Key(String)` — the store
+    key by its path, kept by the interpreter when it starts with `.` —
+    `Port(Port)` and `Select { source, path }`. `source_port` takes a
+    `Source`.
+  - `Graph { root, nodes }`: `nodes` is a list with unique ids, serialized in
+    its order. `Graph::links`, `Graph::variables` and `Graph::link_to` are
+    gone, and so is `Link`.
+  - `GraphDiff { remove, set, unbind, bind, root }`, applied in that order:
+    nodes removed (a binding reading one goes with it, and so does the root),
+    nodes set whole (in their place, or after the others), single ports
+    unbound and bound (`Binding { node, port, source }`), the root set. A
+    diff binding a port on no node is refused and changes nothing.
+    `GraphDiff::load` is gone: loading a graph is applying
+    `Graph::empty().diff(&graph)`.
+  - A graph and a diff serialize leanly: an empty field is left out, and a
+    `Source` is a single-entry map naming its kind (`{"key": "face/x"}`,
+    `{"value": {"f64": 1.0}}`) in every format, so a graph with any value
+    bound reads back from YAML. A graph, a node or a diff holding a field it
+    does not have is refused, so a payload of arora-behavior 9's shape fails
+    to decode rather than reading as an empty edit.
+- `interpreter_module`'s `LOAD`, `EDIT` and `SPAWN_GRAPH` carry the new
+  forms.
+
+### Added
+
+- `Graph::diff(&self, target)`: the minimal diff taking a graph to `target`.
+  A node whose function or children change is set whole; a node whose
+  bindings alone change gets one entry per binding that changes. Applied, it
+  gives `target`'s root and nodes, the graph's own nodes in their order and
+  the others after them.
+
 ## [9.6.0] - 2026-10-19
 
 ### Changed

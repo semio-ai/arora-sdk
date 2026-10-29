@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -208,17 +208,18 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "9.6.0"
+version = "10.0.0"
 dependencies = [
  "arora-types",
  "semver",
  "serde",
+ "serde_yaml",
  "uuid",
 ]
 
 [[package]]
 name = "arora-behavior-tree"
-version = "9.5.0"
+version = "10.0.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
@@ -226,6 +227,7 @@ dependencies = [
  "arora-types",
  "derive_more",
  "lazy_static",
+ "logos",
  "quick-xml",
  "regex",
  "semver",
@@ -237,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree-types"
-version = "2.2.0"
+version = "3.0.0"
 dependencies = [
  "arora-behavior",
  "arora-types",
@@ -248,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "6.2.0"
+version = "6.3.0"
 dependencies = [
  "arora-behavior",
  "arora-types",
@@ -739,7 +741,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -3098,6 +3100,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "logos"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb2c55a318a87600ea870ff8c2012148b44bf18b74fad48d0f835c38c7d07c5f"
+dependencies = [
+ "logos-derive",
+]
+
+[[package]]
+name = "logos-codegen"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58b3ffaa284e1350d017a57d04ada118c4583cf260c8fb01e0fe28a2e9cf8970"
+dependencies = [
+ "fnv",
+ "proc-macro2",
+ "quote",
+ "regex-automata",
+ "regex-syntax",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "logos-derive"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
+dependencies = [
+ "logos-codegen",
+]
+
+[[package]]
 name = "lru"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4027,7 +4061,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5060,6 +5094,12 @@ dependencies = [
  "cpufeatures 0.2.17",
  "digest",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "sha2"
@@ -6276,6 +6316,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

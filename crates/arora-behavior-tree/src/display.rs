@@ -80,7 +80,9 @@ pub const WIDTH: usize = 60;
 pub struct Names<'a> {
     /// The functions, by id: their names and their parameters' names.
     pub functions: Option<&'a FunctionIndex>,
-    /// The variables' names, by id.
+    /// The variables' names, by id. A tree shown without them names its
+    /// variables as it was loaded with them: a tree built from a graph, by
+    /// the keys the graph binds.
     pub variables: Option<&'a HashMap<Uuid, String>>,
     /// The nodes' names, by id, for the nodes a reference or a listing names.
     pub nodes: Option<&'a HashMap<Uuid, String>>,
@@ -328,6 +330,7 @@ impl Display for TreeDisplay<'_> {
         }
         let names = Names {
             nodes: Some(&labels),
+            variables: self.names.variables.or(Some(&tree.variable_names)),
             ..self.names
         };
         for (depth, node) in &attached {

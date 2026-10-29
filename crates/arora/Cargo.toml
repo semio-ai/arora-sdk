@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "16.0.0"
+version = "17.0.0"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -62,8 +62,8 @@ tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.1" }
-arora-behavior = { path = "../arora-behavior", version = "9.4" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "10" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 # 3.8: `PrimitiveKind::from_id`, to check a module record against its header.
 arora-types = { path = "../arora-types", version = "3.8" }
 # 2.1: a device's records, looked up by exact id and version
@@ -79,8 +79,9 @@ web-time = "1"
 # The three interfaces the runtime loop wires around the shared state.
 # 4.3: `Hal::describe_keys`, the HAL's key descriptions.
 arora-hal = { path = "../arora-hal", version = "4.3" }
-# 6.1: `client`, the by-name and run conventions `LocalCaller` speaks.
-arora-bridge = { path = "../arora-bridge", version = "6.1" }
+# 6.1: `client`, the by-name and run conventions `LocalCaller` speaks. 6.3:
+# on arora-behavior 10, the one this crate's run handles are of.
+arora-bridge = { path = "../arora-bridge", version = "6.3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 futures = "0.3"
 # Only the runtime-free sync primitives here (the behavior-error watch); the

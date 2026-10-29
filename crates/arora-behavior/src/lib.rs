@@ -18,8 +18,8 @@
 //! in Rust is possible, but it is a corner case — the promoted path is to author
 //! a behavior in an editor and let an interpreter run it.
 //!
-//! An authored behavior is a [`graph::Graph`] — nodes bound to functions, with
-//! typed I/Os and links — and interpreters are edited by
+//! An authored behavior is a [`graph::Graph`] — nodes bound to functions, each
+//! holding its ports' bindings — and interpreters are edited by
 //! [`apply`](BehaviorInterpreter::apply)ing a [`graph::GraphDiff`]. Loading a
 //! behavior is applying a diff onto an empty graph. See [`graph`] for the model.
 //!
@@ -161,8 +161,8 @@ pub trait BehaviorInterpreter {
     fn tick(&mut self, ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError>;
 
     /// Edit the running behavior by applying a [`GraphDiff`](graph::GraphDiff):
-    /// add/remove nodes and links, set/override predetermined keys. **Loading** a
-    /// behavior is applying a diff onto an empty graph.
+    /// set or remove whole nodes, bind or unbind single ports, set the root.
+    /// **Loading** a behavior is applying a diff onto an empty graph.
     ///
     /// The default rejects edition — override it in interpreters that carry an
     /// editable [`graph::Graph`] (the behavior tree does). A hand-coded,
@@ -223,8 +223,9 @@ pub trait BehaviorInterpreter {
     ///
     /// The run's nodes are part of the interpreter's graph: an
     /// [`apply`](Self::apply) reaches them by id, so a client edits a live run
-    /// (relinks a literal, replaces a node) without respawning it, and a
-    /// [`load`](Self::load) of the main behavior leaves them in place.
+    /// (binds a port to another value, replaces a node) without respawning
+    /// it, and a [`load`](Self::load) of the main behavior leaves them in
+    /// place.
     ///
     /// A run is known by its graph's root, which the client chooses. Spawning
     /// a graph whose root a live run has starts no second run: that run takes

@@ -2,77 +2,67 @@
 //! every [`BehaviorInterpreter`](super::BehaviorInterpreter) reads.
 //!
 //! A behavior — a behavior tree, a node graph — is authored as a [`Graph`]: a
-//! set of [`Node`]s, each bound to a **function** (a statically-known id the
-//! interpreter handles natively, **or** a module call routed by that same id —
-//! exactly how `arora-behavior-tree` already treats its builtins and module
-//! actions homogeneously), with typed slots ([`Io`] — inputs and outputs, told apart by
-//! which [`Node`] list holds them) and **links**
-//! ([`Link`]) wiring an output/port of one node into the input of another.
+//! list of [`Node`]s, each bound to a **function** (a statically-known id the
+//! interpreter handles natively, **or** a module call routed by that same id),
+//! each holding its own **bindings** ([`Node::bind`]): for each of its
+//! function's ports, the [`Source`] that feeds an input, or where an output is
+//! written. Which ports are inputs and which are outputs, and their types, is
+//! the function signature's to say: the graph carries neither.
 //!
 //! This module is *only* the data model. It does not tick anything and it does
-//! not know how any particular interpreter walks the links — the behavior tree
-//! reads them as argument/child edges; a node graph reads them as dataflow. Each
-//! interpreter lowers this shared model into its own runtime form (see
-//! `arora-behavior-tree`'s `graph` module for the tree lowering).
+//! not know how any particular interpreter walks the bindings — the behavior
+//! tree reads them as arguments and child edges; a node graph reads them as
+//! dataflow. Each interpreter lowers this shared model into its own runtime
+//! form (see `arora-behavior-tree`'s `graph` module for the tree lowering).
 //!
-//! Edition happens through [`GraphDiff`]: a set of node/link additions and
-//! removals (plus predetermined-key overrides). "Loading" a behavior is just
-//! [`Graph::apply`]ing a diff onto an [`Graph::empty`] graph — which is why
+//! Edition happens through [`GraphDiff`]: whole nodes set or removed, and
+//! single bindings set or unset. "Loading" a behavior is [`Graph::apply`]ing
+//! the diff from an [`Graph::empty`] graph to it, which is why
 //! [`BehaviorInterpreter::apply`](super::BehaviorInterpreter::apply) is the one
-//! edition entry point.
+//! edition entry point. [`Graph::diff`] gives the diff between two graphs.
+//!
+//! # Serialized forms
+//!
+//! A graph and a diff serialize leanly: an empty field is left out, and a
+//! [`Source`] is a single-entry map naming its kind, so a graph reads the same
+//! in JSON and in YAML:
+//!
+//! ```yaml
+//! root: d2591ab9-…
+//! nodes:
+//! - id: d2591ab9-…
+//!   function: 32246df6-…              # sequence
+//!   children:
+//!   - baa9bab8-…
+//! - id: baa9bab8-…
+//!   function: 31814ea5-…              # lessthan
+//!   bind:
+//!     5f726574-0000-4000-8000-000000000000:   # its return value…
+//!       key: face/near                         # …written to a key
+//!     784d2762-…:
+//!       port:                                  # read from another node
+//!         node: 46228f99-…
+//!         port: 5f726574-0000-4000-8000-000000000000
+//!     b7b9a190-…:
+//!       value:
+//!         f32: 30.0
+//! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arora_types::data::Key;
-use arora_types::module::high::TypeRef;
 use arora_types::value::Value;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A typed slot on a [`Node`] — one entry of [`Node::inputs`] or
-/// [`Node::outputs`]. **Which of the two lists holds it is what makes it an
-/// input or an output**; the slot itself carries no direction, so the two can
-/// never disagree.
-///
-/// `id` matches the function's parameter id (for an input) or is the node's
-/// output slot id (a return is conventionally the function id itself). `ty` is
-/// the arora **`Value` type** of the slot, taken from the frozen `Function`
-/// record's signature when known; `None` means "leave it to the interpreter to
-/// derive from the function record at build time".
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct Io {
-    /// The slot id: a parameter id for an input, an output slot id for an output.
-    pub id: Uuid,
-    /// The slot's arora `Value` type, when known from the function signature.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ty: Option<TypeRef>,
-    /// An optional **predetermined key**: the slot's default store binding (an
-    /// animation track's authored key, a sink node's path). The interpreter
-    /// binds the slot to this key unless a [`Link`] overrides it. Carried here
-    /// per proposal §3.6; the full predetermined-I/O semantics land in a later
-    /// pass, but the field travels with the model now.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub predetermined_key: Option<String>,
-}
-
-impl Io {
-    /// A bare slot with no type or predetermined key.
-    pub fn new(id: Uuid) -> Self {
-        Self {
-            id,
-            ty: None,
-            predetermined_key: None,
-        }
-    }
-}
-
-/// A reference to one slot on one node: `(node, port)`. Generalizes the behavior
-/// tree's `NodeParameterId`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// A reference to one port on one node: `(node, port)`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
 pub struct Port {
-    /// The node the slot belongs to.
+    /// The node the port belongs to.
     pub node: Uuid,
-    /// The slot id on that node (an [`Io::id`]).
+    /// The port on that node: a parameter of its function, or its return
+    /// value.
     pub port: Uuid,
 }
 
@@ -83,118 +73,96 @@ impl Port {
     }
 }
 
-/// Where the value feeding a [`Link`]'s target comes from.
-///
-/// Generalizes the behavior tree's `Expression` link kinds (a literal value, a
-/// shared blackboard variable, or another node's slot). Full expression links
-/// (arithmetic over sources) are deferred — proposal Q-D.
+/// What a port is bound to: for an input, what feeds it; for an output, where
+/// it is written.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum LinkSource {
+pub enum Source {
     /// A constant value.
-    Literal(Value),
-    /// A shared blackboard variable, by id — the interpreter resolves it to a
-    /// store slot (or a tree-local cell) at build time.
-    Variable(Uuid),
-    /// Another node's slot: the output/port the link reads from. Generalizes
-    /// `Expression::NodeArgument`.
+    Value(Value),
+    /// A store key, by its path. A key whose path starts with `.` is local:
+    /// an interpreter keeps it to itself, and the store never sees it.
+    Key(String),
+    /// Another node's port.
     Port(Port),
-    /// Read a [`Key`] sub-path of another source's value on read — a structured
-    /// output's field (by id) or an array element (by index). Selection is an
-    /// *operation over any source*, not a property of one: `Select { source:
-    /// Variable(id), .. }` selects into a variable, and nested `Select`s chain.
-    /// The path segments are resolved **ids**, not names (the type registry
-    /// maps authored field names to ids when a graph is built), so the runtime
-    /// resolves nothing. See [`Key::select`]. Heavier "compute a value"
-    /// operations (calls, arithmetic) are nodes, not link sources.
+    /// A [`Key`] sub-path of another source's value, read on read — a
+    /// structured output's field (by id) or an array element (by index).
+    /// Selection is an operation over any source: `Select { source: Key(..),
+    /// .. }` selects into a key, and nested `Select`s chain. The path segments
+    /// are resolved **ids**, not names, so the runtime resolves nothing. See
+    /// [`Key::select`]. Heavier "compute a value" operations (calls,
+    /// arithmetic) are nodes, not sources.
     Select {
         /// The source whose value is projected.
-        source: Box<LinkSource>,
+        source: Box<Source>,
         /// The sub-path (`Key` attributes = ids) read out of that value.
         path: Key,
     },
 }
 
-/// The source `Port` a link ultimately reads from, through any [`LinkSource::Select`]
-/// wrappers; `None` for a literal or variable source.
-pub fn source_port(source: &LinkSource) -> Option<Port> {
+/// The port `source` ultimately reads, through any [`Source::Select`];
+/// `None` for a value or a key.
+pub fn source_port(source: &Source) -> Option<Port> {
     match source {
-        LinkSource::Port(port) => Some(*port),
-        LinkSource::Select { source, .. } => source_port(source),
-        _ => None,
+        Source::Port(port) => Some(*port),
+        Source::Select { source, .. } => source_port(source),
+        Source::Value(_) | Source::Key(_) => None,
     }
 }
 
-/// A directed wire feeding one node input from a [`LinkSource`].
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Link {
-    /// The input slot being fed. At most one link targets a given port.
-    pub target: Port,
-    /// What feeds it.
-    pub source: LinkSource,
-}
-
-impl Link {
-    /// A link feeding `target` from `source`.
-    pub fn new(target: Port, source: LinkSource) -> Self {
-        Self { target, source }
-    }
-}
-
-/// A node bound to a function, with its typed inputs/outputs and (optionally)
-/// ordered children.
+/// A node bound to a function, with its bindings and (optionally) ordered
+/// children.
 ///
 /// One node kind, routed by `function`: an interpreter dispatches natively for
-/// the ids it knows and calls a module for the rest — the same homogeneous split
-/// the behavior tree already makes.
+/// the ids it knows and calls a module for the rest.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Node {
-    /// This node's id.
+    /// This node's id, unique in its graph.
     pub id: Uuid,
     /// The function bound to this node: a statically-known id **or** a module
     /// function id. The interpreter routes on it.
     pub function: Uuid,
-    /// Declared inputs.
-    #[serde(default)]
-    pub inputs: Vec<Io>,
-    /// Declared outputs.
-    #[serde(default)]
-    pub outputs: Vec<Io>,
+    /// Each bound port and its [`Source`]. A port the function reads is fed
+    /// by its source; a port it writes is written to its source.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "serde_yaml::with::singleton_map_recursive"
+    )]
+    pub bind: BTreeMap<Uuid, Source>,
     /// Ordered children, for interpreters (like the tree) whose structure is a
     /// child relation. `None` for a leaf.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<Uuid>>,
 }
 
-/// The shared behavior graph: nodes, the links between their slots, the named
-/// blackboard variables, and (for tree-shaped interpreters) the root node.
+/// The shared behavior graph: its nodes, each with its bindings, and (for
+/// tree-shaped interpreters) the root node.
+///
+/// The nodes are a list with unique ids. Their order means nothing to an
+/// interpreter: it is the order they serialize in, so a graph serializes the
+/// same every time.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Graph {
     /// The entry node, for interpreters that need one (a behavior tree's root).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<Uuid>,
-    /// All nodes, indexed by id.
-    #[serde(default)]
-    pub nodes: HashMap<Uuid, Node>,
-    /// The links wiring node slots together.
-    #[serde(default)]
-    pub links: Vec<Link>,
-    /// Named blackboard variables (`id -> name`); a [`LinkSource::Variable`]
-    /// refers to one of these, and the name is what an interpreter resolves
-    /// against the data store.
-    #[serde(default)]
-    pub variables: HashMap<Uuid, String>,
+    /// The nodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nodes: Vec<Node>,
 }
 
 /// The language a [`Graph`] is written in, and the version of that language's
 /// format it is written for.
 ///
 /// Every language uses the one [`Graph`] model; the type says how its nodes,
-/// links and structure are read. The version is the format's, not a crate's:
-/// a minor version adds to the format (a new node kind), a major changes what
-/// an existing graph means. A graph states the oldest version that has
-/// everything it uses, so an interpreter reading version `1.3` of a type runs
-/// any `1.x` graph with `x ≤ 3` ([`GraphType::reads`]).
+/// bindings and structure are read. The version is the format's, not a
+/// crate's: a minor version adds to the format (a new node kind), a major
+/// changes what an existing graph means. A graph states the oldest version
+/// that has everything it uses, so an interpreter reading version `1.3` of a
+/// type runs any `1.x` graph with `x ≤ 3` ([`GraphType::reads`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GraphType {
     /// The language's name, e.g. `behavior-tree`.
@@ -235,148 +203,206 @@ impl std::fmt::Display for GraphError {
 
 impl std::error::Error for GraphError {}
 
-/// An edit to a [`Graph`]: what to add and remove.
-///
-/// Applied in a fixed order (removals of links, then nodes; additions of nodes,
-/// then links; then predetermined-key and root/variable settings) so a single
-/// diff can both delete and rebuild a region. Loading a fresh behavior is
-/// [`Graph::apply`]ing a diff whose `add_nodes`/`add_links` describe the whole
-/// graph onto an [`Graph::empty`] graph.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-pub struct GraphDiff {
-    /// Nodes to insert (replacing any node with the same id).
-    #[serde(default)]
-    pub add_nodes: Vec<Node>,
-    /// Node ids to remove. Links touching a removed node are dropped too.
-    #[serde(default)]
-    pub remove_nodes: Vec<Uuid>,
-    /// Links to insert. Adding a link whose `target` already has one replaces it
-    /// (at most one link per input).
-    #[serde(default)]
-    pub add_links: Vec<Link>,
-    /// Link targets to unwire.
-    #[serde(default)]
-    pub remove_links: Vec<Port>,
-    /// Predetermined-key overrides: set (`Some`) or clear (`None`) the
-    /// [`Io::predetermined_key`] of the slot at each [`Port`].
-    #[serde(default)]
-    pub set_predetermined: Vec<(Port, Option<String>)>,
-    /// If set, becomes the graph's [`root`](Graph::root).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub set_root: Option<Uuid>,
-    /// Named variables to declare/rename (`id -> name`), merged in.
-    #[serde(default)]
-    pub variables: HashMap<Uuid, String>,
+/// One port's binding, as a [`GraphDiff`] sets it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    /// The node holding the binding.
+    pub node: Uuid,
+    /// The port bound.
+    pub port: Uuid,
+    /// What the port is bound to.
+    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    pub source: Source,
 }
 
-impl GraphDiff {
-    /// A diff that loads `graph` wholesale: every node and link as additions,
-    /// carrying its root and variables. `apply`ing this onto [`Graph::empty`]
-    /// reproduces `graph`.
-    pub fn load(graph: Graph) -> Self {
-        let mut add_nodes: Vec<Node> = graph.nodes.into_values().collect();
-        // Root first keeps interpreters that treat node order as significant
-        // (the behavior tree takes the first node as the root) well-defined.
-        if let Some(root) = graph.root {
-            add_nodes.sort_by_key(|n| n.id != root);
-        }
-        Self {
-            add_nodes,
-            add_links: graph.links,
-            set_root: graph.root,
-            variables: graph.variables,
-            ..Self::default()
-        }
-    }
+/// An edit to a [`Graph`]: whole nodes set or removed, single bindings set or
+/// unset, and the root.
+///
+/// Applied in a fixed order, coarse to fine — removals, then whole nodes,
+/// then single bindings unset and set, then the root — so one diff can both
+/// delete and rebuild a region. Loading a behavior is applying
+/// `Graph::empty().diff(&graph)`, which sets every node and the root.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphDiff {
+    /// Nodes to remove. A binding reading a removed node goes with it, and so
+    /// does the root when it is removed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove: Vec<Uuid>,
+    /// Nodes to set, whole: each replaces the node with its id, in its place,
+    /// or is added after the others.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub set: Vec<Node>,
+    /// Ports to unbind. A port already unbound, or on no node, stays so.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unbind: Vec<Port>,
+    /// Ports to bind, each replacing what its port was bound to. Of several
+    /// for one port, the last stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bind: Vec<Binding>,
+    /// If set, becomes the graph's [`root`](Graph::root).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<Uuid>,
 }
 
 impl Graph {
-    /// An empty graph — the starting point a load diff is applied onto.
+    /// An empty graph — the starting point a load is applied onto.
     pub fn empty() -> Self {
         Self::default()
     }
 
     /// The node with id `id`, if present.
     pub fn node(&self, id: &Uuid) -> Option<&Node> {
-        self.nodes.get(id)
+        self.nodes.iter().find(|node| node.id == *id)
     }
 
-    /// The link feeding `target`, if any.
-    pub fn link_to(&self, target: &Port) -> Option<&Link> {
-        self.links.iter().find(|l| &l.target == target)
-    }
-
-    /// Apply `diff` in place.
+    /// Apply `diff` in place. A diff that binds a port on no node fails, and
+    /// leaves the graph as it was.
     pub fn apply(&mut self, diff: GraphDiff) -> Result<(), GraphError> {
-        // 1. Remove links, then nodes (and any links still touching them).
-        // One pass over the links for the whole diff, not one per removal:
-        // the cost of an edit follows the edit, not the size of the graph.
-        let removed_targets: HashSet<Port> = diff.remove_links.iter().copied().collect();
-        let removed_nodes: HashSet<Uuid> = diff.remove_nodes.iter().copied().collect();
-        for id in &removed_nodes {
-            self.nodes.remove(id);
-        }
-        if self.root.is_some_and(|root| removed_nodes.contains(&root)) {
-            self.root = None;
-        }
-        if !removed_targets.is_empty() || !removed_nodes.is_empty() {
-            self.links.retain(|l| {
-                !removed_targets.contains(&l.target)
-                    && !removed_nodes.contains(&l.target.node)
-                    && !source_port(&l.source)
-                        .is_some_and(|port| removed_nodes.contains(&port.node))
-            });
+        let GraphDiff {
+            remove,
+            set,
+            unbind,
+            bind,
+            root,
+        } = diff;
+        let removed: HashSet<Uuid> = remove.into_iter().collect();
+        // A binding onto no node is refused before anything changes.
+        if !bind.is_empty() {
+            let present: HashSet<Uuid> = self
+                .nodes
+                .iter()
+                .map(|node| node.id)
+                .filter(|id| !removed.contains(id))
+                .chain(set.iter().map(|node| node.id))
+                .collect();
+            if let Some(binding) = bind.iter().find(|binding| !present.contains(&binding.node)) {
+                return Err(GraphError {
+                    message: format!(
+                        "a binding targets node {}, which is not in the graph",
+                        binding.node
+                    ),
+                });
+            }
         }
 
-        // 2. Add nodes, then links: a link replaces any on the same target,
-        // the diff's own included, so of several added for one target the
-        // last stands.
-        for node in diff.add_nodes {
-            self.nodes.insert(node.id, node);
+        // 1. Removals: the nodes, the bindings reading them, the root. One
+        // pass over the nodes for the whole diff.
+        if !removed.is_empty() {
+            self.nodes.retain(|node| !removed.contains(&node.id));
+            for node in &mut self.nodes {
+                node.bind.retain(|_, source| {
+                    !source_port(source).is_some_and(|port| removed.contains(&port.node))
+                });
+            }
+            if self.root.is_some_and(|root| removed.contains(&root)) {
+                self.root = None;
+            }
         }
-        let last_for_target: HashMap<Port, usize> = diff
-            .add_links
+
+        // 2. Whole nodes, then single bindings, through one index of the
+        // nodes by id.
+        let mut at: HashMap<Uuid, usize> = self
+            .nodes
             .iter()
             .enumerate()
-            .map(|(idx, link)| (link.target, idx))
+            .map(|(index, node)| (node.id, index))
             .collect();
-        if !last_for_target.is_empty() {
-            self.links
-                .retain(|l| !last_for_target.contains_key(&l.target));
-            self.links.extend(
-                diff.add_links
-                    .into_iter()
-                    .enumerate()
-                    .filter(|(idx, link)| last_for_target[&link.target] == *idx)
-                    .map(|(_, link)| link),
-            );
+        for node in set {
+            match at.get(&node.id) {
+                Some(index) => self.nodes[*index] = node,
+                None => {
+                    at.insert(node.id, self.nodes.len());
+                    self.nodes.push(node);
+                }
+            }
+        }
+        for port in unbind {
+            if let Some(index) = at.get(&port.node) {
+                self.nodes[*index].bind.remove(&port.port);
+            }
+        }
+        for binding in bind {
+            let index = at[&binding.node];
+            self.nodes[index].bind.insert(binding.port, binding.source);
         }
 
-        // 3. Predetermined-key overrides.
-        for (port, key) in diff.set_predetermined {
-            let node = self.nodes.get_mut(&port.node).ok_or_else(|| GraphError {
-                message: format!("predetermined key targets unknown node {}", port.node),
-            })?;
-            let io = node
-                .inputs
-                .iter_mut()
-                .chain(node.outputs.iter_mut())
-                .find(|io| io.id == port.port)
-                .ok_or_else(|| GraphError {
-                    message: format!(
-                        "predetermined key targets unknown slot {} on node {}",
-                        port.port, port.node
-                    ),
-                })?;
-            io.predetermined_key = key;
-        }
-
-        // 4. Root and variables.
-        if let Some(root) = diff.set_root {
+        // 3. The root.
+        if let Some(root) = root {
             self.root = Some(root);
         }
-        self.variables.extend(diff.variables);
         Ok(())
+    }
+
+    /// The diff that takes this graph to `target`: [`apply`](Self::apply)ing
+    /// it to this graph gives `target`'s root and nodes, the nodes this graph
+    /// has in its order and the others after them, in `target`'s order.
+    ///
+    /// It is minimal: a node only `target` has, or whose function or
+    /// children change, is set whole; a node whose bindings alone change gets
+    /// one entry per binding that changes, but for the bindings reading a
+    /// removed node, which go with it. A diff has no entry that clears the
+    /// root, and a removal is what unroots: a node this graph roots and
+    /// `target` keeps unrooted is removed and set again, and the nodes reading
+    /// it are bound again, so they restart with it.
+    pub fn diff(&self, target: &Graph) -> GraphDiff {
+        let theirs: HashMap<Uuid, &Node> =
+            target.nodes.iter().map(|node| (node.id, node)).collect();
+        let ours: HashMap<Uuid, &Node> = self.nodes.iter().map(|node| (node.id, node)).collect();
+        // The root `target` drops: a node it keeps is removed and set again;
+        // a root no node holds is removed, which unroots and removes nothing.
+        let unrooted = self.root.filter(|root| {
+            target.root.is_none() && ours.get(root).is_none_or(|_| theirs.contains_key(root))
+        });
+        let mut remove: Vec<Uuid> = self
+            .nodes
+            .iter()
+            .map(|node| node.id)
+            .filter(|id| !theirs.contains_key(id) || Some(*id) == unrooted)
+            .collect();
+        remove.extend(unrooted.filter(|root| !ours.contains_key(root)));
+        let removed: HashSet<Uuid> = remove.iter().copied().collect();
+        let mut diff = GraphDiff {
+            remove,
+            ..GraphDiff::default()
+        };
+        for node in &target.nodes {
+            let Some(old) = ours.get(&node.id).filter(|_| !removed.contains(&node.id)) else {
+                diff.set.push(node.clone());
+                continue;
+            };
+            if old.function != node.function || old.children != node.children {
+                diff.set.push(node.clone());
+                continue;
+            }
+            // A binding reading a removed node goes with it: one `target`
+            // keeps, to a node set again, is bound again.
+            let reads_removed = |source: &Source| {
+                source_port(source).is_some_and(|read| removed.contains(&read.node))
+            };
+            for (port, source) in &node.bind {
+                if old.bind.get(port) != Some(source) || reads_removed(source) {
+                    diff.bind.push(Binding {
+                        node: node.id,
+                        port: *port,
+                        source: source.clone(),
+                    });
+                }
+            }
+            for (port, source) in &old.bind {
+                if !node.bind.contains_key(port) && !reads_removed(source) {
+                    diff.unbind.push(Port::new(node.id, *port));
+                }
+            }
+        }
+        // The root the removals leave, set again where `target` has another,
+        // or has this one and a removal took it.
+        let left = self.root.filter(|root| !removed.contains(root));
+        if target.root.is_some() && target.root != left {
+            diff.root = target.root;
+        }
+        diff
     }
 }
 
@@ -399,200 +425,381 @@ mod tests {
         assert_eq!(reader.to_string(), "behavior-tree 1.1.0");
     }
 
-    fn node(id: Uuid, function: Uuid) -> Node {
+    fn id(n: u128) -> Uuid {
+        Uuid::from_u128(n)
+    }
+
+    fn node(n: u128, function: u128) -> Node {
         Node {
-            id,
-            function,
+            id: id(n),
+            function: id(function),
             ..Node::default()
         }
     }
 
-    #[test]
-    fn load_onto_empty_reproduces_the_graph() {
-        let a = Uuid::from_u128(0xA);
-        let b = Uuid::from_u128(0xB);
-        let mut graph = Graph::empty();
-        graph.nodes.insert(a, node(a, Uuid::from_u128(0xF1)));
-        graph.nodes.insert(b, node(b, Uuid::from_u128(0xF2)));
-        graph.links.push(Link::new(
-            Port::new(b, Uuid::from_u128(0x1)),
-            LinkSource::Port(Port::new(a, Uuid::from_u128(0x2))),
-        ));
-        graph.root = Some(a);
-        graph
-            .variables
-            .insert(Uuid::from_u128(0x9), "battery".into());
-
-        let mut rebuilt = Graph::empty();
-        rebuilt.apply(GraphDiff::load(graph.clone())).unwrap();
-        assert_eq!(rebuilt, graph);
+    fn bound(mut node: Node, port: u128, source: Source) -> Node {
+        node.bind.insert(id(port), source);
+        node
     }
 
-    #[test]
-    fn load_diff_lists_the_root_node_first() {
-        let a = Uuid::from_u128(0xA);
-        let b = Uuid::from_u128(0xB);
-        let c = Uuid::from_u128(0xC);
-        let mut graph = Graph::empty();
-        for id in [a, b, c] {
-            graph.nodes.insert(id, node(id, Uuid::from_u128(0xF0)));
+    fn from(n: u128, port: u128) -> Source {
+        Source::Port(Port::new(id(n), id(port)))
+    }
+
+    fn graph(root: Option<u128>, nodes: Vec<Node>) -> Graph {
+        Graph {
+            root: root.map(id),
+            nodes,
         }
-        graph.root = Some(c);
-        let diff = GraphDiff::load(graph);
-        assert_eq!(diff.add_nodes.first().unwrap().id, c);
     }
 
     #[test]
-    fn removing_a_node_drops_links_touching_it() {
-        let a = Uuid::from_u128(0xA);
-        let b = Uuid::from_u128(0xB);
-        let mut graph = Graph::empty();
-        graph.nodes.insert(a, node(a, Uuid::from_u128(0xF1)));
-        graph.nodes.insert(b, node(b, Uuid::from_u128(0xF2)));
-        // a's input is fed from b's output; removing b must drop the link.
-        graph.links.push(Link::new(
-            Port::new(a, Uuid::from_u128(0x1)),
-            LinkSource::Port(Port::new(b, Uuid::from_u128(0x2))),
-        ));
-
-        graph
-            .apply(GraphDiff {
-                remove_nodes: vec![b],
-                ..GraphDiff::default()
-            })
-            .unwrap();
-        assert!(!graph.nodes.contains_key(&b));
-        assert!(graph.links.is_empty(), "dangling link dropped");
+    fn the_diff_from_empty_loads_the_graph() {
+        let target = graph(
+            Some(0xA),
+            vec![
+                Node {
+                    children: Some(vec![id(0xB)]),
+                    ..node(0xA, 0xF1)
+                },
+                bound(node(0xB, 0xF2), 0x1, from(0xA, 0x2)),
+            ],
+        );
+        let diff = Graph::empty().diff(&target);
+        assert_eq!(diff.set, target.nodes, "every node, whole, in order");
+        assert_eq!(diff.root, target.root);
+        let mut loaded = Graph::empty();
+        loaded.apply(diff).unwrap();
+        assert_eq!(loaded, target);
     }
 
     #[test]
-    fn adding_a_link_replaces_the_one_on_the_same_target() {
-        let a = Uuid::from_u128(0xA);
-        let target = Port::new(a, Uuid::from_u128(0x1));
-        let mut graph = Graph::empty();
-        graph.nodes.insert(a, node(a, Uuid::from_u128(0xF1)));
-        graph
-            .apply(GraphDiff {
-                add_links: vec![Link::new(target, LinkSource::Literal(Value::U8(1)))],
-                ..GraphDiff::default()
-            })
-            .unwrap();
-        graph
-            .apply(GraphDiff {
-                add_links: vec![Link::new(target, LinkSource::Literal(Value::U8(2)))],
-                ..GraphDiff::default()
-            })
-            .unwrap();
-        assert_eq!(graph.links.len(), 1);
+    fn removing_a_node_drops_the_bindings_reading_it() {
+        let mut g = graph(
+            None,
+            vec![
+                bound(
+                    bound(node(0xA, 0xF1), 0x1, from(0xB, 0x2)),
+                    0x2,
+                    Source::Select {
+                        source: Box::new(from(0xB, 0x3)),
+                        path: Key::new(".field"),
+                    },
+                ),
+                node(0xB, 0xF2),
+            ],
+        );
+        g.apply(GraphDiff {
+            remove: vec![id(0xB)],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+        assert_eq!(g, graph(None, vec![node(0xA, 0xF1)]));
+    }
+
+    #[test]
+    fn removing_the_root_unroots_the_graph() {
+        let mut g = graph(Some(0xA), vec![node(0xA, 0xF1)]);
+        g.apply(GraphDiff {
+            remove: vec![id(0xA)],
+            set: vec![node(0xA, 0xF1)],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+        assert_eq!(g, graph(None, vec![node(0xA, 0xF1)]), "set again, unrooted");
+    }
+
+    #[test]
+    fn a_binding_replaces_what_its_port_was_bound_to() {
+        let mut g = graph(
+            None,
+            vec![bound(node(0xA, 0xF1), 0x1, Source::Value(Value::U8(1)))],
+        );
+        let bind = |value| Binding {
+            node: id(0xA),
+            port: id(0x1),
+            source: Source::Value(Value::U8(value)),
+        };
+        g.apply(GraphDiff {
+            bind: vec![bind(2), bind(3)],
+            ..GraphDiff::default()
+        })
+        .unwrap();
         assert_eq!(
-            graph.link_to(&target).unwrap().source,
-            LinkSource::Literal(Value::U8(2))
+            g.nodes[0].bind[&id(0x1)],
+            Source::Value(Value::U8(3)),
+            "the last stands"
         );
     }
 
-    /// The one-removal-at-a-time application the single passes replace:
-    /// what `apply` must keep doing to links, root and nodes.
-    fn apply_one_at_a_time(graph: &mut Graph, diff: GraphDiff) {
-        for target in &diff.remove_links {
-            graph.links.retain(|l| &l.target != target);
-        }
-        for id in &diff.remove_nodes {
-            graph.nodes.remove(id);
-            graph.links.retain(|l| {
-                &l.target.node != id && !source_port(&l.source).is_some_and(|p| &p.node == id)
-            });
-            if graph.root == Some(*id) {
-                graph.root = None;
-            }
-        }
-        for node in diff.add_nodes {
-            graph.nodes.insert(node.id, node);
-        }
-        for link in diff.add_links {
-            graph.links.retain(|l| l.target != link.target);
-            graph.links.push(link);
-        }
-    }
-
-    /// One diff removing links and nodes — the root among them, a node some
-    /// links read from — and adding several links, two on one target and
-    /// one replacing an existing link: the result, link order included, is
-    /// what applying it one change at a time gives.
     #[test]
-    fn a_diff_applies_as_its_changes_one_at_a_time() {
-        let id = |n: u128| Uuid::from_u128(n);
-        let port = |n: u128, p: u128| Port::new(id(n), id(p));
-        let from = |n: u128| LinkSource::Port(port(n, 0xF));
-        let mut graph = Graph::empty();
-        for n in 1..=5 {
-            graph.nodes.insert(id(n), node(id(n), id(0xF1)));
-        }
-        graph.root = Some(id(2));
-        graph.links = vec![
-            Link::new(port(1, 1), from(2)),
-            Link::new(port(3, 1), from(1)),
-            Link::new(port(3, 2), from(4)),
-            Link::new(port(4, 1), LinkSource::Literal(Value::U8(1))),
-            Link::new(port(5, 1), from(2)),
-            Link::new(port(5, 2), from(3)),
-        ];
-        let diff = GraphDiff {
-            remove_links: vec![port(3, 2)],
-            remove_nodes: vec![id(2)],
-            add_nodes: vec![node(id(6), id(0xF2))],
-            add_links: vec![
-                Link::new(port(6, 1), LinkSource::Literal(Value::U8(2))),
-                Link::new(port(4, 1), from(6)),
-                Link::new(port(6, 1), LinkSource::Literal(Value::U8(3))),
+    fn unbinding_wins_over_nothing_and_loses_to_a_binding() {
+        let mut g = graph(
+            None,
+            vec![bound(node(0xA, 0xF1), 0x1, Source::Key("k".into()))],
+        );
+        g.apply(GraphDiff {
+            unbind: vec![
+                Port::new(id(0xA), id(0x1)),
+                Port::new(id(0xA), id(0x2)),
+                Port::new(id(0xC), id(0x1)),
             ],
             ..GraphDiff::default()
-        };
-        let mut expected = graph.clone();
-        apply_one_at_a_time(&mut expected, diff.clone());
-        graph.apply(diff).unwrap();
-        assert_eq!(graph, expected);
-        assert_eq!(graph.root, None);
-        assert_eq!(
-            graph.link_to(&port(6, 1)).unwrap().source,
-            LinkSource::Literal(Value::U8(3))
+        })
+        .unwrap();
+        assert!(
+            g.nodes[0].bind.is_empty(),
+            "unbound; the others stay unbound"
         );
+        g.apply(GraphDiff {
+            unbind: vec![Port::new(id(0xA), id(0x1))],
+            bind: vec![Binding {
+                node: id(0xA),
+                port: id(0x1),
+                source: Source::Key("j".into()),
+            }],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+        assert_eq!(g.nodes[0].bind[&id(0x1)], Source::Key("j".into()));
     }
 
     #[test]
-    fn set_predetermined_key_overrides_the_slot() {
-        let a = Uuid::from_u128(0xA);
-        let slot = Uuid::from_u128(0x1);
-        let mut graph = Graph::empty();
-        graph.nodes.insert(
-            a,
-            Node {
-                id: a,
-                function: Uuid::from_u128(0xF1),
-                inputs: vec![Io::new(slot)],
-                ..Node::default()
-            },
-        );
-        graph
-            .apply(GraphDiff {
-                set_predetermined: vec![(Port::new(a, slot), Some("head/pitch".into()))],
-                ..GraphDiff::default()
-            })
-            .unwrap();
-        assert_eq!(
-            graph.nodes[&a].inputs[0].predetermined_key.as_deref(),
-            Some("head/pitch")
-        );
-    }
-
-    #[test]
-    fn predetermined_key_on_unknown_slot_is_an_error() {
-        let a = Uuid::from_u128(0xA);
-        let mut graph = Graph::empty();
-        graph.nodes.insert(a, node(a, Uuid::from_u128(0xF1)));
-        let err = graph.apply(GraphDiff {
-            set_predetermined: vec![(Port::new(a, Uuid::from_u128(0x2)), Some("k".into()))],
+    fn a_binding_onto_no_node_is_refused_whole() {
+        let mut g = graph(None, vec![node(0xA, 0xF1)]);
+        let before = g.clone();
+        let refused = g.apply(GraphDiff {
+            remove: vec![id(0xA)],
+            set: vec![node(0xB, 0xF2)],
+            bind: vec![Binding {
+                node: id(0xA),
+                port: id(0x1),
+                source: Source::Key("k".into()),
+            }],
             ..GraphDiff::default()
         });
-        assert!(err.is_err());
+        assert!(refused.is_err(), "0xA is removed by the same diff");
+        assert_eq!(g, before, "nothing applied");
+    }
+
+    #[test]
+    fn a_set_node_replaces_in_place_and_a_new_one_goes_last() {
+        let mut g = graph(None, vec![node(0xA, 0xF1), node(0xB, 0xF1)]);
+        g.apply(GraphDiff {
+            set: vec![node(0xC, 0xF3), node(0xA, 0xF2)],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+        assert_eq!(
+            g,
+            graph(
+                None,
+                vec![node(0xA, 0xF2), node(0xB, 0xF1), node(0xC, 0xF3)]
+            )
+        );
+    }
+
+    /// Two graphs differing in every way a diff tells: the diff sets the
+    /// nodes it must, binds and unbinds the rest, and takes the one to the
+    /// other.
+    #[test]
+    fn a_diff_takes_a_graph_to_its_target() {
+        let key = |k: &str| Source::Key(k.to_string());
+        let value = |v| Source::Value(Value::F64(v));
+        let a = graph(
+            Some(0x1),
+            vec![
+                Node {
+                    children: Some(vec![id(0x2), id(0x3)]),
+                    ..node(0x1, 0xF0)
+                },
+                bound(bound(node(0x2, 0xF1), 0xA, value(1.0)), 0xB, key("in")),
+                bound(node(0x3, 0xF1), 0xA, from(0x4, 0xC)),
+                node(0x4, 0xF2),
+                bound(node(0x5, 0xF3), 0xA, key("out")),
+            ],
+        );
+        let b = graph(
+            Some(0x1),
+            vec![
+                // Children reordered: set whole.
+                Node {
+                    children: Some(vec![id(0x3), id(0x2)]),
+                    ..node(0x1, 0xF0)
+                },
+                // One binding changed, one removed, one added.
+                bound(bound(node(0x2, 0xF1), 0xA, value(2.0)), 0xC, key("new")),
+                // Its source removed: the binding goes with it.
+                node(0x3, 0xF1),
+                // Function changed: set whole.
+                bound(node(0x5, 0xF4), 0xA, key("out")),
+                // Added.
+                node(0x6, 0xF5),
+            ],
+        );
+        let diff = a.diff(&b);
+        assert_eq!(diff.remove, [id(0x4)]);
+        assert_eq!(
+            diff.set.iter().map(|node| node.id).collect::<Vec<_>>(),
+            [id(0x1), id(0x5), id(0x6)]
+        );
+        assert_eq!(
+            diff.bind,
+            [
+                Binding {
+                    node: id(0x2),
+                    port: id(0xA),
+                    source: value(2.0)
+                },
+                Binding {
+                    node: id(0x2),
+                    port: id(0xC),
+                    source: key("new")
+                },
+            ]
+        );
+        assert_eq!(diff.unbind, [Port::new(id(0x2), id(0xB))]);
+        assert_eq!(diff.root, None);
+        let mut applied = a.clone();
+        applied.apply(diff).unwrap();
+        assert_eq!(applied, b);
+        assert_eq!(
+            b.diff(&b),
+            GraphDiff::default(),
+            "a graph is its own target"
+        );
+    }
+
+    /// A root the target keeps without rooting it is removed and set again,
+    /// which places it after the others, and what reads it is bound again.
+    #[test]
+    fn a_diff_unroots_a_root_the_target_keeps() {
+        let reader = bound(node(0x2, 0xF1), 0xA, from(0x1, 0xB));
+        let a = graph(Some(0x1), vec![node(0x1, 0xF0), reader.clone()]);
+        let b = graph(None, vec![reader, node(0x1, 0xF0)]);
+        let diff = a.diff(&b);
+        assert_eq!(diff.remove, [id(0x1)]);
+        assert_eq!(diff.set, [node(0x1, 0xF0)]);
+        assert_eq!(
+            diff.bind,
+            [Binding {
+                node: id(0x2),
+                port: id(0xA),
+                source: from(0x1, 0xB)
+            }]
+        );
+        let mut applied = a.clone();
+        applied.apply(diff).unwrap();
+        assert_eq!(applied, b);
+
+        let mut rerooted = b.clone();
+        rerooted.apply(b.diff(&a)).unwrap();
+        assert_eq!(rerooted, graph(Some(0x1), b.nodes), "rooted, in b's order");
+    }
+
+    /// A root no node holds is dropped by removing it, and a root the diff's
+    /// removals take is set again: whatever its root, a graph's diff gives
+    /// the target's.
+    #[test]
+    fn a_diff_gives_the_target_s_root_whatever_it_names() {
+        let cases = [
+            // A root that is no node, dropped.
+            (
+                graph(Some(0x7), vec![node(0x1, 0xF0)]),
+                graph(None, vec![node(0x1, 0xF0)]),
+            ),
+            // A root the target keeps while dropping its node.
+            (
+                graph(Some(0x1), vec![node(0x1, 0xF0)]),
+                graph(Some(0x1), vec![]),
+            ),
+            // A root that is no node, kept.
+            (
+                graph(Some(0x7), vec![]),
+                graph(Some(0x7), vec![node(0x1, 0xF0)]),
+            ),
+        ];
+        for (a, b) in cases {
+            let mut applied = a.clone();
+            applied.apply(a.diff(&b)).unwrap();
+            assert_eq!(applied, b, "{a:?} to {b:?}");
+        }
+    }
+
+    #[test]
+    fn a_graph_serializes_leanly() {
+        let g = graph(
+            Some(0x1),
+            vec![
+                Node {
+                    children: Some(vec![id(0x2)]),
+                    ..node(0x1, 0xF0)
+                },
+                bound(
+                    bound(node(0x2, 0xF1), 0xA, Source::Value(Value::F64(1.5))),
+                    0xB,
+                    Source::Key("face/x".into()),
+                ),
+            ],
+        );
+        let json = serde_json::to_string(&g).unwrap();
+        assert_eq!(
+            json,
+            r#"{"root":"00000000-0000-0000-0000-000000000001","nodes":[{"id":"00000000-0000-0000-0000-000000000001","function":"00000000-0000-0000-0000-0000000000f0","children":["00000000-0000-0000-0000-000000000002"]},{"id":"00000000-0000-0000-0000-000000000002","function":"00000000-0000-0000-0000-0000000000f1","bind":{"00000000-0000-0000-0000-00000000000a":{"value":{"f64":1.5}},"00000000-0000-0000-0000-00000000000b":{"key":"face/x"}}}]}"#
+        );
+        assert_eq!(serde_json::from_str::<Graph>(&json).unwrap(), g);
+        assert_eq!(
+            serde_json::to_string(&GraphDiff::default()).unwrap(),
+            "{}",
+            "an empty diff is empty"
+        );
+    }
+
+    /// A value bound to a port is an enum in an enum, which YAML writes as a
+    /// single-entry map: every binding, a graph's and a diff's, reads back.
+    #[test]
+    fn a_graph_and_a_diff_round_trip_through_yaml() {
+        let values = [
+            Value::F64(1.5),
+            Value::String("text".into()),
+            Value::Unit,
+            Value::Option(Some(Box::new(Value::F64(1.0)))),
+            Value::Option(None),
+            Value::ArrayF64(vec![1.0, 2.0]),
+        ];
+        let mut g = graph(Some(0x1), vec![node(0x1, 0xF0)]);
+        for (port, value) in values.iter().enumerate() {
+            g.nodes[0]
+                .bind
+                .insert(id(port as u128 + 0x10), Source::Value(value.clone()));
+        }
+        g.nodes[0]
+            .bind
+            .insert(id(0x20), Source::Key("face/x".into()));
+        g.nodes[0].bind.insert(
+            id(0x21),
+            Source::Select {
+                source: Box::new(from(0x1, 0x10)),
+                path: Key::new(".field"),
+            },
+        );
+        let yaml = serde_yaml::to_string(&g).unwrap();
+        assert_eq!(serde_yaml::from_str::<Graph>(&yaml).unwrap(), g, "{yaml}");
+
+        let diff = Graph::empty().diff(&g);
+        let diff = GraphDiff {
+            bind: vec![Binding {
+                node: id(0x1),
+                port: id(0x30),
+                source: Source::Value(Value::Option(Some(Box::new(Value::U8(1))))),
+            }],
+            ..diff
+        };
+        let yaml = serde_yaml::to_string(&diff).unwrap();
+        assert_eq!(
+            serde_yaml::from_str::<GraphDiff>(&yaml).unwrap(),
+            diff,
+            "{yaml}"
+        );
     }
 }

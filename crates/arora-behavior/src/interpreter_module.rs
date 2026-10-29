@@ -281,8 +281,17 @@ mod tests {
     #[test]
     fn edit_call_round_trips_the_diff() {
         let diff = GraphDiff {
-            remove_nodes: vec![Uuid::from_u128(7)],
-            set_root: Some(Uuid::from_u128(9)),
+            remove: vec![Uuid::from_u128(7)],
+            bind: vec![crate::graph::Binding {
+                node: Uuid::from_u128(8),
+                port: Uuid::from_u128(1),
+                source: crate::graph::Source::Value(Value::Option(Some(Box::new(Value::F64(1.5))))),
+            }],
+            unbind: vec![crate::graph::Port::new(
+                Uuid::from_u128(8),
+                Uuid::from_u128(2),
+            )],
+            root: Some(Uuid::from_u128(9)),
             ..Default::default()
         };
         let call = encode_edit(&diff);
@@ -323,14 +332,19 @@ mod tests {
     fn spawn_graph_call_round_trips_the_type_graph_and_policy() {
         let mut graph = Graph::empty();
         graph.root = Some(Uuid::from_u128(3));
-        graph.nodes.insert(
-            Uuid::from_u128(3),
-            crate::graph::Node {
-                id: Uuid::from_u128(3),
-                function: Uuid::from_u128(4),
-                ..Default::default()
-            },
-        );
+        graph.nodes.push(crate::graph::Node {
+            id: Uuid::from_u128(3),
+            function: Uuid::from_u128(4),
+            bind: [(
+                Uuid::from_u128(5),
+                crate::graph::Source::Select {
+                    source: Box::new(crate::graph::Source::Key(".step".to_string())),
+                    path: arora_types::data::Key::new(".field"),
+                },
+            )]
+            .into(),
+            ..Default::default()
+        });
         let graph_type = GraphType {
             name: "behavior-tree".to_string(),
             version: semver::Version::new(1, 0, 0),
@@ -402,6 +416,35 @@ mod tests {
         };
         let value = encode_spawn_result(&handle);
         assert_eq!(decode_spawn_result(&value).unwrap(), handle);
+    }
+
+    /// A diff or a graph of another shape, such as the variables-and-links
+    /// form of arora-behavior 9, is refused rather than read as an empty
+    /// edit.
+    #[test]
+    fn a_payload_of_another_shape_is_refused() {
+        let old_edit: Value = value_serde::to_value(&serde_json::json!({
+            "add_nodes": [],
+            "remove_nodes": ["00000000-0000-0000-0000-000000000007"],
+            "add_links": [],
+            "set_root": "00000000-0000-0000-0000-000000000009",
+        }))
+        .unwrap();
+        let mut call = encode_edit(&GraphDiff::default());
+        *call.args[0].value = old_edit;
+        assert!(decode_edit(&call).is_err(), "an edit of another shape");
+
+        let old_node: Value = value_serde::to_value(&serde_json::json!({
+            "nodes": [{
+                "id": "00000000-0000-0000-0000-000000000003",
+                "function": "00000000-0000-0000-0000-000000000004",
+                "inputs": [],
+            }],
+        }))
+        .unwrap();
+        let mut call = encode_load(&Graph::empty());
+        *call.args[0].value = old_node;
+        assert!(decode_load(&call).is_err(), "a node of another shape");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "13.0.0"
+version = "14.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -26,16 +26,16 @@ arora-types = { path = "../arora-types", version = "3" }
 # surface carries them. 13.1: `AroraBuilder::with_registry`. 13.2:
 # `list_keys` and `Arora::describe_methods`, which the read-only operations
 # answer from without a step. 13.7: the browser's component executor
-# registered, which a `wasm-component` guest loads through. 16: the current
+# registered, which a `wasm-component` guest loads through. 17: the current
 # major, whose `Arora`/`AroraBuilder` this crate's surface carries.
-arora = { path = "../arora", version = "16", default-features = false }
+arora = { path = "../arora", version = "17", default-features = false }
 # 2.1: the records `withRecords` loads, in arora-registry's layout.
 arora-registry = { path = "../arora-registry", version = "2.1" }
 # 6.1: the shapes a client reads keys and methods in, and a run handle's
-# client form (`arora_bridge::client`).
-arora-bridge = { path = "../arora-bridge", version = "6.1" }
+# client form (`arora_bridge::client`). 6.3: on arora-behavior 10.
+arora-bridge = { path = "../arora-bridge", version = "6.3" }
 # The run handle's value-plane encoding, which `client::run_value` reads.
-arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 wasm-bindgen = "0.2"
 futures = "0.3"
 # Runtime-free sync primitives only: the receiving end of the device's

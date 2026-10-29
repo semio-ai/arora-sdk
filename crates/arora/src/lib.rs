@@ -1497,11 +1497,11 @@ impl AroraBuilder {
                     let diff = interpreter_module::decode_edit(&call)
                         .map_err(|message| CallError::Guest { message })?;
                     let summary = format!(
-                        "+{} -{} node(s), +{} -{} link(s)",
-                        diff.add_nodes.len(),
-                        diff.remove_nodes.len(),
-                        diff.add_links.len(),
-                        diff.remove_links.len()
+                        "{} node(s) set, {} removed, {} port(s) bound, {} unbound",
+                        diff.set.len(),
+                        diff.remove.len(),
+                        diff.bind.len(),
+                        diff.unbind.len()
                     );
                     let result =
                         runtime::with_interpreter(&cell, |interpreter| interpreter.apply(diff))?;
@@ -1543,7 +1543,7 @@ impl AroraBuilder {
                         .map_err(|message| CallError::Guest { message })?;
                     let graph_functions = graph.nodes.len();
                     let calls = runtime::RunCalls::Graph {
-                        functions: graph.nodes.values().map(|node| node.function).collect(),
+                        functions: graph.nodes.iter().map(|node| node.function).collect(),
                     };
                     let mut handle = None;
                     let result = runtime::with_interpreter_value(&cell, |interpreter| {
@@ -3225,49 +3225,37 @@ mod caller_tests {
     /// A graph that calls `double` with `x` each step, writing the return
     /// under `tools/doubled`, and never ends.
     fn doubling_graph(x: f64) -> arora_behavior::graph::Graph {
-        use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node, Port};
+        use arora_behavior::graph::{Graph, Node, Source};
         use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID};
         use arora_behavior_tree::schema::_RET_PARAM_ID;
 
         let [parallel, double, run] = [0x1, 0x2, 0x3].map(Uuid::from_u128);
-        let out = Uuid::from_u128(0x4);
-        let mut graph = Graph::empty();
-        graph.root = Some(parallel);
-        graph.nodes.insert(
-            parallel,
-            Node {
-                id: parallel,
-                function: PARALLEL_FUNCTION_ID,
-                children: Some(vec![double, run]),
-                ..Node::default()
-            },
-        );
-        graph.nodes.insert(
-            double,
-            Node {
-                id: double,
-                function: DOUBLE,
-                inputs: vec![Io::new(DOUBLE_X), Io::new(_RET_PARAM_ID)],
-                ..Node::default()
-            },
-        );
-        graph.nodes.insert(
-            run,
-            Node {
-                id: run,
-                function: RUN_FUNCTION_ID,
-                ..Node::default()
-            },
-        );
-        graph.links = vec![
-            Link::new(
-                Port::new(double, DOUBLE_X),
-                LinkSource::Literal(Value::F64(x)),
-            ),
-            Link::new(Port::new(double, _RET_PARAM_ID), LinkSource::Variable(out)),
-        ];
-        graph.variables.insert(out, "tools/doubled".to_string());
-        graph
+        Graph {
+            root: Some(parallel),
+            nodes: vec![
+                Node {
+                    id: parallel,
+                    function: PARALLEL_FUNCTION_ID,
+                    children: Some(vec![double, run]),
+                    ..Node::default()
+                },
+                Node {
+                    id: double,
+                    function: DOUBLE,
+                    bind: [
+                        (DOUBLE_X, Source::Value(Value::F64(x))),
+                        (_RET_PARAM_ID, Source::Key("tools/doubled".to_string())),
+                    ]
+                    .into(),
+                    children: None,
+                },
+                Node {
+                    id: run,
+                    function: RUN_FUNCTION_ID,
+                    ..Node::default()
+                },
+            ],
+        }
     }
 
     /// `spawn_graph` starts a graph as a run: each step it calls a module
@@ -3401,17 +3389,14 @@ mod caller_tests {
         let run = Uuid::from_u128(0x1);
         let mut graph = Graph::empty();
         graph.root = Some(run);
-        graph.nodes.insert(
-            run,
-            Node {
-                id: run,
-                function: RUN_FUNCTION_ID,
-                ..Node::default()
-            },
-        );
+        graph.nodes.push(Node {
+            id: run,
+            function: RUN_FUNCTION_ID,
+            ..Node::default()
+        });
         let args = HashMap::from([
             ("graph_type".to_string(), Value::from("behavior-tree")),
-            ("graph_version".to_string(), Value::from("1.0")),
+            ("graph_version".to_string(), Value::from("2.0")),
             (
                 "graph".to_string(),
                 arora_types::value_serde::to_value(&graph).expect("a graph converts"),

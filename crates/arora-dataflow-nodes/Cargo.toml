@@ -1,6 +1,6 @@
 [package]
 name = "arora-dataflow-nodes"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Arora's dataflow nodes: the node vocabulary as the functions of @arora/dataflow, @arora/geometry and @arora/kinematics, computing on Arora's values, for a loader to put on a behavior tree."
@@ -14,7 +14,7 @@ arora-geometry = { path = "../arora-geometry", version = "1" }
 # Declares the behavior `Status` enumeration (type + variant ids) a task run
 # speaks — the cross-interpreter run-status contract — and the function
 # descriptions a function index holds.
-arora-behavior = { path = "../arora-behavior", version = "9.4" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 arora-types = { path = "../arora-types", version = "3.9" }
 hashbrown = { version = "0.17", features = ["serde"] }
 k = { version = "0.32", optional = true, default-features = false }
@@ -24,7 +24,7 @@ urdf-rs = { version = "0.9", optional = true }
 uuid = { version = "1", features = ["serde", "v5"] }
 
 [dev-dependencies]
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.5" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "10" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 
 [features]
