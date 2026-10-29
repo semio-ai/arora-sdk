@@ -43,6 +43,7 @@ pub use resolve::{resolve, Loaded, LoadedNode};
 pub(crate) use format::variable;
 pub(crate) use lexer::{is_name, is_parameter_name};
 pub(crate) use natives::{native, native_named};
+pub(crate) use resolve::{node_id, Functions};
 
 use serde::{Deserialize, Serialize};
 

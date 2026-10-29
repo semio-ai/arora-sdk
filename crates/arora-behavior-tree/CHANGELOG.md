@@ -37,6 +37,21 @@ All notable changes to `arora-behavior-tree`. The format follows
   Groot leaves empty (`res=""`, an unconnected output) binds nothing.
 - Requires arora-behavior-tree-types 3.
 
+### Added
+
+- `readable`: the shared graph and diff with references by name, for the
+  files people write, read and review. A reference is a string, an id when
+  it parses as a UUID and a name otherwise, one file mixing both: a node by
+  the name a text gives it, a function as a text resolves it, a port by its
+  parameter's name or `_ret`. `readable::Graph::resolve` and
+  `readable::GraphDiff::resolve` read a file into the shared form, reporting
+  each reference that does not resolve or is ambiguous with where it is
+  written (`ReferenceError`); `from_graph` and `from_diff` write the shared
+  form with a name wherever one resolves back to the same id.
+  [`docs/text.md`](docs/text.md#which-form-to-use) says which form to use
+  where: the text for behaviors, readable files for what people review, ids
+  for interpreter payloads and what programs exchange.
+
 ## [9.7.0] - 2026-10-28
 
 ### Added

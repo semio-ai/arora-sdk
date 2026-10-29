@@ -116,7 +116,7 @@ impl<'a> Names<'a> {
     /// alone names a native or another module's function, or its id when its
     /// name is not written as a name as it is, or names another function of
     /// its module too.
-    fn head(&self, function: &ModuleFunction) -> String {
+    pub(crate) fn head(&self, function: &ModuleFunction) -> String {
         let name = &function.function_name;
         if crate::text::native(function.function_id).is_some() {
             return name.clone();

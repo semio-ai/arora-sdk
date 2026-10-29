@@ -258,6 +258,128 @@ native or another module's function shows as `<module>::name`. A key shows
 quoted when it needs it. A float shows in its shortest form that reads back:
 `1e300f64`, not three hundred digits.
 
+## Which form to use
+
+A behavior is written in three forms, one per kind of reader:
+
+| Form | Use it for | Because |
+|---|---|---|
+| Text (`.bt`) | writing and reading behaviors | The tree shows as indentation and a binding as an argument, everything by name. |
+| [Readable graph or diff](#readable-graphs-and-diffs), JSON or YAML | files people write, read or review in git — fixtures, examples, hand-made diffs — and tools working on a graph's structure | It is the shared model field by field, with a name wherever a person reads a reference. |
+| Graph or diff by ids, JSON or YAML | the machine world: `LOAD`, `EDIT` and `SPAWN_GRAPH` payloads, graphs programs exchange or store, and wherever a name may be ambiguous or renamed | An id means one thing on every device and after every rename. |
+
+A payload to the interpreter module is by ids: whoever holds the function
+index resolves names before sending. A name means what the functions the
+device has make it mean when it reads it, so a payload by name could name one
+function when it is written and another, or none, once a module is loaded or
+dropped.
+
+## Readable graphs and diffs
+
+[`readable`](../src/readable.rs) mirrors the shared `Graph` and `GraphDiff`
+field by field, every reference a string: a node's `id`, its `function`, the
+ports its `bind` maps, its `children`, the `root`, the `node` and `port` of a
+`port` source or of a diff's binding, the nodes a diff `remove`s. A string
+that parses as a UUID is an id; any other is a name, and one file may mix
+both. This is the graph of a text:
+
+```text
+watch: fallback
+  calm: sequence
+    near: below(x: @cm, limit: 30)
+    settle: smooth(x: @cm, alpha: 0.5, state: {.s})
+  done: succeed
+
+cm: clamp(x: {sensor/distance}, lo: 0)
+level: {face/level} = add(a: @cm, b: 1)
+```
+
+```yaml
+root: watch
+nodes:
+- id: watch
+  function: fallback
+  children: [calm, done]
+- id: calm
+  function: sequence
+  children: [near, settle]
+- id: near
+  function: below
+  bind:
+    x: {port: {node: cm, port: _ret}}
+    limit: {value: {f64: 30.0}}
+- id: settle
+  function: smooth
+  bind:
+    x: {port: {node: cm, port: _ret}}
+    alpha: {value: {f64: 0.5}}
+    state: {key: .s}
+- id: done
+  function: succeed
+- id: cm
+  function: clamp
+  bind:
+    x: {key: sensor/distance}
+    lo: {value: {f64: 0.0}}
+- id: level
+  function: add
+  bind:
+    _ret: {key: face/level}
+    a: {port: {node: cm, port: _ret}}
+    b: {value: {f64: 1.0}}
+```
+
+and a diff to it, applied to that graph:
+
+```yaml
+remove: [level]
+set:
+- id: pulse
+  function: mul
+  bind:
+    _ret: {key: face/pulse}
+    a: {port: {node: cm, port: _ret}}
+    b: {value: {f64: 2.0}}
+unbind:
+- {node: settle, port: state}
+bind:
+- {node: near, port: limit, source: {value: {f64: 20.0}}}
+- {node: cm, port: hi, source: {value: {f64: 50.0}}}
+```
+
+- **Nodes.** A name is the id a text gives the node of that name, or the
+  node at that path for a node with none (`root.0.2`): `cm` here is `cm:` in
+  the text. A name in a reference names a node of the file. In a diff,
+  `remove` names nodes of the graph the diff applies to, and every other
+  reference a node of that graph it does not remove, or one it sets. An id is
+  taken as it is.
+- **Functions** resolve as in a text: a native's name, else a function of
+  the index, `<module>::name` naming one of several modules' functions of
+  that name.
+- **Ports.** A name is the parameter of that name of the node's function,
+  and `_ret` its return value. The ports of a node whose function the index
+  does not have are named by their ids.
+
+A reference that does not resolve is an error naming where the file writes
+it — ``nodes[5].bind.low: `clamp` has no parameter `low` `` — and so is a name
+naming several functions or ports, or a port bound twice. A file by ids
+resolves with no function index.
+
+| Function | Does |
+|---|---|
+| `readable::Graph::resolve(&self, &functions) -> Result<Graph, Vec<ReferenceError>>` | The graph a file describes, or every reference that does not resolve. |
+| `readable::GraphDiff::resolve(&self, &base, &functions) -> Result<GraphDiff, Vec<ReferenceError>>` | The diff a file describes, `base` the graph it applies to. |
+| `readable::Graph::from_graph(&graph, &names)` | A graph written with a name for each reference that has one. |
+| `readable::GraphDiff::from_diff(&diff, &base, &names)` | A diff written so, `base` the graph it applies to. |
+
+A file is read by deserializing it, in any serde format, into a
+`readable::Graph` or `readable::GraphDiff`, then resolving it; a file by ids
+reads the same way. `names` is a [`display::Names`](../src/display.rs): its
+`functions` name the functions and ports, its `nodes` the nodes, such as a
+text's `Loaded::nodes`. A reference is written as a name when that name
+resolves back to the same id, and as its id otherwise, so a file written
+reads back to the graph or diff exactly.
+
 ## Examples
 
 The examples of [The NGBT spectrum](../../../docs/ngbt-spectrum.html), with

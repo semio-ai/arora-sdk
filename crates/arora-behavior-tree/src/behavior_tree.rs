@@ -10,6 +10,7 @@ pub mod error;
 pub mod graph;
 mod id_hash;
 pub mod nodes;
+pub mod readable;
 mod scatter;
 pub mod schema;
 pub mod schema_groot;

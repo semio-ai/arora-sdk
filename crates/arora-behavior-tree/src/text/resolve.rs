@@ -132,7 +132,7 @@ pub(crate) enum Found<'a> {
 }
 
 impl Found<'_> {
-    fn id(&self) -> Uuid {
+    pub(crate) fn id(&self) -> Uuid {
         match self {
             Found::Known(function) => function.function_id,
             Found::Unknown(id) => *id,
@@ -214,7 +214,7 @@ impl<'a> Functions<'a> {
 }
 
 /// The id a node named `name` has, or a node at `path` that has no name.
-fn node_id(name_or_path: &str) -> Uuid {
+pub(crate) fn node_id(name_or_path: &str) -> Uuid {
     Uuid::parse_str(name_or_path)
         .unwrap_or_else(|_| Uuid::new_v5(&NODE_NAMESPACE, name_or_path.as_bytes()))
 }
