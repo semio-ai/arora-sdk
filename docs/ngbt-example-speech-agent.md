@@ -429,6 +429,21 @@ download it and open it in a browser.
 - **The call contract.** Every design replays the reference's run under
   Arora's call contract (§5) and is checked against it. Its scorecard says
   what the contract changes against the reference, whose ghost shows it.
+- **The system.** Every part composed in one drawing, from a tick's inputs to
+  its outputs. The world's inputs are on the left. Next come the trees, which
+  read inputs and keys and write keys, then the store's keys, which pass values
+  between the parts. Beneath the keys are the providers the tree's calls go to,
+  each call a dotted connector. Then the motion graph, and the outputs on the
+  right, each channel beside the node that writes it. At each tick a part that
+  changed or was called is blue, and a connector between two of them is the
+  change passing. Each node shows what it holds, and the speech provider shows
+  the audio playing on after its leaf stops polling it. The order of a tick is
+  numbered per design; where the motion reads the keys a tick late (#405,
+  #257), those connectors are dashed. A provider is an element of its own, not
+  a detail of a node: it is a module with its own runs, keyed by what they
+  were sent, and its audio outlives the leaf. Its inspector shows its calls and
+  the bytes they sent at each tick, and a call leaf's shows what its call
+  sends.
 - **How each design holds it.** One part at a time, the same part on both
   sides: the conversation, attention and reply run, or one of the seven motion
   groups; or Full, every part at once, the three trees above the whole motion

@@ -269,6 +269,11 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .view pre span.polled::after, .view pre span.st-R.polled::after { content: "   ● Running · polled"; color: var(--poll-ink); }
 .g-edge { fill: none; stroke: var(--faint); stroke-width: 1.2; }
 .g-edge.data { stroke-dasharray: 4 3; }
+.g-edge.io { stroke-width: 1; }
+.g-edge.call { stroke-dasharray: 1.5 3; stroke-linecap: round; }
+.g-edge.late { stroke-dasharray: 7 4; }
+.g-edge.clock.active { stroke-width: 1.4; stroke-opacity: .55; }
+.g-node.sys.provider rect { stroke-dasharray: 3 2; }
 .g-edge.active { stroke: var(--run-1); stroke-width: 2.8; }
 .g-edge.read { stroke: var(--check); stroke-width: 2.2; }
 .g-edge-label.active { fill: var(--run-1); }
@@ -284,6 +289,8 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .rep-legend .ln { width: 18px; height: 3px; border-radius: 2px; }
 .rep-legend .ln.active { background: var(--run-1); }
 .rep-legend .ln.read { background: var(--check); }
+.rep-legend .ln.call { background: repeating-linear-gradient(90deg, var(--muted) 0 2px, transparent 2px 5px); }
+.rep-legend .ln.late { background: repeating-linear-gradient(90deg, var(--muted) 0 7px, transparent 7px 11px); }
 .g-edge-label { font-size: 9px; fill: var(--faint); }
 .g-box rect { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 4; }
 .g-box text { font-size: 10px; fill: var(--muted); }
@@ -2173,6 +2180,7 @@ function motionModel(design) {
 // The graph of one part, for the drawing: nodes, edges, and an optional container.
 function graphModel(design, part, opt = {}) {
   const S = design ? design.strategy : 'reference';
+  if (part === 'system') return systemModel(design);
   if (part === 'full') {
     // Every part at once: the statechart's two subtrees and the reply run, then the whole motion graph.
     const sections = ['conversation', 'attention', 'reply'].map((p) => { const s = graphModel(design, p, opt); return { ...s, box: s.box.includes(p) ? s.box : `${p} · ${s.box}` }; }).concat([motionModel(design)]);
@@ -2208,6 +2216,143 @@ function graphModel(design, part, opt = {}) {
     edges.push({ from: builder.id, to: llm.id, data: true, label: S === 'control' ? '@prompt' : S === 'reference' ? 'prompt' : '{.prompt}' });
   }
   return { kind: 'tree', nodes, edges, box: S === 'control' ? `graph ${part}` : part === 'reply' ? 'task run' : 'subtree' };
+}
+// ---- the system: every part composed, from a tick's inputs to its outputs ------------------------------------------
+// The world's inputs, the keys the store holds between the parts, the providers the leaves call, and the outputs. A tree
+// node reads inputs and keys and writes keys; a call goes to its provider, which answers each poll; the motion graph
+// reads keys and inputs and writes the channels; the speech provider plays the audio.
+const SYS_INPUTS = [['time', 'arora/time'], ['face_visible', 'face/visible'], ['face_x', 'face/x'], ['face_y', 'face/y'], ['vad', 'vad'], ['words', 'asr/words']];
+const SYS_KEYS = ['conversation/state', 'conversation/sub', 'thinking/since', 'attention/state', 'attention/since', 'emotion/active', 'speech/viseme', 'speech/playing', 'gesture/start', 'reply/utterance', 'reply/docs', 'reply/memories', 'reply/answer', 'reply/tool_call', 'reply/tool_results', 'reply/audio'];
+// What each tree node reads and writes, by its name: `in:` an input, else a store key.
+const SYS_IO = {
+  is_listening: { reads: ['in:vad'] },
+  listen: { reads: ['in:vad', 'in:words'], writes: ['conversation/state', 'reply/utterance'] },
+  is_judging: { reads: ['conversation/state'] },
+  judge: { reads: ['in:words', 'reply/answer'], writes: ['conversation/state'] },
+  has_reply_run: { reads: ['conversation/state'] },
+  is_audio_ready: { reads: ['reply/audio'] },
+  play: { reads: ['reply/audio'], writes: ['speech/viseme', 'speech/playing', 'gesture/start', 'emotion/active', 'conversation/state'] },
+  show_thinking: { writes: ['conversation/sub', 'thinking/since'] },
+  await_sentence: { reads: ['reply/answer'], writes: ['conversation/state'] },
+  idle: { writes: ['conversation/state'] },
+  is_face_visible: { reads: ['in:face_visible'] },
+  set_present: { writes: ['attention/state', 'attention/since'] },
+  was_seen_lately: { reads: ['in:face_visible', 'in:time'] },
+  set_lost: { writes: ['attention/state', 'attention/since', 'emotion/active'] },
+  set_nobody: { writes: ['attention/state', 'attention/since'] },
+  rag: { reads: ['reply/utterance'], writes: ['reply/docs'] },
+  recall: { reads: ['reply/utterance'], writes: ['reply/memories'] },
+  prompt: { reads: ['reply/utterance', 'reply/docs', 'reply/memories', 'reply/tool_results', 'emotion/active'] },
+  llm: { writes: ['reply/answer', 'reply/tool_call'] },
+  tool: { reads: ['reply/tool_call'], writes: ['reply/tool_results'] },
+  filler: { writes: ['speech/viseme', 'speech/playing'] },
+  tts: { reads: ['reply/answer'], writes: ['reply/audio'] },
+  remember: { reads: ['reply/answer'] },
+};
+// The order of a tick in each build, as the system view numbers its parts.
+const SYSTEM_ORDER = {
+  reference: { tree: '② the state machine, on its event loop', motion: '③ the motion, computed on change', providers: 'services, called from the event loop: each result comes back as an event' },
+  compute: { tree: '② the tree: the statechart and the reply run', motion: '③ the motion: detached nodes, pulled by the sinks after the tree' },
+  full: { tree: '② the tree: the statechart and the reply run', motion: '③ the motion: detached nodes, each a full tree node, pulled after the tree' },
+  inc: { tree: '② the tree: the statechart and the reply run', motion: '③ the motion: node-graph shapes under the root PARALLEL, after the statechart' },
+  macro: { tree: '③ the tree: the statechart and the reply run', motion: '② the motion: macros in a WITH before the tree, reading last tick’s keys' },
+  control: { tree: '② control graphs: the statechart and the reply run', motion: '③ the motion graph: reads the store, a tick after the control writes it' },
+};
+const providerId = (fn) => `fn:${fn}`;
+// Where a motion source comes from: the world, or a key the control writes.
+const sysSource = (key) => { const inp = SYS_INPUTS.find(([, k]) => k === key); return inp ? `in:${inp[0]}` : `key:${key}`; };
+function systemModel(design) {
+  const S = design ? design.strategy : 'reference', lag = design ? design.lag : 0, io = [];
+  const trees = ['conversation', 'attention', 'reply'].map((p) => graphModel(design, p));
+  const calls = new Map();
+  for (const tm of trees) for (const n of tm.nodes) {
+    const t = n.tree;
+    if (!t) continue;
+    const rw = SYS_IO[t.name] || {};
+    for (const r of rw.reads || []) io.push({ from: r.startsWith('in:') ? r : `key:${r}`, to: n.id, io: true });
+    for (const w of rw.writes || []) io.push({ from: n.id, to: `key:${w}`, io: true });
+    if (t.k === 'action') { const id = providerId(t.fn); if (!calls.has(id)) calls.set(id, t.fn); io.push({ from: n.id, to: id, call: true }); }
+  }
+  const motionEdges = [];
+  for (const n of FUNCS) for (const r of refsOf(n)) {
+    const rn = NODE.get(r);
+    if (rn.group !== 'inputs') motionEdges.push({ from: r, to: n.id });
+    else { const from = sysSource(rn.key); io.push({ from, to: n.id, late: lag > 0 && from.startsWith('key:'), clock: from === 'in:time' }); }
+  }
+  for (const [key, id] of SINKS) io.push({ from: id, to: `out:${key}` });
+  io.push({ from: providerId('@pip/speech.play'), to: 'out:audio' }, { from: providerId('@pip/agent.remember'), to: 'out:memory' });
+  const order = SYSTEM_ORDER[S];
+  return {
+    kind: 'system', lag, trees,
+    inputs: SYS_INPUTS.map(([id, key]) => ({ id: `in:${id}`, kind: 'input', label: key, port: true, sys: { type: 'input', key: id } })),
+    keys: SYS_KEYS.map((k) => ({ id: `key:${k}`, kind: 'store key', label: `{${k}}`, port: true, sys: { type: 'key', key: k } })),
+    providers: [...calls].map(([id, fn]) => { const module = fn.slice(0, fn.lastIndexOf('.')); return { id, kind: `${module} · ${EXECUTOR[module] === 'wasm' ? 'wasm' : 'linked'}`, label: fnText(fn), sys: { type: 'provider', fn, module } }; }),
+    motion: FUNCS.map((n) => ({ id: n.id, kind: fname(n), label: n.id })), motionEdges,
+    outputs: [...SINKS.map(([key, id]) => ({ id: `out:${key}`, kind: 'channel', label: key, port: true, out: true, sys: { type: 'output', key, sink: id } })),
+      { id: 'out:audio', kind: 'speaker', label: 'audio', port: true, out: true, sys: { type: 'output', key: 'audio' } },
+      { id: 'out:memory', kind: 'memory', label: 'memory', port: true, out: true, sys: { type: 'output', key: 'memory' } }],
+    edges: [...trees.flatMap((t) => t.edges), ...motionEdges, ...io],
+    boxes: {
+      inputs: '① inputs',
+      trees: ['conversation', 'attention', 'reply run'].map((p) => `${order.tree[0]} ${p}`),
+      keys: 'the store',
+      providers: S === 'reference' ? 'services' : 'providers',
+      motion: `${order.motion[0]} motion graph${lag ? ', a tick late' : ''}`,
+      outputs: '④ outputs',
+    },
+  };
+}
+// What each part of the system holds at a tick, and whether it changed: an input, a key, a provider called, an output.
+const sysMemo = new WeakMap();
+function systemState(rec, i) {
+  if (!sysMemo.has(rec)) sysMemo.set(rec, new Map());
+  const memo = sysMemo.get(rec);
+  if (memo.has(i)) return memo.get(i);
+  const now = sysValues(rec, i), before = i ? sysValues(rec, i - 1) : new Map(), out = new Map();
+  for (const [id, v] of now) out.set(id, { ...v, changed: v.called !== undefined ? v.called > 0 || !!v.playsOn : !before.has(id) || !same(before.get(id).value, v.value) });
+  memo.set(i, out);
+  return out;
+}
+const sysText = (v) => (v === undefined || v === null || v === '' ? '—' : typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : typeof v === 'boolean' ? String(v) : String(v).length > 22 ? `${String(v).slice(0, 21)}…` : String(v));
+function sysValues(rec, i) {
+  const f = rec.frames[i], k = f.keys, face = faceAt(f.t), ctx = controlContext(rec), out = new Map(), put = (id, value, text) => out.set(id, { value, text: text ?? sysText(value) });
+  // The world.
+  const words = rec.events.filter((e) => e.kind === 'asr' && e.t <= f.t + 1e-9).pop();
+  put('in:time', f.t, `${f.t.toFixed(2)} s`); put('in:face_visible', face.visible); put('in:face_x', face.x); put('in:face_y', face.y);
+  put('in:vad', !!f.user); put('in:words', words ? words.text : '');
+  // The store.
+  const done = (lane, label) => rec.lanes.filter((r) => r.lane === lane && r.run === f.runId && r.t1 <= f.t + 1e-9 && r.outcome === 'done' && (!label || label.test(r.label))).length;
+  const run = ctx.runs.get(f.runId);
+  put('key:conversation/state', k.conv); put('key:conversation/sub', k.sub); put('key:thinking/since', k.thinkSince); put('key:attention/state', k.att); put('key:attention/since', k.attSince);
+  put('key:emotion/active', k.active.map((e) => e.name).join(', ')); put('key:speech/viseme', k.viseme); put('key:speech/playing', k.playing); put('key:gesture/start', k.gStart);
+  put('key:reply/utterance', run ? run.utterance : '');
+  for (const [key, lane, label] of [['docs', 'rag'], ['memories', 'recall'], ['answer', 'llm', /sentence/], ['tool_call', 'llm', /tool/], ['tool_results', 'tool'], ['audio', 'tts']]) {
+    const n = f.runId ? done(lane, label) : 0;
+    put(`key:reply/${key}`, n, n ? `${n} · run ${f.runId}` : '—');
+  }
+  // The providers: called this tick, and what the calls sent. A design polls every wait; the reference's event loop
+  // starts a call and takes its result, and calls nothing in between.
+  const calls = new Map(), add = (fn, bytes) => { const c = calls.get(fn) || { n: 0, bytes: 0 }; c.n++; c.bytes += bytes; calls.set(fn, c); };
+  const waits = waitsAt(ctx, f, i), polled = new Set(rec.polls && rec.polls[i] || []);
+  for (const w of waits) {
+    const t = TREE_NODE.get(POLL_UID[w.leaf]);
+    if (!t || !t.fn) continue;
+    if (rec.design ? polled.has(w.leaf) : w.start || w.end) add(t.fn, rec.design ? w.bytes : 0);
+  }
+  if (ctx.starts[i].has(`${f.runId}:llm`)) add('@pip/agent.prompt', 0);
+  if (rec.lanes.some((r) => r.lane === 'remember' && Math.abs(r.t0 - f.t) < DT / 2)) add('@pip/agent.remember', 0);
+  for (const [, fn] of new Map([...TREE_NODE.values()].filter((t) => t.k === 'action').map((t) => [t.fn, t.fn]))) {
+    const c = calls.get(fn), module = fn.slice(0, fn.lastIndexOf('.'));
+    // The speech provider plays on after its leaf stops polling it: it drives the speaker with no call.
+    if (!c && fn === '@pip/speech.play' && f.robot && f.robot.note === 'plays on') { out.set(providerId(fn), { value: 0, called: 0, bytes: 0, playsOn: true, text: 'plays on, not polled' }); continue; }
+    out.set(providerId(fn), { value: c ? c.n : 0, called: c ? c.n : 0, bytes: c ? c.bytes : 0, text: c ? `${c.n === 1 ? 'called' : `${c.n} calls`}${c.bytes ? ` · ${Math.round(c.bytes)} B` : ''}` : `${module} · ${EXECUTOR[module] === 'wasm' ? 'wasm' : 'linked'}` });
+  }
+  // The outputs.
+  SINKS.forEach(([key], j) => put(`out:${key}`, f.c[j]));
+  const r = f.robot, heard = r && r.note !== 'paused' && r.note !== 'stopped';
+  put('out:audio', heard ? `${r.text}#${r.word}` : '', heard ? `“${r.words[r.word] || '…'}”${r.note ? ` ${r.note}` : ''}` : 'silent');
+  put('out:memory', rec.memoryLog.filter((m) => m.t <= f.t + 1e-9).length);
+  return out;
 }
 // ---- what an inspector reads ----------------------------------------------------------------
 // A port's value at a tick and its state: 0 not kept, 1 ran this tick, 2 kept and current, 3 kept but stale (what it
@@ -2350,6 +2495,11 @@ function inspectNode(rec, sel) {
     const n = NODE.get(sel.id);
     return { name: n.id, kind: n.group === 'inputs' ? `store key {${n.key}}` : `${fname(n)} · ${n.group}`, where: motionWhere(S, n, rec), ports: motionPorts(rec, n) };
   }
+  if (sel.kind === 'provider') {
+    const fn = sel.id, module = fn.slice(0, fn.lastIndexOf('.'));
+    return { name: fnText(fn), kind: `${module} · ${EXECUTOR[module] === 'wasm' ? 'a wasm component' : 'linked into the runtime'}`, where: providerWhere(S, module),
+      ports: [{ key: 'calls', role: 'calls', short: 'calls', label: 'calls this tick', type: { kind: 'float' } }, { key: 'bytes', role: 'sent', short: 'sent', label: 'bytes they sent', type: { kind: 'float' } }] };
+  }
   const t = TREE_NODE.get(sel.id), ports = [], promptName = S === 'control' ? '@prompt' : S === 'reference' ? 'prompt' : '{.prompt}';
   if (t.builds) {
     // The prompt is built once a call and kept for the llm, which sends it at every poll: a prompt that changed while
@@ -2372,6 +2522,7 @@ function inspectNode(rec, sel) {
   if (t.k === 'set' && t.key === 'attention/state') ports.push({ key: 'key', role: 'writes', short: 'writes', label: `{${t.key}}`, type: { kind: 'enum', values: ENUM_OF['attention/state'] } });
   t.children.forEach((c, j) => ports.push({ key: `child${j}`, role: S === 'control' ? `child_${j}` : `child ${j + 1}`, short: c.name, label: c.name, type: { kind: 'enum', values: STATUS_NAMES } }));
   if (t.prompt) ports.push({ key: 'prompt', role: 'in', short: 'prompt', label: promptName, type: { kind: 'string' } });
+  if (leafOf(t)) ports.push({ key: 'sent', role: 'sends', short: 'sent', label: 'bytes its call sends', type: { kind: 'float' } });
   ports.push({ key: 'status', role: 'out', short: 'status', label: 'status', type: { kind: 'enum', values: STATUS_NAMES } });
   return { name: t.name, kind: `${t.k === 'action' ? fnText(t.fn) : t.k} · ${TREE_PART.get(t.uid)}`, where: treeWhere(S, t), ports };
 }
@@ -2384,9 +2535,11 @@ function seriesOf(rec, sel, port) {
   const dot = port.indexOf('.'), base = dot < 0 ? port : port.slice(0, dot), field = dot < 0 ? null : port.slice(dot + 1);
   if (field) { const s = seriesOf(rec, sel, base); out = { v: s.v.map((x) => (x && typeof x === 'object' ? x[field] : undefined)), st: s.st }; }
   else if (sel.kind === 'motion') out = motionSeries(rec, NODE.get(sel.id), port);
+  else if (sel.kind === 'provider') out = providerSeries(rec, sel.id, port);
   else {
     const t = TREE_NODE.get(sel.id), keeps = !!rec.design;
-    if (t.builds && port !== 'status') out = promptSeries(rec, port);
+    if (port === 'sent') out = sentSeries(rec, t);
+    else if (t.builds && port !== 'status') out = promptSeries(rec, port);
     else if (port === 'status') out = statusSeries(rec, t.uid, keeps);
     else if (port.startsWith('child')) out = statusSeries(rec, t.children[+port.slice(5)].uid, keeps);
     else if (port === 'prompt') out = promptSeries(rec, 'out');
@@ -2431,6 +2584,32 @@ function motionWhere(S, n, rec) {
     control: `The node’s output is a typed port with its shape, and eval_all returns every port, get_outputs_delta the changes; its inputs are not kept, only the ports they come from${sink ? `, and an output node writes ${key}` : ''}. #257’s code clears the ports at each tick and a lazy node not ticked holds nothing; the build here keeps them, with the bench’s cache on every node.`,
   }[S] || '';
 }
+// The wait a call leaf is, by the name the waits go by.
+const leafOf = (t) => (t.k === 'action' && !t.builds ? (t.lane || (POLL_UID[t.fn.split('.').pop()] === t.uid ? t.fn.split('.').pop() : null)) : null);
+// What a call leaf's call sent at each tick: polled, under the call contract; the reference's event loop only starts it.
+function sentSeries(rec, t) {
+  const ctx = controlContext(rec), leaf = leafOf(t), n = rec.frames.length, v = new Array(n), st = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const w = waitsAt(ctx, rec.frames[i], i).find((x) => x.leaf === leaf), sent = w && (rec.design ? (rec.polls[i] || []).includes(leaf) : w.start);
+    v[i] = sent ? w.bytes : undefined; st[i] = sent ? FRESH : NONE;
+  }
+  return { v, st };
+}
+// A provider's calls at each tick, and the bytes they sent.
+function providerSeries(rec, fn, port) {
+  const n = rec.frames.length, v = new Array(n), st = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { const p = systemState(rec, i).get(providerId(fn)); v[i] = port === 'calls' ? p.called : p.bytes; st[i] = p.called ? FRESH : KEPT; }
+  return { v, st };
+}
+// What a provider is, and how the leaves reach it.
+function providerWhere(S, module) {
+  if (S === 'reference') return 'The reference calls this service from its event loop and takes its result as an event: one call starts it, nothing in between, and its own player plays the audio, pausing it at once.';
+  return {
+    '@pip/speech': 'The speech provider, linked into the runtime: it synthesizes and plays on its own threads, and keeps each run by its text. The play leaf polls it at every tick, sending the sentence again, and gets back the viseme at its playhead. Nothing tells it when the leaf stops: the audio plays on 250 ms, the run is dropped, and the same text again starts it over.',
+    '@pip/agent': 'Linked into the runtime: it calls the services (rag, recall, the llm, the judge) off the tick, and keeps each run by what it was sent. A leaf polls it at every tick it waits, sending its arguments again: the llm its prompt, about 650 bytes, 100 times a second. It builds the prompt and records the turn in the call itself.',
+    '@pip/tools': 'Linked into the runtime: it runs a tool call off the tick, keyed by the call; the tool leaf polls it at every tick until its result.',
+  }[module] || '';
+}
 function treeWhere(S, t) {
   const call = t.k === 'action' ? ` A call through the engine at every tick it is reached: while it answers Running it is polled, its arguments encoded and sent again, and its provider finds its run by them. Nothing tells the provider when the leaf stops.${t.prompt ? ' Its argument is the prompt the leaf before it built, kept for the whole call.' : ''}` : '';
   const what = t.k === 'check' ? ` It reads {${t.key}}, a store key the bridge lists and pushes on change.` : t.k === 'set' ? ` It writes {${t.key}}, a store key.` : call;
@@ -2447,7 +2626,7 @@ const PARTS = [
   { id: 'conversation', label: 'Conversation' }, { id: 'attention', label: 'Attention' }, { id: 'reply', label: 'Reply run' },
   ...MOTION_GROUPS.map(([id, label]) => ({ id, label, motion: true })),
 ];
-if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, waitingAt, inspectionStats, engineUs, modeledUs, llmBytes, sendBytes, callBytes, contractEffect, mouthLag, CONTRACT_CHANGES, EXECUTOR, ENGINE_US, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim, probeOf, ORDER, INDEX, NODE, SINK_IDX, SOURCES, TREES, TREE_NODE, motionInput, seriesOf, inspectNode, motionPorts, FUNCS };
+if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, waitingAt, systemModel, systemState, providerId, SYS_KEYS, inspectionStats, engineUs, modeledUs, llmBytes, sendBytes, callBytes, contractEffect, mouthLag, CONTRACT_CHANGES, EXECUTOR, ENGINE_US, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim, probeOf, ORDER, INDEX, NODE, SINK_IDX, SOURCES, TREES, TREE_NODE, motionInput, seriesOf, inspectNode, motionPorts, FUNCS };
 </script>
 
 <script>
@@ -2664,9 +2843,13 @@ function buildTranscript(side) {
 }
 
 // ---- representations: graph, outline, stored form ---------------------------------
-const partLabel = (id) => (id === 'full' ? 'Full' : PARTS.find((p) => p.id === id).label);
-const isMotion = (part) => part !== 'full' && PARTS.find((p) => p.id === part).motion;
+// Full and System show every part at once; System composes them, from the tick's inputs to its outputs.
+const whole = (part) => part === 'full' || part === 'system';
+const partLabel = (id) => (id === 'full' ? 'Full' : id === 'system' ? 'System' : PARTS.find((p) => p.id === id).label);
+const isMotion = (part) => !whole(part) && PARTS.find((p) => p.id === part).motion;
+const edgeClass = (e) => `g-edge${e.data ? ' data' : ''}${e.io ? ' io' : ''}${e.call ? ' call' : ''}${e.late ? ' late' : ''}${e.clock ? ' clock' : ''}`;
 function repNote(design, part, tab) {
+  if (part === 'system') return tab !== 'graph' ? repNote(design, 'full', tab) : `Every part composed. The world’s inputs on the left; the trees, which read inputs and keys and write keys; the store’s keys, which pass values between the parts; the providers the tree’s calls go to, a dotted connector each; the motion graph; and on the right the outputs, beside the node that writes each. At each tick a part that changed or was called is blue, and a connector between two is the change passing.${design && design.lag ? ' The motion reads the keys the control wrote a tick before: dashed.' : ''} The order of a tick: ① the inputs; ${[SYSTEM_ORDER[design ? design.strategy : 'reference'].tree, SYSTEM_ORDER[design ? design.strategy : 'reference'].motion].sort().map((x) => x.slice(2)).join('; ')}; ④ the outputs. Each node shows what it holds this tick. Fitted to the panel’s width; “Actual size” shows it unscaled, to scroll.`;
   if (part === 'full') return tab === 'stored' ? 'Every part’s stored form, one after another.' : 'Every part at once: the conversation over the attention, the reply run beside them, and the whole motion graph below. The colours mean what they mean in each part. Fitted to the panel’s width; “Actual size” shows it unscaled, to scroll.';
   const motion = MOTION_GROUPS.find(([g]) => g === part);
   if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} in its own code, each value only when what it follows from changed: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.' + (tab === 'stored' ? '' : ' It polls nothing: its event loop hands each wait its result.');
@@ -2682,13 +2865,13 @@ function buildRep(side) {
   side.repNote.textContent = repNote(design, part, tab) + (isMotion(part) && tab !== 'stored' ? ' Nothing here waits, so nothing is polled: the waits are in the conversation and the reply run, and the chip under each robot lists them.' : '') + (tab === 'graph' ? '' : ` ${NOTATION}`) + ' Click a node, or a line that names one, to inspect it.';
   side.repKey = `${side.rec.impl.id}|${part}|${tab}`;
   side.repLines = null; side.gnodes = null; side.gedges = null; side.pickLines = [];
-  side.view.classList.toggle('full', part === 'full');
-  side.zoom.hidden = part !== 'full' || tab !== 'graph'; side.zoom.textContent = S.fit ? 'Actual size' : 'Fit to width';
+  side.view.classList.toggle('full', whole(part));
+  side.zoom.hidden = !whole(part) || tab !== 'graph'; side.zoom.textContent = S.fit ? 'Actual size' : 'Fit to width';
   if (tab === 'graph') { buildGraph(side, design, part); side.repNote.textContent += ' Drag a node to move it; with a node focused, the arrow keys move it.'; }
   else {
     side.resetLayout.hidden = true;
     const opt = side.rec.opt || {}, outlineOf = (p) => (isMotion(p) ? storedLines(design, p, opt) : treeLines(TREES[p]).map((l) => ({ text: l.text, id: l.uid })));
-    const lines = tab !== 'outline' ? storedLines(design, part, opt) : part === 'full' ? PARTS.flatMap((p, k) => [...(k ? [{ text: '' }] : []), { text: `// — ${p.label} —` }, ...outlineOf(p.id)]) : outlineOf(part);
+    const lines = tab !== 'outline' ? storedLines(design, whole(part) ? 'full' : part, opt) : whole(part) ? PARTS.flatMap((p, k) => [...(k ? [{ text: '' }] : []), { text: `// — ${p.label} —` }, ...outlineOf(p.id)]) : outlineOf(part);
     const pre = el('pre');
     // A line's // comment is muted, so the file's own text stands out.
     const lineSpan = (text) => { const at = text.search(/(^|\s)\/\/ /); if (at < 0) return el('span', { text: text || ' ' }); const cut = text[at] === '/' ? at : at + 1; return el('span', {}, text.slice(0, cut), el('i', { class: 'cmt', text: text.slice(cut) })); };
@@ -2719,7 +2902,7 @@ function layoutDag(model) {
     function avgPos(n) { const ps = n.preds.filter((p) => pos.has(p)); return ps.length ? ps.reduce((s, p) => s + pos.get(p), 0) / ps.length : 0; }
   }
   const gapX = 34, gapY = 10, top = 26, left = 10;
-  let x = left; const tallest = Math.max(...layers.map((ly) => (ly || []).length));
+  let x = left; const tallest = Math.max(...Array.from(layers, (ly) => (ly || []).length));   // a layer may be empty
   layers.forEach((ly) => {
     if (!ly || !ly.length) return;
     const colW = Math.max(...ly.map((n) => n.w)), offset = ((tallest - ly.length) * (36 + gapY)) / 2;
@@ -2752,11 +2935,43 @@ function layoutTree(model) {
   const width = Math.max(...[...byId.values()].map((n) => n.x + n.w)) + 12;
   return { nodes: [...byId.values()], width, height: top + row * (36 + gapY) + 8 };
 }
+// The system's drawing: the inputs on the left, then the trees, the store's keys with the providers under them, the
+// motion graph, and the outputs on the right, each column in its box. A channel sits beside the node that writes it.
+function layoutSystem(model) {
+  const gap = 90, top = 30, step = 46, nodes = [], boxes = [];
+  const col = (list, x, y0) => { let y = y0, w = 0; for (const n of list) { const m = { ...n, ...nodeSize(n), x, y }; y += step; w = Math.max(w, m.w); nodes.push(m); } return { w, bottom: y }; };
+  const inputs = col(model.inputs, 10, top);
+  boxes.push({ label: model.boxes.inputs, ids: new Set(model.inputs.map((n) => n.id)), ports: true });
+  let x = 10 + inputs.w + gap, y = top, treeW = 0;
+  model.trees.forEach((t, k) => {
+    const lay = layoutTree(t);
+    for (const n of lay.nodes) { n.x += x - 10; n.y += y - 26; nodes.push(n); }
+    boxes.push({ label: model.boxes.trees[k], ids: new Set(lay.nodes.map((n) => n.id)) });
+    y += lay.height + 34; treeW = Math.max(treeW, lay.width);
+  });
+  x += treeW + gap;
+  const keys = col(model.keys, x, top);
+  boxes.push({ label: model.boxes.keys, ids: new Set(model.keys.map((n) => n.id)), ports: true });
+  const provs = col(model.providers, x, keys.bottom + 44);
+  boxes.push({ label: model.boxes.providers, ids: new Set(model.providers.map((n) => n.id)) });
+  x += Math.max(keys.w, provs.w) + gap;
+  const dag = layoutDag({ nodes: model.motion, edges: model.motionEdges });
+  for (const n of dag.nodes) { n.x += x - 10; n.y += top - 26; nodes.push(n); }
+  boxes.push({ label: model.boxes.motion, ids: new Set(dag.nodes.map((n) => n.id)) });
+  x += dag.width + gap - 10;
+  const at = new Map(nodes.map((n) => [n.id, n]));
+  const outs = model.outputs.map((n) => ({ ...n, ...nodeSize(n), x, want: n.sys.sink ? at.get(n.sys.sink).y : Infinity })).sort((a, b) => a.want - b.want);
+  let oy = top;
+  for (const o of outs) { o.y = o.want === Infinity ? oy + 20 : Math.max(oy, o.want); oy = o.y + step; nodes.push(o); }
+  boxes.push({ label: model.boxes.outputs, ids: new Set(outs.map((n) => n.id)), ports: true });
+  return { nodes, width: Math.max(...nodes.map((n) => n.x + n.w)) + 12, height: Math.max(...nodes.map((n) => n.y + n.h)) + 10, boxes };
+}
 // A part's layout. The full drawing places every part's, each in its own box: the conversation over the attention,
 // the reply run beside them, and the motion graph below all three.
 function layoutOf(model) {
   if (model.kind === 'dag') return { ...layoutDag(model), boxes: [{ label: model.box }] };
   if (model.kind === 'tree') return { ...layoutTree(model), boxes: [{ label: model.box }] };
+  if (model.kind === 'system') return layoutSystem(model);
   const lays = model.sections.map(layoutOf), [conv, att, reply, motion] = lays, nodes = [];
   const place = (lay, dx, dy) => { for (const n of lay.nodes) { n.x += dx; n.y += dy; nodes.push(n); } };
   const colW = Math.max(conv.width, att.width) + 24, top = Math.max(conv.height + 16 + att.height, reply.height) + 16;
@@ -2780,7 +2995,7 @@ function buildGraph(side, design, part) {
     return { ...b, g, rect, text };
   });
   const edges = model.edges.map((e) => {
-    const path = sv('path', { class: `g-edge${e.data ? ' data' : ''}` }); svg.append(path);
+    const path = sv('path', { class: edgeClass(e) }); svg.append(path);
     const label = e.label ? sv('text', { class: 'g-edge-label', 'text-anchor': e.data ? 'middle' : 'end' }, e.label) : null;
     if (label) svg.append(label);
     return { e, path, label };
@@ -2796,6 +3011,11 @@ function buildGraph(side, design, part) {
       const x1 = a.x, y1 = a.y + a.h / 2, x2 = b.x + b.w, y2 = b.y + b.h / 2;
       path.setAttribute('d', `M${x1} ${y1} C${x1 - 20} ${y1} ${x2 + 20} ${y2} ${x2} ${y2}`);
       if (label) { label.setAttribute('x', (x1 + x2) / 2); label.setAttribute('y', Math.min(y1, y2) - 6); }
+    } else if (b.x + b.w < a.x) {
+      // To a node on the left, as a tree node reading a key: from the left side of one to the right side of the other.
+      const x1 = a.x, y1 = a.y + a.h / 2, x2 = b.x + b.w, y2 = b.y + b.h / 2;
+      path.setAttribute('d', `M${x1} ${y1} C${x1 - 60} ${y1} ${x2 + 60} ${y2} ${x2} ${y2}`);
+      if (label) { label.setAttribute('x', x2 + 4); label.setAttribute('y', y2 - 4); }
     } else {
       const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, mx = (x1 + x2) / 2;
       path.setAttribute('d', `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`);
@@ -2803,8 +3023,8 @@ function buildGraph(side, design, part) {
     }
   };
   const placeBox = () => {
-    for (const { g, rect, text, ids } of boxes) {
-      const inner = lay.nodes.filter((n) => !n.port && (!ids || ids.has(n.id)));
+    for (const { g, rect, text, ids, ports } of boxes) {
+      const inner = lay.nodes.filter((n) => (ports || !n.port) && (!ids || ids.has(n.id)));
       g.style.display = inner.length ? '' : 'none';
       if (!inner.length) continue;
       const x0 = Math.min(...inner.map((n) => n.x)) - 6, y0 = Math.min(...inner.map((n) => n.y)) - 18, x1 = Math.max(...inner.map((n) => n.x + n.w)) + 6, y1 = Math.max(...inner.map((n) => n.y + n.h)) + 6;
@@ -2819,7 +3039,7 @@ function buildGraph(side, design, part) {
     const minX = Math.min(...xs) - 12, minY = Math.min(...ys) - 26, w = Math.max(...xs) - minX + 12, h = Math.max(...ys) - minY + 10;
     svg.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
     const room = Math.max(240, (side.view.getBoundingClientRect().width || side.trace.getBoundingClientRect().width || 600) - 4);
-    const scale = w > room && (part === 'full' ? S.fit : room / w >= 0.62) ? room / w : 1;
+    const scale = w > room && (whole(part) ? S.fit : room / w >= 0.62) ? room / w : 1;
     svg.setAttribute('width', Math.round(w * scale)); svg.setAttribute('height', Math.round(h * scale));
   };
   const move = (n, g, x, y) => {
@@ -2855,6 +3075,7 @@ function buildGraph(side, design, part) {
     if (n.tree) g.append(sv('text', { class: 'badge-s', x: n.w - 8, y: 13, 'text-anchor': 'end' }, ''));
     const describe = () => {
       if (n.tree) { const t = n.tree; return `<b>${escapeHtml(t.label)}</b><br>${escapeHtml(t.k === 'action' ? `${t.fn}(${t.args.join(', ')})` : t.k === 'check' ? `Truthy({${t.key}})` : t.k === 'set' ? `{${t.key}}` : n.kind)}${t.note ? `<br>${escapeHtml(t.note)}` : ''}`; }
+      if (n.sys) return `<b>${escapeHtml(n.label)}</b><br>${escapeHtml(n.kind)}`;
       const id = n.ref || n.id, mn = MOTION.find((x) => x.id === id);
       return mn ? `<b>${escapeHtml(mn.id)}</b><br>${escapeHtml(mn.group === 'inputs' ? `{${mn.key}}` : `${mn.module} · ${mn.kind}`)}${mn.group !== 'inputs' ? `<br>${escapeHtml(mn.args.map((x) => (typeof x === 'string' ? x : String(+x.toFixed(4)))).join(', '))}` : ''}` : escapeHtml(n.label);
     };
@@ -2869,13 +3090,13 @@ function buildGraph(side, design, part) {
       ev.preventDefault(); const step = ev.shiftKey ? 2 : 12;
       move(n, g, n.x + d[0] * step, n.y + d[1] * step); remember(n); fit();
     });
-    svg.append(g); side.gnodes.set(n.id, { g, n, badge: g.querySelector('.badge-s'), sel: selOfNode(n) });
+    svg.append(g); side.gnodes.set(n.id, { g, n, badge: g.querySelector('.badge-s'), value: n.sys ? g.querySelector('text.k') : null, sel: selOfNode(n) });
   }
   fit();
   side.view.replaceChildren(svg);
 }
 function liveRep(side, i) {
-  const rec = side.rec, f = rec.frames[i], part = S.part, full = part === 'full', motion = isMotion(part);
+  const rec = side.rec, f = rec.frames[i], part = S.part, full = whole(part), motion = isMotion(part), sys = part === 'system' ? systemState(rec, i) : null;
   const act = rec.acts ? rec.acts[i] : null;
   const laneOn = (lane) => rec.laneAt[i].has(`${f.runId}:${lane}`);
   const trees = motion ? null : controlContext(rec).trees[i], statuses = motion ? null : full ? new Map(['conversation', 'attention', 'reply'].flatMap((p) => [...trees[p]])) : trees[part];
@@ -2893,17 +3114,20 @@ function liveRep(side, i) {
   };
   if (side.gnodes) {
     const state = new Map();   // ran or visited: an edge between two ran nodes is the active path, one into or out of a visit is a read
-    for (const { g, n, badge, sel } of side.gnodes.values()) {
+    for (const { g, n, badge, value, sel } of side.gnodes.values()) {
       let cls = '';
+      // An input, a key, a provider or an output: changed or called this tick, and what it holds.
+      if (n.sys) { const st = sys.get(n.id); cls = st && st.changed ? 'ran' : 'untouched'; if (value) value.textContent = st ? st.text : n.kind; }
+      else
       if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid); cls = s ? treeClass(n.tree.uid) : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; if (!tk && s === 'R') state.set(n.id, 'ran'); }
       else if (motion || full) cls = motionClass(n.ref || n.id);
-      g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}${sameSel(sel, S.sel) ? ' sel' : ''}`);
+      g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${n.sys ? ` sys ${n.sys.type}` : ''}${cls ? ` ${cls}` : ''}${sameSel(sel, S.sel) ? ' sel' : ''}`);
       const words = cls.split(' ');
       if (words.includes('ran')) state.set(n.id, 'ran'); else if (words.includes('visited')) state.set(n.id, 'visited');
     }
     for (const { e, path, label } of side.gedges) {
       const a = state.get(e.from), b = state.get(e.to), on = a === 'ran' && b === 'ran', read = !on && !!a && !!b;
-      path.setAttribute('class', `g-edge${e.data ? ' data' : ''}${on ? ' active' : read ? ' read' : ''}`);
+      path.setAttribute('class', `${edgeClass(e)}${on ? ' active' : read ? ' read' : ''}`);
       if (label) label.setAttribute('class', `g-edge-label${on ? ' active' : read ? ' read' : ''}`);
     }
   }
@@ -2933,6 +3157,12 @@ function selFor(id) {
 // A drawn node's selection: a tree node, the prompt, or a motion node, a port standing for the node it names.
 function selOfNode(n) {
   if (n.tree) return { kind: 'tree', id: n.tree.uid };
+  if (n.sys) {
+    if (n.sys.type === 'provider') return { kind: 'provider', id: n.sys.fn };
+    if (n.sys.type === 'output') return n.sys.sink ? { kind: 'motion', id: n.sys.sink } : null;
+    const key = n.sys.type === 'input' ? SYS_INPUTS.find(([id]) => id === n.sys.key)[1] : n.sys.key, src = SOURCES.find((m) => m.key === key);
+    return src ? { kind: 'motion', id: src.id } : null;
+  }
   const id = n.ref || n.id;
   return NODE.has(id) ? { kind: 'motion', id } : null;
 }
@@ -3314,7 +3544,7 @@ function buildRepControls() {
   };
   for (const [k, label] of TABS) tabs.append(el('button', { type: 'button', 'data-k': k, onclick: () => { S.tab = k; sync(); for (const s of Object.values(sides)) buildRep(s); render(); } }, label));
   const partButton = (id, label) => el('button', { type: 'button', 'data-k': id, onclick: () => { S.part = id; sync(); for (const s of Object.values(sides)) buildRep(s); render(); } }, label);
-  partsRow.append(partButton('full', 'Full'), el('span', { class: 'gap' }), el('span', { class: 'k', text: 'control ', style: 'font:11px var(--f-mono);color:var(--faint);align-self:center' }));
+  partsRow.append(partButton('system', 'System'), partButton('full', 'Full'), el('span', { class: 'gap' }), el('span', { class: 'k', text: 'control ', style: 'font:11px var(--f-mono);color:var(--faint);align-self:center' }));
   PARTS.forEach((p, i) => {
     if (i === 3) partsRow.append(el('span', { class: 'gap' }), el('span', { class: 'k', text: 'motion ', style: 'font:11px var(--f-mono);color:var(--faint);align-self:center' }));
     partsRow.append(partButton(p.id, p.label));
@@ -3323,7 +3553,7 @@ function buildRepControls() {
   const key = (cls, text) => el('span', { class: 'key' }, el('i', { class: cls }), text);
   const legend = el('div', { class: 'rep-legend', 'aria-label': 'What the colours mean' },
     key('sw ran', 're-evaluated, or ticked'), key('sw visited', 'visited to collect its data, kept'), key('sw untouched', 'not visited'), key('sw skipped', 'not needed this tick'), key('sw polled', 'a wait polled'),
-    key('ln active', 'between two re-evaluated nodes'), key('ln read', 'read by a visit'),
+    key('ln active', 'between two re-evaluated nodes'), key('ln read', 'read by a visit'), key('ln call', 'a call to a provider'), key('ln late', 'read a tick late'),
     el('span', { class: 'key', text: 'A tree node’s border is its status: green succeeded, red failed, blue Running.' }));
   const bar = el('section', { class: 'rep-controls', 'aria-label': 'Representation' },
     el('div', { class: 'rep-bar' }, el('h2', { text: 'How each design holds it' }), tabs),
