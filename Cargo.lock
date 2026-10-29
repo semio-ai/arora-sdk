@@ -198,7 +198,7 @@ dependencies = [
  "ratatui",
  "rustls 0.23.46",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "sysinfo",
  "test-rust-wasm",
  "tokio",
@@ -258,7 +258,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "uuid",
 ]
 
@@ -271,7 +271,7 @@ dependencies = [
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "uuid",
 ]
 
@@ -283,7 +283,7 @@ dependencies = [
  "arora-registry",
  "arora-types",
  "serde",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -355,7 +355,7 @@ dependencies = [
  "bytes",
  "cbindgen",
  "serde",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "uuid",
 ]
 
@@ -375,7 +375,7 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "url",
  "uuid",
@@ -418,7 +418,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tempfile",
  "test-rust-component",
  "test-rust-wasm",
@@ -528,7 +528,7 @@ dependencies = [
  "example-cpp",
  "futures",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "test-behavior-tree-nodes",
  "test-cpp",
  "test-cpp-2",
@@ -547,7 +547,7 @@ dependencies = [
  "arora-engine",
  "arora-module-macros",
  "arora-types",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "trybuild",
  "wit-bindgen 0.63.0",
 ]
@@ -568,7 +568,7 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "url",
  "uuid",
@@ -582,12 +582,11 @@ dependencies = [
  "arora-types",
  "arora-vfs",
  "bytes",
- "convert_case 0.11.0",
  "derive_more 2.1.1",
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -602,12 +601,12 @@ dependencies = [
  "arora-types",
  "arora-vfs",
  "clap 4.6.7",
- "convert_case 0.11.0",
+ "convert_case 0.12.0",
  "derive_more 2.1.1",
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -619,7 +618,7 @@ dependencies = [
  "arora-types",
  "proc-macro2",
  "quote",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "syn 3.0.9",
  "uuid",
 ]
@@ -636,17 +635,16 @@ dependencies = [
  "arora-vfs",
  "async-recursion",
  "clap 4.6.7",
- "convert_case 0.11.0",
+ "convert_case 0.12.0",
  "derive_more 2.1.1",
  "indexmap 2.14.2",
- "itertools",
  "lazy_static",
  "proc-macro2",
  "quote",
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -662,7 +660,7 @@ dependencies = [
  "serde",
  "serde-big-array",
  "serde_json",
- "serde_yaml 0.8.26",
+ "serde_yaml",
  "thiserror 2.0.21",
 ]
 
@@ -675,7 +673,7 @@ dependencies = [
  "async-trait",
  "derive_more 2.1.1",
  "semver",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "uuid",
 ]
@@ -695,7 +693,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "tokio",
  "url",
  "uuid",
@@ -749,7 +747,7 @@ dependencies = [
  "derive_more 2.1.1",
  "indexmap 2.14.2",
  "js-sys",
- "json5",
+ "json5 1.3.6",
  "lazy_static",
  "pollster",
  "pretty_assertions",
@@ -757,7 +755,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",
@@ -810,7 +808,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "test-rust-wasm",
  "tokio",
  "uuid",
@@ -2101,15 +2099,6 @@ name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
-name = "convert_case"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "affbf0190ed2caf063e3def54ff444b449371d55c58e513a95ab98eca50adb49"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -4198,6 +4187,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "json5"
+version = "1.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e46128c9fb848c29097da3149e627cce5496d0b2820a9be06d12ee266c09c749"
+dependencies = [
+ "serde",
+ "ucd-trie",
+]
+
+[[package]]
 name = "jsonwebtoken"
 version = "10.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4363,12 +4362,6 @@ checksum = "e752191d037c44ad111a8caa762921926658402f01cc1253f7bef2020ece4f5e"
 dependencies = [
  "bitflags 2.13.2",
 ]
-
-[[package]]
-name = "linked-hash-map"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "linux-raw-sys"
@@ -5554,9 +5547,9 @@ dependencies = [
 
 [[package]]
 name = "pollster"
-version = "0.4.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+checksum = "bc6355899e1c9462875b6757c79f3caa011a1fdae12bbb1a2e72dd1f234f8336"
 
 [[package]]
 name = "polly"
@@ -5573,11 +5566,11 @@ dependencies = [
  "aws-config",
  "aws-sdk-polly",
  "bytes",
- "convert_case 0.11.0",
+ "convert_case 0.12.0",
  "derive_more 2.1.1",
  "lazy_static",
  "rand 0.10.3",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "soloud",
  "test-behavior-tree-nodes",
  "tokio",
@@ -7028,18 +7021,6 @@ dependencies = [
 
 [[package]]
 name = "serde_yaml"
-version = "0.8.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "578a7433b776b56a35785ed5ce9a7e777ac0598aac5a6dd1b4b18a307c7fc71b"
-dependencies = [
- "indexmap 1.9.3",
- "ryu",
- "serde",
- "yaml-rust",
-]
-
-[[package]]
-name = "serde_yaml"
 version = "0.9.34+deprecated"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
@@ -7053,9 +7034,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test"
-version = "3.5.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699f4197115b8a7e7ff19c9a315a4bd6fffec26cc4626ef45ecaea389e081c6d"
+checksum = "a6df5ed973ad8d834e09f824f9e9f449af6b9a3745f78dec7cc752770bd3bf11"
 dependencies = [
  "futures-executor",
  "futures-util",
@@ -7067,13 +7048,13 @@ dependencies = [
 
 [[package]]
 name = "serial_test_derive"
-version = "3.5.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94e153fc76e1c6a068703d6d29c508a0b15c061c4b7e43da59cc097bc342673c"
+checksum = "a22144e767da4ddd8416dbf383700542ffd8a5dc493dfecedfe1fe3ad03c98ae"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -8607,7 +8588,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "869a93e8a7286e339e1128630051d82babbcd75d585975af07b9f3327220e60e"
 dependencies = [
- "json5",
+ "json5 0.4.1",
  "serde",
  "serde_json",
  "validated_struct_macros",
@@ -9898,15 +9879,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7"
 
 [[package]]
-name = "yaml-rust"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
-dependencies = [
- "linked-hash-map",
-]
-
-[[package]]
 name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9970,7 +9942,7 @@ dependencies = [
  "futures",
  "git-version",
  "itertools",
- "json5",
+ "json5 0.4.1",
  "lazy_static",
  "nonempty-collections",
  "once_cell",
@@ -10042,14 +10014,14 @@ version = "1.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64d9dd5b2af70352f280fdc8d3fdf1b008599c81340932b078b872eb0616dc22"
 dependencies = [
- "json5",
+ "json5 0.4.1",
  "nonempty-collections",
  "num_cpus",
  "secrecy",
  "serde",
  "serde_json",
  "serde_with",
- "serde_yaml 0.9.34+deprecated",
+ "serde_yaml",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "uhlc",
