@@ -124,7 +124,7 @@ device's step rate from them, or filters them out.
 | module | contents |
 |---|---|
 | crate root | `BehaviorInterpreter`, `BehaviorContext`, `BehaviorStatus`, `BehaviorError`, `FunctionIndex`, `ModuleFunction` |
-| [`graph`](src/graph.rs) | `Graph`, `Node`, `Source`, `Port`, `GraphDiff`, `Binding`, `GraphType` |
+| [`graph`](src/graph.rs) | `Graph`, `Node`, `Source`, `Port`, `GraphDiff`, `Binding`, `GraphType`: references by id, the form an interpreter takes ([which form to use](../arora-behavior-tree/docs/text.md#which-form-to-use)) |
 | [`interpreter_module`](src/interpreter_module.rs) | the interpreter module's ids and its calls' encoders and decoders |
 | [`task`](src/task.rs) | `TaskHandle`, `TaskId`, `RunPolicy` |
 | [`status`](src/status.rs) | `Status`, its record's ids and version, `declare_status_enumeration` |

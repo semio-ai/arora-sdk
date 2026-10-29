@@ -85,6 +85,14 @@ and writes, and their types, is its signature's to say: the graph holds the
 bindings alone. The order of the nodes is the order they serialize in, and
 means nothing to an interpreter.
 
+A graph or diff an interpreter takes names its nodes, functions and ports by
+id. A file a person writes or reviews names them instead, and is resolved to
+ids before it is sent: a name means what the device's functions make it
+mean, which changes as modules come and go. arora-behavior-tree's
+[`readable`](../../arora-behavior-tree/src/readable.rs) reads and writes such
+files, and its [`text.md`](../../arora-behavior-tree/docs/text.md#which-form-to-use)
+says which form to use where.
+
 `load` replaces the running behavior with the graph. Loading is the same as
 applying, onto an empty graph, the diff from it to the graph
 (`Graph::empty().diff(&graph)`).

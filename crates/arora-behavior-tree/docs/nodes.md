@@ -325,6 +325,9 @@ call runs only when it is read, and only for arguments it has not seen.
 | `halt(task)` | removes the run's nodes; its status, `Failure`, is written at the next tick |
 | `tick(context)` | re-lowers the graph if it changed, ticks the runner once, and reports `Running` |
 
+The graphs and diffs these take are by ids; a file naming its references is
+resolved first ([which form to use](text.md#which-form-to-use)).
+
 **The runner scaffold.** The interpreter hosts one graph, rooted at a
 `parallel` runner created with it. The main behavior is the runner's first
 child, then each live run's decorator in the order the runs were spawned. A

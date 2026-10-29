@@ -47,6 +47,12 @@
 //!       value:
 //!         f32: 30.0
 //! ```
+//!
+//! This is the form an interpreter takes, its references ids: an id means
+//! one thing on every device. Files people write and review name their
+//! references instead, and are resolved to this form before they are sent:
+//! arora-behavior-tree's `readable` module reads and writes them, and its
+//! `docs/text.md` says which form to use where.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 

@@ -121,13 +121,16 @@ Groot file.
 |---|---|
 | Text ([`docs/text.md`](docs/text.md)) | `text::parse`, then `text::resolve` into a `Graph`; or `load_behavior_tree_text` into a `BehaviorTree` |
 | [Groot](https://github.com/BehaviorTree/Groot) XML | `BehaviorTreeInterpreter::load_groot`; or `schema_groot::BehaviorTree::try_from_groot_xml`, then `into_graph` |
-| Arora's shared behavior [`Graph`](../arora-behavior/src/graph.rs) | `BehaviorInterpreter::load`, and `apply` with a `GraphDiff` for an edit: what an editor sends |
+| Arora's shared behavior [`Graph`](../arora-behavior/src/graph.rs), by ids | `BehaviorInterpreter::load`, and `apply` with a `GraphDiff` for an edit: what an editor sends |
+| The shared graph or a diff, by names ([`readable`](src/readable.rs)) | deserialize into `readable::Graph` or `readable::GraphDiff`, then `resolve` into the shared form; `from_graph` and `from_diff` write it |
 | YAML, a list of [`schema::Node`](src/schema.rs) | `load_behavior_tree_yaml` |
 | Rust | [`TreeNode`](src/tree_node.rs) and the builders of [`nodes`](src/nodes.rs) (`seq`, `fallback`, `set_str`, …) |
 
 The text and the shared graph say everything a tree can: the tree, the
 detached nodes beside it, every binding. `BehaviorTree::display` writes a loaded
-tree back as text.
+tree back as text. [Which form to use](docs/text.md#which-form-to-use): the
+text to write and read behaviors, the readable graph for files people review,
+ids for what programs send and store.
 
 Groot is the visual editor of BehaviorTree.CPP, the behavior tree library
 [Nav2](https://docs.nav2.org/) runs on. A Groot tag names a native node

@@ -644,6 +644,20 @@ diff between two graphs, so an editor that keeps the graph it last sent sends
 an edit rather than a load, and the device keeps the state of every node the
 edit leaves alone.
 
+**Files name references; payloads carry ids.** A graph or diff file may name
+its nodes, functions and ports, each name resolved as the text language
+resolves it, and may mix names and ids: a string that parses as a UUID is an
+id. Loading it resolves it, against the function index, to the shared model
+by ids, which is all an interpreter takes. A payload by name would mean what
+the device's functions make it mean when it is read: one more module
+exporting a function of that name makes the name ambiguous, and one module
+fewer leaves it naming nothing, so the same payload could run differently, or
+not at all, from one day to the next. Whoever holds the index resolves names
+before sending, once. The readable form is a mirror of the shared model
+rather than a generic parameter of it, so the model an interpreter reads
+stays one concrete type, and only arora-behavior-tree, which has the text's
+resolution rules, knows names.
+
 **A graph run is known by its root.** The client chooses a graph's node ids,
 so the graph's root names its run. Spawning a graph whose root a live run has
 starts no second run: the run takes the graph as its program, only what
