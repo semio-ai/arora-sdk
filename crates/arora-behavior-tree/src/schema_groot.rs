@@ -160,10 +160,7 @@ impl Node {
             })?;
         let mut parameters = HashMap::new();
         for param_arg in &self.param_args {
-            // A port left empty is one Groot leaves unconnected: it is not
-            // bound, but for a string parameter, which takes the empty
-            // string.
-            if param_arg.1.is_empty() && !takes_string(function, param_arg.0) {
+            if param_arg.1.is_empty() && is_unconnected_port(function, param_arg.0) {
                 continue;
             }
             let (param, arg) = groot_param_arg_to_arora(param_arg, function, variables)?;
@@ -675,9 +672,12 @@ fn groot_param_arg_to_arora(
     }
 }
 
-/// Whether `function`'s parameter `name` takes a string, as itself or as an
-/// optional's content.
-fn takes_string(function: &ModuleFunction, name: &str) -> bool {
+/// Whether `function`'s attribute `name`, left empty, is a port Groot leaves
+/// unconnected, which binds nothing: a parameter's, but for a string
+/// parameter (as itself or as an optional's content), which takes the empty
+/// string; or the return port of a function that returns no status. Any other
+/// name is no port, which reading the attribute refuses.
+fn is_unconnected_port(function: &ModuleFunction, name: &str) -> bool {
     fn string(ty: &FrozenTy) -> bool {
         match ty {
             FrozenTy::Primitive(primitive) => primitive.kind == PrimitiveKind::String,
@@ -685,11 +685,15 @@ fn takes_string(function: &ModuleFunction, name: &str) -> bool {
             _ => false,
         }
     }
-    function
+    match function
         .function
         .parameters
         .values()
-        .any(|parameter| parameter.name == name && string(&parameter.ty))
+        .find(|parameter| parameter.name == name)
+    {
+        Some(parameter) => !string(&parameter.ty),
+        None => !returns_status(&function.function.return_ty),
+    }
 }
 
 /// A module function's attribute as the value its parameter of type `ty`
@@ -710,7 +714,6 @@ fn attribute_value(text: &str, ty: &FrozenTy) -> Result<Value, String> {
         _ => return Ok(Value::String(text.to_string())),
     };
     match kind {
-        PrimitiveKind::String => Ok(Value::String(text.to_string())),
         PrimitiveKind::Boolean => match text {
             "true" => Ok(Value::Boolean(true)),
             "false" => Ok(Value::Boolean(false)),
@@ -729,19 +732,21 @@ fn attribute_value(text: &str, ty: &FrozenTy) -> Result<Value, String> {
             let digits = text.strip_suffix(&kind.to_string()).unwrap_or(text);
             crate::text::number(digits, kind)
         }
-        _ => Err(format!(
-            "a {kind} is written as a value in JSON: `{JSON_PREFIX}…`"
-        )),
+        // A string, and any other primitive (a unit, an array): the text.
+        _ => Ok(Value::String(text.to_string())),
     }
 }
 
-/// A module function's argument as an attribute, which [`attribute_value`]
-/// reads back as itself: a string as it is when it reads back so, a boolean
-/// or a number as the text language writes it (`true`, `0.1f32`), any other
-/// value as `json:` and its serde form.
-fn attribute_text(value: &Value) -> Result<String, BehaviorTreeError> {
-    Ok(match value {
-        Value::String(text) if reads_back_as_plain(text) => text.clone(),
+/// A module function's argument for a parameter of type `ty` as an
+/// attribute, which [`attribute_value`] reads back as itself: a string as it
+/// is, a boolean or a number as the text language writes it (`true`,
+/// `0.1f32`), when that plain text reads back as the value for `ty`. Any
+/// other value, or one whose plain text reads back otherwise (an `f32` for a
+/// parameter of a record type, which takes plain text as a string), is
+/// written as `json:` and its serde form.
+fn attribute_text(value: &Value, ty: &FrozenTy) -> Result<String, BehaviorTreeError> {
+    let plain = match value {
+        Value::String(text) if reads_back_as_plain(text) => Some(text.clone()),
         Value::Boolean(_)
         | Value::U8(_)
         | Value::U16(_)
@@ -752,9 +757,13 @@ fn attribute_text(value: &Value) -> Result<String, BehaviorTreeError> {
         | Value::I32(_)
         | Value::I64(_)
         | Value::F32(_)
-        | Value::F64(_) => value.to_string(),
-        value => json_text(value)?,
-    })
+        | Value::F64(_) => Some(value.to_string()),
+        _ => None,
+    };
+    match plain {
+        Some(text) if attribute_value(&text, ty).as_ref() == Ok(value) => Ok(text),
+        _ => json_text(value),
+    }
 }
 
 fn arora_param_to_groot(
@@ -804,7 +813,7 @@ fn arora_param_to_groot(
                 Expression::Uuid(id) | Expression::VariableId(id) => {
                     format!("{{{}}}", groot_variable_name(*id, variables))
                 }
-                Expression::Value(value) => attribute_text(value)?,
+                Expression::Value(value) => attribute_text(value, &function_parameter.ty)?,
                 _ => {
                     return Err(BehaviorTreeError::InconsistentTreeError {
                         message: format!(
@@ -1834,9 +1843,68 @@ mod tests {
         }
     }
 
+    /// A value is written as plain text only when that text reads back as it
+    /// for its parameter: a number or a boolean for a parameter of a record
+    /// type, which takes plain text as a string, is written as `json:`. Plain
+    /// text for a parameter of any other type, an array's included, is a
+    /// string.
+    #[test]
+    fn a_value_reads_back_as_itself_whatever_its_parameter_s_type() {
+        let ids: Vec<Uuid> = (0..3).map(|_| Uuid::new_v4()).collect();
+        let tag = Uuid::new_v4();
+        let mut index = HashMap::new();
+        index_typed(
+            &mut index,
+            tag,
+            "tag",
+            &[
+                ("level", ids[0], PrimitiveKind::String),
+                ("on", ids[1], PrimitiveKind::String),
+                ("gains", ids[2], PrimitiveKind::ArrayF32),
+            ],
+        );
+        let record = FrozenTy::FrozenScalar(FrozenScalar {
+            reference: FrozenReference {
+                id: Uuid::new_v4(),
+                version: semver::Version::new(1, 0, 0).into(),
+            },
+        });
+        let parameters = &mut index.get_mut(&tag).unwrap().function.parameters;
+        for id in &ids[..2] {
+            parameters.get_mut(id).unwrap().ty = record.clone();
+        }
+        let values = [
+            Value::F32(0.1),
+            Value::Boolean(true),
+            Value::String("plain".to_string()),
+        ];
+        let node = TreeNode {
+            function: tag,
+            children: None,
+            parameters: ids
+                .iter()
+                .zip(&values)
+                .map(|(id, value)| (*id, Expression::Value(value.clone())))
+                .collect(),
+        };
+        let exported = Node::try_from_tree_node(&node, &index, &mut HashMap::new()).unwrap();
+        assert_eq!(exported.param_args["level"], r#"json:{"f32":0.1}"#);
+        assert_eq!(exported.param_args["gains"], "plain");
+        let xml = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+        let read = BehaviorTree::try_from_groot_xml(&xml)
+            .unwrap()
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .unwrap_or_else(|e| panic!("{xml}: {e:?}"));
+        for (id, value) in ids.iter().zip(values) {
+            assert_eq!(read.parameters[id], Expression::Value(value), "{xml}");
+        }
+    }
+
     /// An attribute Groot leaves empty, an unconnected port, binds nothing,
     /// as `groot/cosine_tree_groot_edited.xml`'s `res=""` does; a string
-    /// parameter takes it as the empty string.
+    /// parameter takes it as the empty string. An empty attribute that names
+    /// no port is refused, as a filled one is.
     #[test]
     fn an_empty_attribute_binds_nothing_but_an_empty_string() {
         let say = Uuid::new_v4();
@@ -1863,5 +1931,11 @@ mod tests {
             Some(&Expression::Value(Value::String(String::new())))
         );
         assert_eq!(node.parameters.get(&ids[1]), None, "volume is unbound");
+        let refused = groot(r#"<Say text="" volumme=""/>"#)
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .err()
+            .expect("an empty attribute that names no port is refused");
+        assert!(format!("{refused:?}").contains("volumme"), "{refused:?}");
     }
 }
