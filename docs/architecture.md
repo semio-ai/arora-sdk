@@ -174,8 +174,8 @@ dispatches to it exactly as to a guest.
 - **Compile once, instantiate per engine.** A `CompiledModule` is shared by
   every device that loads it; each gets its own instance and state.
 - **Limits.** Each call has a time budget and each guest a memory limit
-  (`GuestLimits`); a guest that overruns traps and refuses every later call
-  until it is reloaded.
+  (`GuestLimits`); a guest call that overruns traps, and its module is
+  instantiated afresh before its next call.
 - **The engine is pinned** (`Pin<Box<Engine>>`): a guest's call to another
   module re-enters the engine while it is borrowed, so the executors reach it
   through a stable raw pointer.

@@ -135,11 +135,17 @@ is what a module registry can hold and every host can run.
   allocator protocol is part of the contract. A guest's error is the
   `err` of `dispatch`; an error buffer in its `ok`, the form Arora Buffers
   give an error, is read as its error too.
-- A component that traps is entered no more. wasmtime refuses to re-enter a
+- An instance a call trapped in is entered no more, and the module is
+  instantiated afresh before its next call. wasmtime refuses to re-enter a
   component instance after a trap, since the trap may have left its state
-  half-written, and the browser executor holds a trapped component to the
-  same rule: every later call fails, naming the trap, until the module is
-  reloaded, which instantiates it afresh.
+  half-written; the browser executor holds its instances to the same rule.
+  The trapped call fails with its trap; the next one runs in a new instance
+  of the module's compiled code, from its initial state, and a warning names
+  the module and the trap. A device whose call overran its step under load
+  keeps its module, which an operator would otherwise have to reload, and no
+  call ever runs in a half-written instance. Instantiating afresh runs under
+  the loading budget; a module that fails to instantiate afresh runs no more
+  calls until it is reloaded, rather than retrying on every call.
 - `wasip2` is Tier 2 in rustc, and WASI SDK 33 links components with
   `wasm-component-ld`. Rust guests export through `arora_module::artifact!`,
   C++ guests through `arora-cpp-component` (see the C++ section below).

@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "7.0.2"
+version = "7.1.0"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
@@ -26,6 +26,7 @@ async-trait = "0.1"
 bytes = "1"
 derive_more = { version = "2", features = ["display", "error", "from"] }
 lazy_static = "1"
+log = "0.4"
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
