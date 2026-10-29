@@ -161,6 +161,11 @@ impl Node {
         let mut parameters = HashMap::new();
         for param_arg in &self.param_args {
             let (param, arg) = groot_param_arg_to_arora(param_arg, function, variables)?;
+            // A return port left empty, as Groot writes an unconnected
+            // output, writes nowhere: it is not bound.
+            if param == _RET_PARAM_ID && param_arg.1.is_empty() {
+                continue;
+            }
             parameters.insert(param, arg);
         }
         Ok(TreeNode {
@@ -1562,5 +1567,45 @@ mod tests {
         let local = format!(".{local}");
         assert_eq!(keys, [local.as_str()].into(), "one tree-local key");
         assert!(names_resolved(&graph).is_empty());
+    }
+
+    /// An output port Groot leaves empty, as it saves an unconnected one
+    /// (`res=""`), binds nothing: the return value is written nowhere, rather
+    /// than into a string.
+    #[test]
+    fn an_empty_return_port_binds_nothing() {
+        let function_id = Uuid::new_v4();
+        let angle = Uuid::new_v4();
+        let index = HashMap::from([(
+            function_id,
+            ModuleFunction {
+                module_id: Uuid::new_v4(),
+                function_id,
+                function_name: "cosine".to_string(),
+                function: Function {
+                    parameters: HashMap::from([(
+                        angle,
+                        Parameter {
+                            name: "angle".to_string(),
+                            ty: FrozenTy::from(PrimitiveKind::F32),
+                            mutable: false,
+                        },
+                    )]),
+                    parameter_ordering: vec![angle],
+                    return_ty: FrozenTy::from(PrimitiveKind::F32),
+                },
+            },
+        )]);
+        let bound = |res: &str| {
+            let tree = groot(&format!(r#"<Cosine angle="{{angle}}" res="{res}"/>"#));
+            let graph = tree.into_graph(&index).unwrap();
+            graph.nodes[0].bind.get(&_RET_PARAM_ID).cloned()
+        };
+        assert_eq!(bound(""), None, "an empty output binds nothing");
+        assert_eq!(
+            bound("{cos}"),
+            Some(Source::Key("cos".to_string())),
+            "a named one binds its key"
+        );
     }
 }

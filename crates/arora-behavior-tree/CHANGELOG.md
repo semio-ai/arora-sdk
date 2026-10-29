@@ -33,7 +33,8 @@ All notable changes to `arora-behavior-tree`. The format follows
   when `Names::variables` does not name it, so a tree built from a graph
   reads back to it with no names given.
 - `schema_groot::BehaviorTree::into_graph` lists the nodes root first, each
-  before its children, and binds `{var}` to the key `var`.
+  before its children, and binds `{var}` to the key `var`. A return port
+  Groot leaves empty (`res=""`, an unconnected output) binds nothing.
 - Requires arora-behavior-tree-types 3.
 
 ## [9.7.0] - 2026-10-28
