@@ -18,7 +18,7 @@ them into `src/arora_generated/`
 let assets = analyze_module_from_path("module.yaml", &mut registry).await?;
 let sources = generate_sources(assets, &mut registry, &ExternTypes::new()).await?;
 sources.sync("src/arora_generated/".into()).await?;
-rustfmt::apply_rustfmt("src/arora_generated/".into()).await?;
+rustfmt::apply_rustfmt("src/arora_generated/").await?;
 ```
 
 The crate then implements each exported function at its root, under the
