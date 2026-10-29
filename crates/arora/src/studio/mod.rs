@@ -1400,24 +1400,42 @@ mod tests {
             command.env(emulator, &address);
         }
 
-        let process = std::thread::spawn(move || command.output().unwrap());
+        // The process writes to a file, not a pipe, so it never blocks on a
+        // pipe nobody reads while the loop below watches for connections.
+        let log = root.join("process.log");
+        let log_file = std::fs::File::create(&log).unwrap();
+        command
+            .stdout(log_file.try_clone().unwrap())
+            .stderr(log_file);
+        let mut process = command.spawn().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
         let contacted = || watched.accept().ok().map(|(_, from)| from);
-        while !process.is_finished() {
-            if let Some(from) = contacted() {
-                panic!("getting a device's Studio side contacted {address}, from {from}");
+        let status = loop {
+            let finished = process.try_wait().unwrap();
+            let failure = match contacted() {
+                Some(from) => Some(format!(
+                    "getting a device's Studio side contacted {address}, from {from}"
+                )),
+                None if finished.is_none() && std::time::Instant::now() > deadline => {
+                    Some("the process did not finish within 120 s".to_string())
+                }
+                None => None,
+            };
+            if let Some(failure) = failure {
+                let _ = process.kill();
+                let _ = process.wait();
+                panic!(
+                    "{failure}:\n{}",
+                    std::fs::read_to_string(&log).unwrap_or_default()
+                );
+            }
+            if let Some(status) = finished {
+                break status;
             }
             std::thread::sleep(Duration::from_millis(10));
-        }
-        if let Some(from) = contacted() {
-            panic!("getting a device's Studio side contacted {address}, from {from}");
-        }
-        let output = process.join().unwrap();
-        let said = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(output.status.success(), "the process failed:\n{said}");
+        };
+        let said = std::fs::read_to_string(&log).unwrap();
+        assert!(status.success(), "the process failed:\n{said}");
         assert!(
             said.contains("1 passed"),
             "the process ran no test:\n{said}"
