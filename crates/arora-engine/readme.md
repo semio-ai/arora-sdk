@@ -1,152 +1,237 @@
-# Arora Engine
+# arora-engine
 
-Welcome to the core of the project!
+The engine loads **modules** — compiled code exporting functions — and calls
+their functions by id, whatever runs them: a WebAssembly component on wasmtime
+or in the browser, a native shared library, or plain Rust registered by the
+host. Callers, and modules calling each other, never know which.
 
-## WebAssembly executors
+## Modules, executors and calls
 
-The Arora engine runs WASM modules — advertised with
-[a custom module description format (or schema)](https://github.com/semio-ai/arora-sdk) —
-through pluggable [`Executor`](src/executor/mod.rs) implementations, chosen
-by the `executor.name` of a module's header. A WebAssembly guest runs
-natively, on [`wasmtime`](https://docs.wasmtime.dev/) (the default
-`wasmtime-host` feature), and in the browser, on its native `WebAssembly`
-runtime, when `arora` itself is compiled to `wasm32-unknown-unknown` (the
-JS-facing wrapper is [`arora-web`](https://github.com/semio-ai/arora-sdk)).
-It is a **`wasm-component`**: a component of the
-  `arora:module` world ([`wit/arora-module.wit`](wit/arora-module.wit)), as
-  Rust and C++ build one for `wasm32-wasip2`. It exports `functions` and
-  `dispatch`, and may import the world's `host` interface and the WASI 0.2
-  interfaces `wasi:cli`, `wasi:io`, `wasi:clocks`, `wasi:random` and
-  `wasi:filesystem`, with no directory preopened — no sockets
-  ([`component_layout`](src/component_layout.rs)).
-  Hosted by [`component::ComponentExecutor`](src/executor/component/mod.rs)
-  and [`browser::BrowserComponentExecutor`](src/executor/browser/component.rs),
-  built on a [`SharedLoader`](src/executor/browser/mod.rs), which stages a
-  component compiled asynchronously. A component that traps runs no more calls
-  until it is reloaded.
+A **module** is identified by a UUID and exports **functions**, each with its
+own UUID and its parameters identified by UUID. What the engine loads is a
+[`ModuleDefinition`](../arora-types/src/module/low.rs): the module's **header**
+(its id, its name, the executor that runs it, its exported functions and their
+parameters) and its **executable**, the bytes of its artifact. A header is
+written from the module's declaration — a Rust
+[`#[module]`](../arora-module/readme.md) or a `module.yaml` — when the artifact
+is built.
 
-A core module, as a guest built for `wasm32-wasip1` is, has no executor: its
-header names `wasm`, which no engine registers, and a device's module
-directory naming it is refused with the rebuild it needs.
+An **executor** turns an executable into a running module. The header names
+it (`executor.name`), and the engine holds one executor per name, added with
+`EngineBuilder::add_executor`.
 
-A guest that exports `_initialize` — a WASI reactor, which a C or C++ guest
-is when linked with `-mexec-model=reactor` — has it run once, when it loads,
-before any other export: its component's initializer calls it. It runs the
-guest's static constructors.
+A **call** names a module id and a function id and carries its arguments as
+[`Value`](../arora-types/readme.md)s keyed by parameter id
+([`Call`](../arora-types/src/call.rs)). Its result is the return value and
+the mutable parameters the function wrote
+([`CallResult`](../arora-types/src/call.rs)). The engine implements
+[`CallBridge`](../arora-types/src/call.rs), the trait callers program against;
+[`docs/dispatch.md`](../../docs/dispatch.md) follows a call from caller to
+function.
 
-### Compiling a module once
+## Load a module and call it
 
-[`Engine::load_module`](src/engine.rs) compiles the module's executable for
-the engine that loads it. A module that several engines load — one per
-device, say — compiles once as a [`CompiledModule`](src/compiled.rs), which
-each engine loads with `Engine::load_compiled_module`: it instantiates the
-compiled code, with an instance (memory, globals) of its own, and compiles
-nothing. Natively, every component executor in the process runs on one
-wasmtime engine, the one a compiled module belongs to; in the browser, the
-`WebAssembly.Module` of the component's guest core module instantiates
-anywhere.
+The example C++ module ([`examples/modules/cpp`](../../examples/modules/cpp/readme.md))
+adds two `i32`s:
 
-## Native Executor
+```rust
+use arora_engine::{call::CallBridge, engine::EngineBuilder, load::load_module_from_parts};
+use arora_engine::executor::component::ComponentExecutor;
+use arora_types::{call::Call, module::low::Header, value::{StructureField, Value}};
+use uuid::uuid;
 
-A [`native::NativeExecutor`](src/executor/native.rs) is available and is
-capable of loading native dynamic libraries, and call the functions
-declared in the module description. Beware of figuring out the right
-dynamic library extension for the host platform. Gated behind the
-default `native-host` feature; disabled on `wasm32-*` targets.
+let mut engine = EngineBuilder::new()
+    .add_executor(ComponentExecutor::new()?)
+    .build();
 
-## Calling Module Functions
+let dir = "target/debug/modules/example-cpp";
+let header: Header = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/header.json"))?)?;
+let wasm = std::fs::read(format!("{dir}/example-cpp.wasm"))?.into_boxed_slice();
+let module = load_module_from_parts(&mut engine, header, wasm)?;
 
-Once modules are loaded — either via [`Engine::load_module`](src/engine.rs)
-directly, or via the [`load::load_module_from_parts`](src/load.rs)
-convenience that takes a parsed `Header` plus the executable bytes and
-also returns the module's function IDs —
-their functions can be called using engine's
-implementation of the [`CallBridge` trait](src/call.rs).
-`arora_call` takes a `Call` description holding generic `Value`s as an input,
-and returns a `CallResult` holding the return value
-and the mutated parameters.
-The engine also advertises a function called `arora_dispatch`
-in the module's runtime context, so that they can call one another.
-It is recommended to use the bindings generated by
-[`arora-module-cli`](../arora-module-authoring/cli/readme.md),
-rather than calling these functions directly.
+let arg = |id, value| StructureField { id, value: Box::new(value) };
+let result = engine.arora_call(Call {
+    module_id: Some(module.id),
+    id: uuid!("4a3020dc-6db3-43c2-bb75-6a7db237329a"), // add_two_integers
+    args: vec![
+        arg(uuid!("e15b0627-29df-441c-bea8-706ddc92f712"), Value::I32(2)), // a
+        arg(uuid!("0374610f-5f4a-41d8-97f3-64f48cf21f40"), Value::I32(3)), // b
+    ],
+})?;
+assert_eq!(result.ret, Value::I64(5));
+```
 
-The host of the engine (the process loading this library)
-can also register native functions using [`arora_register_callable`](src/call.rs).
-An `u64` identifier is attributed to each registered function,
-so that they can be called later using `arora_call_indirect` from the host side,
-or from any module via `arora_dispatch_indirect`.
+[`load_module_from_parts`](src/load.rs) loads a header and its executable and
+returns the module's id and its function ids, for a caller indexing functions
+by module; `Engine::load_module` takes the `ModuleDefinition` itself. Loading
+an id already loaded leaves the loaded module in place and succeeds.
 
-> [Behavior Trees](https://github.com/semio-ai/arora-sdk) typically use this mechanism
-> to wrap the various node functions into uniform tick functions.
+A device built with the [`arora`](../arora/readme.md) crate does all of this
+from its module directories.
 
-### Arguments checked against the header
+## Executors
 
-Before a call reaches a guest module, the engine checks its arguments against
-the parameters the module's header declares for the function: an argument
-naming a parameter the function does not declare, or carrying a value not of
-its parameter's type, fails the call with `DispatchError::Argument`
-(`CallError::Generic` through `arora_call`), and the guest never reads it. This
-holds for every guest, whatever built it, and for calls between guests, which
-reach the engine's `dispatch` too. Without it, a C++ guest reads a value of
-another type as absent and answers as if it had not been given.
+| `executor.name` | Executor | Runs | Built with |
+|---|---|---|---|
+| `wasm-component` | [`component::ComponentExecutor`](src/executor/component/mod.rs) | a `wasm32-wasip2` component, on wasmtime | the `wasmtime-host` feature |
+| `wasm-component` | [`browser::BrowserComponentExecutor`](src/executor/browser/component.rs) | the same component, on the browser's `WebAssembly` | `target_arch = "wasm32"` |
+| `native` | [`native::NativeExecutor`](src/executor/native.rs) | a shared library built for the host (`.so`, `.dylib`, `.dll`) | the `native-host` feature |
 
-The check reads each argument's type tags where they lie in its buffer and
-decodes nothing, so an argument costs the host no memory beyond its buffer.
-What passes, in the forms callers send:
+A WebAssembly guest is a component of the `arora:module` world
+([`wit/arora-module.wit`](wit/arora-module.wit)), whatever language built it:
 
-- `unit` for any parameter: callers pass it for an argument they leave unset,
-  and a guest reads it as absent;
-- any value for a parameter of a dynamic value type (`KEY_VALUE_ID`,
-  `ARRAY_VALUE_ID`), which a guest takes as a `Value`;
-- a present optional argument as an option or as its element;
-- an array as its typed array, or as a generic array whose every element is of
-  the element type. A Rust guest generated from a `module.yaml` reads a generic
-  array of records; a `#[module]` guest refuses a generic array, and a C++
-  guest reads one as absent.
+- it exports `functions`, the ids of the functions it serves, and `dispatch`,
+  which runs one of them on an argument buffer and returns a result buffer;
+- it may import the world's `host` interface, to call other modules, and the
+  WASI 0.2 interfaces `wasi:cli`, `wasi:io`, `wasi:clocks`, `wasi:random` and
+  `wasi:filesystem` with no directory preopened — no sockets
+  ([`component_layout::HOST_INTERFACES`](src/component_layout.rs)); a
+  component importing anything else does not load;
+- loading it checks that it serves every function its header declares;
+- a guest exporting `_initialize` — a C or C++ guest linked as a WASI reactor —
+  has it run once, when it loads, before any call;
+- a guest's error is the `err` of `dispatch`, or an error buffer in its `ok`;
+- a component that traps (a Rust panic, a failed C++ `assert`) is entered no
+  more: every later call fails with that trap until the module is reloaded.
 
-Left to the guest: an argument that is not an Arora Buffer or not a structure,
-a parameter the call leaves out, and the fields of a record-typed argument,
-which is checked by its record's id, the one thing a header names of it.
+A header naming `wasm` — a `wasm32-wasip1` core module — has no executor.
+Rust guests become components through
+[`arora_module::artifact!`](../arora-module/readme.md#build-the-artifact), C++
+guests by linking `arora-cpp-component` ([`libs/cpp`](../../libs/cpp/CMakeLists.txt)).
 
-### Time and memory a guest may spend
+In the browser the executor instantiates the component's guest core module
+alone ([`component_layout::guest_module`](src/component_layout.rs)) and
+implements its imports as a tab allows: standard output and error go to the
+console, clocks read `performance.now()` and `Date.now()`, randomness comes
+from `crypto.getRandomValues`, and nothing blocks. Chrome refuses to compile
+more than 8 MB synchronously on the main thread: a
+[`SharedLoader`](src/executor/browser/mod.rs) compiles a larger component
+asynchronously (`SharedLoader::prepare`) and stages it for the next load of
+that module id.
 
-On wasmtime, a call to a guest module ends by a deadline, and its instance's
-linear memory is capped ([`limits`](src/limits.rs)):
+A native module is code in the host's process: the executor looks up
+`arora_function_<id>` (the id's dashes as underscores) on each call, passes it
+the address of the argument buffer and takes ownership of the result buffer it
+returns. Nothing bounds its time or memory, and it is never unloaded: a native
+library cannot be closed safely while the process runs.
 
-- **Time.** During a device's step, set with `Engine::set_step_budget`, the
-  deadline is the step's end, so one step's guest calls cannot together
-  outlast it. Outside a step it is `DEFAULT_CALL_BUDGET`, one second. A
-  module's own `GuestLimits::call_budget`, set with `Engine::set_guest_limits`
-  or for every module with `EngineBuilder::with_guest_limits`, tightens it, or
-  sets it outside a step. A guest's call to another guest ends by its
-  caller's deadline, and a module called back while its call is under way
-  ends by that call's deadline, or its caller's if earlier.
-  A call still running at its deadline is interrupted at the first epoch
-  tick past it, a millisecond apart, never before: it fails with
-  `DispatchError::Trap`, naming the module, the function and the budget. The
-  module then refuses its calls until it is reloaded, since the interrupted
-  call can have left its state half updated. A caller whose callee ran past
-  the caller's deadline is interrupted once the call returns. A call with no
-  time left before its deadline is not made, and its module, never entered,
-  serves its later calls.
-- **Memory.** Each linear memory of a guest's instance holds at most
-  `GuestLimits::memory` bytes, 256 MiB by default; a component can hold
-  several, each under the cap. A `memory.grow` past it
-  returns -1 to the guest, whose allocator then reports the allocation
-  failed.
+## Host modules
 
-In the browser a guest runs on the JS thread, which nothing interrupts: the
-browser executors bound neither a call's time nor, beyond the maximum its
-module declares, its memory.
+Host code joins the same dispatch as a [`HostModule`](src/module.rs),
+registered under its id with `Engine::register_module`. A module declared in
+Rust registers whole:
 
-### Call Mechanism
+```rust
+engine.register_module(polly::ids::MODULE, Box::new(HostModule::of::<polly::Module>()));
+```
 
-When a call is performed, its description is serialized into a raw buffer,
-using the [Arora Buffers library](../arora-buffers/readme.md),
-copied into the module's memory
-(allocated using `arora_buffer_alloc` that must be exported by the modules),
-before the function is called with a pointer to the memory segment.
-The module is in charge of deserializing it
-and serializing the result into a new buffer,
-that the engine will free using `arora_buffer_free`.
+Functions with no declaration attach to a [`ModuleBuilder`](src/module.rs):
+
+```rust
+let module = ModuleBuilder::new(MODULE)
+    .function(DOUBLE, |call: Call| {
+        let Value::I32(n) = call.args[0].value.as_ref() else {
+            return Err(CallError::Guest { message: "expected an i32".into() });
+        };
+        Ok(CallResult { ret: Value::I32(n * 2), mutated: Vec::new() })
+    })
+    .build();
+engine.register_module(module.id(), Box::new(module));
+```
+
+`ModuleBuilder::described_function` attaches a function with its name and
+frozen signature, so a device lists it among its methods
+(`HostModule::descriptions`); one attached with `function` is called but not
+listed. `HostModule::from_exports` serves a contract's functions under the id
+of the module implementing it (see
+[contracts](../arora-module/readme.md#contracts-several-modules-one-set-of-functions)).
+
+## Compiling once, reloading, unloading
+
+A [`CompiledModule`](src/compiled.rs) holds a guest compiled once: each engine
+loading it with `Engine::load_compiled_module` creates its own instance —
+memory and globals — and compiles nothing. Natively every component runs on
+one process-wide wasmtime engine, and a `CompiledModule` is `Send + Sync`; in
+the browser it holds the guest core module's `WebAssembly.Module`.
+`Engine::load_module` compiles first, then loads the compiled module.
+
+`Engine::reload_module` replaces a loaded module with a fresh instance of a
+`CompiledModule` under the same id; a module that fails to load leaves the old
+one serving. `Engine::unload_module` drops a module, a registered host module
+included. Neither is reachable from inside a call. A module whose executor
+cannot unload it (`Executor::can_unload`, false for `native`) is refused with
+`Unsupported` and stays loaded.
+
+## Arguments checked against the header
+
+Before a call reaches a guest, the engine checks its arguments against the
+parameters the header declares for the function
+([`arguments`](src/arguments.rs)): an argument naming a parameter the function
+does not declare, or carrying a value not of its parameter's type, fails with
+`DispatchError::Argument` and the guest never reads it. Calls between guests
+pass the same check. It reads type tags in place and decodes nothing. What
+passes:
+
+- `unit` for any parameter — what callers send for an unset argument;
+- any value for a parameter of a dynamic type (`KEY_VALUE_ID`,
+  `ARRAY_VALUE_ID`);
+- a present optional argument as an option or as its bare element;
+- an array as its typed array, or as a generic array whose every element is
+  of the element type.
+
+Left to the guest: a buffer that is not a structure, a parameter left out, and
+a record's fields — a record-typed argument is checked by its record's id, all
+a header names of it. A host module's calls are not checked: it has no header.
+
+## Time and memory a guest may spend
+
+On wasmtime, a call to a guest ends by a deadline and its memory is capped
+([`limits`](src/limits.rs)):
+
+- **Time.** `Engine::set_step_budget` gives the time left in a device's step,
+  which the guest calls of that step share. Outside a step a call gets
+  `DEFAULT_CALL_BUDGET`, one second, and so does a module loading. A module's
+  own `GuestLimits::call_budget` (`Engine::set_guest_limits`, or
+  `EngineBuilder::with_guest_limits` for every module) tightens it. A call to
+  another guest ends by its caller's deadline. A guest still running at its
+  deadline is interrupted at the next epoch tick, every `EPOCH` (1 ms): the
+  call fails with `DispatchError::Trap`, and the module refuses its calls
+  until reloaded, since the call may have left its state half updated. A call
+  with no time left is not made, and its module keeps serving.
+- **Memory.** Each linear memory of an instance holds at most
+  `GuestLimits::memory` bytes, `DEFAULT_MEMORY` (256 MiB) by default: a
+  `memory.grow` past it returns -1 to the guest, whose allocator reports the
+  failure.
+
+In the browser a guest runs on the JS thread, which nothing interrupts: no
+call time is bounded, and memory only by the maximum the module declares.
+
+## Reference
+
+**Features.** `wasmtime-host` (wasmtime and wasmtime-wasi) and `native-host`
+(libloading), both default. A `wasm32` build sets `default-features = false`
+and gets the browser executor.
+
+**Errors.** Loading fails with `engine::LoadModuleError` (`ExecutorNotFound`,
+`MalformedExecutable`, `Internal`). A dispatch fails with
+`module::DispatchError`, which `arora_call` reports as `CallError`:
+
+| `DispatchError` | `CallError` | When |
+|---|---|---|
+| `ModuleNotFound` | `ModuleNotFound` | no module under the id |
+| `FunctionNotFound` | `FunctionNotFound` | the module serves no such function |
+| `Argument` | `Generic` | an argument does not match the header |
+| `Trap` | `Trap` | the guest trapped, overran its deadline, or trapped earlier |
+| `Guest` | `Guest` | a component's or a host module's function returned an error |
+| `Internal` | `Internal` | the engine or the executor failed |
+
+**Threads.** An engine runs on one thread: guests call back into it while it
+is borrowed further up the stack, through a raw pointer to the pinned engine
+`EngineBuilder::build` returns (`Pin<Box<Engine>>`) — see
+[design decisions](../../docs/design_decisions.md#raw-engine-pointer-in-executor-host-state-deliberately-unsafe).
+A `CompiledModule` crosses threads.
+
+**Header fields read.** The engine reads a header's `id`, `executor.name`,
+`exports`, and `name` in error messages. `executor.min_version`,
+`executor.max_version`, `imports` and `executable_mime` describe the module to
+tools and registries; the engine does not check them.

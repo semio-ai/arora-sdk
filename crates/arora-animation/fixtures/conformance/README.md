@@ -1,12 +1,15 @@
 # Animation reference results
 
-These cases define results the animation engine must reproduce. They are the
-reference set Semio Studio generates from its own curve logic
-(`packages/animation/conformance/` in semio_studio), copied here unchanged:
-`tests/conformance.rs` evaluates every case through the crate.
+The values and velocities an animation's curves must give, case by case. They
+are the reference set Semio Studio generates from its own curve logic
+(`packages/animation/conformance/` in semio_studio), copied here unchanged, so
+a curve this crate plays is the curve Studio's editor draws.
+`tests/conformance.rs` reads each case's animation into the crate's form
+(`tests/support`), evaluates every track with `Curve`, and holds each sample
+to the reference within a tolerance.
 
-They are regenerated in semio_studio, never edited here. A change to Studio's
-handle resolution changes them there, and the copy here follows.
+The cases are regenerated in semio_studio, never edited here: a change to
+Studio's handle resolution changes them there, and the copy here follows.
 
 ## Format
 
@@ -14,8 +17,10 @@ One file per animation and instance setting:
 
 - `animation`: a stored Studio animation of format 2, its tracks embedded:
   stamps and handle times in milliseconds, transitions as Studio spells them.
+  `tests/support` reads it into the crate's nanosecond form.
 - `instance`: `offset` in world milliseconds, `timescale` as a speed
-  multiplier, and `active` (`false` means the instance is muted).
+  multiplier, and `active` (`false` means the instance is muted). World time
+  is the timeline the instance plays the animation on (rule 4).
 - `samples`: sorted `worldTimeMs`, and a `tracks` object keyed by track id.
   Each entry holds `value` and `velocity`. Velocity is value units per second
   of world time; `null` for strings and booleans. A muted instance, a muted

@@ -1,292 +1,212 @@
 # arora-bridge-ros2
 
-ROS 2 as an Arora bridge: exposes a device's keys over ROS 2 topics and accepts
-commands from the graph, implementing [`arora_bridge::Bridge`].
+A bridge ([`arora_bridge::Bridge`](https://docs.rs/arora-bridge)) whose remote
+is a ROS 2 graph: a running Arora device appears to ROS as topics, services and
+actions, so any ROS 2 node reads its state, writes its inputs and calls its
+functions with standard ROS tools.
 
-An Arora device is one blackboard with four seams around it (store, HAL, bridge,
-behavior). This crate is a **bridge** whose remote is a ROS 2 graph — ROS is the
-external control/data plane into an Arora runtime. It is a sibling to
-`arora-bridge-ws` (whose remote is a local WebSocket app) and is **distinct from
-`arora-hal-ros2`**: there ROS is the device's own hardware (a HAL); here ROS is
-the remote (a bridge).
+Here ROS is the device's remote. When ROS is the device's own hardware, the
+HAL [`arora-hal-ros2`](../arora-hal-ros2/readme.md) is the crate instead.
 
-## Topic convention
+## Three planes
 
-Keys map to topics under a namespace: the key `face/mouth` is the topic
-`/{namespace}/keys/face/mouth`. Values speak the Arora data vocabulary
-(`arora_types::Value`).
+The bridge mirrors what the device has, asked of the device when the bridge
+starts — nothing is declared to it:
 
-A ROS 2 name allows only `[A-Za-z0-9_]` in each `/`-separated token, no token
-starting with a digit, and (in `ros2-client`) no `__`, so a key path is escaped
-token by token: every other character becomes `_`, a run of underscores
-collapses to one, a token starting with a digit gains a leading `_`, and an
-empty token becomes `_`. `rig/poses/pose_b.weight` is the topic
-`/{namespace}/keys/rig/poses/pose_b_weight`, and the UUID-named key
-`rig/6cefb62d-dc71-4244-9f65-a343b905ac78` is
-`/{namespace}/keys/rig/_6cefb62d_dc71_4244_9f65_a343b905ac78`. A path that is
-already a valid name is its topic verbatim. An include's rewrite escapes what
-it keeps of the key the same way.
+| Device | ROS 2 | Name |
+|---|---|---|
+| a key | a topic | `/{namespace}/keys/{path}` |
+| a function | a service | `/{namespace}/methods/{name}` |
+| a task run (a function returning the behavior `Status`) | an action | `/{namespace}/actions/{name}` |
 
-Two keys can escape to one topic (`a.b` and `a-b`). The key that sorts first
-keeps it, and the other gets no topic and is reported once, naming both — on
-the outbound side too, whichever key the device writes first. An input topic
-is never published on for another key. A subscription delivers to the key it
-was made for: the bridge keeps the topic-to-key mapping and never reverses the
-escape.
+On top of these, an **exposure profile** serves a standard surface — typed
+messages on well-known names, such as ROS4HRI's — over the device's keys and
+functions (see [Exposure profiles](#exposure-profiles)).
 
-| Direction | Bridge method | ROS 2 |
-| --- | --- | --- |
-| Runtime → ROS | `send_data(StateChange)` | Publishes each changed key to its topic. The `std_msgs` type is chosen from the value's type (`Value::F64` → `std_msgs/Float64`, …); non-scalar values fall back to a JSON-encoded `std_msgs/String`. |
-| ROS → Runtime | `commands()` | Each message received on a declared input topic becomes a `BridgeOp::Update` the runtime applies to its store. |
-
-Input keys are the keys the device's store opens to remote writers
-(`KeyMeta::editable`), asked of the device at startup and typed from their meta:
-a ROS 2 topic is typed, and the subscription is created before any message
-arrives. An input whose shape has no `std_msgs` scalar (a `u8`, a structure)
-takes a JSON `std_msgs/String` topic — unless a typed endpoint routes onto it,
-in which case that endpoint is its interface and it gets no key topic: the
-ROS4HRI viseme code `standard/ros4hri/viseme`, a `u8`, comes in on
-`/tts/viseme` and `/tts/visemes` only. Output keys need no declaration — a publisher is created from each
-changed value's type on first use. A key that cannot be published (its topic is
-taken, or its publisher could not be created) is reported once, not on every
-change.
-
-## Delivery: only the latest value, twice over
-
-The bridge publishes **state, not events**, and it says so at both layers.
-
-*Above ROS.* The runtime hands the bridge one coalesced `StateChange` per step;
-those go into a **latest-value-per-key** buffer that the node task drains. A key
-written again before the drain replaces its pending value instead of queuing
-behind it, so the memory the bridge holds is bounded by the device's key count
-however far behind the ROS graph falls — and what it publishes is always the
-freshest value, never a backlog of stale ones. A device that renders or steps
-faster than ROS drains therefore publishes *fewer* samples, not later ones. The
-count of values replaced before they were published is logged at `debug`.
-
-*In ROS.* Each endpoint runs under a `Qos` profile, and the default follows the
-flow:
-
-| Flow | Default | Policy |
-| --- | --- | --- |
-| out (state: rig values, the face image, the utterance) | `Qos::SensorData` | best-effort, volatile, keep-last-1 |
-| in (commands: an expression, a gaze point) | `Qos::Reliable` | reliable, volatile, keep-last-1 |
-
-State is only interesting at its newest value and a slow reader must not stall
-the writer; a command is an instruction and dropping one loses it. Override per
-endpoint with the `qos` field on `Endpoint`, `Include`, `InputKey`,
-`TypedInput` and `TypedOutput`.
-
-**Large values.** The scalar plane's JSON fallback will carry anything, but a
-ROS 2 topic should not: RustDDS fragments samples over 1 KB, and an image-sized
-one costs memory per sample inside the writer (see the 6.0.0 changelog). A value
-serializing past 64 KB of JSON is warned about once per key. Declare such a key
-as a typed output — an image belongs on `sensor_msgs/CompressedImage`.
-
-**The trade on the outbound plane:** a best-effort writer does not match a
-reliable reader. A subscriber left on the rclcpp/rclpy default (reliable) sees
-nothing on a `Qos::SensorData` topic until it asks for best-effort — the same
-bargain `image_transport` strikes for camera streams. `ros2 topic echo` needs
-`--qos-reliability best_effort` on those topics.
-
-**Type hashes on the Zenoh backend.** `rmw_zenoh` keys every publisher on its
-message's REP-2016 type hash, and a native subscriber listens on that exact key,
-so a publisher announcing the wrong hash is listed by `ros2 topic list`,
-described by `ros2 topic info -v`, and never heard. A typed output is keyed on
-the hash the bridge computes from the message's registry description — the same
-value ROS 2 ships in the type's `.json` — so `ros2 topic echo`, `rqt_image_view`
-and any rclcpp/rclpy node receive it. A message the hasher cannot describe still
-publishes, but reaches only other `ros2-client` peers; that is warned about once
-per key. Subscriptions match on a wildcard, so the inbound plane never depended
-on the hash; DDS discovery carries none and is unaffected either way.
-
-## Configuration
+## Smallest use
 
 ```rust,no_run
-use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig, Type};
+use arora_bridge_ros2::{Ros2Bridge, Ros2BridgeConfig};
 
 # async fn example() {
-let config = Ros2BridgeConfig::new("robot", 0)
-    .with_input("face/mouth/open", Type::F64)
-    .with_input("enabled", Type::Boolean);
-let bridge = Ros2Bridge::new(config).await;
-// Hand `bridge` to the Arora runtime as its `Bridge`.
-# let _ = bridge;
+let bridge = Ros2Bridge::new(Ros2BridgeConfig::new("robot", 0)).await;
+// arora::Arora::builder().with_bridge(Box::new(bridge))
 # }
 ```
 
-`Ros2Bridge::new` spins a DDS node in a background task; call it from within a
-Tokio runtime. Dropping the bridge stops the task.
+`Ros2BridgeConfig::new(namespace, domain_id)` names the topics' namespace and
+the ROS domain. `Ros2Bridge::new` starts a ROS 2 node on a background task, so
+call it inside a Tokio runtime; dropping the bridge stops the node. A node
+that cannot start is logged, and leaves the bridge inert.
 
-## Bridge-method mapping
+A device can hold this bridge beside others, such as the open local bridge;
+each serves the same store.
 
-- `send_data(StateChange)` → publish each changed key to its topic.
-- `commands()` → input-topic messages become `BridgeOp::Update`.
-- `data_requested()` → yields `true` once (a ROS 2 graph is a data consumer; DDS
-  exposes no clean per-subscriber claim/release toggle).
-- `get_device_info` / `device_info_updated` / `update_device_info` → stubs; ROS 2
-  has no device-registration concept.
+## Keys as topics
 
-## Methods as services
+Every key the device sets is published on its topic, as the `std_msgs` type
+of its first value: `f64` as `std_msgs/Float64`, likewise `f32`, `i64`, `i32`,
+`u64`, `u32`, `bool` and `string`. Any other value — an array, a structure, a
+`u8` — is published as JSON in a `std_msgs/String`. A key that a profile's
+typed output or include claims publishes there instead.
 
-Where the topic plane mirrors a device's *keys*, the method plane mirrors its
-*methods*. The bridge asks the runtime for every method's signature
-(`BridgeOp::DescribeMethods`) and, for each one whose parameter and return types
-are representable in ROS 2, stands up a service at `/{namespace}/methods/{name}`.
-Discovery is automatic — a device's methods are its own surface, so nothing is
-declared.
+The device's **inputs** are the keys its store opens to remote writers
+(`KeyMeta::editable`): the bridge subscribes each on its topic, typed from the
+key's meta, and turns each message into a write of that key. The device checks
+the write as it checks every remote write, and the bridge logs a refusal (at
+most once per topic and set of keys every five seconds). An input whose meta
+states no type gets no topic. The bridge publishes nothing on a topic it
+subscribes to.
 
-A method maps onto a `.srv` the way ROS already models one: the parameter list is
-the **request** (one field per parameter), the return value is the **response**.
-Both messages are synthesised as runtime types and driven through the shared CDR
-codec (`arora_msgs_ros2::cdr`) against the registry — real ROS 2 message types on
-the wire, no ad-hoc encoding. An optional parameter or return of a scalar or a
-message travels as the bounded sequence `T[<=1]`, the ROS 2 spelling of an
-optional field: empty is absent, one element is present, and a request holding
-more is refused. Signatures ROS 2 cannot represent are skipped and reported, not
-silently dropped.
+A ROS name allows only `[A-Za-z0-9_]` in each `/`-separated token, so the
+bridge escapes a key path token by token: any other character becomes `_`, a
+run of underscores collapses to one, a token starting with a digit gains a
+leading `_`, and an empty token becomes `_`. `rig/poses/pose_b.weight` is the
+topic `/{namespace}/keys/rig/poses/pose_b_weight`. A path that is already a
+valid name is its topic as is. Two keys can escape to one topic (`a.b` and
+`a-b`): the key that sorts first keeps it, and the other gets no topic and is
+reported once. The bridge keeps the topic of each key, and never reverses the
+escape.
+
+### Delivery: the newest value
+
+The bridge publishes state, not events. Each step's changes go into a buffer
+holding the newest value of each key, which the node drains: a key written
+again before it was published replaces its pending value, so a device that
+changes faster than ROS drains publishes fewer, fresher samples, and the
+buffer is bounded by the device's key count.
+
+Each endpoint runs under a `Qos`, by default after its direction:
+
+| Direction | Default | Policy |
+|---|---|---|
+| out — state the device publishes | `Qos::SensorData` | best-effort, volatile, keep-last-1 |
+| in — commands the device receives | `Qos::Reliable` | reliable, volatile, keep-last-1 |
+
+A best-effort writer matches no reliable reader, so a subscriber on the
+rclcpp/rclpy default sees nothing on an output topic until it asks for best
+effort (`ros2 topic echo --qos-reliability best_effort …`). Typed endpoints,
+includes and topic skills take a `qos` of their own.
+
+A value whose JSON passes 64 KB is warned about once per key: an image belongs
+on a typed output (`sensor_msgs/CompressedImage`), not on the JSON fallback.
+
+## Functions as services
+
+For each of the device's functions whose parameters and return type ROS 2 can
+represent, the bridge serves a service. Its request has one field per
+parameter, its response the return value, both built at run time from the
+function's signature and carried as real ROS 2 messages through the CDR codec
+of [`arora-msgs-ros2`](../arora-msgs-ros2/README.md). An optional parameter or
+return travels as the bounded sequence `T[<=1]`: empty is absent. A function
+ROS 2 cannot represent is skipped, and logged.
 
 ## Task runs as actions
 
-Task-run methods — those whose return type is the behavior-tree `Status`
-enumeration, i.e. tickable, long-running, cancellable work — are mirrored as ROS
-2 **actions** instead. That enum is also the one return type the service plane
-cannot carry, so actions claim exactly the methods services skip; the two planes
-never overlap. A goal spawns the run (through `BridgeOp::Call` to the
-interpreter's `SPAWN`), feedback and result are typed from what the run writes
-(an optional of a scalar as `T[<=1]`, like an optional goal parameter), and
-cancel/status ride ros2-client's `RawActionServer`. The goal lifecycle lives
-in a `GoalBook`.
+A function that returns the behavior `Status` reports `Running`, `Success` or
+`Failure` across ticks: the device hosts a call to it as a task run, and the
+bridge serves it as an action instead of a service. A goal spawns the run;
+the feedback and result are typed from what the run writes; cancelling a goal
+halts the run.
 
-Introspection over the bridge (`ListKeys` / `ListMethods`) and `BridgeOp::Call`
-over topics remain unwired — services and actions are the method surface.
+## Exposure profiles
 
-## Skills on topics
+A profile (`ExposureProfile`, added with `Ros2BridgeConfig::with_profile`)
+binds a standard surface to the device:
 
-A skill that sets a state held until changed — `set_expression`, say — has no
-lifecycle for a client to follow, so a profile serves it on a **topic** rather
-than as an action: a `TopicSkillBinding` names the topic, its message type, the
-device's task-run method, and the routes from the message's fields onto the
-method's parameters. Each message spawns the method through the same
-interpreter `SPAWN` as an action goal, and nothing answers the publisher. The
-latest message wins: the run the previous message spawned is halted, unless it
-already ended, before the new one is spawned, and messages that queue up while
-a spawn is in flight collapse to the newest. A message whose fields do not
-route is dropped with a warning, and the running state stays as it was.
+- **Typed endpoints** (`Endpoint`): a topic of a registered message type on an
+  absolute name. Inbound, a message's fields land on device keys, all in one
+  change; outbound, the message is composed from device keys and published
+  again whenever one of them changes. Each `FieldRoute` pairs a dotted field
+  path with a key.
+- **Includes** (`Include`): keys matching a glob (`*` one segment, `**` the
+  rest) published under a rewritten absolute name, on the scalar plane.
+- **Action bindings** (`ActionBinding`): a standard `.action` on an absolute
+  name, whose goal spawns a device task run, the goal's fields routed onto the
+  function's parameters. A bound action serves one goal at a time:
+  `std_skills/Meta.priority` arbitrates, an equal or higher priority preempting
+  the active run and a lower one being rejected.
+- **Topic skills** (`TopicSkillBinding`): a topic whose every message spawns a
+  device task run, for a skill that sets a state held until changed. The latest
+  message wins: the run the previous message spawned is halted first.
 
-## ROS4HRI
+The bridge checks each binding against the device's functions when it starts —
+the function exists, is a task run, and every routed field lands on a parameter
+of a compatible type — and refuses it, logged, otherwise. A parameter no field
+names is left out of the call. `ExposureProfile::coverage` lists what of a
+profile a device does not serve.
 
-This bridge is where a device meets a ROS 2 graph, so it is the natural home for
-[ROS4HRI](https://ros.org/reps/rep-0155.html) interop. The ROS4HRI message vocabulary
-(`hri_msgs/Expression`, `FacialActionUnits`, `Gaze`, …) is available as typed ROS
-2 messages in [`arora-msgs-ros2`](../arora-msgs-ros2/README.md), and the Vizij
-face standard consumes it (see [vizij-rs's ROS4HRI
-docs](https://github.com/vizij-ai/vizij-rs/blob/main/docs/ros4hri.md)).
+Single endpoints also have builder methods: `with_typed_input`,
+`with_typed_output`, and their `_on` forms for an absolute topic name.
 
-Typed topics bind per endpoint: `with_typed_input`/`with_typed_output` (and
-their `_on` variants for absolute topic names) subscribe or publish a device
-key as a registered ROS message, decoded and encoded against its runtime type.
-A typed endpoint may instead **route fields to keys** by dotted name, both
-ways: inbound, each message fans out over its routed keys in one atomic
-change; outbound, the message is composed from its routed keys — each key
-lands at its field, the fields keep their last value (their type's default
-until written), and a change to any routed key publishes the whole message
-again. A `std_msgs` wrapper around one key (`data` ← the key) is the smallest
-case; a `PointStamped` from a vec3 key and a frame key is the same mechanism.
+A route's dotted path reads a message: a name descends into a field
+(`expression.valence`), a number takes one element of a sequence
+(`visemes.0.value`), `*` takes every element and collects what the rest
+reaches into one array (`timeline.visemes.*.viseme.value`), a geometry point
+or vector lands as an `[f32; 3]`, and a `builtin_interfaces/Duration` as its
+seconds.
 
-Inbound, a route's dotted path reads a decoded message — for a key, and for
-a skill's goal or message onto a method's parameters alike:
+### ROS4HRI
 
-- a name descends into a field (`expression.valence`); an empty path is the
-  whole message;
-- a number takes one element of a sequence (`visemes.0.value`), so a message
-  wrapping its payload in an array routes like any other;
-- `*` takes each element of a sequence and collects what the rest of the path
-  reaches into one flat array (`timeline.visemes.*.viseme.value` is a `[u8]`);
-  the rest must reach a scalar, and a path holds one `*`;
-- a geometry point or vector (exactly `x`, `y`, `z`) lands as the vec3
-  `[f32; 3]`, and a `builtin_interfaces/Duration` as its seconds, an `f32` —
-  under `*`, an `[f32]`.
+`ExposureProfile::ros4hri()` serves the [ROS4HRI](https://ros.org/reps/rep-0155.html)
+face surface under PAL's `/robot_face/*` names:
 
-**Exposure profiles** (`profile` module) bundle a whole surface: an
-[`ExposureProfile`] holds typed endpoints on absolute topics with per-field
-fan-out over device keys, glob includes (`*` one segment, `**` the rest)
-whose prefix rewrites expose bulk keys on the scalar plane under absolute
-names, and the skill plane: **action bindings** that serve a device task-run
-method as a standard ROS 2 action, and **topic-skill bindings** that serve one
-on a topic (see [Skills on topics](#skills-on-topics)).
-`ExposureProfile::ros4hri()` ships the ROS4HRI face surface under PAL's names
-(`/robot_face/*`): `look_at` points land as the gaze target (vec3) and frame, a
-streamed viseme lands as its ROS4HRI code on `standard/ros4hri/viseme`, with
-its `time` and `duration` (seconds) on `standard/ros4hri/viseme/time` and
-`standard/ros4hri/viseme/duration` — from either shape a TTS node publishes it
-in, one `hri_msgs/Viseme` on `/tts/viseme` or an `hri_msgs/Visemes` on
-`/tts/visemes`, both carrying the shape at the audio playhead — and the skills
-in the table below spawn the device's task runs. What the face is saying
-publishes as a `std_msgs/String` on `/robot_face/speech` from the speech state
-key `standard/ros4hri/speech/text` — the utterance while a say run speaks,
-empty at rest — for subtitles and transcripts; text is not commanded through a
-topic, speaking is the action. The lip shape being spoken publishes the same
-way, as a `std_msgs/String` on `/robot_face/viseme` from
-`standard/ros4hri/speech/viseme` — a Vizij standard shape name, `sil` at rest —
-so one topic follows the lips of the whole robot. The rendered face publishes
-on the `image_transport` pair PAL OS documents — `display/face` as a
-`sensor_msgs/Image` on `/robot_face/image_raw`, `display/face/compressed` as a
-`sensor_msgs/CompressedImage` on `/robot_face/image_raw/compressed`; a face
-writes the key of the transport it encodes. A closed caption — an
-`hri_actions_msgs/ClosedCaption` on `/closed_captions` — lands its text on
-`standard/ros4hri/caption/text` and its speaker on
-`standard/ros4hri/caption/speaker`, and the key `diagnostics`, holding a whole
-`diagnostic_msgs/DiagnosticArray`, publishes on `/diagnostics` — reliably,
-since the ROS diagnostics tooling subscribes reliably. Enabling it is one call:
+```rust,no_run
+use arora_bridge_ros2::{ExposureProfile, Ros2BridgeConfig};
 
-```rust
-let config = Ros2BridgeConfig::new("robot", 0)
-    .with_profile(ExposureProfile::ros4hri());
+let config = Ros2BridgeConfig::new("robot", 0).with_profile(ExposureProfile::ros4hri());
 ```
 
-The preset's skills, ROS4HRI's and Vizij's own (typed by arora-msgs-ros2's
-`vizij_face_msgs`):
-
-| Skill | Served as | ROS type | Device method |
+| Name | Served as | ROS type | Device |
 |---|---|---|---|
-| `/skill/set_expression` | topic | `interaction_skills/SetExpression` | `set_expression(expression: string, valence: f32, arousal: f32)` |
-| `/skill/set_facial_action_units` | topic | `vizij_face_msgs/SetFacialActionUnits` | `set_facial_action_units(codes: [u8], intensities: [f32])` |
-| `/skill/set_viseme` | topic | `vizij_face_msgs/SetViseme` | `set_viseme(viseme: u8)` |
-| `/skill/look_at` | action | `interaction_skills/LookAt` | `look_at(policy: string, target: [f32], frame: string)` |
-| `/skill/say` | action | `communication_skills/Say` | `say(text: string)` |
-| `/skill/play_visemes` | action | `vizij_face_msgs/PlayVisemes` | `play_visemes(visemes: [u8], starts: [f32], durations: [f32])` |
+| `/skill/set_expression` | topic skill | `interaction_skills/SetExpression` | `set_expression(expression, valence, arousal)` |
+| `/skill/set_facial_action_units` | topic skill | `vizij_face_msgs/SetFacialActionUnits` | `set_facial_action_units(codes, intensities)` |
+| `/skill/set_viseme` | topic skill | `vizij_face_msgs/SetViseme` | `set_viseme(viseme)` |
+| `/skill/look_at` | action | `interaction_skills/LookAt` | `look_at(policy, target, frame)` |
+| `/skill/say` | action | `communication_skills/Say` | `say(text)` |
+| `/skill/play_visemes` | action | `vizij_face_msgs/PlayVisemes` | `play_visemes(visemes, starts, durations)` |
+| `/robot_face/look_at` | in | `geometry_msgs/PointStamped` | `standard/ros4hri/gaze/target`, `…/gaze/frame` |
+| `/tts/viseme`, `/tts/visemes` | in | `hri_msgs/Viseme`, `hri_msgs/Visemes` | `standard/ros4hri/viseme` (and its `/time`, `/duration`) |
+| `/closed_captions` | in | `hri_actions_msgs/ClosedCaption` | `standard/ros4hri/caption/text`, `…/caption/speaker` |
+| `/robot_face/speech` | out | `std_msgs/String` | `standard/ros4hri/speech/text` |
+| `/robot_face/viseme` | out | `std_msgs/String` | `standard/ros4hri/speech/viseme` |
+| `/robot_face/image_raw` | out | `sensor_msgs/Image` | `display/face` |
+| `/robot_face/image_raw/compressed` | out | `sensor_msgs/CompressedImage` | `display/face/compressed` |
+| `/diagnostics` | out, reliable | `diagnostic_msgs/DiagnosticArray` | `diagnostics` |
 
-`set_expression` and `set_facial_action_units` set the same thing, the face's
-expression, and the device gives the face to the latest of the two; the
-`hri_msgs/Expression`'s `confidence` is perception's and is not routed. A face
-that reads its expression from the `standard/ros4hri/expression/*` keys rather
-than implementing `set_expression` takes
-`ExposureProfile::ros4hri().with_set_expression_on_keys()`, which lands the
-topic on those keys instead. `set_viseme` is the mouth shape at the playhead,
-for a live producer that knows the shape and not its timing; `play_visemes`
-plays a timeline out, so it is an action, routed as parallel arrays with times
-in seconds from the timeline's origin and the shape being played as feedback.
-`say`'s goal `input` is the utterance, and its feedback carries what the run
-reports (for a face, the viseme at the audio playhead).
+A face that reads its expression from the `standard/ros4hri/expression/*` keys
+rather than implementing `set_expression` takes
+`ExposureProfile::ros4hri().with_set_expression_on_keys()`. The
+`communication_skills/Say` this profile serves is the vendored one, whose
+feedback differs from upstream's (see
+[arora-msgs-ros2](../arora-msgs-ros2/README.md#departures-from-upstream)).
 
-An action or topic-skill binding is the exterior contract of a skill: at
-startup the bridge checks it against the device's described methods (the
-function exists, is a task run, and every routed field resolves in the goal
-or message and lands on a parameter of a compatible type) and refuses it
-loudly otherwise. A parameter the message does not name is left out of the
-spawn call, and the bridge logs it — a standard contract carries what
-the standard says, not every parameter an implementation happens to take. What
-the absent argument means is the implementation's: a method declared with
-arora-module reads an absent optional parameter as `None` and fails the call on
-an absent required one, while a task fragment may supply the argument itself.
-A bound action serves one goal at a time —
-`std_skills/Meta.priority` arbitrates, an equal-or-higher replacement
-preempting the active run (its result reports `ROS_EINTR`) and a lower one
-being rejected — and answers with the standard Result message carrying the
-`std_skills` errno of the goal's lifecycle, unless the run wrote the Result
-(or an errno) itself.
+## Reference
 
-`ExposureProfile::coverage` reports which of the profile's keys and skill
-functions a device does not serve, so a deployment checks a face against its
-profile up front instead of discovering holes topic by topic.
+| Feature | Effect |
+|---|---|
+| `dds` (default) | The DDS middleware backend. |
+| `zenoh` | The `rmw_zenoh`-compatible backend: build with `--no-default-features --features zenoh`. |
+
+On the Zenoh backend, the session reads its configuration from
+`ZENOH_CONFIG_OVERRIDE` or `ZENOH_SESSION_CONFIG_URI`, for instance
+`ZENOH_CONFIG_OVERRIDE='mode="client";connect/endpoints=["tcp/localhost:7447"]'`
+to join a `zenohd` router. `rmw_zenoh` matches a publisher to a subscriber by
+its message's REP-2016 type hash: the bridge keys a typed output on the hash
+of its registered message, so native nodes receive it; a message the hasher
+cannot describe still publishes, reaching only other `ros2-client` peers, and
+is warned about once. `examples/zenoh_probe.rs` exercises a device's keys
+against a real ROS 2 stack over Zenoh.
+
+Limits:
+
+- The bridge reads the device's inputs and functions once, when it starts. An
+  input opened, or a module loaded, afterwards gets no topic, service or
+  action until the bridge restarts.
+- A ROS client cannot list the device's keys or call a function by name
+  through this bridge: the topics, services and actions are its surface.
+- The bridge has no device registration: `get_device_info` answers none.
+
+`cdr` re-exports the CDR codec of
+[`arora-msgs-ros2`](../arora-msgs-ros2/README.md), and `Type` and `Value` the
+Arora value vocabulary.
