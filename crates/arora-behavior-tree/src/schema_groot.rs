@@ -761,8 +761,18 @@ fn attribute_text(value: &Value, ty: &FrozenTy) -> Result<String, BehaviorTreeEr
         _ => None,
     };
     match plain {
-        Some(text) if attribute_value(&text, ty).as_ref() == Ok(value) => Ok(text),
+        Some(text) if attribute_value(&text, ty).is_ok_and(|read| same(&read, value)) => Ok(text),
         _ => json_text(value),
+    }
+}
+
+/// Whether `read` is `value`, a NaN being the NaN of its width: `NaNf32`
+/// reads back as an `f32` NaN, which equals no value.
+fn same(read: &Value, value: &Value) -> bool {
+    match (read, value) {
+        (Value::F32(read), Value::F32(value)) => read == value || read.is_nan() && value.is_nan(),
+        (Value::F64(read), Value::F64(value)) => read == value || read.is_nan() && value.is_nan(),
+        _ => read == value,
     }
 }
 
@@ -1840,6 +1850,55 @@ mod tests {
             .unwrap_or_else(|e| panic!("{xml}: {e:?}"));
         for (id, value) in ids.iter().zip(values) {
             assert_eq!(read.parameters[id], Expression::Value(value), "{xml}");
+        }
+    }
+
+    /// A float that is no finite number reads back through Groot as itself
+    /// too: `NaNf32`, `NaNf64` and `-inff64` are plain text.
+    #[test]
+    fn a_non_finite_float_reads_back_through_groot() {
+        let ids: Vec<Uuid> = (0..3).map(|_| Uuid::new_v4()).collect();
+        let gain = Uuid::new_v4();
+        let mut index = HashMap::new();
+        index_typed(
+            &mut index,
+            gain,
+            "gain",
+            &[
+                ("single", ids[0], PrimitiveKind::F32),
+                ("double", ids[1], PrimitiveKind::F64),
+                ("floor", ids[2], PrimitiveKind::F64),
+            ],
+        );
+        let values = [
+            Value::F32(f32::NAN),
+            Value::F64(f64::NAN),
+            Value::F64(f64::NEG_INFINITY),
+        ];
+        let node = TreeNode {
+            function: gain,
+            children: None,
+            parameters: ids
+                .iter()
+                .zip(&values)
+                .map(|(id, value)| (*id, Expression::Value(value.clone())))
+                .collect(),
+        };
+        let exported = Node::try_from_tree_node(&node, &index, &mut HashMap::new()).unwrap();
+        assert_eq!(exported.param_args["single"], "NaNf32");
+        assert_eq!(exported.param_args["double"], "NaNf64");
+        assert_eq!(exported.param_args["floor"], "-inff64");
+        let xml = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+        let read = BehaviorTree::try_from_groot_xml(&xml)
+            .unwrap()
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .unwrap_or_else(|e| panic!("{xml}: {e:?}"));
+        for (id, value) in ids.iter().zip(&values) {
+            let Expression::Value(read) = &read.parameters[id] else {
+                panic!("{xml}: {:?}", read.parameters[id]);
+            };
+            assert!(same(read, value), "{xml}: {read:?} for {value:?}");
         }
     }
 
