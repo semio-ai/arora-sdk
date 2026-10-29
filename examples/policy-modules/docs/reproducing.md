@@ -4,6 +4,16 @@ What to keep, what to adapt, and what to expect, for someone bringing a
 learned policy for a different robot into an Arora module. It assumes the
 [how-it-works](how-it-works.md) page.
 
+## Where a new robot lives
+
+In a repository of its own, not in arora-sdk: the robot's HAL, its runner,
+and its modules, depending on the published Arora crates from crates.io.
+[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran) is one — the
+NAO and Pepper HAL (`arora-hal-naoqi`) and its `arora-naoqi` runner,
+against the published crates. This workspace is laid out the same way: it
+lives in the SDK checkout as a worked example, and the
+[README](../README.md#where-things-are) says what moving it out takes.
+
 ## What you need from the robot's side
 
 1. **A simulator model** (MJCF for `arora-hal-mujoco`): the robot with
@@ -45,6 +55,15 @@ learned policy for a different robot into an Arora module. It assumes the
   (`[w, x, y, z]`, world from IMU); `sim/*` for what only a simulator knows.
   Leaves read the aggregates, so renaming the per-joint keys changes nothing
   above the HAL.
+
+  What `arora-hal-mujoco` reads as a setpoint is exactly this:
+  `<joint>.target_position` (`f32` or `f64`, at the root of the key space)
+  and `joints.target_position` (an `f32` or `f64` array in `joints.names`
+  order), plus `sim/reset`. It reads neither the `<joint>/target.position`
+  form of the SDK's target convention (`arora_hal::set_targets` reads both)
+  nor a namespaced key, and it describes only `<joint>.target_position` and
+  `sim/reset` as inputs. The aggregate shares the per-joint grammar, so no
+  joint may be keyed `joints`.
 - The device shape (`crates/arora-microduck`): HAL + declared modules (wasm or
   in-process) + Groot tree (`with_groot`), built directly for a lockstep run
   and handed to the standard `AroraBuilder::run` for serving — the operator
@@ -114,6 +133,69 @@ contacts, an imitation phase; `0.25 × action` with a slew limit; Feetech
 servos at `kp 13.37`.
 
 ## Showing it in Semio Studio
+
+Studio draws the robot from a URDF, moves it with the device's live keys, and
+its Live Data page writes the commands. The connection is opt-in at build
+time: only a build with the device's `studio` feature has it, and a run of
+that build connects unless it passes `--no-studio`.
+
+### The Microduck, step by step
+
+Once:
+
+1. Export the URDF and its meshes:
+
+   ```sh
+   uv run --python 3.12 --with mujoco python tools/export-urdf.py
+   ```
+
+   It writes `assets/microduck/urdf/` (`microduck.urdf` and its STL meshes)
+   and checks the result against the MJCF: every mesh vertex where MuJoCo
+   has it, to the micrometre.
+2. In Studio, **Upload URDF** and select `microduck.urdf` with every `.stl`
+   of that directory. Studio saves a model named `Microduck`, the URDF's
+   robot name capitalised.
+3. On that model, **Download Asset**, and save the GLB, say as
+   `assets/microduck/studio-model.glb`. It carries the ids Studio gave the
+   joints and the robot's placement; the device publishes under them.
+
+Then, for each run:
+
+4. Run the device built with Studio:
+
+   ```sh
+   cargo run --release -p arora-microduck --features studio -- \
+       --studio-model assets/microduck/studio-model.glb
+   ```
+
+   The first run enrolls the device with Studio: the terminal asks for a
+   device name, then shows a code, which you enter in Studio, choosing the
+   device's owner. The device saves its Studio credential, and every later
+   run connects with it. The model family is the GLB's robot name,
+   capitalised (`Microduck`), and the hardware version `mujoco`;
+   `DEVICE_NAME`, `MODEL_FAMILY` and `HARDWARE_VERSION` override them.
+   Without a terminal nothing is asked: the log shows the code, or the
+   device enrolls with the enrollment token `STUDIO_ENROLLMENT_TOKEN` holds.
+
+   The device keeps its Studio identity under its name in Semio's device
+   store, `~/Library/Application Support/semio/devices/<name>/` on macOS
+   (`~/.local/share/semio/devices/<name>/` on Linux; `SEMIO_DEVICE_STORE`
+   replaces the whole path). The name is `ARORA_DEVICE`, `default` when
+   unset, so every run with the same name is the same device, whatever the
+   build: give the duck its own (`ARORA_DEVICE=microduck`) when another
+   Arora device runs on this machine.
+5. In Studio, open a project with the Microduck model and pair the device
+   from the **Connections** sidebar: the duck in the scene moves with the
+   simulated one, walking across the floor.
+6. On the device's **Live Data** page (claim the device first), add the keys
+   to drive — `command.vx`, `command.vy`, `command.vyaw` as numbers,
+   `command.behavior` as text, `sim/reset` as a boolean — the same keys the
+   [README](../README.md#over-the-local-bridge) lists for the local bridge.
+
+Without `--studio-model`, the joints are published under their names
+(`left_knee.position`), which Studio's model does not know.
+
+### Another robot
 
 Studio needs the robot's model and the device's keys under Studio's ids.
 
