@@ -11,9 +11,9 @@
 //!   would be a false identity, one that changes the moment the field or struct
 //!   is renamed. Deserialization matches the stored names. (An enum keeps its
 //!   variant tag by **name** — a unit variant as its bare name string, any
-//!   other as one `KeyValue` entry keyed by the variant name; the
-//!   variant and type ids there are still name-hashed, pending a typed enum
-//!   path.)
+//!   other as one `KeyValue` entry keyed by the variant name. The ids these
+//!   `KeyValue`s carry — their own and their entries' — are hashes of the
+//!   type, variant and field names.)
 //! - **seeded** ([`to_value_seeded`]/[`from_value_seeded`]) — a declared
 //!   [`low::Type`] is threaded through the (de)serializer, so struct ids come
 //!   from the *type* rather than from names. serde supplies the structure; the
@@ -43,12 +43,15 @@ use crate::module::low::TypeRef;
 use crate::ty::{self, low, TypeRegistry};
 use crate::value::{Structure, StructureField, StructureWithoutId, Value};
 
-/// Convert any `Serialize` type into a [`Value`], deriving ids from names.
+/// Convert any `Serialize` type into a [`Value`], carrying struct fields and
+/// enum variants by name, as the [module docs](self) say.
 pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, Error> {
   value.serialize(ValueSerializer { seed: None })
 }
 
-/// Convert a [`Value`] back into any `Deserialize` type, matching name hashes.
+/// Convert a [`Value`] back into any `Deserialize` type, matching fields and
+/// variants by name — a [`Value::Structure`]'s field ids against the hashes of
+/// the names serde supplies.
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
   T::deserialize(ValueDeserializer { value, seed: None })
 }
@@ -179,8 +182,7 @@ impl<'a> Seed<'a> {
 
   /// The seed for a position declared as `type_ref`: a nested user-defined type
   /// resolves to its [`low::Type`]; an array carries its declaration; a
-  /// well-known primitive (and, for now, a map or an option) has nothing to
-  /// hand down.
+  /// well-known primitive, a map or an option has nothing to hand down.
   fn child(&self, type_ref: &'a TypeRef) -> Option<Seed<'a>> {
     match type_ref {
       TypeRef::Scalar { id } if !ty::PRIMITIVE_IDS.contains(id) => {

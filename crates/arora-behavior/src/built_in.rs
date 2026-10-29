@@ -1,11 +1,11 @@
-//! Built-in keys: well-known store slots the runtime maintains for every behavior.
+//! Built-in keys: well-known store keys the runtime maintains for every behavior.
 //!
 //! The runtime writes these at the start of each step — before it ticks any
 //! behavior — so a behavior reads the current frame's timing straight from the
 //! [`store`](super::BehaviorContext::store) instead of taking it as a tick
 //! argument. Timing stays out of the
 //! [`BehaviorInterpreter`](super::BehaviorInterpreter) API: it is
-//! just data, like any other slot, and a behavior (an animation module, a graph
+//! just data, like any other key, and a behavior (an animation module, a graph
 //! time node) derives whatever it needs — `dt`, elapsed time — by reading these
 //! keys.
 //!

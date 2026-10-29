@@ -40,7 +40,6 @@ tokio-util = "0.7"
 # Middleware backend selection, forwarded to ros2-client (which requires exactly
 # one of `dds`/`zenoh`). DDS is the default; `zenoh` is rmw_zenoh-compatible.
 # Build the Zenoh backend with `--no-default-features --features zenoh`.
-# Consumers expose these as `ros2-dds` / `ros2-zenoh` with `ros2` = `ros2-dds`.
 # Each also turns on `arora-msgs-ros2`'s matching backend feature, which is
 # what makes its REP-2016 hasher available: a typed publisher keys itself on
 # its message's hash so native `rmw_zenoh` subscribers match it.

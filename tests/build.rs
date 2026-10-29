@@ -1,13 +1,11 @@
 use std::env;
 use std::path::PathBuf;
 
-// We deliberately do NOT bindep arora-cli or the host-targeted modules
-// (polly, test-cpp, test-cpp-2). Bindeps on workspace members with cdylib
-// crate-type produce duplicate compilation units (cargo issue #6313 / output
-// filename collision warnings). Instead, rely on the workspace having been
-// built — `cargo build --workspace` populates everything we need at known
-// paths under <workspace>/target. The integration tests panic with a clear
-// message if an artifact is missing.
+// Hand the integration tests the artifacts cargo builds for them: arora-cli,
+// a bin artifact build-dependency, and the Rust guests, cdylib artifact
+// build-dependencies for wasm32-wasip2. The C++ guests are dev-dependencies
+// whose build scripts write their module directories under
+// <workspace>/target/<profile>/modules; nothing here forwards them.
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
@@ -25,7 +23,7 @@ fn main() {
         ""
     };
 
-    // Try to get arora-cli from bindeps first, fall back to target dir
+    // arora-cli from its artifact dependency, else the target directory's
     let arora_cli = env::var("CARGO_BIN_FILE_ARORA_CLI")
         .ok()
         .map(PathBuf::from)

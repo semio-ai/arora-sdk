@@ -225,8 +225,8 @@ pub struct Arora {
     pub(crate) store_changes: Subscription,
     // The built-in clock: monotonic nanoseconds since start, advanced by each
     // step's `dt`. Published into the store's built-in keys each step, before any
-    // behavior ticks; the flush phase filters the built-in namespace out of what
-    // it forwards outbound.
+    // behavior ticks; those writes travel outbound like any other change, so a
+    // remote can derive the device's step rate from them.
     pub(crate) clock: Clock,
 }
 

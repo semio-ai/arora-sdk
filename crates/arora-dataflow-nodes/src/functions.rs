@@ -1,6 +1,6 @@
 //! The node vocabulary as the functions of three Arora modules:
-//! [`DATAFLOW`] holds the general node kinds, [`GEOMETRY`] those building a
-//! geometry type from numbers, and [`KINEMATICS`] the kinematics nodes
+//! [`DATAFLOW`] holds the general node kinds, [`GEOMETRY`] the
+//! three-vector ones, and [`KINEMATICS`] the kinematics nodes
 //! ([`module_of`]).
 //!
 //! Each node kind is one function, named by the kind's graph-JSON name
@@ -70,7 +70,10 @@ pub const DATAFLOW: Module = Module {
     name: "@arora/dataflow",
 };
 
-/// The node kinds building a geometry type from numbers: `vec3cross`.
+/// The three-vector node kinds: `vec3cross`, the cross product of two
+/// operands of three numbers each, returned in the first operand's form. When
+/// an operand is not three numbers, the result is NaN in that form (the
+/// second operand's when the first is not numeric).
 pub const GEOMETRY: Module = Module {
     id: Uuid::from_u128(0x6765_6f6d_6574_7279_0000_0000_0000_0001),
     name: "@arora/geometry",

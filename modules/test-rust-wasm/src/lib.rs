@@ -1,5 +1,6 @@
-//! Engine-local, behavior-tree-free test guest. The Status-returning version
-//! lives in arora-sdk as test-rust-wasm-with-nodes.
+//! The reference Rust test guest: a module declared with `arora-module`,
+//! depending on no behavior-tree crate. The guest whose functions return a
+//! behavior-tree `Status` is `test-behavior-tree-nodes`.
 
 use arora_types::record::scope::Scope;
 use arora_types::AroraType;
