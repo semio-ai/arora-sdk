@@ -312,8 +312,10 @@ To release a crate:
    published first, and the workflow retries a publish while the index catches
    up.
 
-A crate that fails to publish leaves a warning in the run, and the run still
-succeeds: read its warnings after a release. A new crate joins the list once it
+A crate that fails to publish does not stop the others: the workflow tries
+every crate, then fails, naming each one it did not publish. Re-run the job
+once the cause is fixed (an index that had not caught up needs only the
+re-run); the crates already published are skipped. A new crate joins the list once it
 exists on crates.io with a Trusted Publisher for `semio-ai/arora-sdk` and
 `release.yml`; crates.io configures one only on an existing crate, so a new
 crate's first version is published by hand.
