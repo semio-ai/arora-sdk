@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "16.0.1"
+version = "16.0.2"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -101,7 +101,7 @@ arora-studio-bridge-client = { version = "11", optional = true }
 # Headless device-runner deps (native-only, optional). `dirs` finds the per-user
 # directory the device directory defaults to; `serde_json` reads a module
 # directory's `header.json`.
-dirs = { version = "6", optional = true }
+dirs = { version = "7", optional = true }
 serde_json = { version = "1", optional = true }
 clap = { version = "4", features = ["derive", "env"], optional = true }
 env_logger = { version = "0.11", optional = true }
@@ -110,11 +110,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring"], opti
 # The operator interface (`arora::operator`) is an async trait.
 async-trait = { version = "0.1", optional = true }
 # Terminal operator UI (the "tui" feature).
-ratatui = { version = "0.29", optional = true }
+ratatui = { version = "0.30", optional = true }
 # Own-process CPU usage for the TUI's indicators panel.
-sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
+sysinfo = { version = "0.40", default-features = false, features = ["system"], optional = true }
 # RUST_LOG-style filtering for the TUI's in-pane log capture.
-env_filter = { version = "0.1", optional = true }
+env_filter = { version = "2", optional = true }
 
 # The async runtime for everything native: the run loop's metronome (`time`),
 # the binary's `#[tokio::main]` and spawned servers (`rt-multi-thread`,
@@ -125,7 +125,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 # The run loop's metronome sleep on wasm32: a `setTimeout`-backed future.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 
 [dev-dependencies]
 async-trait = "0.1"
