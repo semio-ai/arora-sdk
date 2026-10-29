@@ -34,6 +34,7 @@ INPUTS=(
   'crates/arora-engine/wit/* test-cpp-2'
   'crates/arora-engine/wit/* example-cpp'
   'crates/arora-engine/wit/* arora-module'   # tests/wit.rs: one world for guest and engine
+  'crates/arora-behavior-tree/docs/text.md arora-behavior-tree'   # readable/tests.rs checks its examples
 )
 
 meta=$(cargo metadata --format-version 1 --all-features)
