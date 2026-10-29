@@ -3458,7 +3458,6 @@ mod data_nodes {
     use arora_behavior::{BehaviorContext, BehaviorInterpreter};
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::data::{DataStore, Key, StateChange};
-    use arora_types::gen_uuid_from_str;
     use arora_types::value::{Structure, StructureField, Value};
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -3479,7 +3478,7 @@ mod data_nodes {
 
     /// The variable named `name`, as the lowering identifies it.
     fn variable(name: &str) -> Uuid {
-        gen_uuid_from_str(name)
+        crate::graph::key_variable(name)
     }
 
     /// A binding to the key `name`.

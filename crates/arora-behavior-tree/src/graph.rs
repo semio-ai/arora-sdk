@@ -13,7 +13,7 @@
 //! - [`Source::Value`] → [`Expression::Value`]
 //! - [`Source::Key`] → [`Expression::VariableId`], the variable named by the
 //!   key (the Direct convention: variable name == store key), its id
-//!   [`gen_uuid_from_str`] of the key, so every binding to one key shares one
+//!   [`key_variable`] of the key, so every binding to one key shares one
 //!   cell. A key starting with `.` is tree-local.
 //! - [`Source::Port`] → [`Expression::NodeArgument`] (another node's port)
 //! - [`Source::Select`] → [`Expression::Select`]
@@ -21,13 +21,21 @@
 use std::collections::HashMap;
 
 use arora_behavior::graph::{Graph, Source};
-use arora_types::gen_uuid_from_str;
 use uuid::Uuid;
 
 use crate::error::BehaviorTreeError;
 use crate::schema::{Expression, Node as SchemaNode, NodeParameterId};
 use crate::variable::VariableResolver;
 use crate::{load_behavior_tree_nodes_with, BehaviorTree};
+
+const KEY_NAMESPACE: Uuid = uuid::uuid!("beed0a7b-1d2f-4877-ab4f-1be522a521aa");
+
+/// The id of the variable the lowering names by the key `key`, derived from
+/// every byte of the key: two keys never share one, as two spellings of a
+/// uuid would if a key were read as the uuid it spells.
+pub(crate) fn key_variable(key: &str) -> Uuid {
+    Uuid::new_v5(&KEY_NAMESPACE, key.as_bytes())
+}
 
 /// Lower a shared [`Graph`] into the behavior tree's [`schema::Node`] list, root
 /// first (the loader takes the first node as the tree root).
@@ -93,7 +101,7 @@ fn source_to_expression(source: &Source, variables: &mut HashMap<Uuid, String>) 
     match source {
         Source::Value(value) => Expression::Value(value.clone()),
         Source::Key(key) => {
-            let id = gen_uuid_from_str(key);
+            let id = key_variable(key);
             variables.entry(id).or_insert_with(|| key.clone());
             Expression::VariableId(id)
         }
@@ -320,8 +328,8 @@ mod tests {
         graph.nodes.push(node);
 
         let (nodes, variables) = lower_graph(&graph).unwrap();
-        let face = gen_uuid_from_str("face/x");
-        let motor = gen_uuid_from_str("motor/left");
+        let face = key_variable("face/x");
+        let motor = key_variable("motor/left");
         assert_eq!(nodes[0].arguments[&input], Expression::VariableId(face));
         assert_eq!(nodes[0].arguments[&other], Expression::VariableId(face));
         assert_eq!(
@@ -335,6 +343,32 @@ mod tests {
                 (motor, "motor/left".to_string())
             ])
         );
+    }
+
+    /// Two keys are two variables, however alike: keys spelling one uuid in
+    /// two cases are two store keys.
+    #[test]
+    fn keys_spelling_one_uuid_are_two_variables() {
+        let node_id = Uuid::from_u128(0x1);
+        let [lower, upper] = [Uuid::from_u128(0x10), Uuid::from_u128(0x11)];
+        let mut node = leaf(node_id, SUCCEED_FUNCTION_ID);
+        for (port, key) in [
+            (lower, "00000000-0000-4000-8000-0000000000ab"),
+            (upper, "00000000-0000-4000-8000-0000000000AB"),
+        ] {
+            node.bind.insert(port, Source::Key(key.into()));
+        }
+        let mut graph = Graph::empty();
+        graph.root = Some(node_id);
+        graph.nodes.push(node);
+
+        let (nodes, variables) = lower_graph(&graph).unwrap();
+        let variable = |port| match &nodes[0].arguments[&port] {
+            Expression::VariableId(id) => variables[id].clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(variable(lower), "00000000-0000-4000-8000-0000000000ab");
+        assert_eq!(variable(upper), "00000000-0000-4000-8000-0000000000AB");
     }
 
     /// The variables reach the loader with the key as their name, so the

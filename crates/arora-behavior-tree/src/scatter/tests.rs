@@ -10,7 +10,6 @@ use arora_behavior::{BehaviorContext, BehaviorInterpreter, FunctionIndex, Status
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::data::{DataStore, Key, Slot, StateChange};
-use arora_types::gen_uuid_from_str;
 use arora_types::value::Value;
 use uuid::Uuid;
 
@@ -58,7 +57,7 @@ impl CallBridge for Bridge {
 
 /// The variable named `name`.
 fn variable(name: &str) -> Uuid {
-    gen_uuid_from_str(name)
+    crate::graph::key_variable(name)
 }
 
 /// A binding to the key `name`: under the Direct convention, the store key
