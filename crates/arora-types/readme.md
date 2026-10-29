@@ -1,292 +1,307 @@
-# Arora Types
+# arora-types
 
-Shared type definitions for the [Arora](https://github.com/semio-ai/arora-sdk)
-framework: the vocabulary the engine, modules, registries and clients use to
-describe modules, types and runtime values. It carries no engine dependencies, so
-it is safe to depend on from tools, bindings and remote clients.
+The vocabulary every part of Arora shares: the values that cross a module
+boundary, the types that describe them, the calls that carry them, and the
+records that name types and modules from one machine to another. It depends on
+no engine, so a tool, a binding or a remote client can depend on it alone.
 
-## High-level vs. low-level types
+## Values
 
-High-level types use names to reference other entities. Names are meant to be
-resolved using a
-[registry](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-registry/readme.md),
-or local indexes associating [UUIDs](https://docs.rs/uuid) to names.
+A [`Value`](src/value.rs) is any piece of data Arora moves: a function's
+argument or result, the state of a key in a data store, a parameter's default.
+It is one enum:
 
-Low-level types are produced for contexts where [UUIDs](https://docs.rs/uuid) are
-sufficient, if not more efficient for looking them up.
+| Variants | Hold |
+|---|---|
+| `Unit`, `Boolean`, `U8` … `U64`, `I8` … `I64`, `F32`, `F64`, `String`, `Uuid` | one primitive |
+| `Option` | a value, or none |
+| `ArrayBoolean`, `ArrayU8` … `ArrayF64`, `ArrayString` | a homogeneous array of a primitive |
+| `ArrayValue` | an array of values of any shape |
+| `Structure` | the fields of a structure, each under its **field id**, under the structure's **type id** |
+| `Enumeration` | one variant of an enumeration, under its **variant id**, with that variant's payload |
+| `ArrayStructure`, `ArrayEnumeration` | an array of structures or enumerations of one type, its id stated once |
+| `KeyValue` | fields under their **names**, for data no declared type describes |
 
-## Module
+Data is identified by UUID, not by name. A `Structure` states which type it is
+by that type's id and holds each field under the field's id, so renaming a type
+or a field in source changes nothing a reader sees. Each primitive and built-in
+form has a fixed, well-known id ([`ty::F64_ID`](src/ty/mod.rs),
+`ty::STRING_ID`, …, `ty::KEY_VALUE_ID`, `ty::UUID_ID`). `Value::type_uuid`
+answers a value's id: the well-known one, or its type's for a structure or an
+enumeration.
 
-The "high-level"
-[`ModuleDefinition`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/module/high.rs)
-completely describes a module to implement. It is usually saved as a `module.yaml`
-file (using [`serde_yaml`](https://docs.rs/serde_yaml)). It can be used by the
-code generators of
-[`arora-module-cli`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-module-authoring/cli/readme.md)
-to produce the proper bindings for a module.
-
-The "low-level" format of a module is called a
-[`Header`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/module/low.rs),
-and is produced by the code generators under the file name `header.yaml`. It is
-used to load the module in the engine, with
-[`arora-cli`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-cli/readme.md).
-
-Modules may export symbols, so that they can be called by any client. Modules may
-also declare symbols to import from other modules, so that the right bindings are
-made available in the implementation. The only symbols supported so far are
-functions. Their declaration may involve references to existing [types](#type-ty):
-
-- directly (`TypeRef::Scalar`)
-- as the element type of an array (`TypeRef::Array`)
-- as the key or value type of a map (`TypeRef::Map`). This kind of reference is
-  not used in this project, in practice.
-
-A module written in Rust can carry its own interface instead of a `module.yaml`:
-the marker type its declaration emits implements
-[`AroraModule`](src/module/declared.rs),
-which yields the `Header` for a given executor (the exporter names it), the
-store record, and its exported functions, callable. The trait is what
-`arora-types` provides; the declaration macros live in `arora-module`.
-
-## Type (`ty`)
-
-Structured types can be described in both
-[high-level](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/ty/high.rs)
-or
-[low-level](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/ty/low.rs)
-ways, so that they can be used in both high-level or low-level modules. This
-library can describe:
-
-- [primitive types](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/ty/mod.rs),
-  equivalent in Rust to: `bool`, `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`,
-  `i64`, `f32`, `f64`, `String`.
-- enumerations, similar to Rust `enum`s: each variant can hold a value of any
-  other type, and does not necessarily translate into an integer.
-- structures, similar to Rust `struct`s and C / C++ PODs: each field has a name
-  and holds a value.
-
-## Value
-
-A [`Value`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/value.rs)
-describes a value defined in the low-level [types](#type-ty). It is generic and
-can also be serialized (using [`serde`](https://docs.rs/serde)). For other kinds
-of conversions a common error type is suggested:
-`arora_types::value::ConversionError`.
-
-`Value`s are useful at runtime to pass arguments to functions, but also to
-describe `default_value`s for function parameters.
-
-> Note: we call "parameter" the declaration of what a function may accept as
-> inputs (or outputs, if `mutable`). We call "argument" the actual value passed to
-> the function.
-
-## Serializing a `Value` (`value_serde`)
-
-[`value_serde`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/value_serde/mod.rs)
-converts a [`Value`](#value) to and from other representations. One distinction
-runs through all of it: **does the data carry real type identity (explicit
-UUIDs), or only field names?** That is the difference between a `Structure` and a
-`KeyValue`, and it decides which layer you are in.
-
-- **the basic serde bridge — no declared type.** Any Rust `Serialize` /
-  `Deserialize` type converts to and from a `Value` with `to_value` /
-  `from_value`. With no type to supply ids, a struct becomes a **`KeyValue`**: a
-  *name-keyed* map that carries each field's name — **not** a `Structure`. This
-  is deliberate. Minting an id by hashing a field or type name would be a *false*
-  identity: it collides, and it silently changes the moment the field or struct
-  is renamed. So when there are no real ids, the honest form keeps the names.
-  (Rust maps become `KeyValue`s the same way; an enum keeps its variant tag as an
-  `Enumeration` whose payload is a `KeyValue`.)
-- **the seeded / id-based bridge — a declared type supplies the ids.** The same
-  conversion, but a declared [`ty::low::Type`](#type-ty) supplies the real ids,
-  so the struct becomes a **`Structure`** carrying the type's and fields'
-  declared UUIDs (`to_value_seeded` / `from_value_seeded`). The `Type` is
-  normally generated straight from the Rust type with `#[derive(AroraType)]` —
-  which **requires** an explicit `#[arora(id = "…")]` on the type and each field,
-  precisely so the ids are stable rather than name hashes. Use this whenever
-  identity must survive a rename or cross the wire.
-- **the type-directed walk** — a `Value` to and from a **wire format** (the
-  arora binary buffers, or ROS 2 CDR), driven by a runtime `ty::low::Type` and a
-  `TypeRegistry` that resolves the types nested fields reference.
-
-In one line: **no ids ⇒ `KeyValue` (the names are the key); declared ids ⇒
-`Structure` (the UUIDs are the key).**
+Rust primitives, `String`, `Uuid`, an `Option` of any of them and a `Vec` of a
+primitive convert into a `Value` with `From`:
 
 ```rust
-use arora_types::{value_serde, value::Value, AroraType};
+use arora_types::value::Value;
 
-// Basic serde — no type, so a name-keyed KeyValue.
-#[derive(serde::Serialize)]
-struct Point { x: f64, y: f64 }
-let kv = value_serde::to_value(&Point { x: 1.0, y: 2.0 }).unwrap();
-assert!(matches!(kv, Value::KeyValue(_)));
+assert_eq!(Value::from(1.5f64), Value::F64(1.5));
+assert_eq!(Value::from(vec![1u8, 2]), Value::ArrayU8(vec![1, 2]));
+assert_eq!(Value::from(None::<f64>), Value::Option(None));
+```
 
-// Id-based — declared UUIDs, so a Structure keyed by those ids.
-#[derive(serde::Serialize, AroraType)]
+`Value::kind` answers which variant a value is, as a
+[`value::Type`](src/value.rs); `Value::conforms_to` compares it exactly, with no
+conversion — an `F32` is not of `F64`, an `ArrayValue` of floats not of
+`ArrayF64`.
+
+A `Value` serializes with serde, tagged by its variant: `{"f64": 1.5}`,
+`{"struct": {"id": "…", "fields": [{"id": "…", "value": {"i32": 3}}]}}`.
+
+## Types
+
+The id a structure or an enumeration carries names a **type definition**, a
+[`ty::low::Type`](src/ty/low.rs): its id, name, description and kind.
+
+- `TypeKind::Structure` — its fields, each a name and a type reference under
+  the field's id, in declared order.
+- `TypeKind::Enumeration` — its variants, each a name and a payload type
+  reference under the variant's id, in declared order.
+- `TypeKind::Primitive` — a type reference to a primitive.
+
+A **type reference**, [`module::low::TypeRef`](src/module/low.rs), names the
+type of a field, a variant's payload, a parameter or a return value by id:
+
+| `TypeRef` | Means |
+|---|---|
+| `Scalar { id }` | one value of type `id` |
+| `Array { id }` | any number of values of type `id` |
+| `FixedArray { id, len }` | exactly `len` values of type `id` |
+| `Option { id }` | a value of type `id`, or none |
+| `Map { key_id, value_id }` | a map, carried as a `KeyValue` |
+
+A [`TypeRegistry`](src/ty/mod.rs) holds definitions by id, so a reference to a
+structure or an enumeration can be followed; a primitive is known by its id
+and needs no entry. With a definition in hand:
+
+- `Type::validate` checks a value against it — the type id, every field once
+  and of its declared type, a variant the enumeration declares;
+- `Type::default_value` builds the value the type rests at. A field naming
+  another structure or enumeration gets a shell of that type with no fields,
+  so the default of a structure holding one does not validate;
+- `value_serde::write_value` and `read_value` encode and decode a value in a
+  wire format ([below](#wire-formats)).
+
+## Rust types as Arora types
+
+The [`AroraType`](src/arora_type.rs) trait is a Rust type describing itself:
+`arora_type_id()`, `arora_type()` (its `ty::low::Type`), `register_types()` (it
+and every type it names, into a `TypeRegistry`), `arora_type_version()`, and
+its [record](#records). `#[derive(AroraType)]`
+([`arora-types-derive`](../arora-types-derive/readme.md), re-exported here) writes
+the implementation from the Rust definition, every id pinned in an attribute,
+and adds `From<T> for Value` and `TryFrom<Value> for T`:
+
+```rust
+use arora_types::{value::Value, AroraType};
+
+#[derive(Debug, PartialEq, AroraType)]
 #[arora(id = "0a0a0a0a-0000-4000-8000-000000000001")]
-struct TypedPoint {
-    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000002")] x: f64,
-    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000003")] y: f64,
+struct Point {
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000002")]
+    x: f64,
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000003")]
+    y: f64,
 }
-let (ty, registry) = TypedPoint::arora_type_with_registry();
-let s = value_serde::to_value_seeded(&TypedPoint { x: 1.0, y: 2.0 }, &ty, &registry).unwrap();
-assert!(matches!(s, Value::Structure(_)));
+
+let value = Value::from(Point { x: 1.0, y: 2.0 }); // a Structure under Point's ids
+assert_eq!(value.type_uuid(), Point::arora_type_id());
+assert!(Point::arora_type().validate(&value).is_ok());
+assert_eq!(Point::try_from(value).unwrap(), Point { x: 1.0, y: 2.0 });
 ```
 
-### Writing a new wire format
+## Converting any serde type
 
-A wire format is a
-[`ValueWriter`](https://github.com/semio-ai/arora-sdk/blob/main/crates/arora-types/src/value_serde/walk.rs)
-/ `ValueReader` pair. You implement the primitive read/write operations and the
-struct framing; the walk (`write_value` / `read_value`) drives them over a
-`ty::low::Type`. You never match on `Value` variants or recurse the type
-yourself — the walk does that, in the type's declared field order, and validates
-the value against the type as it goes.
+[`value_serde`](src/value_serde/mod.rs) converts any `Serialize` /
+`Deserialize` type to and from a `Value`, without a derive. Whether real ids are
+available decides the form:
 
-A writer receives each datum in turn, plus explicit struct framing:
+- **`to_value` / `from_value`** — no type is given, so a struct becomes a
+  `KeyValue` carrying its field names, not a `Structure`. An id made by hashing
+  a name would change the moment the type or the field is renamed; the names
+  are the honest key. A map is a `KeyValue` too, a sequence an `ArrayValue`; an
+  enum's unit variant is its name as a string, any other variant a one-entry
+  `KeyValue` keyed by the variant's name.
+- **`to_value_seeded` / `from_value_seeded`** — a `ty::low::Type` and its
+  `TypeRegistry` supply the ids, so a struct becomes a `Structure` under the
+  declared type and field ids, and a sequence declared as an array takes its
+  typed form (`ArrayF64`, `ArrayStructure`, …).
+
+No ids, a `KeyValue` keyed by names; declared ids, a `Structure` keyed by ids.
 
 ```rust
-use arora_types::value_serde::{Result, ValueWriter};
-use arora_types::Uuid;
+use arora_types::{value::Value, value_serde, AroraType};
 
-/// A minimal writer: a length-prefixed little-endian binary format.
-#[derive(Default)]
-struct MyWriter {
-    out: Vec<u8>,
+#[derive(serde::Serialize, serde::Deserialize, AroraType)]
+#[arora(id = "0a0a0a0a-0000-4000-8000-000000000001")]
+struct Point {
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000002")]
+    x: f64,
+    #[arora(id = "0a0a0a0a-0000-4000-8000-000000000003")]
+    y: f64,
 }
 
-impl ValueWriter for MyWriter {
-    fn write_i32(&mut self, v: i32) -> Result<()> {
-        self.out.extend_from_slice(&v.to_le_bytes());
-        Ok(())
-    }
-    fn write_string(&mut self, v: &str) -> Result<()> {
-        self.out.extend_from_slice(&(v.len() as u32).to_le_bytes());
-        self.out.extend_from_slice(v.as_bytes());
-        Ok(())
-    }
-    // ...one method per primitive: write_unit, write_bool, write_u8 ..= write_u64,
-    // write_i8 ..= write_i64, write_f32, write_f64, and one bulk method per scalar
-    // array: write_bool_array ..= write_f64_array, write_string_array...
+let named = value_serde::to_value(&Point { x: 1.0, y: 2.0 }).unwrap();
+assert!(matches!(named, Value::KeyValue(_)));
 
-    fn begin_struct(&mut self, _id: Uuid, _field_count: usize) -> Result<()> {
-        Ok(()) // this format is positional — nothing to frame here
-    }
-    fn begin_field(&mut self, _id: Uuid) -> Result<()> {
-        Ok(())
-    }
-    // ...plus the struct-array framing: begin_struct_array / begin_struct_element.
-}
+let (ty, registry) = Point::arora_type_with_registry();
+let typed = value_serde::to_value_seeded(&Point { x: 1.0, y: 2.0 }, &ty, &registry).unwrap();
+assert!(matches!(typed, Value::Structure(_)));
 ```
 
-Driving it is one call: `write_value(&ty, &registry, &value, &mut MyWriter::default())`.
+## Calls
 
-The reader is the mirror image, and takes the *shape* from the type. Struct
-framing on read is directed by the walk — it passes the expected id and field
-count — so a reader either validates them against its own framing or ignores
-them:
+A [`Call`](src/call.rs) invokes one function: `module_id`, the module exporting
+it; `id`, the function's id; and `args`, each argument a `StructureField` under
+its parameter's id. Its [`CallResult`](src/call.rs) carries `ret`, the return
+value, and `mutated`, the values of the call's mutable parameters after the
+call. A parameter is an input, and a `mutable` one an output too: a call has in
+and out parameters, and hands its outputs back to its caller.
 
-```rust
-fn enter_struct(&mut self, _expected_id: Uuid, _field_count: usize) -> Result<()> {
-    Ok(()) // positional: the type says how many fields follow, so read nothing
-}
-```
+[`CallBridge`](src/call.rs) is how code calls functions without depending on
+what answers them:
 
-The one decision a new format makes is whether it is **self-describing** or
-**positional**, illustrated by the two backends already in the tree:
+- `arora_call` dispatches a `Call` to the module it names; a call naming no
+  module is refused. `arora_call_borrowed` does the same with borrowed
+  arguments.
+- `arora_register_callable` registers a [`Callable`](src/call.rs) and returns
+  its `CallableId`; `arora_call_indirect` invokes it by that handle, and
+  `arora_unregister_callable` drops it.
 
-- **self-describing** — the arora buffers backend
-  ([`arora-buffers`](https://github.com/semio-ai/arora-sdk/tree/main/crates/arora-buffers))
-  writes a type tag before each datum; on read it consumes that tag and
-  **validates** it against the type the walk asked for. `begin_struct` /
-  `begin_field` emit the id and count; `enter_struct` / `enter_field` read and
-  check them.
-- **positional** — the ROS 2 CDR backend (`arora-bridge-ros2`'s `cdr` module)
-  writes no framing at all: the type alone determines the layout, so the framing
-  methods are no-ops and the reader takes each field's type from the walk.
+The engine implements `CallBridge`; the behavior tree and module-shaped
+libraries consume it, which is why they run against any implementation.
+[`docs/dispatch.md`](../../docs/dispatch.md) covers direct and indirect
+dispatch. A failed call is a `CallError`.
 
-The walk covers scalars, strings, nested structures and homogeneous arrays. A
-scalar array goes through the `write_*_array` / `read_*_array` bulk methods (the
-element type framed once, not re-tagged per element); an array of structures
-through `begin_struct_array` / `begin_struct_element`, each element a headerless
-struct body. An optional goes through `begin_option` / `enter_option`: a
-presence flag, then the element when present. Each format spells the flag its
-own way: ROS 2 CDR writes it as the count, 0 or 1, of a bounded sequence
-`T[<=1]`. A format with no optional form returns an error there. Enumerations
-and maps extend the trait and the walk together.
+## Modules
 
-## Web Bindings
+A module's interface is the functions it exports — each an id, a name,
+parameters (an id, a name, a type reference, `mutable`, an optional
+`default_value`) and a return type reference — and the functions of other
+modules it imports. Four forms carry it:
 
-The `Value` type is exposed to JavaScript/TypeScript via WebAssembly bindings
-(published as the `@semio-ai/arora-types` npm package). This lets you work with
-Arora values from JavaScript environments.
+| Form | What it is |
+|---|---|
+| [`module::high::ModuleDefinition`](src/module/high.rs) | The interface as an author writes it in a `module.yaml`: each type named by a string — a primitive's name (`u32`, `str`), a record's path (`arora.Status`) or an id. |
+| [`module::low::Header`](src/module/low.rs) | The same interface resolved, every type reference an id. Module authoring writes it as `header.json` beside the module's artifact, and as a `module.yaml` `arora-cli --header` reads. |
+| [`module::low::ModuleDefinition`](src/module/low.rs) | A `Header` with the module's executable bytes: what an engine loads. |
+| [`module::declared::AroraModule`](src/module/declared.rs) | The trait a module declared in Rust implements, through the `arora-module` macros: `header(executor)`, `record(parent)`, `scope()`, `type_records()`, and `exports()`, each an [`AroraFunction`](src/module/declared.rs) ready to call. |
 
-### Using from JavaScript/TypeScript
+## Records
+
+Types and modules travel between machines as **records**: versioned
+declarations of a structure, an enumeration or a module, each under a stable id,
+organized in folders whose top level is the publisher's scope.
+[`record`](src/record/mod.rs) holds them in two forms — *unfrozen*, references
+carrying version requirements, and *frozen*, every reference pinned to one
+version, the form record files and the store carry — and `Freeze` with a
+`Resolver` turns one into the other. `AroraType::record` and
+`AroraType::register_records`, and `AroraModule::record` and
+`AroraModule::type_records`, produce the records of a type or module declared
+in Rust. [`docs/records.md`](../../docs/records.md) explains the model, and
+[`arora-registry`](../arora-registry/readme.md) holds records.
+
+## Data
+
+[`data`](src/data/mod.rs) is the vocabulary of a device's shared state, which
+its HAL, bridges and behaviors read and write:
+
+- [`Key`](src/data/state.rs) — the name of a value: a `/`-separated path
+  (`arora/time`, `display/face/compressed`). A trailing `.attribute` on the
+  last segment (`head_yaw.target_position`) is a naming convention, nothing
+  more: stores, bridges and access checks compare the whole path.
+- [`State`](src/data/state.rs) — keys and their values;
+  [`StateChange`](src/data/state.rs) — keys set and keys unset.
+- [`DataStore`](src/data/store.rs) — a shared, observable store: `read`,
+  `write`, `snapshot`, `subscribe` and `subscribe_prefix` (a `Subscription`
+  whose first change is the current state), and `slot`, a
+  [`Slot`](src/data/store.rs) — a handle on one key's cell, resolved once.
+  [`arora-simple-data-store`](../arora-simple-data-store) implements it.
+- [`KeyMeta`](src/data/store.rs) — what a key is beyond its value: the
+  `value::Type` it holds, its range, unit, resting value and description, and
+  whether a writer outside the device may set it. A key is closed to remote
+  writers unless its meta opens it (`KeyMeta::editable`, per key with
+  `DataStore::set_meta` or per subtree with `DataStore::set_prefix_meta`); the
+  device's own writers are never checked.
+
+## Wire formats
+
+A wire format is a [`ValueWriter`](src/value_serde/walk.rs) / `ValueReader`
+pair: the primitive reads and writes, bulk arrays, and the framing of
+structures, arrays of structures and options. `write_value` and `read_value`
+drive it over a `ty::low::Type` and a `TypeRegistry` — fields in declared
+order, the value validated against the type as it goes — so a format never
+matches on `Value` variants or recurses a type itself. Its one choice is how
+much it frames:
+
+- **self-describing** — arora-buffers'
+  [`froto_checked_value`](../arora-buffers/src/froto_checked_value.rs) writes a
+  type tag before each datum and, on read, checks it against the type the walk
+  asks for;
+- **positional** — the ROS 2 CDR codec of
+  [`arora-msgs-ros2`](../arora-msgs-ros2/src/cdr.rs) writes no type
+  information: the type alone fixes the layout, so a structure and its fields
+  write nothing, a variable-length array or an optional writes only its CDR
+  sequence count (an optional's is 0 or 1), and a fixed-length array only its
+  elements.
+
+The walk covers primitives, strings, structures, variable- and fixed-length
+arrays and options. A value whose type is an enumeration, a map or a uuid is
+refused with an error.
+
+## JavaScript bindings
+
+Built for `wasm32-unknown-unknown`, the crate exports two wasm-bindgen classes
+from [`wasm_value`](src/wasm_value.rs): `Value`, wrapping a `Value`, and
+`ValueType`, its variant. arora-types builds as an `rlib` only, so they reach
+JavaScript through a `cdylib` that links it, such as
+[`arora-web`](../arora-web/readme.md).
 
 ```typescript
-import { Value, ValueType } from "@semio-ai/arora-types";
-
-// Create values with explicit types
-const num = new Value(ValueType.F64, 3.14);
-const str = new Value(ValueType.String, "hello");
-const bool = new Value(ValueType.Boolean, true);
-
-// Get the type and value
-console.log(num.type);  // ValueType.F64
-console.log(num.get()); // 3.14
-
-// Auto-detect types from JavaScript values
-const autoNum = Value.from(42);        // Detects as F64
-const autoStr = Value.from("world");   // Detects as String
-const autoBool = Value.from(false);    // Detects as Boolean
-const autoNull = Value.from(null);     // Converts to Unit
-
-// Arrays
-const numArr = new Value(ValueType.ArrayF64, [1.0, 2.0, 3.0]);
-const mixedArr = Value.from([42, "text", true]); // ArrayValue
-
-// Key-value objects
-const obj = Value.from({ name: "Alice", age: 30 });
-console.log(obj.type); // ValueType.KeyValue
-console.log(obj.get()); // { name: "Alice", age: 30 }
-
-// Mutable values with type checking
-const val = new Value(ValueType.I32, 10);
-val.set(20);  // OK
-val.set("x"); // Error: type mismatch
+const speed = new Value(ValueType.F64, 3.14); // integers are range-checked
+speed.type;                    // ValueType.F64
+speed.get();                   // 3.14
+speed.set("fast");             // throws: not an f64
+Value.from(42);                // F64: a number defaults to f64
+Value.from([1, 2, 3]);         // ArrayF64
+Value.from([42, "text"]);      // ArrayValue
+Value.from({ name: "Alice" }); // KeyValue
+Value.from(null);              // Option, none
 ```
 
-### Type mapping
+| `Value` | In JavaScript |
+|---|---|
+| `Unit` | `undefined` |
+| `Option` | its value, or `null` |
+| integers, floats | `number`; a 64-bit integer loses precision past 2^53 |
+| `Uuid` | its string |
+| arrays | `Array` |
+| `KeyValue` | a plain object |
+| `Structure` | `{ id, fields: { <field id>: value } }` |
+| `Enumeration` | `{ id, variant_id, value }` |
 
-| Rust Type                 | WASM `ValueType`          | JavaScript Type | Notes                            |
-|---------------------------|---------------------------|-----------------|----------------------------------|
-| `()`                      | `Unit`                    | `null`          |                                  |
-| `bool`                    | `Boolean`                 | `boolean`       |                                  |
-| `u8`, `u16`, `u32`, `u64` | `U8`, `U16`, `U32`, `U64` | `number`        | Range validated                  |
-| `i8`, `i16`, `i32`, `i64` | `I8`, `I16`, `I32`, `I64` | `number`        | Range validated                  |
-| `f32`, `f64`              | `F32`, `F64`              | `number`        | Default for auto-detection       |
-| `String`                  | `String`                  | `string`        |                                  |
-| `Option<T>`               | `Option`                  | `T \| null`     |                                  |
-| `Vec<T>`                  | `Array*`                  | `T[]`           | Typed arrays                     |
-| `Value[]`                 | `ArrayValue`              | `any[]`         | Mixed-type arrays                |
-| `KeyValue`                | `KeyValue`                | `object`        | Plain objects                    |
-| `Structure`               | `Structure`               | `object`        | With `id` and `fields`           |
-| `Enumeration`             | `Enumeration`             | `object`        | With `id`, `variant_id`, `value` |
-| `Uuid`                    | `Uuid`                    | `string`        | UUID string                      |
+`Value.from` reads an object with a uuid `id` and a `variant_id` as an
+enumeration, one with a uuid `id` and `fields` as a structure, and any other
+object as a `KeyValue`. `ValueType`'s numbers are its own, not the tags of the
+[arora-buffers](../arora-buffers/readme.md) wire format.
 
-### Building and testing the bindings
+## Reference
 
-```bash
-# Build the WASM module (creates a pkg/ directory for wasm32-unknown-unknown)
-npm run build:wasm
-# Run the JS integration tests against the locally built pkg/
-npm test
-```
+**Features.** `derive` (default) re-exports `#[derive(AroraType)]`; without it
+the crate has no proc-macro dependency, and `AroraType` is implemented by hand.
 
-The integration tests verify that all `ValueType` values are exposed, that value
-construction/retrieval works for every primitive type, that integer range and
-`set()` type checks hold, and that arrays, auto-detection and `KeyValue` objects
-behave as expected.
+**Three meanings of "type".**
+
+| Item | What it describes |
+|---|---|
+| [`value::Type`](src/value.rs) | which variant a value is — what `KeyMeta` states and `Value::conforms_to` checks |
+| [`ty::low::Type`](src/ty/low.rs) | a type definition, its references by id — what validation, defaults and the wire walk read. [`ty::high::Type`](src/ty/high.rs) is the same definition naming types by string. |
+| [`record::ty::UnfrozenTy` / `FrozenTy`](src/record/ty.rs) | the type of a field or parameter inside a record: a primitive, or a reference to another record with its version requirement or its pinned version |
+
+**Ids.** `Uuid` is re-exported. `gen_uuid_from_str` parses a UUID, or hashes
+any other string into one; `gen_bb_uuid` makes a random one. `SemanticVersion`
+is the `major.minor.patch` a module definition and a header carry.
 
 ## License
 

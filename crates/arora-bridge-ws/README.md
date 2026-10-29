@@ -1,41 +1,65 @@
 # arora-bridge-ws
 
-The open local bridge for Arora: a WebSocket server that bridges the Arora API,
-implementing [`arora_bridge::Bridge`], for editors and apps on trusted local
-links.
+The open local bridge of [Arora](https://github.com/semio-ai/arora-sdk): a
+WebSocket server through which an app on the same machine — an editor, a
+control panel, a script — reads and writes a running device's keys and calls
+its functions. It implements the bridge interface,
+[`arora_bridge::Bridge`](https://docs.rs/arora-bridge), with JSON messages.
 
-An Arora device is one blackboard with four seams around it (store, HAL,
-bridge, behavior). This crate is a **bridge** implementation whose remote is a
-local app — a rig editor, a control panel, a debugging tool — rather than
-Semio Studio over the network. Messages speak the data-layer vocabulary:
-clients **write** and **read** values at **keys** (hierarchical paths into the
-store, e.g. `face/mouth`), list the available keys, and call the device's
-methods by name.
+## The open local bridge
 
-## Wire format
+A device built with [`arora`](https://docs.rs/arora) serves this bridge by
+default, on `ws://127.0.0.1:9000`. The link is unauthenticated, so the server
+binds the loopback interface unless its embedder opens another, and the device
+accepts a write only to the keys it opened.
 
-JSON messages with a `type` field discriminator, over a WebSocket:
+The server relays the device and keeps nothing of its own: the keys and their
+meta come from the device's store, the methods from its modules, each asked
+when the client asks, so a module loaded while the device runs is listed at
+once. The server serves one client at a time; a new connection replaces the
+previous one.
 
-| Client → Server | Reply | Meaning |
-| --- | --- | --- |
-| `{"type": "write_values", "values": {"face/mouth": {"f64": 0.5}}}` | `write_values_resp` | Write values to keys |
-| `{"type": "read_values", "keys": ["face/mouth"]}` | `read_values_resp` | Read current values |
-| `{"type": "list_keys", "path": "face"}` | `list_keys_resp` | List the device's keys (optionally under a prefix) |
-| `{"type": "list_methods"}` | `list_methods_resp` | List the callable methods |
-| `{"type": "invoke", "method": "say", "args": {"text": {"str": "hi"}}}` | `invoke_resp` | Call a method by name |
-| `{"type": "halt", "run": "<run id>"}` | `halt_resp` | Stop a run |
-| `{"type": "subscribe", "keys": ["face/mouth"]}` | `subscribe_resp` | Choose which keys are pushed |
+## Smallest use
 
-The server also pushes `{"type": "values_changed", "values": {...}}`
-unsolicited whenever the runtime writes new state — the live feed a connected
-editor renders from. A client is pushed every key until it subscribes, and only
-the keys it named afterwards: nothing about a key makes it special, so a client
-that wants the device's clock subscribes to it like any other.
+Run a device, then talk to it from any WebSocket client. From a browser
+console:
 
-## Keys
+```js
+const ws = new WebSocket("ws://127.0.0.1:9000");
+ws.onmessage = (event) => console.log(JSON.parse(event.data));
+ws.onopen = () => ws.send(JSON.stringify({ type: "list_keys" }));
+```
 
-`list_keys` answers from the device, asked as the client asks: every key it holds
-right now, each with the `KeyMeta` its store keeps —
+The answer lists the device's keys, and from then on the server pushes
+`values_changed` with every key the device changes.
+
+## Messages
+
+Each message is a JSON object whose `type` names it. Values are Arora `Value`s
+in their JSON form: `{"f64": 0.5}`, `{"str": "hi"}`, `{"bool": true}`,
+`{"f32s": [0, 1, 0]}`.
+
+| Client sends | Server answers | What it does |
+|---|---|---|
+| `{"type": "list_keys", "path": "face"}` | `list_keys_resp` | The device's keys (all, or those whose path starts with `path`), each with its meta. |
+| `{"type": "read_values", "keys": ["face/mouth"]}` | `read_values_resp` | The current values of the keys. |
+| `{"type": "write_values", "values": {"face/mouth": {"f64": 0.5}}}` | `write_values_resp` | Writes the keys, all or none. |
+| `{"type": "subscribe", "keys": ["face/mouth"]}` | `subscribe_resp` | Chooses the keys this connection is pushed; `null` or absent means every key. |
+| `{"type": "list_methods"}` | `list_methods_resp` | The device's callable methods, with their parameters. |
+| `{"type": "invoke", "method": "say", "args": {"text": {"str": "hi"}}, "request_id": "r1"}` | `invoke_resp` | Calls a method by name. |
+| `{"type": "halt", "run": "<run id>", "request_id": "r2"}` | `halt_resp` | Stops a run. |
+
+Unsolicited, the server pushes `{"type": "values_changed", "values": {…}}`
+with what changed at each step of the device. A connection is pushed every key
+until it subscribes, then only the keys it named; no key is special, so a
+client that wants the device's clock subscribes to it like any other. A
+message the server cannot parse is answered with `{"type": "error",
+"message": …}`.
+
+## Keys and their meta
+
+`list_keys_resp` carries each key with the `KeyMeta` the device's store keeps
+for it, under `__meta`:
 
 ```json
 {"path": "face/mouth", "__meta": {"ty": "f64", "min": 0.0, "max": 1.0,
@@ -44,33 +68,30 @@ right now, each with the `KeyMeta` its store keeps —
                                   "description": "how open the mouth is"}}
 ```
 
-— so a slider knows its range, and the unit to label it with, without anyone
-restating them here, and a module
-loaded while the device runs is listed at once. A key nobody has described
-carries the default meta: the shape of the value it holds, and closed to writes.
+so a slider knows its range and its unit without anyone restating them. A key
+nothing described carries only the type of the value it holds, and is closed.
 
-A write reaches the device, which accepts it only for the keys it opened
-(`editable: true`, by key or by subtree in its store) and refuses the rest,
-naming the path. A key whose meta states a `ty` takes only values of that type:
+A write is accepted only for the keys the device opened (`editable`, by key or
+by subtree in its store), and only with values of the type their meta states:
 `{"f32": 0.5}` sent to an `f64` key is refused, naming the key and both types.
-A refused write writes none of its keys. A device that opens nothing accepts no
-writes: a client on an unauthenticated link does not get to set a key the
-device never offered.
+A refused write writes none of its keys, and `write_values_resp` carries
+`"success": false` with the reason. A device that opens nothing accepts no
+writes.
 
 ## Methods and runs
 
-`list_methods` answers with the methods the server itself registered *and* the
-device's own module functions, each under its declared name with the parameters
-and value shapes of its described signature — nothing mirrors them here.
-`invoke` binds its `args` to those parameters by name; an argument the signature
-does not name fails the call rather than being dropped.
+`list_methods_resp` lists each of the device's functions under the name its
+module declares, with its parameters (`name`, `param_type`, `required`) in
+declaration order, its `return_type`, and `task`. `invoke` binds its `args` to
+those parameters by name; an argument the method does not declare fails the
+call. When two modules export one name, `invoke` fails naming them.
 
-A method that reports a behavior status is a **run**: long-running and
-cancellable (`"task": true` in its description). Invoking it answers at once with
-the run, by name —
+A method with `"task": true` returns the behavior `Status`: it is a **run**,
+long-running and cancellable. Invoking it starts the run and answers at once
+with its handle, by name:
 
 ```json
-{"type": "invoke_resp", "success": true, "value": {"keyvalue": {"fields": {
+{"type": "invoke_resp", "success": true, "value": {"keyvalue": {"id": "…", "fields": {
   "run":    {"name": "run",    "value": {"str": "0195e1f2-…"}},
   "status": {"name": "status", "value": {"str": "arora/tasks/…/status"}},
   "feedback": {"name": "feedback", "value": {"strs": []}},
@@ -79,41 +100,50 @@ the run, by name —
 }}}}
 ```
 
-— so a client watches `status` for the outcome (subscribe to it) and stops the
-run with `{"type": "halt", "run": "0195e1f2-…"}`.
+A client follows the run on its `status` key (subscribe to it) and stops it
+with `{"type": "halt", "run": "0195e1f2-…"}`.
 
-## Pieces
+## Serving a device
 
-- `AroraWSServer` — the ready-to-use server. Binds loopback by default: the
-  link is unauthenticated, so exposing other interfaces is an explicit opt-in.
-  One active client at a time; a new connection replaces the old one.
-- `Device` — the device behind the server, and the only thing a client
-  discovers: its keys with their meta, its functions with their signatures, and
-  the calls it answers. The server keeps nothing of its own.
-- `bridge::WsBridge` — drives the server as an Arora `Bridge`: incoming
-  writes/reads become `BridgeCommand`s for the runtime, the runtime's state flows
-  out as `values_changed`, and the device's methods are described and called
-  through the same channel.
-- A built-in control panel served on plain HTTP from the same port (opt-in via
-  `ServerConfig::serve_control_panel`): sliders over the advertised input keys,
-  and a row per method with its arguments, a call and a stop; the device's other
-  keys are listed read-only beneath, with the value they held when listed.
-
-## Example
+The `arora` crate attaches this bridge when a device is given no other, and
+offers it composed: `arora::local_ws_bridge()`, `local_ws_bridge_with(config)`
+for a `ServerConfig` of your own, and `serve_local_ws_bridge(server)` for a
+server you keep. Without `arora`, wrap a server in `bridge::WsBridge` — which
+turns each message into a `BridgeCommand` on its inbound stream and each
+outbound change into a `values_changed` push — and run the server yourself:
 
 ```rust,no_run
-use arora_bridge_ws::{AroraWSServer, CancellationToken};
+use std::sync::Arc;
+use arora_bridge_ws::{bridge::WsBridge, AroraWSServer, CancellationToken, ServerConfig};
 
-#[tokio::main]
-async fn main() {
-    let server = AroraWSServer::with_port(9000);
-    server.set_write_values_handler(|values| {
-        println!("{} values written", values.len());
-        Ok(())
-    }).await;
-    server.run(CancellationToken::new()).await.unwrap();
-}
+# async fn serve() {
+let server = Arc::new(AroraWSServer::new(ServerConfig::with_port(9000)));
+let bridge = WsBridge::new(server.clone()).await;
+tokio::spawn(async move { server.run(CancellationToken::new()).await });
+// Hand `bridge` to the device: arora::Arora::builder().with_bridge(Box::new(bridge))
+# }
 ```
 
-To serve a runtime instead of raw handlers, wrap the server in
-`WsBridge::new(server)` and hand it to the runtime as its bridge.
+The inbound stream ends when the server stops, which the device sees as the
+endpoint disconnecting.
+
+Underneath, the server dispatches to handlers an embedder can set directly —
+`set_write_values_handler`, `set_read_values_handler`, and `set_device` with a
+`Device` (keys, methods, invoke, halt) — which is what `WsBridge` sets.
+
+## Reference
+
+`ServerConfig`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `port` | `9000` | The port served. |
+| `bind_address` | `127.0.0.1` | The interface bound. Binding another one exposes an unauthenticated link to that network. |
+| `serve_control_panel` | `false` | Serve a control panel on plain HTTP on the same port: a slider per input key, a row per method with its arguments, a call and a stop, and the other keys read-only. |
+
+Limits: a message is at most 1 MiB, a frame 256 KiB. The server answers
+WebSocket pings.
+
+A device built with `arora` takes the port from `--bridge-port`
+(`ARORA_BRIDGE_PORT`), and `arora --open` opens every key that has no meta of
+its own, for a sandbox or a bench.

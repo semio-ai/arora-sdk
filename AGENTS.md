@@ -1,345 +1,180 @@
-# Agent Guide for Semio Arora Engine
+# Agent guide
 
-## Essential Reading
+What an agent needs to work in this workspace without breaking it. Read, in
+order:
 
-**Start here:**
-1. [`readme.md`](readme.md) — Project overview and high-level concepts
-2. [`docs/architecture.md`](docs/architecture.md) — Detailed repo layout and component interaction
+1. [`readme.md`](readme.md) — what Arora is, and the crate map;
+2. [`docs/overview.md`](docs/overview.md) — the concepts, one at a time;
+3. [`docs/architecture.md`](docs/architecture.md) — the crates' layers, the
+   device, the engine, the module pipelines;
+4. the readme of the crate you are changing; then
+   [`docs/design_decisions.md`](docs/design_decisions.md) before changing a
+   rule it records.
 
-These docs explain the runtime, module system, build orchestration, and cross-compilation strategy.
+## Build and test
 
-## Key Architectural Concepts
-
-### Where a Module's Interface Lives
-
-A module's interface — its id, functions, parameters and their ids — has exactly
-one source, and which one tells you how the module builds:
-
-- **A Rust declaration** (`modules/polly`, `modules/test-rust-wasm`): macros
-  from [`arora-module`](crates/arora-module/readme.md) on the Rust module and
-  its functions. No `module.yaml`, no `build.rs`, no generated sources; the
-  header, the host registration and the guest entry points come out of macro
-  expansion. Edit the Rust code.
-- **A `module.yaml`** (C++ modules, and Rust modules that import other modules'
-  functions, which the macros do not declare): the generator pipeline below.
-  A `module.yaml` beside `Cargo.toml` means the YAML is the source of truth.
-
-### Code Generation Pipeline
-
-For `module.yaml` modules, and for crates that generate types (`arora-behavior-tree`):
-
-1. **Module definitions** (`module.yaml`) define the contract: types, functions, imports, exports
-2. **Build scripts** (`build.rs`) invoke code generators (`arora-module-cli`, `arora-module-rust`, `arora-module-cpp`)
-3. **Generated sources** land in `src/arora_generated/` and are **regenerated on every build**
-4. **Manual edits to generated files are lost** — always edit the source `module.yaml` instead
-
-#### Example: Adding a Function to a Module
-
-When adding a function that depends on another module (see
-`modules/test-cpp-2/module.yaml`):
-
-```yaml
-# modules/my-module/module.yaml
-exports:
-  - type: function
-    id: <new-uuid>
-    name: my_function
-    parameters: [...]
-    ret: [...]
-
-imports:
-  - type: function
-    module: <dependency-module-uuid>
-    id: <dependency-function-uuid>
-    name: dependency_function
-    parameters: [...]
-    ret: [...]
-
-dependencies:
-  - dependency-module-name
-```
-
-The build script will:
-- Read `module.yaml`
-- Generate Rust bindings in `src/arora_generated/`
-- Generate a `mod.rs` that exposes imported modules
-- Generate wrapper functions for cross-module calls
-
-**Do not** manually edit `src/arora_generated/mod.rs` — it will be overwritten.
-
-### Build Orchestration
-
-This workspace uses one **unstable Cargo feature**:
-- `-Z bindeps` (artifact dependencies) — enabled in `.cargo/config.toml`
-  (`[unstable] bindeps = true`) for host tools and cross-target
-  staticlibs/cdylibs.
-
-`per-package-target` is **not** used — no module sets `forced-target`, and the
-leftover `cargo-features = ["per-package-target"]` opt-ins were removed from the
-module manifests. See `docs/design_decisions.md`.
-
-**Consequence:** Requires nightly Rust (pinned in `rust-toolchain.toml`).
-
-Key build concepts:
-- `cargo build` (the default members) is the entry point; `--workspace` also
-  builds the members kept out of it (polly and the test guests)
-- Cross-compilation happens automatically via artifact dependencies
-- C++ modules use CMake, but invoked from Rust `build.rs`
-- Wasm guests, Rust and C++, are components built for `wasm32-wasip2` against
-  the `arora:module` world (`crates/arora-engine/wit/arora-module.wit`); their
-  headers name the `wasm-component` executor, the one WebAssembly executor.
-- Browser engine uses `wasm32-unknown-unknown`
-
-## Common Pitfalls and Solutions
-
-### Issue: Test Failures Due to Missing Function in Index
-
-**Symptom:**
-```
-Error: internal error: function <uuid> is missing from index
-```
-
-**Root cause:** The function is referenced in behavior tree code but not exported by any loaded module.
-
-**Solution:**
-1. Identify which module should export the function (check the UUID against module definitions)
-2. Export it from that module:
-   - Rust declaration: add the function to the `#[module]` with `#[export(id = "<uuid>")]`
-   - `module.yaml`: add it to `exports`, and if it wraps another module's
-     function, to `imports` and the dependency to `dependencies`; then
-     `cargo clean -p <module-name>` so the build script regenerates bindings
-3. Implement the function in the module's `src/lib.rs`
-4. Make sure the test loads that module
-
-### Issue: Registry Error During Build
-
-**Symptom:**
-```
-Error: no such record "<uuid>"
-```
-
-**Root cause:** The build script needs the imported module's definition in the registry, but it's not available.
-
-**Solution:** The module's `build.rs` needs to add the dependency module to its registry before analyzing the module definition. Check `modules/test-cpp-2/build.rs` for an example of importing from another module.
-
-### Issue: Compilation Errors After Editing Generated Files
-
-**Symptom:** Manual edits to `src/arora_generated/*.rs` files disappear or cause build errors.
-
-**Solution:** Never edit generated files directly. Instead:
-1. Edit the source `module.yaml`
-2. Update `build.rs` if needed
-3. Run `cargo clean -p <module-name>` to force regeneration
-4. Build again
-
-## Development Workflow
-
-### Running Tests
-
-[`docs/testing.md`](docs/testing.md) has coverage (`cargo-llvm-cov`) and the
-rules for adding a test.
+The workspace pins a nightly toolchain (`rust-toolchain.toml`) because it uses
+cargo's artifact dependencies (`[unstable] bindeps = true` in
+`.cargo/config.toml`). [`docs/building.md`](docs/building.md) lists the
+prerequisites (CMake ≥ 3.20, a host C/C++ compiler; the WASI SDK downloads
+itself).
 
 ```bash
-# All tests
-cargo test
-
-# Specific crate
-cargo test -p arora-behavior-tree
-
-# Specific test
+cargo build                         # the default members
+cargo test                          # default members' tests; builds the guests the tests load
+cargo test -p arora-behavior-tree   # one crate
 cargo test -p arora-behavior-tree graph::tests::groot_lowers_to_graph_and_runs
-
-# With output
-cargo test -- --nocapture
 ```
 
-### Building Modules
+- `--workspace` adds the opt-in members (`polly`, `arora-web`, the test
+  guests, the C++ crates); it is slow, and rarely what a change needs.
+- Rust guests build for the host by default; their `wasm32-wasip2`
+  component is built on demand by the crates that depend on them as
+  artifacts, so `cargo test` needs no `--target`.
+- A build script's output is shown only on failure or with `-vv`; it is kept in
+  `target/<profile>/build/<package>-<hash>/output`.
+- Artifact paths reach build scripts as environment variables. For a
+  dash-named staticlib or cdylib, cargo sets only
+  `CARGO_<KIND>_FILE_<DEP>_<lib>` (dashes → underscores) and
+  `CARGO_<KIND>_DIR_<DEP>`, never the bare `CARGO_<KIND>_FILE_<DEP>`
+  ([why](docs/design_decisions.md#-z-bindeps-artifact-dependencies-over-recursive-cargo)).
 
-```bash
-# Default members (everything but polly and the test guests)
-cargo build
+[`docs/testing.md`](docs/testing.md) covers the integration tests, the browser
+and Zenoh runs, coverage, and the rules for adding a test.
 
-# Specific module
-cargo build -p test-rust-wasm
+### What CI runs on a pull request
 
-# A module.yaml module after changing its YAML: clean to force regeneration
-cargo clean -p test-behavior-tree-nodes && cargo build -p test-behavior-tree-nodes
-```
-
-### Debugging Build Scripts
-
-Build script output goes to stderr. To see it:
-```bash
-cargo build -p <module-name> 2>&1 | grep -v "Compiling"
-```
-
-Or set verbosity:
-```bash
-cargo build -vv -p <module-name>
-```
-
-### CI Selection
-
-On a pull request, CI builds and tests only the members the diff can reach
-([`.github/scripts/list_modified_targets.sh`](.github/scripts/list_modified_targets.sh),
-over `cargo metadata`). A file in no package selects everything unless the
-script's `IGNORE` lists it. When a package reads a file outside its own
-directory (a build script reading `libs/cpp`, `wit_bindgen` reading
-arora-engine's WIT), print `cargo:rerun-if-changed` for it and add it to the
-script's `INPUTS`. The `verify` step fails otherwise and names the line to add.
+CI builds and tests only the members the diff can reach
+([`list_modified_targets.sh`](.github/scripts/list_modified_targets.sh)). A
+package that reads a file outside its own directory (a build script reading
+`libs/cpp`, `wit_bindgen` reading the engine's WIT world) prints
+`cargo:rerun-if-changed` for it and has a line in the script's `INPUTS`;
+CI's `verify` step fails otherwise, naming the line to add.
 
 ```bash
 .github/scripts/list_modified_targets.sh origin/main   # what this branch selects
 ```
 
-### Cross-Compilation
+## Where a module's interface lives
 
-The workspace handles cross-compilation via artifact dependencies:
-- Rust wasm guests build for the **host** by default; their `wasm32-wasip2`
-  flavour, a component, is forced on demand by the consuming crates' artifact
-  dependencies, so `cargo test` builds them automatically.
-- Host tools (CLI, code generators) build for host.
-- Build scripts receive artifact paths via env vars. **Mind the names:**
-  `CARGO_BIN_FILE_<DEP>` works for bins, but for dash-named staticlib/cdylib
-  crates cargo only sets `CARGO_<KIND>_FILE_<DEP>_<lib>` (dashes→underscores)
-  and `CARGO_<KIND>_DIR_<DEP>` — not the bare `CARGO_<KIND>_FILE_<DEP>`.
-  See `docs/design_decisions.md`.
+A module's interface — its id, its functions, their parameters, each with its
+UUID — has exactly one source. Find it before editing anything:
 
-## Module Development
+- **A Rust declaration** (`modules/polly`, `modules/test-rust-wasm`,
+  `modules/animation`): the [`arora-module`](crates/arora-module/readme.md)
+  macros on a Rust module (`#[arora_module::module]`, `#[export]`,
+  `#[param]`). There is no `module.yaml`, no build script and no generated
+  source: the header, the records, the host registration, the client stubs
+  and the entry points come from macro expansion. Edit the Rust code.
+- **A `module.yaml`** beside `Cargo.toml`: C++ modules, and Rust modules that
+  call other modules' functions, which a declaration cannot express
+  (`modules/test-behavior-tree-nodes`). The YAML is the source; the bindings
+  are generated from it on every build.
 
-### Creating a New Module
+### A Rust module
 
-**In Rust**, the crate carries the interface — no `module.yaml`, no `build.rs`:
+1. Depend on `arora-module`.
+2. Put `#[arora_module::module(id = "…", name = "…", version = "…")]` on an
+   inline Rust module, `#[export(id = "…")]` on each function and
+   `#[param(id = "…")]` on each parameter. Ids are written in full, never
+   derived from names.
+3. Write `arora_module::artifact!(<module>)` once, at the root of the crate
+   built as the artifact: for `wasm32-wasip2` it is a component of the
+   `arora:module` world; for the host, a shared library.
+4. A host links it with `HostModule::of::<M>()`; a device loads its module
+   directory.
 
-1. Create directory under `modules/<name>/`
-2. Depend on [`arora-module`](crates/arora-module/readme.md)
-3. Put `#[arora_module::module(id = "…", …)]` on the Rust module and
-   `#[export(id = "…")]` / `#[param(id = "…")]` on its functions
-4. Write `arora_module::artifact!(<module>)` once at the crate root: built for
-   `wasm32-wasip2`, the crate is then a component serving the module
-5. Build and test; a host registers it with `HostModule::of::<M>()`
-
-Functions that several modules implement, each under its own module id, are
-declared once as a contract: `#[arora_module::contract]` on a trait whose
-methods take `&mut self`. A host registers an implementation with
+Functions several modules implement, each under its own module id, are a
+contract (`modules/animation`'s `AnimationContract`): `#[arora_module::contract]` on a trait whose
+methods take `&mut self`, registered with
 `HostModule::from_exports(module_id, contract::exports(implementation))`.
 
-See [`modules/test-rust-wasm/`](modules/test-rust-wasm/) (wasm guest) or
-[`modules/polly/`](modules/polly/) (native) for working examples.
+### A `module.yaml` module
 
-**In another language** (C++), the interface is a `module.yaml` and the
-`arora-module-*` generators produce the bindings: write the YAML, a `build.rs`
-driving the CMake build, then implement the functions. The guest links
-`arora-cpp-component`, which makes it a component of the `arora:module` world,
-as a WASI reactor, and `arora_module_directory` (`libs/cpp/CMakeLists.txt`)
-writes the module directory a device loads, the form a Rust guest ships in.
-See [`examples/modules/cpp/`](examples/modules/cpp/readme.md).
+- `exports:` lists the functions it serves, `imports:` the functions of other
+  modules it calls. Dependencies are derived from `imports:`; there is no
+  `dependencies:` key to fill.
+- The generators read the imported modules' records:
+  - a C++ module's `CMakeLists.txt` passes them to `arora-module-cli` with
+    `--include` (`modules/test-cpp-2/CMakeLists.txt`);
+  - a Rust one's `build.rs` adds them to a `LocalRegistry` before
+    `analyze_module_from_path` (`modules/test-behavior-tree-nodes/build.rs`).
+- The build scripts print `cargo:rerun-if-changed=module.yaml`: a changed
+  YAML regenerates on the next build, with no `cargo clean`.
+- Generated sources are never edited. A Rust module's land in
+  `src/arora_generated/`; a C++ module's in its CMake build tree under
+  `OUT_DIR`.
+- A C++ guest links `arora-cpp-component` (`libs/cpp`), which makes it a
+  component of the `arora:module` world, and `arora_module_directory` writes
+  its module directory. C++ guests call other modules with `arora_dispatch`;
+  they have no indirect dispatch. See
+  [`examples/modules/cpp`](examples/modules/cpp/readme.md).
 
-### Module Interface Contract
+## Common failures
 
-All modules communicate via:
-- **Structures** for call arguments and returns (UUID-identified)
-- **Buffers** for serialization (see `arora-buffers`)
-- **Dispatch functions** for cross-module calls, the `arora:module` world's
-  `host` interface (`arora_dispatch` / `arora_dispatch_indirect` in the
-  code generated from a `module.yaml`):
-  - `dispatch(module, method, arg)` — direct call
-  - `dispatch-indirect(callable)` — anonymous callable
+| Symptom | Cause | Fix |
+|---|---|---|
+| `function <uuid> is missing from index` | a tree names a function no loaded module exports | find the module that should export it (check the id against its declaration), export it, and make sure the device or test loads that module |
+| `no such record "<uuid>"` during a build | the generator was not given the record of a type or module the `module.yaml` names | pass that module's records (`--include` in CMake, or the `LocalRegistry` in `build.rs`) |
+| an edit to `src/arora_generated/` disappears | generated sources are rebuilt from `module.yaml` | edit the YAML |
+| a call fails on its arguments | an id mismatch between caller and declaration | compare the `#[export]`/`#[param]` ids, or the YAML's, with the ids the caller uses |
 
-See [`arora-types`](crates/arora-types/readme.md) for the runtime contract.
+## Writing in this repository
 
-## Testing Strategy
+Docs, comments and commit messages follow the same rules:
 
-- **Unit tests:** In `src/` files using `#[cfg(test)]`
-- **Integration tests:** In `tests/` directory (see `arora-integration-tests`)
-- **Module tests:** Often in `crates/arora-behavior-tree/src/tests.rs`
+- **State what is true now, and why.** History belongs in git: no "was",
+  "no longer", "we first tried", no attribution, no incident counts.
+  Alternatives that were not chosen go in `docs/design_decisions.md`.
+- **Vocabulary.** A key is a `/`-separated path; a trailing `.attribute` is a
+  naming convention only. A module never writes keys: a call has in and out
+  parameters, and a behavior or a remote client writes outputs to keys. A key
+  is closed to remote writers unless its meta opens it. "Registry" means the
+  type registry. A keyframed asset is an "animation". A module's name has no
+  `-module` suffix (the module `@arora/animation`); the crate shipping it does
+  (`arora-animation-module`). Say "wire format" and "messages", never "Arora
+  protocol"; "slot" means `arora_types::data::Slot` only.
+- **Semio Studio is opt-in.** Nothing in Arora connects to Studio by default:
+  the connection sits behind the `studio-bridge` feature of `arora` and each
+  runner's `studio` feature.
+- Every relative link must resolve; CI link-checks every Markdown file.
 
-Behavior tree tests often need to:
-1. Set up an engine with specific modules loaded
-2. Build a behavior tree referencing those modules
-3. Tick the tree and verify results
-
-Helper functions (test-local, e.g. `modules/polly/tests/`):
-- `setup_engine_with_modules(&vec!["module-name"])`
-- `add_module_functions_to_index()` — populates function lookup
-
-## Crate Purposes
-
-Quick reference:
+## Crates
 
 | Crate | Purpose |
-|-------|---------|
-| `arora-engine` | Core engine (host + browser executors) |
-| `arora` | Opinionated device runtime (engine + native BT nodes + step loop) |
-| `arora-cli` | Command-line interface |
-| `arora-web` | Browser wasm bindings |
-| `arora-buffers` | Serialization primitives |
-| `arora-registry` | Type/module registry (local + remote) |
-| `arora-module` | Declare a module in Rust (facade over the macros + `AroraModule`) |
-| `arora-module-macros` | Proc macros behind `arora-module` (use through the facade) |
-| `arora-module-core` | Module analysis and resolution |
-| `arora-module-cli` | Code generator CLI |
-| `arora-module-rust` | Rust code generation |
-| `arora-module-cpp` | C++ code generation |
-| `arora-behavior-tree` | Behavior tree runtime |
-| `arora-behavior-tree-types` | BT primitive types |
-| `arora-animation` | Keyframe clips, exact evaluation, players on the device clock |
-| `arora-animation-module` | The module `@arora/animation` (`modules/animation`): a wasm guest in a module directory with its records, or host-linked |
-| `arora-geometry` | Geometry types over `Value` (vec2–4, quat, transform) and the blending of values |
-| `arora-graphics-types` | Graphics types over `Value` (the RGBA colour) |
-| `arora-dataflow-nodes` | Dataflow nodes: the node vocabulary as the functions of `@arora/dataflow`, `@arora/geometry` and `@arora/kinematics`, computing on `Value`, for a loader to put on a behavior tree (Vizij's graph format is vizij-rs's `vizij-graph-core`) |
+|---|---|
+| `arora-types` | Values, types, calls, records, the data-store vocabulary |
+| `arora-types-derive` | `#[derive(AroraType)]`: a Rust type as an Arora type |
+| `arora-buffers` | The binary form of a value at module boundaries; serde to and from it |
+| `arora-behavior` | The `BehaviorInterpreter` trait, the interpreter module's ids, task runs, built-in keys |
+| `arora-hal` | The `Hal` trait, `FakeHal`, joint-target conventions, the HAL module's ids |
+| `arora-bridge` | The `Bridge` trait, `FakeBridge`, the client conventions |
+| `arora-simple-data-store` | `SimpleDataStore`, and `NamespacedStore` for many devices over one store |
+| `arora-registry` | The local type registry and record files |
+| `arora-registry-remote` | Registries backed by Semio's hosted store (unpublished) |
+| `arora-engine` | Loads modules and dispatches calls: wasmtime components, the browser, native libraries, host modules |
+| `arora-module` | Declare a module in Rust (the facade over `arora-module-macros`) |
+| `arora-module-core` | Analysis and resolution of `module.yaml` declarations |
+| `arora-module-cli` | The generator front end (unpublished) |
+| `arora-module-rust`, `arora-module-cpp` | The Rust and C++ generators |
+| `arora-behavior-tree` | The behavior-tree interpreter, its text language and Groot import |
+| `arora-behavior-tree-types` | `Status` and `TickId` as module-facing types |
+| `arora-behavior-tree-types-yaml` | The same types as YAML records |
+| `arora` | The device runtime, its builder, and the `arora` runner |
+| `arora-bridge-ws` | The open local bridge: JSON messages over a local WebSocket |
+| `arora-bridge-ros2`, `arora-msgs-ros2` | The ROS 2 bridge; ROS 2 messages, their CDR codec and type hashes |
+| `arora-hal-ros2`, `arora-hal-restful` | Robot HALs and their runners `arora-ros2`, `arora-restful` (unpublished) |
+| `arora-web` | The device in a browser, for JavaScript |
+| `arora-cli` | Load a module and call one of its functions from the command line (unpublished) |
+| `arora-animation`, `arora-animation-module` | Animations and their exact evaluation; the module `@arora/animation` |
+| `arora-geometry`, `arora-graphics-types` | Vectors, quaternions, transforms and colours over `Value` |
+| `arora-dataflow-nodes` | Dataflow nodes as the functions of `@arora/dataflow`, `@arora/geometry`, `@arora/kinematics` |
+| `arora-util`, `arora-vfs`, `wasi-sdk` | A C helper, an in-memory file tree for code generation, the WASI SDK for C++ guests |
 
-## Tips for AI Agents
+## Related repositories
 
-1. **Always read the README and docs first** — they contain critical context about build orchestration and cross-compilation
-   
-2. **Know where the interface lives** — a Rust declaration or a `module.yaml`, never both; edit that source, not what is derived from it
-   
-3. **Use `cargo clean -p <module>` after changing a `module.yaml`** — it forces regeneration
-   
-4. **Check UUIDs carefully** — function/type mismatches often come down to UUID confusion between similar concepts
-   
-5. **Test module dependencies in isolation** — if a test fails with "function missing from index", verify the module actually exports it and the test loads that module
-   
-6. **Grep for examples** — this codebase has patterns repeated across modules; find a working example and adapt it
-   
-7. **Watch out for generated files** — if you see `src/arora_generated/`, don't edit it directly
-   
-8. **Build scripts are key for `module.yaml` modules** — if something doesn't generate correctly, the bug is likely in `build.rs`, not the source files
-   
-9. **Imports vs Dependencies** — `module.yaml` modules need BOTH:
-   - `imports:` section for functions you'll call
-   - `dependencies:` section for modules to link against
-   
-10. **Registry matters** — the build-time registry needs to know about imported modules; check `build.rs` adds them before `analyze_module_from_path()`
-
-## When Things Break
-
-Diagnostic checklist:
-
-- [ ] Rust declaration: do the `#[export]` / `#[param]` ids match the ids callers use?
-- [ ] Is `module.yaml` syntactically correct?
-- [ ] Do all referenced UUIDs exist in the registry?
-- [ ] Are imported modules listed in both `imports:` and `dependencies:`?
-- [ ] Does `build.rs` add dependency modules to the registry?
-- [ ] Did you clean the package after editing `module.yaml`?
-- [ ] Are you editing generated files instead of source files?
-- [ ] Do test helper functions load all necessary modules?
-- [ ] Are function parameter/return types correctly specified?
-
-## Related Repositories
-
-- [arora-types](crates/arora-types/readme.md) — Core type definitions and runtime contract
-- [semio-record](https://github.com/semio-ai/semio-record) — Record system for types and modules
-- [semio-client](https://github.com/semio-ai/semio-client) — Client for Semio database
-
-## Maintenance Notes
-
-This AGENTS.md file should be updated when:
-- Build system changes (new unstable features, toolchain requirements)
-- Code generation pipeline evolves
-- New common pitfalls are discovered
-- Module development patterns change
-- Cross-compilation strategy shifts
-
-Keep it focused on what AI agents need to know to work effectively on the codebase.
+- [arora-aldebaran](https://github.com/semio-ai/arora-aldebaran) — NAO and
+  Pepper support, against the published crates: the model for supporting a
+  robot in a repository of its own.
+- [semio-client](https://github.com/semio-ai/semio-client) — the client of
+  Semio's hosted store, behind `arora-registry-remote`.

@@ -6,6 +6,18 @@ runs beside the phase's policy in the `interactive` tree. This page explains
 how the leaf works, how it fits a tree that also runs control policies, and
 where it should live.
 
+To hear it, serve the device built with Piper, then request phases over a
+bridge (the [README](../README.md#drive-it-live) shows how):
+
+```sh
+cargo run --release -p arora-microduck --features piper
+```
+
+The `piper` feature is opt-in: libpiper and espeak-ng are GPLv3, so a binary
+built with it is GPL-affected. Its first build compiles libpiper (it needs
+`cmake`) and downloads the `en_US-lessac-medium` voice. Without it, or with
+`--speech silent`, each sentence takes a speaker's time and is only logged.
+
 ## The leaf
 
 `say(text, voice, viseme: &mut String) -> Status` is Vizij's speech
@@ -106,7 +118,7 @@ have. With the Say latching its `Success`, that composition gives:
 
 ## Where Say should live
 
-The contract and its providers live in vizij-rs today:
+The contract and its providers live in vizij-rs:
 `vizij-arora-host::skills` holds the ids, `vizij-arora-behavior::speech` the
 signature and Vizij's lip-sync fragment, `vizij-arora-tts` the cloud
 provider, `vizij-piper` Piper's provisioning, and the Vizij app's

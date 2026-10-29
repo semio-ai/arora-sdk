@@ -1,267 +1,204 @@
 # arora-web
 
-Run an Arora device inside a browser. Compiles `arora` (with
-`--no-default-features`, so no wasmtime, no libloading) to
-`wasm32-unknown-unknown` and exposes two things:
+Run an Arora device in a browser page. The crate compiles the
+[`arora`](../arora/readme.md) runtime to `wasm32-unknown-unknown` and exports
+it to JavaScript as `AroraRuntime`; its modules run on the browser's own
+`WebAssembly`, so a page hosts the same device, modules and behavior a robot
+runs.
 
-- **`AroraRuntime`** (Rust name: `AroraWeb`) — the wasm-bindgen device over an
-  `arora::Arora`: a synchronous `step()`, a self-pacing `run()`, in-process
-  `call()` dispatch, and Value↔JSON store accessors.
-- **`Engine`** / **`BehaviorTreeRunner`** — a lower-level JS surface for loading
-  guest modules and running behavior trees directly on the engine.
+## The device in the page
 
-## `AroraRuntime` (the device)
+An `AroraRuntime` is one device: a store of keys and values, the modules it
+loaded, and its behavior. The page drives it and talks to it two ways:
 
-```ts
-class AroraRuntime {
-  constructor();                          // the demo device (fake HAL, no bridge)
-  step(dtMs: number): void;               // one step, e.g. from requestAnimationFrame
-  run(periodMs?: number): Promise<void>; // hands the device to arora's own loop; resolves on stop(), rejects when stepping fails
-  stop(): void;                           // reclaims the device at the next step boundary; step() works again
-  readonly running: boolean;              // whether run() currently owns the device
-  readonly behaviorError?: string;        // the behavior's standing error; undefined while healthy
-  behaviorErrorChanged(): Promise<string | undefined>; // resolves on the next standing-error change
-  call(callJson: string): Promise<string>; // in-process Call; resolves to result JSON once applied
-  invoke(method: string, argsJson: string, moduleId?: string): Promise<unknown | Run>; // by name; a Value's JSON, or a run's handle
-  spawn(callJson: string): Promise<Run>;  // starts a task run; resolves to its handle
-  halt(runId: string): Promise<void>;     // stops the run its handle's `run` names
-  listKeys(prefix?: string): Promise<{ path: string; __meta: unknown }[]>; // answers at once, no step
-  describeMethods(prefix?: string): Promise<unknown[]>; // as a bridge lists methods, plus each one's `module` id; no step
-  setValue(path: string, valueJson: string): void;    // in the store at once; a step carries it to the HAL
-  writeValues(valuesJson: string): void;
-  readValues(paths: string[]): Record<string, unknown>;
-  snapshot(): Record<string, unknown>;
-  drainChanges(): Record<string, unknown>; // each changed key's latest value; first drain = the store's whole state
-}
+- **as its owner**: it steps the device — `step(dt_ms)` from its own clock, or
+  `run()` to let the device pace itself — and reads and writes the store
+  directly (`setValue`, `readValues`, `snapshot`, `drainChanges`);
+- **as a client**: it calls the device's functions (`call`, `invoke`), starts
+  and halts task runs (`spawn`, `halt`), and lists what the device has
+  (`listKeys`, `describeMethods`) — the operations a remote has over a bridge.
 
-// A run's handle: its id, and the paths of the keys that follow and steer it.
-type Run = { run: string; status: string; feedback: string[]; result: string[]; update: string[] };
+Values cross the boundary as JSON in the Arora `Value` form: `{"f64": 0.5}`,
+`{"str": "hi"}`, `{"f32s": [0, 1, 0]}`.
 
-class AroraRuntimeBuilder {
-  constructor();
-  withModule(headerJson: string, executable: Uint8Array): void; // repeatable
-  withCompiledModule(module: CompiledModule): void;              // repeatable
-  withRecords(records: Record<string, string>): void;            // repeatable
-  build(): AroraRuntime;
-}
+## Smallest use
 
-// A guest module compiled once (sync compile, < 8 MB in Chrome), for any number of devices.
-class CompiledModule {
-  constructor(headerJson: string, executable: Uint8Array);
-}
+```sh
+wasm-pack build crates/arora-web --target web --dev   # writes crates/arora-web/pkg/
 ```
 
-`withModule` compiles the module's bytes when the device is built, for that
-device alone. Several devices running one module share its compilation by
-loading one `CompiledModule` each with `withCompiledModule`: each device still
-gets its own instance, with its own memory and state.
+```js
+import init, { AroraRuntime } from "./pkg/arora_web.js";
 
-`withRecords` takes the records a module's package ships in its `records/`
-directory: each record file's path under `records/`
-(`module/<id>@<version>.yaml`, `structure/…`, `enumeration/…`,
-`folder/<id>.yaml`) mapped to its YAML. A module whose record the device holds
-has every export described by `describeMethods` and callable from a behavior
-— those taking or returning a structure included; the build fails when the
-record does not match the module's header. Without records, only the exports
-whose types are primitives are described.
+await init();
+const device = new AroraRuntime();            // fake hardware, no bridge, no behavior
+device.setValue("face/mouth", JSON.stringify({ f64: 0.5 }));
+device.step(16);                              // one step, 16 ms after the last
+console.log(device.readValues(["face/mouth"]));
+```
 
-Values cross the JS boundary as JSON in the Arora `Value` vocabulary, e.g.
-`{"f32": 0.75}`. `drainChanges` is the poll-based counterpart to a store
-subscription (JavaScript can't await the std channel `DataStore::subscribe`
-delivers on); a subscription opens on the store's whole current state, so the
-first drain returns the full picture. Every step folds what the subscription
-received into the latest value per key, so a drain answers the net change
-since the previous one — a key set twice reads its second value, a key set
-then unset reads `null` — and what a page has not drained is one entry per
-key changed since its last drain, however many steps it goes without
-draining.
+For a bundler, build with `--target bundler`.
 
-`run()` hands the device to `arora::Arora::run` until `stop()` reclaims it —
-the loop ends at its next step boundary, the run promise resolves, and
-`step()` (or another `run()`) works again; while it runs, `step()` is
-unavailable. The rest of the surface keeps working while the device runs:
-`setValue`/`readValues`/`snapshot` work on a sibling handle of the store,
-`drainChanges` on its subscription, and the client operations are the ones a
-remote client has over a bridge.
+## Loading modules
 
-### When an operation settles
+`AroraRuntimeBuilder` builds a device with modules:
 
-The operations that change the device — `call`, `invoke`, `spawn`, `halt` —
-are queued on the device's in-process `arora::LocalCaller` before the method
-returns, and their promise settles on the reply of the step that applies them:
+```js
+const builder = new AroraRuntimeBuilder();
+builder.withModule(headerJson, wasmBytes);   // compiled for this device alone
+builder.withRecords(records);                // the module package's records/
+const device = builder.build();
+```
 
-- **No `run()` ongoing:** the operation asks for a step at a zero dt, taken in
-  the next microtask. A device nobody steps still settles every operation.
-  The operations issued in one turn share one such step, which applies them
-  in the order they were issued, with whatever the bridges delivered, and
-  writes the HAL and the bridges what changed. A page that steps in the same
-  turn (`call(…)` then `step(16)`) applies them with its own step, and no
-  step at a zero dt follows.
-- **`run()` ongoing:** the run's next step applies the operation. The page
-  adds no step, so the run's cadence is its own. An operation the run leaves
-  unapplied as `stop()` ends it takes a step at a zero dt once the device is
-  back.
+- `withModule(headerJson, executable)` compiles the module when the device is
+  built. To run one module on several devices, compile it once as a
+  `CompiledModule(headerJson, executable)` and give it to each with
+  `withCompiledModule`: each device still gets its own instance and memory.
+  Compiling is synchronous, which Chrome refuses above 8 MB on the main thread.
+- `withRecords(records)` takes the records a module package ships in its
+  `records/` directory, as an object mapping each file's path under `records/`
+  (`module/<id>@<version>.yaml`, `structure/…`, `enumeration/…`,
+  `folder/<id>.yaml`) to its YAML. With its module's record, every export is
+  described and callable, those taking or returning a structure included, and
+  the build fails when the record does not match the module's header. Without
+  it, only the exports whose types are primitives are described.
 
-A page's writes to the store, `setValue` and `writeValues`, are in the store
-when the method returns. The same steps carry them to the HAL and the
-bridges: a step at a zero dt shared with the turn's operations, or the run's
-next step.
+## Stepping
 
-A step at a zero dt is an ordinary step with no time elapsed. It applies what
-was asked, publishes `arora/dt` as zero, ticks the behavior once and writes
-the HAL, so precedence and change notifications are those of any step. What
-runs on time holds still, while a node that counts ticks (a behavior tree's
-`Repeat`, say) advances one tick. On a device the page steps itself, an
-operation or a write made outside the turn of a `step()` takes a step at a
-zero dt before the page's next one.
+`step(dt_ms)` takes one step, `dt_ms` milliseconds after the previous one — what a
+`requestAnimationFrame` delta gives. `run(period_ms?)` instead hands the device
+to the runtime's own loop (about 100 Hz by default) until `stop()`; its promise
+resolves on `stop()` and rejects when a step fails. While `run()` owns the
+device, `step()` is refused and the rest of the surface keeps working;
+`running` says which mode the device is in.
 
-A step that fails, the page's own or one at a zero dt, rejects each operation
-it left unanswered with its error, and a step at a zero dt says so on the
-console. The operation is not withdrawn: if the step failed before applying
-it, a later step still does.
+`behaviorError` is the behavior's standing error (undefined while healthy),
+and `behaviorErrorChanged()` resolves on its next change. A failing tick does
+not stop the device.
 
-The operations that only read, `listKeys` and `describeMethods`, never step.
-They answer at once from the device's current state, whether or not `run()`
-owns it: the keys from the store, and the methods from the method index read
-when the device was wrapped. That index changes only through `Arora`'s module
-methods, which `AroraWeb` does not call. `invoke` reads its method's signature
-the same way, so its call is applied like `call`'s. A read does not see an
-operation that is still queued, so await the operation first.
+`drainChanges()` returns each key that changed since the previous drain, with
+its latest value (`null` for a cleared key); the first drain returns the
+store's whole state. What a page has not drained stays one entry per key,
+however many steps pass.
 
-A call into this surface from a callback the step itself invokes (a module
-calling a page function during a tick, which calls back into the device) is
-an ordinary call. A step cannot nest, so an operation is queued and applied
-by a step at a zero dt that runs as a task once the current step has ended,
-or by the run's next step. A write is carried by the current step, or by the
-next one if the current step has already flushed. `step()` from there is
-refused. Because the step follows as a task, a callback that asks for one on
-every tick does not starve the event loop, but it does keep the device
-stepping. Don't rely on such calls. What a step needs done belongs in a
-behavior, where it is part of the step.
+## Talking to the device
 
-`invoke` names a method by the bare name its module exports; when two modules
-export one name, pass the module id (`describeMethods` gives each method's
-`module`) — without it the promise rejects naming those modules. A task-shaped
-method (one returning the behavior `Status`) is spawned as a run: like
-`spawn`, it resolves to the run's handle, a plain object
-`{ run, status, feedback, result, update }`: `run` is the id `halt` takes,
-`status` the path of the key reporting how the run goes and ends, and the rest
-the paths of the keys carrying its progress, its result, and what steers it.
+```ts
+call(callJson: string): Promise<string>;                 // an arora_types::call::Call as JSON
+invoke(method: string, argsJson: string, moduleId?: string): Promise<unknown | Run>;
+spawn(callJson: string): Promise<Run>;
+halt(runId: string): Promise<void>;
+listKeys(prefix?: string): Promise<{ path: string; __meta: unknown }[]>;
+describeMethods(prefix?: string): Promise<unknown[]>;
 
-A downstream device (e.g. Vizij) composes its own `arora::Arora` with
-`arora::AroraBuilder` — the HAL, bridge, and store seams are trait objects that
-cannot cross the JS boundary — and wraps it with `AroraWeb::from`, reusing the
-same JS surface. The `store_json` module exposes the Value↔JSON accessors over
-any store for wrappers that add their own methods, and `AroraWeb::caller` the
-typed client operations. An operation through the caller is a remote's: it
-applies at the device's next step. `AroraWeb::complete(reply)` settles it as
-this surface's operations settle. `AroraWeb::request_step()` asks for the step
-those operations take — at a zero dt, shared with the turn's operations and
-writes, none under `run()` — for a change a wrapper makes to the device by
-another way than the caller or the store.
+type Run = { run: string; status: string; feedback: string[]; result: string[]; update: string[] };
+```
 
-## Engine / BehaviorTreeRunner JS surface (see [src/lib.rs](src/lib.rs)):
+`invoke` calls a method by the name its module exports, with arguments by
+parameter name (`{"x": {"f64": 2.5}}`); when two modules export the name, pass
+the module's id (each method `describeMethods` lists carries its `module`).
+A method returning the behavior `Status` starts a task run instead and
+resolves to its `Run`: `run` is the id `halt` takes, `status` the key that
+reports how the run goes and ends, and the rest the keys carrying its
+progress, its result and what steers it. `listKeys` gives each key with its
+`KeyMeta` under `__meta`, as every bridge lists keys.
+
+**When an operation settles.** `call`, `invoke`, `spawn` and `halt` change the
+device, so they settle on the step that applies them:
+
+- with no `run()` ongoing, the operations of one turn share one step at a zero
+  dt, taken in the next microtask — unless the page steps in that turn, and its
+  own step applies them. A device nobody steps still settles every operation;
+- with `run()` ongoing, the run's next step applies them, and the page adds no
+  step.
+
+A step at a zero dt is an ordinary step with no time elapsed: it publishes
+`arora/dt` as zero and ticks the behavior once, so what runs on time holds still
+while a node that counts ticks advances. A step that fails rejects the
+operations it left unanswered; an operation it had not applied yet is applied
+by a later step.
+
+`setValue` and `writeValues` hold in the store when they return, and the same
+steps carry them to the HAL and the bridges. `listKeys` and `describeMethods`
+never step: they answer at once from the store and from the method index read
+when the device was built, so await an operation before reading what it did.
+
+A call into this surface from inside a step (a module calling a page function
+during a tick) is queued for a step at a zero dt after the current one, or the
+run's next step; `step()` from there is refused. What a step needs done
+belongs in a behavior.
+
+## A device of your own
+
+The JS constructor builds a demo device: fake hardware, no bridge, a private
+store, no behavior. A downstream crate composes its own device in Rust with
+`arora::AroraBuilder` — the HAL, bridge and store are trait objects, which
+cannot cross the JS boundary — and wraps it with `AroraWeb::from` (`AroraWeb`
+is `AroraRuntime`'s Rust name) to reuse this whole surface. For a wrapper
+adding methods of its own, `store_json` holds the `Value`-as-JSON store
+accessors, `AroraWeb::caller` the typed client operations (an operation through
+it is a remote's, applied at the next step), `AroraWeb::complete` settles one
+as this surface's operations settle, and `AroraWeb::request_step` asks for the
+step at a zero dt for a change the wrapper makes another way.
+
+## The engine alone
+
+Below the device, `Engine` loads modules and calls their functions with no
+store, behavior or step:
 
 ```ts
 class Engine {
-  constructor();
-  loadModule(headerJson: string, executable: Uint8Array): string; // returns module id; sync compile (< 8 MB in Chrome)
-  prepareModule(headerJson: string, executable: Uint8Array): Promise<void>; // async compile + instantiate, any size
-  loadPreparedModule(headerJson: string): string;                   // completes a prepareModule load; returns module id
-  call(callJson: string): string;                                   // returns result JSON
-  listModules(): string;                                            // returns JSON array of loaded module headers
-}
-
-class BehaviorTreeRunner {
-  constructor();
-  loadModule(headerJson: string, executable: Uint8Array): string;
-  prepareModule(headerJson: string, executable: Uint8Array): Promise<void>;
-  loadPreparedModule(headerJson: string): string;
-  listModules(): string;                                            // returns JSON array of loaded module headers
-  setVariable(varId: string, valueJson: string): void;
-  tick(nodesJson: string): string;  // returns {status, trace, variables}
-  run(nodesJson: string): string;   // runs until not Running
+  loadModule(headerJson: string, executable: Uint8Array): string;     // the module's id; compiles synchronously
+  prepareModule(headerJson: string, executable: Uint8Array): Promise<void>; // compiles asynchronously, any size
+  loadPreparedModule(headerJson: string): string;                     // completes a prepareModule
+  call(callJson: string): string;                                     // the CallResult as JSON
+  listModules(): string;                                              // the loaded headers, as a JSON array
 }
 ```
 
-`loadModule` compiles and instantiates synchronously, which Chrome rejects
-above 8 MB on the main thread. The `prepareModule` + `loadPreparedModule`
-pair routes through the async `WebAssembly.instantiate` and works for any
-size in every browser.
+A `Call` without a `module_id` goes to the module the function was loaded
+with. `prepareModule` + `loadPreparedModule` compile through the browser's
+asynchronous `WebAssembly.instantiate`, with no size limit.
 
-`callJson` matches `arora_engine::call::Call`:
-`{"id":"<function-uuid>","args":[...]}`. If the call doesn't carry a
-`module_id`, arora-web looks one up from the function ID it was loaded
-with.
+`BehaviorTreeRunner` has the same loading methods and ticks a behavior tree
+given as JSON nodes over them: `setVariable(varId, valueJson)`, `tick(nodesJson)`
+(one tick; returns `{status, trace, variables}`) and `run(nodesJson)` (ticks
+until the tree stops running; returns `{status, trace}`). Each node is:
 
-Each node in `nodesJson` is:
 ```json
 {
   "id": "<uuid>",
-  "function": "<fn-uuid>",
-  "children": ["<child-uuid>"],
-  "arguments": { "<param-uuid>": {"value": {...}} | {"variable_id": "<uuid>"} },
-  "return_binding": "<var-uuid>"
+  "function": "<function uuid>",
+  "children": ["<child uuid>"],
+  "arguments": { "<parameter uuid>": {"value": {"f64": 1.0}} },
+  "return_binding": "<variable uuid>"
 }
 ```
-When `return_binding` is set the function's raw return value is stored in
-that variable and the node always reports `success` to its parent.
 
-## Build
+An argument is a `value` or a `variable_id`. With `return_binding`, the
+function's return value is stored in that variable and the node reports
+success. `Registry` resolves type ids to dotted names from a module's
+`records.json` (`loadRecordsJson`, `resolveId`).
 
-```bash
-wasm-pack build crates/arora-web --target web --dev
+## Build and test
+
+The crate builds only for `wasm32`; on the host it is empty, so it still takes
+part in a native workspace build.
+
+```sh
+cargo build -p arora-web --target wasm32-unknown-unknown
+GECKODRIVER=$(which geckodriver) wasm-pack test --headless --firefox crates/arora-web --lib --test browser
 ```
 
-Output lands under `crates/arora-web/pkg/`. To consume from a bundler
-swap `--target web` for `--target bundler`.
+The browser test loads the `test-rust-wasm` guest, which its build compiles
+for `wasm32-wasip2` through an artifact dependency, and drives `AroraRuntime`
+on a device nobody steps, one the page steps, and one `run()` owns. CI runs it
+on Firefox. `wasm-pack` downloads a `chromedriver` pinned to one Chrome
+version, and on Apple Silicon a `geckodriver` built for x86_64: install a
+native driver (`brew install geckodriver`) and name it with `GECKODRIVER` (or
+`CHROMEDRIVER`).
 
-## Integration test (headless browser)
-
-```bash
-# First, force a wasm32-wasip2 build of the test guest module:
-cargo test -p arora-integration-tests
-
-# Then run the wasm-bindgen-test in a headless browser:
-GECKODRIVER=$(which geckodriver) wasm-pack test --headless --firefox crates/arora-web
-# (or --chrome — see notes below)
-```
-
-The test loads `test-rust-wasm.wasm` through `Engine.loadModule` and
-calls `ping`, asserting the round-trip works. The others drive
-`AroraRuntime`'s operations on a device nobody steps, one the page steps, and
-one `run()` owns, counting the steps each one takes.
-
-> **Browser pick:** `wasm-pack` downloads a pinned `chromedriver`; if it
-> doesn't match the locally installed Chrome it 404s. Firefox /
-> geckodriver is more forgiving; CI uses `--firefox`.
->
-> **Apple Silicon:** the `geckodriver` wasm-pack auto-downloads is
-> x86_64 and SIGABRTs under Rosetta with a "rosetta error: Attachment
-> of code signature supplement failed" message. Install a native arm64
-> driver (`brew install geckodriver`) and point at it via the
-> `GECKODRIVER` env var (as shown above). Same idea for `chromedriver`
-> via the `CHROMEDRIVER` env var.
-
-## Demo pages
-
-```bash
-crates/arora-web/www/serve.sh
-# open http://localhost:8080          – Engine call demo (ping, succeed, cos)
-# open http://localhost:8080/demo.html – BehaviorTreeRunner tick demo
-```
-
-`serve.sh` runs `wasm-pack build`, stages guest modules under
-`www/modules/<name>/`, then starts `python3 -m http.server`.
-
-`demo.html` shows a live behavior tree: each tick increments `x` by 0.1
-via `add()`, then computes `cos(x)`. Variables persist across ticks.
-The SVG tree panel highlights node status; the side panel displays
-variable values and a tick log.
-
-## Why a separate crate
-
-`arora` is dual-target now (`wasmtime-host` and `native-host` features
-default-on for native; gated out on wasm32, where the browser executor
-takes over). `arora-web` exists purely to attach the wasm-bindgen
-surface and keep host builds free of `wasm-bindgen` deps.
+`www/` holds two demo pages over `Engine` and `BehaviorTreeRunner`, staged and
+served by `www/serve.sh` (wasm-pack and Python 3). The script copies a
+generated `module.yaml` for `test-rust-wasm` that the module's build does not
+write, so it stops at that step.

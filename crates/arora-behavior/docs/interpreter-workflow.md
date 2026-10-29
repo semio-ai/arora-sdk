@@ -1,158 +1,255 @@
-# How a behavior interpreter works — load, tick, and graph updates
+# How a behavior interpreter works
 
-This page explains the workflow the Arora runtime drives a **behavior interpreter** through: how a behavior is loaded, how it is ticked each frame, how it relates to the data store, and how a running behavior is edited. The diagrams are grounded in the actual code — every box and step links to the source that implements it.
+This page follows a behavior interpreter through its life in a device: how it
+is installed, how a behavior is loaded into it, how the runtime ticks it, how
+the running behavior is edited, how it hosts task runs, and how it ends. It
+assumes the [crate readme](../readme.md). The step that ticks the interpreter
+is in [`arora`'s runtime page](../../arora/docs/runtime-and-data-flow.md).
 
-Two words are deliberately distinguished throughout ([`lib.rs` module doc, lines 1–35](../src/lib.rs#L1-L35)):
-
-- A **behavior** (the noun) is *authored, editable data* — a behavior tree, a node graph — produced in a visual editor and shipped as a [`Graph`](../src/graph.rs#L146-L162).
-- A **[`BehaviorInterpreter`](../src/lib.rs#L93-L130)** is the *runtime executor* that runs one such behavior. The runtime holds exactly one `Box<dyn BehaviorInterpreter>` and ticks it; loading a new behavior into it (or editing the one it holds) is how you change what the device does.
-
-> The interpreter is `!Send` on purpose — the runtime is a single-owner, single-thread step loop ([`lib.rs:79-92`](../src/lib.rs#L79-L92)).
-
-## The pieces at a glance
+## The pieces
 
 ```mermaid
 flowchart LR
-  editor["Visual editor<br/>(Studio / Vizij Workspace)"] -- "authored behavior<br/>= Graph / GraphDiff" --> interp
-  subgraph runtime["Arora runtime (one step loop)"]
-    store[("Data store<br/>(blackboard)")]
-    interp["BehaviorInterpreter<br/>(the executor)"]
+  editor["Editor or client<br/>(Semio Studio, Vizij Workspace, a remote)"]
+  subgraph device["Arora device: one step loop"]
+    module["Interpreter module<br/>LOAD · EDIT · SPAWN · SPAWN_GRAPH · HALT"]
+    interp["BehaviorInterpreter"]
+    store[("Data store")]
+    engine["Engine<br/>(modules)"]
   end
-  runtime -- "publishes built-in clock<br/>then ticks" --> interp
-  interp -- "reads inputs / built-in time" --> store
-  interp -- "writes intent / outputs" --> store
-  interp -- "calls modules (optional)" --> engine["Engine<br/>(modules)"]
+  editor -- "Graph / GraphDiff / Call, as an ordinary call" --> module
+  module -- "load / apply / spawn / spawn_graph / halt" --> interp
+  interp -- "tick: read inputs and arora/time, write outputs" --> store
+  interp -- "call module functions" --> engine
 ```
 
-The authored behavior is *only data*: the [`graph`](../src/graph.rs) module is the shared model (nodes bound to functions, typed I/Os, links) and knows nothing about ticking. Each interpreter lowers that shared model into its own runtime form and walks it however it likes — a behavior tree reads links as argument/child edges; a node graph reads them as dataflow ([`graph.rs:1-22`](../src/graph.rs#L1-L22)).
+A **behavior** is data: a `Graph` ([`graph`](../src/graph.rs)). An
+**interpreter** lowers it into its own runnable form and walks that form each
+tick. The graph model knows nothing of ticking: the behavior tree reads its
+links as arguments and its children as the tree; a node graph reads its links
+as dataflow.
 
-## The trait: three methods
+## The trait
 
-Defined at [`lib.rs:93-130`](../src/lib.rs#L93-L130). Only `tick` is required; `apply` and `load` default to rejecting the operation, so a hand-coded, non-graph interpreter can implement just `tick`.
+[`BehaviorInterpreter`](../src/lib.rs) has one required method; the others
+default to refusing, so an interpreter implements what it supports.
 
-| Method | Signature | Called | Source |
-|---|---|---|---|
-| `tick` | `fn tick(&mut self, ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError>` | every frame | [`lib.rs:96`](../src/lib.rs#L96) |
-| `apply` | `fn apply(&mut self, diff: GraphDiff) -> Result<(), BehaviorError>` | on a graph edit | [`lib.rs:112`](../src/lib.rs#L112) |
-| `load` | `fn load(&mut self, graph: Graph) -> Result<(), BehaviorError>` | on a whole-behavior load | [`lib.rs:124`](../src/lib.rs#L124) |
+| method | the runtime calls it | default |
+|---|---|---|
+| `tick(&mut BehaviorContext)` | once per step | required |
+| `load(Graph)` | on the interpreter module's `LOAD` | refuses |
+| `apply(GraphDiff)` | on `EDIT` | refuses |
+| `spawn(Call, RunPolicy)` | on `SPAWN` | refuses |
+| `spawn_graph(&GraphType, Graph, RunPolicy)` | on `SPAWN_GRAPH` | refuses |
+| `halt(TaskId)` | on `HALT` | refuses |
+| `described_methods()` | once, when the device is built | describes none |
 
-Each `tick` receives a [`BehaviorContext`](../src/lib.rs#L57-L62): the shared `store: &dyn DataStore` (read inputs, write intent/outputs) and `call_bridge: &mut dyn CallBridge` (the engine, for interpreters that call modules). It returns a [`BehaviorStatus`](../src/lib.rs#L47-L53) — `Running` (tick me again) or `Done` (drop me).
+Each tick receives a `BehaviorContext`:
 
-## The lifecycle
+| field | what it is |
+|---|---|
+| `store: &dyn DataStore` | the device's data store: read inputs, write outputs |
+| `call_bridge: &mut dyn CallBridge` | the engine, to call module functions |
+| `functions: &FunctionIndex` | the device's method index: every described function, with its module and signature |
+
+The store is shared by reference yet written through it: a `DataStore` takes
+`&self` for reads and writes alike.
+
+The trait is not `Send`. A device is stepped on one thread, and the
+interpreter is shared between the step and the interpreter module through a
+`RefCell`, not a lock.
+
+## 1. Installed once
+
+A device holds one interpreter, given at build
+(`AroraBuilder::with_behavior_interpreter`) and never swapped. With none
+given, the device builds an empty `BehaviorTreeInterpreter`. An interpreter
+starts empty and ready: with no behavior loaded, the behavior tree ticks as
+`Running` and does nothing. The device asks for its `described_methods`
+once, at build.
+
+## 2. Load
+
+A behavior arrives as a whole `Graph`:
+
+| `Graph` field | what it holds |
+|---|---|
+| `root` | the entry node, for a tree-shaped interpreter |
+| `nodes` | the `Node`s by id: each bound to a `function` (a function id the interpreter runs natively, or a module function), with its `inputs` and `outputs` (`Io`) and, for a tree, its ordered `children` |
+| `links` | the `Link`s: each feeds one node input (`Port`) from a `LinkSource` — a literal value, a named variable, another node's output, or a selection into one of those |
+| `variables` | the named variables, by id: the name is what an interpreter resolves against the store |
+
+An `Io` may carry a `predetermined_key`: the key an output is written to, or
+an input read from, unless a link says otherwise.
+
+`load` replaces the running behavior with the graph. Loading is the same as
+applying a diff onto an empty graph (`GraphDiff::load`, `Graph::empty`).
+
+`load` and `apply` receive no store. An interpreter may validate and keep the
+new graph, then lower it at its next tick, which carries the store. That is
+what makes both callable from the interpreter module, which holds no store.
+The behavior tree does exactly that: it marks itself changed, and its next
+tick lowers the graph against the store and the method index.
+
+A client loads a behavior through the interpreter module: a `Call` built by
+`interpreter_module::encode_load`, sent over a bridge, through a
+`LocalCaller` or with `Arora::call`. The `arora` runtime's
+`Arora::load_groot` lowers a Groot tree against the method index and sends
+the same call.
+
+## 3. Tick
 
 ```mermaid
 sequenceDiagram
-    participant Remote as Remote / editor / another behavior
-    participant Runtime as Arora step loop
+    participant Step as Arora step
     participant Store as Data store
     participant Interp as BehaviorInterpreter
+    participant Engine
 
-    Note over Interp: constructed empty & idle
-    Remote->>Interp: load(Graph)  (or apply(diff) onto empty)
-    Note over Interp: stash graph, mark dirty (store-less)
-
-    loop every step
-        Runtime->>Store: publish built-in clock (arora/time, arora/dt)
-        Runtime->>Store: apply sensors, then bridge/caller events
-        Runtime->>Interp: tick(ctx = {store, call_bridge})
-        Note over Interp: if dirty, re-lower graph against ctx.store
-        Interp->>Store: read inputs (incl. built-in time)
-        Interp->>Store: write intent / outputs
-        Interp-->>Runtime: Running (keep) | Done (drop)
-        opt graph edit arrives between ticks
-            Remote->>Interp: apply(GraphDiff)
-            Note over Interp: validate + stash, mark dirty<br/>(re-lower on next tick)
-        end
+    Step->>Store: write arora/time and arora/dt
+    Step->>Store: apply the HAL's readings, then the remote commands
+    Step->>Interp: tick(ctx)
+    opt the graph changed since the last tick
+        Interp->>Interp: lower it against ctx.store and ctx.functions
     end
+    Interp->>Store: read inputs
+    Interp->>Engine: call module functions
+    Engine-->>Interp: out parameters
+    Interp->>Store: write outputs
+    Interp-->>Step: Running, Done(Ok), Done(Err) or Err
+    Step->>Step: send what changed to the HAL and the bridges
 ```
 
-### 1. Load
+The runtime ticks the interpreter last in the step, after the clock, the
+HAL's readings and the remote commands are in the store: the behavior reads
+everything that happened in the step, and its writes win the step.
 
-A behavior is loaded into an interpreter as a whole [`Graph`](../src/graph.rs#L146-L162) via [`load`](../src/lib.rs#L124), or built up from an empty graph by [`apply`](../src/lib.rs#L112)ing a [`GraphDiff`](../src/graph.rs#L186-L211) — *loading a fresh behavior is exactly applying a diff onto an empty graph* ([`lib.rs:98-100`](../src/lib.rs#L98-L100), [`graph.rs:19-22`](../src/graph.rs#L19-L22)).
+A module function never writes a key. A call takes in parameters and returns
+out parameters; the interpreter decides which keys the outputs go to — a
+link, a variable, a predetermined key. The store is the whole relationship
+between the runtime and the behavior: there is no separate time update, no
+input argument and no output return.
 
-`load` and `apply` are **store-less** by design ([`lib.rs:119-123`](../src/lib.rs#L119-L123)): they only receive graph data, no store. An interpreter is free to just validate and stash the new behavior and defer turning it into its runnable form until the next `tick` (which does carry the store). That is what makes both methods reachable from anywhere a graph arrives — including the interpreter's own engine-registered load/edit functions, which hold no store (see [Graph updates](#4-graph-updates)).
+**Time is data.** Before anything else in the step, the runtime writes two
+built-in keys ([`built_in`](../src/built_in.rs)):
 
-The runtime injects one interpreter at build time; if none is supplied it defaults to an empty, idle behavior tree ([`arora/src/lib.rs:451-479`](../../arora/src/lib.rs#L451-L479)). An empty interpreter is not an error — it simply idles (returns `Running`) until a behavior is loaded.
+| key | value |
+|---|---|
+| `arora/time` (`built_in::TIME`) | `U64` nanoseconds on the device's timeline, from its start time, zero unless set |
+| `arora/dt` (`built_in::DT`) | `U64` nanoseconds since the previous step |
 
-### 2. Time update — the store↔behavior relationship
+An interpreter that needs time reads them like any other key. The `arora/`
+namespace belongs to the runtime and its interpreter; a behavior writes no
+key of its own there.
 
-There is **no separate "time update" method**. Timing is *data*, not a tick argument. Before it ticks any behavior, the runtime writes the frame's clock into the store under two reserved **built-in keys** ([`built_in.rs`](../src/built_in.rs)):
+How an interpreter uses the store is its own: the behavior tree binds its
+variables to keys by name, once, as direct handles (`Slot`); a node graph
+reads and writes keys as dataflow. [arora-behavior-tree's
+nodes](../../arora-behavior-tree/docs/nodes.md) are a worked example.
 
-| Key | Meaning | Constant |
-|---|---|---|
-| `arora/time` | monotonic nanoseconds on the runtime's timeline, from its start time (zero unless set) (`U64`) | [`built_in.rs:26`](../src/built_in.rs#L26) |
-| `arora/dt` | nanoseconds elapsed since the previous step (`U64`) | [`built_in.rs:31`](../src/built_in.rs#L31) |
+## 4. Edit
 
-An interpreter that needs elapsed time reads `arora/dt` from `ctx.store` like any other slot ([`lib.rs:33-35`](../src/lib.rs#L33-L35), [`built_in.rs:1-16`](../src/built_in.rs#L1-L16)). The runtime publishes them in phase 1 of the step, before sensors, events, or the behavior touch the store ([`arora/src/runtime.rs:207-218`](../../arora/src/runtime.rs#L207-L218)).
+A running behavior is edited with a `GraphDiff`, applied in a fixed order so
+one diff can remove and rebuild a region at once: links removed, then nodes
+(with the links touching them), then nodes added, then links added, then the
+predetermined keys, the root and the variables set (`Graph::apply`).
 
-More broadly, **the store is the entire relationship between the runtime and a behavior**. The store is path-keyed and uses interior mutability (`&self` for both read and write), so one store can be shared by the HAL, the bridge, and the interpreter at once ([`arora-types/src/data/store.rs:1-14`](../../arora-types/src/data/store.rs#L1-L14)) — which is why `BehaviorContext.store` is a shared `&dyn DataStore` yet the interpreter can still write to it.
+| `GraphDiff` field | effect |
+|---|---|
+| `remove_links` | unwire these inputs |
+| `remove_nodes` | remove these nodes and every link touching them |
+| `add_nodes` | insert these nodes, replacing any with the same id |
+| `add_links` | insert these links, replacing any link to the same input |
+| `set_predetermined` | set or clear the predetermined key of these inputs and outputs |
+| `set_root` | make this node the root |
+| `variables` | declare or rename these variables |
 
-**Interpreters have wide freedom in how they use the store.** The crate imposes no convention beyond the reserved `arora/` built-in namespace: a node graph can treat links as dataflow over store slots; a behavior tree binds its authored variables to store slots by name and drives the call bridge instead ([`graph.rs:12-16`](../src/graph.rs#L12-L16)). For a concrete, worked example of one interpreter's store discipline — the behavior tree's `VariableCell` (tree-local scratch vs. a `Slot` handle into the store, bound once at build under the "Direct" name==key convention) — see **[arora-behavior-tree/docs/nodes.md](../../arora-behavior-tree/docs/nodes.md)**.
+The diff arrives through the interpreter module's `EDIT`
+(`interpreter_module::encode_edit`). Interpreters differ in when they act on
+it: the behavior tree keeps the edited graph and re-lowers at its next tick,
+keeping the state of the nodes the edit did not touch; Vizij's node-graph
+interpreter
+([vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/crates/interop/vizij-arora-behavior/docs/node-graph.md))
+applies the diff and re-lowers at once, refusing an edit that leaves an
+invalid graph.
 
-### 3. Ticks — how data flows
+A call to the interpreter module from inside the interpreter's own tick — a
+behavior editing itself — fails cleanly ("the behavior is being ticked; call
+between steps"): the step holds the interpreter for the length of the tick.
 
-Each step the runtime ticks the one interpreter **last**, after the clock, sensors, and bridge/caller events have already been applied to the store — so the behavior is the frame's final writer and sees everything that happened this frame ([`arora/src/runtime.rs:379-421`](../../arora/src/runtime.rs#L379-L421)).
+## 5. Task runs
 
-```mermaid
-flowchart TB
-  store[("Data store")]
-  subgraph frame["one tick"]
-    direction TB
-    read["read inputs from store<br/>(built-in time, sensor values,<br/>remote writes, own prior outputs)"]
-    compute["walk the lowered behavior<br/>(tree nodes / graph nodes)"]
-    invoke["optionally call modules<br/>via ctx.call_bridge"]
-    write["write intent / outputs<br/>back to store"]
-    read --> compute --> invoke --> write
-  end
-  store --> read
-  write --> store
-  invoke --> engine["Engine (modules)"]
-  engine --> invoke
-```
+A task run is a behavior the interpreter hosts beside the main one, ticked
+with it each step:
 
-Concretely, `tick` gets `ctx.store` and `ctx.call_bridge` ([`lib.rs:57-62`](../src/lib.rs#L57-L62)). It reads whatever slots it cares about, does its work (which may include calling engine modules through the call bridge), and writes its results back into the store with `store.write(...)`. Those writes are coalesced by the runtime after the tick and fanned out to the HAL and to any subscribed bridges ([`arora/src/runtime.rs:427-475`](../../arora/src/runtime.rs#L427-L475)). Per-key precedence within a frame is **behavior ▸ bridge ▸ HAL ▸ previous frame** — the behavior's writes win ([`arora/src/runtime.rs:486-492`](../../arora/src/runtime.rs#L486-L492)).
+- `spawn(call, policy)` starts a run from one module `Call`;
+- `spawn_graph(graph_type, graph, policy)` starts a run whose program is a
+  `Graph`. The interpreter refuses a `GraphType` it does not read
+  (`GraphType::reads`: the same language and major version, a minor version
+  no newer than its own). A run is known by its graph's root: spawning a graph
+  whose root a live run has answers that run's handle, and the run takes the
+  graph as its program. The run's nodes are part of the interpreter's graph,
+  so `apply` reaches them and a `load` of the main behavior leaves them;
+- `halt(task)` stops a run, cleanly; halting a finished or unknown run does
+  nothing.
 
-### 4. Graph updates
+Both spawns answer at once with a `TaskHandle`: the run's `TaskId`, the
+`stop` call that halts it, and its keys — `status`, `feedback`, `result`, and
+`update` for steering it. The run writes a `Status` to its status key:
+`Running`, then `Success` or `Failure`; a halted run ends `Failure`. The
+behavior tree allocates a run's keys under
+`arora/tasks/<module>/<function>/<run>/`.
 
-A running behavior is edited by applying a [`GraphDiff`](../src/graph.rs#L186-L211) — add/remove nodes and links, set predetermined keys, set the root, declare variables — applied in a fixed order so one diff can delete and rebuild a region atomically ([`graph.rs:179-211`](../src/graph.rs#L179-L211), applied by [`Graph::apply`, `graph.rs:251-299`](../src/graph.rs#L251-L299)).
+`RunPolicy::Concurrent` is the one policy: runs proceed side by side, and
+overlapping writes to one key are last-write-wins.
 
-The interpreter-level [`apply`](../src/lib.rs#L112) typically only *validates and stashes* the edit (mutating its held `Graph` and marking itself dirty), **deferring the actual re-lowering to the next `tick`**, where the store is available ([`lib.rs:98-117`](../src/lib.rs#L98-L117)). This keeps `apply` callable from anywhere a diff arrives.
+The interpreter module carries each spawn and halt
+(`interpreter_module::encode_spawn`, `encode_spawn_graph`, `encode_halt`, and
+`decode_spawn_result` for the handle), so a remote starts and stops runs with
+ordinary calls. The `arora` runtime follows each run it started, logs when it
+starts and ends, and halts the runs calling a module that is reloaded or
+unloaded.
 
-Where does a diff arrive from? The interpreter is also exposed **as an engine module** so a remote `Call` or even another behavior can load/edit it over the ordinary dispatch path ([`interpreter_module.rs:1-19`](../src/interpreter_module.rs#L1-L19)). It has self-identifying well-known UUIDs (the ASCII bytes of `arora` lead the id):
+Methods the interpreter implements itself (`described_methods`) join the
+device's method index under `interpreter_module::ID`; a client spawns one
+like any task run, and a direct call to it fails.
 
-| Id | Purpose | Constant |
-|---|---|---|
-| `ID` | the interpreter module | [`interpreter_module.rs:33`](../src/interpreter_module.rs#L33) |
-| `LOAD` | → `BehaviorInterpreter::load` (a whole `Graph`) | [`interpreter_module.rs:43`](../src/interpreter_module.rs#L43) |
-| `EDIT` | → `BehaviorInterpreter::apply` (a `GraphDiff`) | [`interpreter_module.rs:36`](../src/interpreter_module.rs#L36) |
+## 6. Keeps ticking, or ends
 
-The `arora` crate wires these ids to the live interpreter cell ([`arora/src/lib.rs:461-479`](../../arora/src/lib.rs#L461-L479)); payloads round-trip as one structured `Value` ([`interpreter_module.rs:50-100`](../src/interpreter_module.rs#L50-L100)). Editing an interpreter from *inside its own tick* is refused cleanly rather than racing, because the interpreter cell is already borrowed for the tick ([`arora/src/runtime.rs:360-366`](../../arora/src/runtime.rs#L360-L366)).
+After each tick the runtime reads the result:
 
-Not every interpreter supports incremental edits. The behavior tree does (it re-lowers on the next tick); Vizij's node graph rejects `GraphDiff` and treats every edit as a whole-spec `load` — see the contrast in [the Vizij NodeGraph doc](https://github.com/vizij-ai/vizij-rs/blob/main/crates/interop/vizij-arora-behavior/docs/node-graph.md).
+| `tick` returns | the runtime |
+|---|---|
+| `Ok(Running)` | ticks it again next step, and clears any standing error |
+| `Ok(Done(Ok(())))` | drops it: the device ticks nothing afterwards |
+| `Ok(Done(Err(e)))` | raises `e` and drops it |
+| `Err(e)` | raises `e` and ticks it again next step |
 
-### 5. Keeps ticking
+`BehaviorStatus` is the interpreter's scheduling status, not a behavior's
+outcome: a behavior's outcome is a value on a key, and one tick can drive many
+task runs. The behavior tree always answers `Running`: it hosts a standing
+behavior and its runs, and is never dropped.
 
-After each tick the runtime reads the returned [`BehaviorStatus`](../src/lib.rs#L47-L53):
-
-- **`Running`** → the interpreter stays installed and is ticked again next step. A node graph runs forever; a behavior tree that is still running reports `Running`. An interpreter with no behavior loaded idles as `Running` ([`arora-behavior-tree/src/behavior.rs:142-144`](../../arora-behavior-tree/src/behavior.rs#L142-L144)).
-- **`Done`** → the interpreter reached a terminal state; the runtime drops it (sets the cell to `None`) ([`arora/src/runtime.rs:404-412`](../../arora/src/runtime.rs#L404-L412)).
-
-A **failing** tick is *state, not a stop*: the behavior stays installed and retries next step, and the error is surfaced on a watch channel (cleared on the next success) rather than halting the device ([`arora/src/runtime.rs:413-420`](../../arora/src/runtime.rs#L413-L420)). See the end-to-end test [`a_failing_behavior_is_state_not_a_stop`](../../arora/src/lib.rs#L615-L678).
-
-## A concrete interpreter
-
-The fully worked reference implementation of all three methods — including the dirty/defer-lowering pattern, store-slot binding, and idle-when-empty semantics — is the behavior tree's [`BehaviorTreeInterpreter`](../../arora-behavior-tree/src/behavior.rs#L35-L180). See **[arora-behavior-tree/docs/nodes.md](../../arora-behavior-tree/docs/nodes.md)** for what its nodes are and how they touch the store and modules, and **[the arora runtime doc](../../arora/docs/runtime-and-data-flow.md)** for the full step loop that drives all of this.
+A raised error stands, on the device's `behavior_error` watch, until a tick
+succeeds; a failing behavior never stops the device.
 
 ## Source map
 
-| Concept | File |
+| what | where |
 |---|---|
-| `BehaviorInterpreter` trait, `BehaviorContext`, `BehaviorStatus` | [`crates/arora-behavior/src/lib.rs`](../src/lib.rs) |
-| Shared graph model, `GraphDiff`, `Graph::apply` | [`crates/arora-behavior/src/graph.rs`](../src/graph.rs) |
-| Built-in clock keys (timing as data) | [`crates/arora-behavior/src/built_in.rs`](../src/built_in.rs) |
-| Interpreter-as-module (`LOAD`/`EDIT` ids, codecs) | [`crates/arora-behavior/src/interpreter_module.rs`](../src/interpreter_module.rs) |
-| The `DataStore` / `Slot` an interpreter reads & writes | [`crates/arora-types/src/data/store.rs`](../../arora-types/src/data/store.rs) |
-| The step loop that ticks the interpreter | [`crates/arora/src/runtime.rs`](../../arora/src/runtime.rs) |
-| Concrete interpreter (behavior tree) | [`crates/arora-behavior-tree/src/behavior.rs`](../../arora-behavior-tree/src/behavior.rs) |
+| `BehaviorInterpreter`, `BehaviorContext`, `BehaviorStatus`, `FunctionIndex` | [`src/lib.rs`](../src/lib.rs) |
+| the graph model, `GraphDiff`, `GraphType` | [`src/graph.rs`](../src/graph.rs) |
+| the interpreter module's ids and calls | [`src/interpreter_module.rs`](../src/interpreter_module.rs) |
+| task runs: `TaskHandle`, `TaskId`, `RunPolicy` | [`src/task.rs`](../src/task.rs) |
+| the run status `Status` | [`src/status.rs`](../src/status.rs) |
+| the built-in keys | [`src/built_in.rs`](../src/built_in.rs) |
+| the step that ticks the interpreter, the interpreter module's registration | [`arora/src/runtime.rs`](../../arora/src/runtime.rs), [`arora/src/lib.rs`](../../arora/src/lib.rs) |
+| the behavior tree, a complete interpreter | [`arora-behavior-tree/src/behavior.rs`](../../arora-behavior-tree/src/behavior.rs) |
 
-Tests worth reading: graph/diff round-trips ([`graph.rs:308-440`](../src/graph.rs#L308-L440)), interpreter-module codecs ([`interpreter_module.rs:102-149`](../src/interpreter_module.rs#L102-L149)), and end-to-end load/tick/edit through the real runtime ([`arora/src/runtime.rs:913-1009`](../../arora/src/runtime.rs#L913-L1009)).
+Tests worth reading: the graph and diff tests in `src/graph.rs`, the
+interpreter module's round trips in `src/interpreter_module.rs`, and, in the
+`arora` crate, `a_call_loads_a_behavior_through_the_engine`,
+`a_call_edits_the_behavior_through_the_engine`,
+`calls_reach_spawn_and_halt_through_the_engine` and `a_tick_time_call_fails_cleanly`
+in `src/runtime.rs`, and `a_failing_behavior_is_state_not_a_stop` in
+`src/lib.rs`.

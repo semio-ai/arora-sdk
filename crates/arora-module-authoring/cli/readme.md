@@ -1,60 +1,58 @@
 # `arora-module-cli`
 
-Command-line tool for generating language-specific build-files, exporting types, and exporting modules.
-`arora-module-cli` interfaces with language-specific executables to generate code.
-It processes the [module headers](https://github.com/semio-ai/arora-sdk) for them and
-analyzes them against a [registry](../../arora-registry/readme.md)
-or local includes using [`arora-module-core`](../core/readme.md).
-Then it sends the resolved type dependencies and
-human-readable exports and imports to consider to the generators
+Generates the bindings that implement a module in a language other than Rust
+from its `module.yaml`, and writes the module's header beside them. A C++
+module's build runs it on every build
+([`modules/test-cpp`](../../../modules/test-cpp/CMakeLists.txt)):
 
-## Common Arguments
+```bash
+arora-module-cli generate -l cpp -m module.yaml -o build/arora
+```
 
-  - `--config` / `-c` - Path to a `semio-cli` configuration file to reuse
-    and potentially update.
-  - `--include` / `-i` - Include records in the registry.
-    It should be the path to a directory of records.
-  - `--user-name` / `-u` - User name to authenticate with.
-    Overrides and updates the configuration file if provided.
-  - `--password` / `-p` - Password to authenticate with.
-    Updates the configuration file if provided.
-  - `--registry-url` - URL of the registry to use.
-    Overrides and updates the configuration file if provided.
-    Default is `http://localhost:8080`.
-  - `--help` - Print available options and subcommands
+It reads `module.yaml`, resolves it with
+[`arora-module-core`](../core/readme.md), hands the result to the generator
+for the language, and writes what the generator returns under the output
+directory, then the module's header there as `module.yaml` and
+`header.json`.
 
-## Code Generation
+## Finding the generator
 
-`arora-module-cli generate` also accepts these specific parameters:
+The generator for `-l <language>` is the executable `arora-module-<language>`
+in the same directory as `arora-module-cli`:
+[`arora-module-cpp`](../cpp/readme.md) or
+[`arora-module-rust`](../rust/readme.md). A build script receives both as
+artifact dependencies and copies them into one directory
+([`modules/test-cpp/build.rs`](../../../modules/test-cpp/build.rs)).
 
-  - `--module-file` / `-m` - The module file to generate code for.
-    It should be the path to a module header file (`.yaml`).
-  - `--language` / `-l` - The language to generate files for
-    (*e.g.*, `cpp`, `rust`)
-  - `--output-directory` / `-o` - The location generated files will be placed
+The generator is started with `--self-id <module id>` and
+`--self-version <module version>`, then any arguments after the
+subcommand's own. It reads the module's assets on its standard input and
+writes back one [`arora-vfs`](../../arora-vfs/readme.md) directory, framed as
+[`arora-module-core`](../core/readme.md#talking-to-a-generator-process)
+describes.
 
-Results depend on the generators.
-See [`arora-module-cpp`](../cpp/readme.md)
-or [`arora-module-rust`](../rust/readme.md)
-for more details.
+## Arguments
 
-### Communication with the Code Generator
+Before the subcommand:
 
-`arora-module-cli` finds the generators from
-the `--language` option value `<language>`,
-by looking for the executable named `arora-module-<language>`.
-The generator will be started with the args
-`--self-id` and `--self-version`,
-corresponding respectively to the UUID of the module to generate,
-and to its version tag.
+| | |
+|---|---|
+| `-i`, `--include <dir>` | load the record files under `<dir>` into the registry; repeatable |
+| `-r`, `--registry-url <url>` | resolve against Semio's record store at `<url>` instead of a local registry |
+| `-c`, `--config <file>` | a `semio-cli` configuration file holding the store's URL and credentials, updated with a refreshed token |
+| `-u`, `--user-name`, `-p`, `--password` | the store's credentials, written to the configuration file |
 
-Then, it is fed the list of resolved
-[`ModuleAsset`s](../core/readme.md)
-in the standard input (serialized using [`serde`](https://serde.rs/)).
-It contains the description of all the dependent types and modules,
-and ends with the description of the module to generate.
+Without `--registry-url` or a configuration naming one, the registry is local
+and holds what `--include` loads.
 
-In return, the generator produces a serialized virtual directory
-using [`arora-vfs`](../../arora-vfs/readme.md),
-that `arora-module-cli` will write to the location specified
-with the option `--output-directory`.
+`generate`:
+
+| | |
+|---|---|
+| `-m`, `--module-file <file>` | the module's `module.yaml` |
+| `-l`, `--language <language>` | the generator to run |
+| `-o`, `--output-directory <dir>` | where the generated files go |
+| `--dry-run` | list the generated files instead of writing them |
+
+The crate depends on `semio-client` from git, so it is not published to
+crates.io.

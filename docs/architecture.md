@@ -1,373 +1,262 @@
 # Architecture
 
-A bird's-eye view of how the repo is laid out and how the pieces fit together.
-For the *why* behind these choices, see
-[`design_decisions.md`](design_decisions.md).
+How the code is organized: the crates and how they depend on each other,
+where each concept lives, and how a device, the engine and the build fit
+together. Read the [concepts](overview.md) first; the
+[design decisions](design_decisions.md) give the reasons.
 
-## Repo layout
+## The crates, in layers
+
+Arora is one Cargo workspace of focused crates. A crate depends only on
+crates of its own layer or of the layers above it in this list:
+
+| Layer | Crates | What it holds |
+|---|---|---|
+| Vocabulary | `arora-types` (+ `arora-types-derive`), `arora-buffers` | values, types, calls, records, the data-store vocabulary; the binary form values cross module boundaries in |
+| Support | `arora-util`, `arora-vfs`, `wasi-sdk` | a C helper, an in-memory file tree for code generation, the WASI SDK for C++ guests |
+| Interfaces | `arora-behavior`, `arora-hal`, `arora-bridge`, `arora-registry`, `arora-simple-data-store` | the behavior, HAL and bridge traits a device is built from; the type registry; the reference store |
+| Engine | `arora-engine` | loading modules and dispatching calls to them, on every executor |
+| Modules | `arora-module` (+ `arora-module-macros`), `arora-module-authoring/*` | declaring a module in Rust; generating one from a `module.yaml` |
+| Behaviors | `arora-behavior-tree` (+ `-types`, `-types-yaml`) | the behavior-tree interpreter |
+| Runtime | `arora` | the device: the step, the builder, the runner |
+| Edges | `arora-bridge-ws`, `arora-bridge-ros2`, `arora-msgs-ros2`, `arora-hal-ros2`, `arora-hal-restful` | bridges, ROS 2 messages, robot HALs and their runners |
+| Front ends | `arora-web`, `arora-cli` | the device in a browser; a command line that loads a module and calls it |
+| Libraries | `arora-animation` (+ `arora-animation-module`), `arora-geometry`, `arora-graphics-types`, `arora-dataflow-nodes` | computation on `Value`s, usable inside or outside a device |
+
+The dependencies that shape the design:
+
+```mermaid
+graph BT
+    types["arora-types"]
+    buffers["arora-buffers"] --> types
+    behavior["arora-behavior"] --> types
+    hal["arora-hal"] --> types
+    bridge["arora-bridge"] --> behavior
+    registry["arora-registry"] --> types
+    store["arora-simple-data-store"] --> types
+    engine["arora-engine"] --> buffers
+    bt["arora-behavior-tree"] --> behavior
+    bt --> buffers
+    ws["arora-bridge-ws"] --> bridge
+    arora["arora"] --> engine
+    arora --> bt
+    arora --> hal
+    arora --> ws
+    arora --> registry
+    arora --> store
+    web["arora-web"] --> arora
+    halros["arora-hal-ros2 · arora-hal-restful"] --> arora
+```
+
+Two seams keep the layers apart:
+
+- **`CallBridge`** (`arora_types::call`): anything that can call a module
+  function by id. The engine implements it; the behavior tree calls through
+  it. So `arora-behavior-tree` does not depend on the engine, and runs against
+  any `CallBridge` — a test double, a remote.
+- **The device's traits** (`Hal`, `Bridge`, `BehaviorInterpreter`,
+  `DataStore`): `arora` owns one of each kind (a vector of bridges) and knows
+  them only through their traits, so a robot, a transport or an interpreter
+  plugs in without touching the runtime.
+
+[Building](building.md#releasing) lists which crates are published to
+crates.io. The robot HALs and their runners, `arora-cli`, `arora-module-cli`,
+`arora-module-cpp`, `arora-registry-remote`, `arora-behavior-tree-bench` and
+the modules built for tests are not.
+
+[`arora-behavior-tree-bench`](../crates/arora-behavior-tree-bench/readme.md)
+stands outside the layers: it measures behavior-tree executor forms over
+`arora-dataflow-nodes` and in-process modules, natively and under WASI, and
+checks tick for tick that each form leaves the store as the reference form
+does.
+
+## Repository layout
 
 ```
 arora-sdk/
-├── crates/
-│   ├── arora                  the runtime: a synchronous step loop over four
-│   │                          seams (store, HAL, bridges, behavior) + launch API
-│   ├── arora-engine           the module engine: executors, dispatch,
-│   │                          host-defined modules (ModuleBuilder)
-│   ├── arora-types            value / type / record vocabulary, value_serde
-│   ├── arora-buffers          wire buffers + serde straight to the wire
-│   ├── arora-behavior         BehaviorInterpreter seam, interpreter module
-│   │                          ids (load/edit), built-in store keys (time/dt)
-│   ├── arora-animation        keyframe clips, exact evaluation, players on the
-│   │                          device clock (no runtime dependency)
-│   ├── arora-behavior-tree         behavior-tree interpreter
-│   ├── arora-behavior-tree-bench   unpublished native/WASI executor benchmarks
-│   ├── arora-behavior-tree-types       BT primitive types
-│   ├── arora-behavior-tree-types-yaml  same types serialised as YAML records
-│   ├── arora-bridge           Bridge seam, client conventions + in-process FakeBridge
-│   ├── arora-bridge-ws        WebSocket bridge
-│   ├── arora-bridge-ros2      ROS 2 bridge
-│   ├── arora-hal              HAL seam + FakeHal
-│   ├── arora-hal-ros2         ROS 2 HAL
-│   ├── arora-hal-restful      RESTful HAL
-│   ├── arora-simple-data-store  trivial owned DataStore
-│   ├── arora-web              browser runtime: the AroraRuntime JS device
-│   │                          over arora + the JS engine surface
-│   ├── arora-cli              host CLI: load modules, call functions
-│   ├── arora-registry         local record registry
-│   ├── arora-registry-remote  remote record registry
-│   ├── arora-module-authoring/  module-author toolbox (grouped crates)
-│   │   ├── core               type/module analysis + resolution
-│   │   ├── cli                host code-generator entry point
-│   │   ├── rust               Rust code generator
-│   │   └── cpp                C++ code generator
-│   ├── arora-buffers, arora-util, arora-vfs, wasi-sdk   support crates
-├── modules/              Arora modules (guest code loaded by the engine)
-│   ├── test-rust-wasm         Rust → wasm32-wasip2 component; reference module
-│   ├── test-behavior-tree-nodes  test-only module exercising BT dispatch
-│   ├── test-rust-component    Rust → wasm32-wasip2 component; arora:module world
-│   ├── test-cpp / test-cpp-2  C++ → wasm32-wasip2 component via WASI SDK + cmake
-│   ├── animation              arora-animation as the module @arora/animation:
-│   │                          a wasm32-wasip2 component in a module directory,
-│   │                          or host-linked
-│   ├── say-silent             the Say contract without a speaker (host)
-│   ├── polly                  host cdylib; AWS Polly TTS nodes
-│   └── transcribe             speech-to-text module
-├── libs/
-│   └── cpp/                   shared C++ helpers used by C++ modules
-├── tests/                arora-integration-tests crate; end-to-end smoke tests
-├── docs/
-│   ├── architecture.md        this file
-│   ├── design_decisions.md    why things are the way they are
-│   └── dispatch.md            direct vs indirect dispatch; how BTs use it
+├── crates/                    the crates of the table above
+│   ├── arora/                 the device runtime and the `arora` runner
+│   │   └── docs/              the runtime's data flow
+│   ├── arora-engine/          the engine; wit/ holds the arora:module world
+│   ├── arora-module-authoring/
+│   │   ├── core/              analysis and resolution of module.yaml declarations
+│   │   ├── cli/               arora-module-cli, the generator front end
+│   │   ├── rust/              the Rust generator
+│   │   └── cpp/               the C++ generator
+│   └── …
+├── modules/                   modules built in this workspace
+│   ├── animation/             the module @arora/animation (crate arora-animation-module)
+│   ├── say-silent/            the speech contract with no speaker, for devices without audio
+│   ├── polly/                 speech by AWS Polly, a native module
+│   ├── test-rust-wasm/        a Rust guest, declared with arora-module
+│   ├── test-rust-component/   the arora:module world written by hand, for the executors' edge cases
+│   ├── test-behavior-tree-nodes/  behavior-tree nodes as a guest, for tests
+│   └── test-cpp/, test-cpp-2/ C++ guests, the second calling the first
+├── libs/cpp/                  the C++ support C++ guests link (arora-cpp-component)
 ├── examples/
-│   ├── modules/cpp            example C++ module → a module directory
-│   └── policy-modules         control policies as modules (own workspace)
-├── .cargo/config.toml    unstable flags + wasm32 browser cfg
-├── rust-toolchain.toml   pins nightly + wasm32-wasip2
-├── Cargo.toml            workspace root
-└── .github/workflows/    CI
+│   ├── modules/cpp/           a C++ module built into a module directory
+│   └── policy-modules/        the Microduck: learned policies as modules (its own workspace)
+├── tests/                     arora-integration-tests: guests loaded and called end to end
+├── docs/                      the pages this one belongs to
+├── .cargo/config.toml         bindeps, and the browser target's settings
+└── rust-toolchain.toml        the pinned nightly and the wasm32-wasip2 target
 ```
 
+Robot support lives outside this repository, against the published crates:
+NAO and Pepper in [arora-aldebaran](https://github.com/semio-ai/arora-aldebaran).
 
-## Layers
+## The device
 
-```mermaid
-graph TB
-    subgraph fe["Front-ends"]
-        cli["arora-cli\n(host binary)"]
-        web["arora-web\n(browser · wasm-bindgen)"]
-    end
-
-    subgraph eng["Engine · crates/arora"]
-        subgraph engine_api["EngineBuilder + Engine (pinned)"]
-            api["load_module(ModuleDefinition) → ModuleId\ncall(Call) → CallResult\narora_dispatch / arora_dispatch_indirect"]
-        end
-        subgraph executors["Executor trait"]
-            native_exec["NativeExecutor\nlibloading · host only\nfeature: native-host"]
-            component_exec["ComponentExecutor\nwasmtime component + WASI p2 · host only\nfeature: wasmtime-host"]
-            browser_component_exec["BrowserComponentExecutor\njs-sys WebAssembly + canonical-ABI WASI 0.2\ncfg(target_arch = wasm32)"]
-        end
-    end
-
-    subgraph mods["Modules"]
-        rust_component["Rust → wasm32-wasip2 component\nanimation, behavior-tree-nodes, test-rust-wasm, test-rust-component"]
-        cpp_component["C++ → wasm32-wasip2 component\ntest-cpp, test-cpp-2, example-cpp"]
-        native_cdylib["Native cdylib\npolly"]
-    end
-
-    fe --> eng
-    mods -->|"runtime contract: arora-types Module + Call"| eng
-```
-
-## Runtime: an Arora instance and its seams
-
-The `arora` crate wraps the engine in a device runtime: an `arora::Arora`
-instance built around one blackboard. Around that store sit four kinds of seam
-— the store itself, a HAL, **zero or more bridges**, and a behavior. The store
-is the single shared state and the only medium through which the seams reach one
-another: none of them talks to another directly; each only feeds the store or
-reads it. One loop (`arora::Arora::step`) serializes that traffic — drain the
-HAL and every bridge's inbound into the store, tick the behavior against it,
-then flush the merged changes back out to the hardware and to each remote that
-asked for them. `step()` is synchronous and non-blocking (it drives the seams
-through `try_recv` / `try_send`); each bridge and HAL owns whatever async I/O
-task it needs, so the same loop runs unchanged on a native thread or in a
-browser Web Worker.
+`arora::Arora` owns the store, the HAL, the bridges, the engine and one
+behavior interpreter, and advances them together in `Arora::step(dt)`:
 
 ```mermaid
 graph LR
-    hw["Device hardware\n(sensors / actuators)"]
-    studio["Remote · Semio Studio\n(Zenoh · studio-bridge)"]
-    peer["Remote · other client\n(WebSocket · ROS 2 · in-process)"]
+    hw["hardware<br/>(or a simulator)"]
+    remote["remote clients"]
 
-    subgraph arora["An Arora instance — arora::Arora (one device)"]
-        hal["HAL\n(arora-hal)"]
-        store[("DataStore — the one shared blackboard\n(arora-types · arora-simple-data-store)")]
-        behavior["BehaviorInterpreter\n(behavior tree · Vizij node graph · …)\nleaves call engine module functions"]
-        bridge0["Bridge · endpoint 0\n(arora-bridge-ws / -ros2 / studio)"]
-        bridge1["Bridge · endpoint 1"]
+    subgraph device["arora::Arora"]
+        hal["HAL"]
+        store[("data store<br/>keys → values, key meta")]
+        behavior["behavior interpreter"]
+        engine["engine<br/>+ modules"]
+        bridges["bridges"]
     end
 
-    hw <-->|"actuation / sensing"| hal
-    hal -->|"1 · sensor readings"| store
-    bridge0 -->|"1 · commands (via engine) · device info · data-requests"| store
-    bridge1 -->|"1 · …"| store
-    behavior <-->|"2 · tick: read / write"| store
-    store -->|"3 · flush changes (per endpoint, while it asked)"| bridge0
-    store -->|"3 · …"| bridge1
-    store -->|"3 · flush changes (always)"| hal
-    bridge0 <--> studio
-    bridge1 <--> peer
+    hw <--> hal
+    hal -->|"1 · readings"| store
+    bridges -->|"2 · writes (checked against meta),<br/>calls (to the engine)"| store
+    behavior <-->|"3 · tick: read, write"| store
+    behavior -->|"calls"| engine
+    store -->|"4 · what changed"| hal
+    store -->|"4 · what changed,<br/>to endpoints that asked"| bridges
+    bridges <--> remote
 ```
 
-An Arora holds a *vector* of bridges — each an independent endpoint (a device
-can face Studio, a WebSocket client and a ROS 2 graph at once, or none at all).
-Inbound, every endpoint drains into the same store; outbound, a change reaches
-an endpoint only while that endpoint has asked for the affected keys (its
-`DataRequested` toggle), whereas the HAL is always written. The seams never
-address each other — bridge 0 and bridge 1, the behavior and the HAL all meet
-only in the store.
+- **One owner, one order.** The parts never address each other; the step
+  applies each one's traffic in its phase, so the step's order decides which
+  write wins (behavior over remote over hardware), and nothing locks.
+- **A step never waits.** It takes what the HAL and the bridges have already
+  delivered (`try_recv`) and hands them what changed (`try_send`); each HAL and
+  bridge owns whatever I/O task it needs. The same loop therefore runs on a
+  native thread and in a browser, where a page steps it.
+- **Remote writes are checked once,** in the step, against the store's key
+  meta: every bridge gets the same rule.
+- **Everything a remote can do is a module call.** Loading and editing the
+  behavior, spawning and halting task runs (the **interpreter module**), and
+  fetching the device's 3D models (the **HAL module**) are functions of host
+  modules the runtime builds, so a bridge lists and calls them like any other
+  function, with no special case.
+- **Many devices, one store.** `NamespacedStore` gives a device a view of a
+  shared store under its own prefix, so one process can run many devices over
+  one store.
 
-Each seam is a trait, so embedders swap implementations without touching the
-loop:
+[The runtime's data flow](../crates/arora/docs/runtime-and-data-flow.md)
+details each phase, the builder and the threads.
 
-- **Store** — `arora_types::data::DataStore`; `SimpleDataStore` is the
-  reference implementation. Clones share storage, and `NamespacedStore` gives
-  a device-relative view into a shared backend: this is how one process (e.g.
-  Semio Studio) spawns many instances over one mutualized blackboard, each
-  built with `Arora::builder().with_data_store(…)` over its own `<device>/`
-  prefix. A view's change feed is the store's subscription to that prefix
-  (`DataStore::subscribe_prefix`), which `SimpleDataStore` routes: each device
-  is sent its own keys and none of its neighbours'.
-- **HAL** — `arora_hal::Hal`, the device boundary. A robot HAL talks to
-  hardware; a simulator or a renderer (e.g. a Vizij rig-instrumented face) is
-  just another implementation. A HAL can describe its keys
-  (`Hal::describe_keys`): the runtime states the description to the store's key
-  meta, so the HAL's inputs are open to remote writers and every bridge lists
-  them.
-- **Bridges** — `arora_bridge::Bridge`, the remote boundary. An instance holds
-  a *vector* of them (`AroraBuilder::with_bridge` adds one), each a numbered
-  endpoint: the studio-bridge Zenoh connector for Studio, `arora-bridge-ws` for
-  a WebSocket client, `arora-bridge-ros2` for a ROS 2 graph, a `FakeBridge`
-  loopback for an embedded host. Outbound is gated per endpoint by its
-  `DataRequested` toggle, so a change is sent only to the endpoints that asked
-  for those keys.
-- **Behavior** — `arora_behavior::BehaviorInterpreter`, the "what to do each
-  step". The behavior tree is one interpreter; a Vizij node graph is another.
+## The engine
 
-## Engine
+`arora-engine` loads modules and dispatches calls to them. It selects an
+**executor** by the `executor.name` a module's header carries:
 
-The engine library (`crates/arora-engine`) is dual-target:
+| Executor | Name | Where | What it runs |
+|---|---|---|---|
+| `ComponentExecutor` | `wasm-component` | native (`wasmtime-host`) | a `wasm32-wasip2` component of the `arora:module` world, on wasmtime |
+| `BrowserComponentExecutor` | `wasm-component` | `wasm32` | the same component, on the browser's `WebAssembly` |
+| `NativeExecutor` | `native` | native (`native-host`) | a shared library, through `libloading` |
 
-- On native (`cfg(not(target_arch = "wasm32"))`), it compiles `executor::native`
-  (libloading) and `executor::component` (wasmtime component model against
-  `wit/arora-module.wit`), gated by Cargo features (`native-host`,
-  `wasmtime-host`), both default-on.
-- On `wasm32-*`, it compiles `executor::browser` instead — the component
-  executor and the loader that stages components compiled asynchronously —
-  and accepts `--no-default-features` to drop the host-only deps.
+Beside them, a **host module** (`ModuleBuilder`, `HostModule::of::<M>()`)
+registers Rust functions in the same process under a module id; the engine
+dispatches to it exactly as to a guest.
 
-`arora::load::*` exposes header-yaml + bytes → `ModuleDefinition` helpers used
-by both `arora-cli` (host) and `arora-web` (browser).
+- **The `arora:module` world** ([`wit/arora-module.wit`](../crates/arora-engine/wit/arora-module.wit))
+  is the guest contract: a component exports `functions` and `dispatch`, and
+  imports the host's `dispatch` (to call other modules) and WASI 0.2 with no
+  directory and no socket. Arguments and results cross as Arora Buffers.
+- **Direct and indirect dispatch.** A call names a function by module and
+  function id (`arora_call`), or a callable the host registered
+  (`arora_call_indirect`), which is how a behavior tree reaches each of its
+  nodes. See [dispatch](dispatch.md).
+- **Compile once, instantiate per engine.** A `CompiledModule` is shared by
+  every device that loads it; each gets its own instance and state.
+- **Limits.** Each call has a time budget and each guest a memory limit
+  (`GuestLimits`); a guest that overruns traps and refuses every later call
+  until it is reloaded.
+- **The engine is pinned** (`Pin<Box<Engine>>`): a guest's call to another
+  module re-enters the engine while it is borrowed, so the executors reach it
+  through a stable raw pointer.
 
-`Engine` is pinned (`Pin<Box<Engine>>`) so host callbacks can capture a
-stable raw pointer for `arora_dispatch` / `arora_dispatch_indirect` round-trips
-through guest wasm.
+## Modules: from declaration to module directory
 
-## Modules
+Whatever its language, a module ends as a **module directory**: its header
+(`header.json`), its one artifact (`.wasm`, or a shared library), and
+optionally its records (`records/`). Two paths lead there:
 
-A module is a binary (host cdylib, wasm32-wasip2 component, or cross-compiled
-ELF) plus a header, written at export from the module's declaration. The
-device runners (`arora`, and the robot runners `arora-ros2`, `arora-restful`,
-and arora-aldebaran's `arora-naoqi`) load modules from *module directories* —
-the header as `header.json` beside its artifact, and optionally the module's
-records in `records/` — under the device directory's `modules/` and from `--module`,
-through `AroraBuilder::with_module_dirs` (see
-[`crates/arora/readme.md`](../crates/arora/readme.md)). A module's record,
-in the device's registry (`AroraBuilder::with_registry`), gives every export
-its frozen signature in the method index; without one, only the exports whose
-types are primitives are described.
-The header declares:
+```mermaid
+graph LR
+    rust["Rust crate<br/>#[arora_module::module]"] -->|"macro expansion"| outputs
+    yaml["module.yaml<br/>(C++)"] -->|"arora-module-cli<br/>+ arora-module-cpp"| cpp["generated sources<br/>+ libs/cpp"]
+    cpp -->|"CMake, WASI SDK"| outputs
+    outputs["header · artifact · records"] --> dir["module directory"]
+```
 
-- **Types**: `Enumeration`s and `Structure`s, identified by UUID.
-- **Functions**: each has an id, an args struct id, and a return struct id.
+- **A Rust module declares itself in Rust**
+  ([`arora-module`](../crates/arora-module/readme.md)). The macros yield the
+  header, the records, the functions a host registers, the typed client stubs
+  and the artifact's entry points. No `module.yaml`, no build script.
+- **A module in another language ships a `module.yaml`.** Its `build.rs`
+  stages the code generators and runs its CMake project, which calls
+  `arora-module-cli`: it resolves the module's types and imports against the
+  records it is given and runs the language's generator
+  ([`arora-module-authoring`](../crates/arora-module-authoring/cli/readme.md)).
+  CMake then builds the guest with the [WASI SDK](building.md#the-wasi-sdk).
+  The generated sources are rebuilt from the YAML on every build: edit the
+  YAML, never them.
 
-The runtime contract — buffer layout, dispatch ABI, struct serialization —
-lives in `arora-types` and `arora-buffers` (both in this workspace, published
-to crates.io).
-
-Modules do not have to be binaries. The host can define a module in plain
-Rust with `arora_engine::ModuleBuilder`: give it the module's UUID and attach
-closures under function UUIDs, and the engine dispatches to it exactly as it
-does to guest code — same argument decoding, same result encoding. The
-behavior interpreter is exposed this way: `arora-behavior` declares the
-interpreter module's ids (`load`, `edit`), and the `arora` runtime builds the
-module from the running interpreter, so behaviors are loaded and edited
-through ordinary module calls.
-
-Rust types cross these boundaries via serde: `arora_types::value_serde`
-converts any `Serialize`/`Deserialize` type to and from an Arora `Value`, and
-`arora_buffers::typed` serializes the same types straight to the wire bytes,
-skipping the intermediate `Value`.
-
-**A Rust module declares itself in Rust.**
-[`arora-module`](../crates/arora-module/readme.md)'s macros go on the Rust
-module and its exported functions, ids pinned in the attributes, and produce
-the header, the store record, the functions a host registers
-(`HostModule::of::<M>()`), the client stubs, and the artifact's entry points —
-no `module.yaml`, no `build.rs`. The executor is not part of the declaration:
-`header(executor)` takes it from the step that builds the artifact.
-
-**A module in another language ships a `module.yaml`**, and `arora-module-cli`
-generates the scaffold (`arora-module-cpp`) plus the stripped "header" form the
-runtime uses. The host-tool location is delivered to that module's `build.rs`
-via cargo bindeps, which regenerates `src/arora_generated/` on every build, so
-edits to generated files are lost — change the YAML (including `imports:` and
-`dependencies:` for cross-module calls) and rebuild. See
-[`../AGENTS.md`](../AGENTS.md) for detailed guidance.
-
-## Build orchestration
-
-`cargo` drives the build. A bare `cargo build` covers the workspace
-`default-members` (engine, host tools, host builds of the Rust modules, the
-integration-test crate); `cargo build --workspace` additionally builds the
-heavier `test-cpp` / `test-cpp-2` / `example-cpp` members, which
-`default-members` excludes. Cross-target artefacts are expressed as artifact dependencies
-(`-Z bindeps`):
-
-- **Host bins** (e.g. `arora-module-cli`) — `build-dependencies` with
-  `artifact = "bin"`. Cargo exports `CARGO_BIN_FILE_<DEP>` (bin target names
-  keep their dashes, so this short convenience name is set).
-- **Cross-target staticlibs** (`arora-buffers`, `arora-util` for
-  `wasm32-wasip2`) — `build-dependencies`
-  with `artifact = "staticlib", target = "..."`. Cargo exports
-  `CARGO_STATICLIB_DIR_<DEP>` and `CARGO_STATICLIB_FILE_<DEP>_<lib>` (lib
-  name, dashes→underscores). The bare `CARGO_STATICLIB_FILE_<DEP>` is **not**
-  set for dash-named crates — read the suffixed or `DIR` form. See
-  [`design_decisions.md`](design_decisions.md).
-- **Cross-target cdylibs** (the Rust wasm guests in
-  `arora-integration-tests`) — `artifact = "cdylib", target = "wasm32-wasip2"`;
-  exported the same way as `CARGO_CDYLIB_FILE_<DEP>_<lib>`.
-
-For C++ modules, each `build.rs` calls into the module's
-self-contained `CMakeLists.txt` via `cmake::Config`, passing the bindep'd
-paths as `-D` cache vars and forcing `cmake-rs`'s target via
-`.target(...).host(...).no_default_flags(true)`.
-
-The Rust wasm guests (`behavior-tree-nodes`, `test-rust-wasm`, `animation`)
-are ordinary `cdylib`+`rlib` crates built for the host by default — no
-`forced-target` is used. Their wasm32-wasip2 build, a component, is forced on
-demand by the consuming crates' artifact dependencies
-(`target = "wasm32-wasip2"`), so `cargo test` builds the guests itself and the
-tests find them via forwarded `CARGO_CDYLIB_FILE_*` env vars (no explicit
-per-target build step needed).
-
-See [`design_decisions.md`](design_decisions.md#build-orchestration) for the
-rationale.
-
-## Browser target
-
-`crates/arora-web` is the JS-facing wasm-bindgen surface. It compiles
-`arora` for `wasm32-unknown-unknown` with `--no-default-features` (so no
-wasmtime, no libloading) and adds an `Engine` class exposing
-`loadModule(headerJson, bytes)` and `call(callJson)` to JS.
-
-The browser executors live in the engine
-(`crates/arora-engine/src/executor/browser/`) and use `js_sys::WebAssembly`
-for instantiation. `BrowserComponentExecutor` runs a component as it is
-published: it instantiates the component's guest core module and gives it,
-in the canonical ABI's form, the `host` interface and the WASI 0.2 imports
-the native component executor links (standard output and error to the
-console, randomness from `crypto.getRandomValues`, …). It needs no guest
-re-compiled for `unknown-unknown`.
-
-Demo + headless-Firefox test under `crates/arora-web/www/` and
-`crates/arora-web/tests/`.
+A device loads module directories from its device directory's `modules/` and
+from `--module` (`AroraBuilder::with_module_dirs`); an embedder can also hand
+it a header and bytes, a compiled module, or a host module directly.
 
 ## Records and the registry
 
-The engine identifies types and functions by UUID. Those UUIDs name **type
-records** — versioned declarations of structures, enumerations and modules,
-defined in [`arora_types::record`](https://docs.rs/arora-types/latest/arora_types/record/)
-and explained in [`docs/records.md`](records.md).
+The engine identifies everything by UUID; **records** give those UUIDs
+meaning across machines. A record (`arora_types::record`) is a versioned
+declaration of a structure, an enumeration, a module or a folder; freezing it
+pins the version of every type it refers to. `arora-registry` holds records in
+memory or reads them from record files; `arora-registry-remote` (unpublished)
+reads them from Semio's hosted store. A device's registry is what describes
+its modules' functions with full signatures. See [records](records.md).
 
-`arora-registry` stores, freezes and resolves records locally (in-process or
-from YAML record files). The registries backed by Semio's hosted store live in
-the private `arora-registry-remote` crate
-([why](design_decisions.md#the-remote-registry-is-a-separate-private-crate)).
-The registry is host-only; the browser engine accepts already-resolved headers
-from the JS layer.
+## The browser
 
-## Behavior trees
+`arora-web` compiles `arora` for `wasm32-unknown-unknown` without default
+features — no wasmtime, no `libloading` — and exports the device to
+JavaScript as `AroraRuntime`. Its engine runs guests on the browser's
+`WebAssembly` through `BrowserComponentExecutor`, which gives a component the
+`host` interface and the WASI imports itself: the component a native device
+loads runs unchanged in a page. The page paces the steps. See
+[`arora-web`](../crates/arora-web/readme.md).
 
-`arora-behavior-tree` ticks behavior trees whose leaves are calls into
-Arora module functions. Node primitives live in
-`arora-behavior-tree-types` (Rust types) and
-`arora-behavior-tree-types-yaml` (YAML records consumable by C++ via
-`arora-module-cpp`).
+## The build
 
-The test-behavior-tree-nodes module (`modules/test-behavior-tree-nodes`) bundles a
-baseline collection of nodes as a wasm guest.
-
-The runtime registers each node as a host callable and ticks children through
-the engine's **indirect dispatch** path. See [`dispatch.md`](dispatch.md) for
-how direct and indirect dispatch work and how behavior trees use them.
-
-The unpublished [`arora-behavior-tree-bench`](../crates/arora-behavior-tree-bench/readme.md)
-crate supplies workload and scale benchmarks, one form registry, native and WASI
-harnesses, and tools for comparing revisions with tick-for-tick agreement checks.
+`cargo build` builds the default members; `cargo test` additionally builds
+the guests the tests load. Cross-target artifacts — the code generators for
+the host, the guests for `wasm32-wasip2` — are cargo **artifact dependencies**
+(`-Z bindeps`), which is why the workspace pins a nightly toolchain. C++
+guests are built by CMake, invoked from their `build.rs`, with a WASI SDK the
+[`wasi-sdk`](../crates/wasi-sdk) crate downloads. See
+[building](building.md).
 
 ## CI
 
-`.github/workflows/continuous.yml` runs independent work as parallel jobs; each
-build-and-test job has its own 40-minute limit:
+[`continuous.yml`](../.github/workflows/continuous.yml) tests on every pull
+request and every push to `main`, as parallel jobs: the tests of the default
+members, the ROS 2 Zenoh backend, the robot runners and their Studio builds,
+clippy and rustfmt, the browser tests in headless Firefox, coverage on `main`,
+and a link check of the Markdown. A pull request builds only the members its
+diff reaches. [Testing](testing.md#what-ci-runs) details each job and how the
+selection is made.
 
-- **`select`** lists the members a pull request can reach
-  ([`list_modified_targets.sh`](../.github/scripts/list_modified_targets.sh));
-  `main` selects everything. A job none of whose packages is selected is
-  skipped.
-- **`test`**: `cargo test --release` over the selected default members (native
-  and the wasm-via-wasmtime integration tests, which build the wasm32 guests
-  through artifact dependencies and `test-cpp`/`test-cpp-2` through the
-  dev-dependency edge), then checks that the selection covers every input
-  cargo tracked.
-- **`zenoh`**: the ROS 2 bridge and messages on the Zenoh backend, which the
-  default (DDS) build never compiles.
-- **`lint`**: clippy over every target, tests included, with `-D warnings`,
-  then `cargo fmt --check`.
-- **`browser`**: the wasm32-only code — the engine's browser executor, the
-  run loop's JS-timer cadence and `arora-web` — in headless Firefox.
-- **`coverage`** (pushes to `main` only): line and region coverage of the
-  native tests with `cargo-llvm-cov`, as the job summary and an `lcov.info`
-  artifact; it gates nothing. [`testing.md`](testing.md#coverage) has the
-  command and what native coverage cannot see.
-- **`markdown-link-check`**: link-checks the markdown.
-
-Each Rust job restores a dependency cache that only `main` saves. Tests build
-`--release` without the release profile's cross-crate thin LTO and with line
-tables only: they run optimised, and LTO over every test binary would otherwise
-dominate the build.
-
-The NAOqi HAL and its `arora-naoqi` runner live in
-[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran), which runs
-their CI against the published Arora crates.
+[`release.yml`](../.github/workflows/release.yml) publishes, on every push to
+`main`, each publishable crate whose version is not yet on crates.io
+([releasing](building.md#releasing)).
