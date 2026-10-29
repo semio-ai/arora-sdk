@@ -603,22 +603,46 @@ run beside the main behavior; `edit` reaches its nodes and `halt` drops it. A
 client that gives a device a program of its own — a behavior that calls a
 module each tick and writes what it returns — therefore neither evicts the
 behavior the device runs, as `load` would, nor needs a module of its own on
-the device. A change to a running program is one `edit` of its links, applied
+the device. A change to a running program is one `edit` of its bindings, applied
 between two ticks, and so is a new program for the run: a `spawn_graph` of a
 graph with its root.
 
 **A change restarts only the nodes it touches.** The interpreter lowers the
 whole changed graph again, and the new tree takes over the state of every node
 the change left in place, by node id: a `SequenceStar`'s position, a run's
-latch, a tree-local variable such a node reads. A node the change adds,
-replaces, relinks or re-keys starts afresh, and a tree-local variable does
+latch, a tree-local variable such a node reads. A node the change sets, or
+whose bindings it changes, starts afresh, and a tree-local variable does
 when every node reading it does: a load keeps one a run also reads, as the run
 the load leaves in place sees it. Spawning, editing, halting or ending one run
 therefore leaves the main behavior and every other run where they stand.
 Lowering each run on its own would confine a change too, but runs and the
 main behavior can share what a tree holds: an edit may place one node under
-both, or link a run's node to a port of the main behavior's, and both may read
+both, or bind a run's node to a port of the main behavior's, and both may read
 one tree-local variable. Separate lowerings would each hold their own copy.
+
+**A node holds its own bindings.** A graph node carries, for each port it
+binds, what the port is bound to: a value, a store key by its path, another
+node's port, or a selection out of one. An input's binding feeds it; an
+output's is where it is written. Nothing else describes a port: which ports
+a function reads and writes, and their types, is its signature's, which the
+device's function index holds. So a node is read, written and compared in one
+place, and a key appears where it is used: there is no variables table that
+an edit would have to keep consistent with the bindings reading it, and no id
+standing for a key. A key starting with `.` stays in the interpreter; a
+separate source kind for it would add a case to every reader of a binding for
+a distinction the key's name already carries, and that the text language
+already writes (`{.x}`).
+
+**An edit names single bindings.** A `GraphDiff` sets or removes whole nodes,
+and binds or unbinds single ports. An interpreter restarts what a diff
+touches, so a diff that binds one port of a node restarts that node, and a
+diff setting the node whole would restart it as well but carry everything it
+binds. A diff of whole nodes only would be simpler to apply and would restart
+the same nodes, but a binding entry keeps a diff the size of the change.
+`Graph::diff` derives the minimal
+diff between two graphs, so an editor that keeps the graph it last sent sends
+an edit rather than a load, and the device keeps the state of every node the
+edit leaves alone.
 
 **A graph run is known by its root.** The client chooses a graph's node ids,
 so the graph's root names its run. Spawning a graph whose root a live run has
@@ -803,7 +827,7 @@ forms accepted while clients move.
 
 Behaviors read their inputs from store paths and write outputs back; the
 built-in keys are reserved names, not hard-wired node plumbing. Anything a node
-would be "predetermined" to read can be overridden by linking a different
+would be "predetermined" to read can be overridden by binding a different
 producer onto the same path.
 
 ### Semio Studio is opt-in

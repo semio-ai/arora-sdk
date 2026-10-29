@@ -25,9 +25,9 @@ flowchart LR
 
 A **behavior** is data: a `Graph` ([`graph`](../src/graph.rs)). An
 **interpreter** lowers it into its own runnable form and walks that form each
-tick. The graph model knows nothing of ticking: the behavior tree reads its
-links as arguments and its children as the tree; a node graph reads its links
-as dataflow.
+tick. The graph model knows nothing of ticking: the behavior tree reads a
+node's bindings as its arguments and its children as the tree; a node graph
+reads the bindings as dataflow.
 
 ## The trait
 
@@ -75,15 +75,19 @@ A behavior arrives as a whole `Graph`:
 | `Graph` field | what it holds |
 |---|---|
 | `root` | the entry node, for a tree-shaped interpreter |
-| `nodes` | the `Node`s by id: each bound to a `function` (a function id the interpreter runs natively, or a module function), with its `inputs` and `outputs` (`Io`) and, for a tree, its ordered `children` |
-| `links` | the `Link`s: each feeds one node input (`Port`) from a `LinkSource` — a literal value, a named variable, another node's output, or a selection into one of those |
-| `variables` | the named variables, by id: the name is what an interpreter resolves against the store |
+| `nodes` | the `Node`s, a list with unique ids: each bound to a `function` (a function id the interpreter runs natively, or a module function), with its `bind`ings and, for a tree, its ordered `children` |
 
-An `Io` may carry a `predetermined_key`: the key an output is written to, or
-an input read from, unless a link says otherwise.
+A node's `bind` maps each port it binds to a `Source`: a literal `Value`, a
+store `Key` by its path (one starting with `.` is the interpreter's own),
+another node's `Port`, or a `Select`ion into one of those. An input's binding
+feeds it; an output's is where it is written. Which ports a function reads
+and writes, and their types, is its signature's to say: the graph holds the
+bindings alone. The order of the nodes is the order they serialize in, and
+means nothing to an interpreter.
 
 `load` replaces the running behavior with the graph. Loading is the same as
-applying a diff onto an empty graph (`GraphDiff::load`, `Graph::empty`).
+applying, onto an empty graph, the diff from it to the graph
+(`Graph::empty().diff(&graph)`).
 
 `load` and `apply` receive no store. An interpreter may validate and keep the
 new graph, then lower it at its next tick, which carries the store. That is
@@ -125,8 +129,8 @@ HAL's readings and the remote commands are in the store: the behavior reads
 everything that happened in the step, and its writes win the step.
 
 A module function never writes a key. A call takes in parameters and returns
-out parameters; the interpreter decides which keys the outputs go to — a
-link, a variable, a predetermined key. The store is the whole relationship
+out parameters; the interpreter decides which keys the outputs go to: the
+keys the graph binds them to. The store is the whole relationship
 between the runtime and the behavior: there is no separate time update, no
 input argument and no output return.
 
@@ -150,24 +154,28 @@ nodes](../../arora-behavior-tree/docs/nodes.md) are a worked example.
 ## 4. Edit
 
 A running behavior is edited with a `GraphDiff`, applied in a fixed order so
-one diff can remove and rebuild a region at once: links removed, then nodes
-(with the links touching them), then nodes added, then links added, then the
-predetermined keys, the root and the variables set (`Graph::apply`).
+one diff can remove and rebuild a region at once, coarse to fine
+(`Graph::apply`):
 
 | `GraphDiff` field | effect |
 |---|---|
-| `remove_links` | unwire these inputs |
-| `remove_nodes` | remove these nodes and every link touching them |
-| `add_nodes` | insert these nodes, replacing any with the same id |
-| `add_links` | insert these links, replacing any link to the same input |
-| `set_predetermined` | set or clear the predetermined key of these inputs and outputs |
-| `set_root` | make this node the root |
-| `variables` | declare or rename these variables |
+| `remove` | remove these nodes, and the bindings reading them; removing the root unroots the graph |
+| `set` | set these nodes whole, replacing any with the same id in its place, the others after the graph's nodes |
+| `unbind` | unbind these ports |
+| `bind` | bind these ports (`Binding { node, port, source }`), replacing what each was bound to |
+| `root` | make this node the root |
+
+A diff that binds a port on no node is refused whole. `Graph::diff` gives the
+minimal diff between two graphs: a node whose function or children change is
+set whole, a node whose bindings alone change gets one entry per binding. An
+editor that keeps the graph it last sent sends `EDIT` with the diff to the
+next one rather than a `LOAD`.
 
 The diff arrives through the interpreter module's `EDIT`
 (`interpreter_module::encode_edit`). Interpreters differ in when they act on
 it: the behavior tree keeps the edited graph and re-lowers at its next tick,
-keeping the state of the nodes the edit did not touch; Vizij's node-graph
+restarting the nodes the diff sets or rebinds and keeping the state of every
+other; Vizij's node-graph
 interpreter
 ([vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/crates/interop/vizij-arora-behavior/docs/node-graph.md))
 applies the diff and re-lowers at once, refusing an edit that leaves an

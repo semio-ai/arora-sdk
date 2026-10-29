@@ -31,10 +31,10 @@ An argument is an [`Expression`](../src/schema.rs):
 
 | Expression | Reads | In the shared graph |
 |---|---|---|
-| `Value`, `Uuid` | a literal | `LinkSource::Literal` |
-| `VariableId` | a variable, shared by every node naming it | `LinkSource::Variable` |
-| `NodeArgument` | another node's argument cell, or its return value (`_ret`) | `LinkSource::Port` |
-| `Select` | a part of another expression's value, by a [`Key`](../../arora-types/src/data/state.rs) path | `LinkSource::Select` |
+| `Value`, `Uuid` | a literal | `Source::Value` |
+| `VariableId` | a variable, shared by every node naming it | `Source::Key`, the variable of that key |
+| `NodeArgument` | another node's argument cell, or its return value (`_ret`) | `Source::Port` |
+| `Select` | a part of another expression's value, by a [`Key`](../../arora-types/src/data/state.rs) path | `Source::Select` |
 | `Call` | a module function's return value, called each time the node ticks | a detached node read by its return value |
 
 `Variable` holds a cell directly, for trees built in Rust.
@@ -104,7 +104,7 @@ is absent at first, which is a failed condition, not an error:
 ### The data nodes
 
 `equal`, `unpack` and `scatter` read their arguments through any expression,
-a selection included; each must have its inputs linked.
+a selection included; each must have its inputs bound.
 
 **`unpack(values, out_0 … out_63)`** writes element `i` of the array `values`
 to the variable bound to `out_i`, and succeeds. An unbound port is skipped,
@@ -231,9 +231,10 @@ one that declines the name, gets a tree-local cell.
 **Tree-local variables.** A variable whose name starts with `.`, `{.values}`,
 never reaches the resolver: it is a cell of the tree, which makes no store
 change and no bridge sees, and no analysis of the keys a tree writes counts
-it. Two trees' `{.x}` never meet. A `.` variable carries a value between nodes
-of one tree, such as a module's array output on its way to `unpack`; a value
-another tree reads goes through a store key. A variable with no name is
+it. Two trees' `{.x}` never meet; the interpreter lowers its main behavior
+and its task runs into one tree, so they share one. A `.` variable carries a
+value between nodes of one tree, such as a module's array output on its way
+to `unpack`; a value another tree reads goes through a store key. A variable with no name is
 tree-local too, and Groot export writes it as `.` and its id.
 
 ```mermaid
@@ -346,15 +347,14 @@ any key.
 the new lowering takes over the state of every node the change left in place
 ([`BehaviorTree::keep_state`](../src/behavior_tree.rs)): a `sequence_star`'s
 index, a run's latch, a call site's cell, and the tree-local variables such a
-node reads. A node the change adds, replaces, relinks or re-keys starts
+node reads. A node the change sets, or whose bindings it changes, starts
 afresh, and so does a tree-local variable only such nodes read. A graph that
 does not lower leaves the previous lowering in place, unticked, and the error
 is the tick's.
 
-**Lowering** ([`graph`](../src/graph.rs)) turns the graph's links into
-argument expressions, and binds each input or output that has a
-predetermined key and no link to the store variable its key names; a link
-overrides the predetermined key. A `BehaviorTree` built without a graph runs
+**Lowering** ([`graph`](../src/graph.rs)) turns each node's bindings into
+its argument expressions: a port bound to a key, whether the function reads
+it or writes it, takes the variable that key names. A `BehaviorTree` built without a graph runs
 on its own (see the [readme](../readme.md#without-the-interpreter)), but has
 no graph to edit.
 

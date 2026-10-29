@@ -118,14 +118,17 @@ word       = identifier | id ;
 
 | Expression | Text | In the graph |
 |---|---|---|
-| a literal | `1.5`, `1.5f64`, `"text"`, `true`, `()`, `f64[1.0, 2.0]`, `[1.0, 2.0]`, `some(x)`, `none` | `LinkSource::Literal` |
-| an id | `uuid(…)` | `Literal(Value::Uuid)` |
-| a structure, an enumeration | `json("…")`: the value's serde JSON | `Literal` |
-| a variable | `{person/visible}` (a store key), `{.mood}` (tree-local), `{"a key"}` (quoted), `{<uuid>}` | `LinkSource::Variable` |
-| a node's return value | `@cm` | `LinkSource::Port` on `_ret` |
-| a node's parameter | `@s.state` | `LinkSource::Port` on the parameter |
-| a selection | `@record[.name]`, `{pose}[.0]`, `@step[.<field id>]` | `LinkSource::Select` |
+| a literal | `1.5`, `1.5f64`, `"text"`, `true`, `()`, `f64[1.0, 2.0]`, `[1.0, 2.0]`, `some(x)`, `none` | `Source::Value` |
+| an id | `uuid(…)` | `Value(Value::Uuid)` |
+| a structure, an enumeration | `json("…")`: the value's serde JSON | `Value` |
+| a variable | `{person/visible}` (a store key), `{.mood}` (tree-local), `{"a key"}` (quoted), `{<uuid>}` | `Source::Key` |
+| a node's return value | `@cm` | `Source::Port` on `_ret` |
+| a node's parameter | `@s.state` | `Source::Port` on the parameter |
+| a selection | `@record[.name]`, `{pose}[.0]`, `@step[.<field id>]` | `Source::Select` |
 | a call | `oscillator(t: {arora/time}, frequency: 1.6)` | a node of its own, read by its return value |
+
+An argument binds its parameter, on the node it is written on: each graph
+node holds its bindings (`Node::bind`).
 
 The display writes two more forms, which a text does not: `{= value}`, a cell
 the tree holds with no variable (a call's literal argument once the tree is
@@ -150,13 +153,12 @@ using either is told so.
   A node named by an id has that id. An edit that keeps a node's name, or
   its place when it has none, keeps its id, so the interpreter's edit keeps
   its state.
-- **Variables.** `{name}` is the graph variable `name`, its id derived from the
-  name as the graph lowering derives a key's (`arora_types::gen_uuid_from_str`):
-  one name, one id. A name starting with `.` is tree-local; any other is a
-  store key under the Direct convention. `{<uuid>}` is the variable of that
-  id, which names none: tree-local.
-- **Targets.** `{key} = f(…)` links `_ret` (`5f726574-0000-4000-8000-000000000000`)
-  to the variable. `@n.p = f(…)` links it to another node's input, which then
+- **Variables.** `{name}` binds the key `name`. A key starting with `.` is
+  tree-local; any other is a store key under the Direct convention. `{<uuid>}`
+  is a variable known by its id alone, which names no key: it binds the
+  tree-local key `.<uuid>`.
+- **Targets.** `{key} = f(…)` binds `_ret` (`5f726574-0000-4000-8000-000000000000`)
+  to the key. `@n.p = f(…)` binds it to another node's input, which then
   reads this node.
 - **Ports.** `@n` is node `n`'s `_ret`; `@n.p` its parameter `p`, by name or
   id. `n` is a node of the text, by its name or its id. A node no node holds
@@ -165,7 +167,7 @@ using either is told so.
 - **Cycles.** Nodes no node holds that read one another in a cycle, or a
   node reading an output of its own, are an error: a value fed back goes
   through a store key.
-- **Calls in arguments.** A link holds no call: a call in an argument is a
+- **Calls in arguments.** A binding holds no call: a call in an argument is a
   node no node holds, with the holder's path and the parameter for its path,
   read by its return value. A native is no such call.
 - **Literals** take the type of the parameter they are given to: `100` given
@@ -176,9 +178,10 @@ using either is told so.
   its type's range (`1e999f64`) is refused, not made infinite.
 - **Natives' own state** is seeded when a node leaves it out:
   `sequence_star`'s `current_index` at `0u16`, `run_status`'s `latch` at `()`.
-- **Inputs and outputs.** A node's inputs are its function's parameters,
-  its outputs its return value (`_ret`) and the parameters it writes, each
-  with its type.
+- **Inputs and outputs.** Which of a node's ports are inputs and which
+  outputs, and their types, is its function's signature's to say: its
+  parameters are inputs, its return value (`_ret`) and the parameters it
+  writes are outputs. The graph holds the bindings alone.
 - **Unstated parameters.** A native's parameters a node must bind are known,
   and leaving one out is warned about. A module function declares no
   default: a parameter a node leaves out is not in the call, which the

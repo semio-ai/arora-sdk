@@ -126,7 +126,7 @@ Groot file.
 | Rust | [`TreeNode`](src/tree_node.rs) and the builders of [`nodes`](src/nodes.rs) (`seq`, `fallback`, `set_str`, …) |
 
 The text and the shared graph say everything a tree can: the tree, the
-detached nodes beside it, every link. `BehaviorTree::display` writes a loaded
+detached nodes beside it, every binding. `BehaviorTree::display` writes a loaded
 tree back as text.
 
 Groot is the visual editor of BehaviorTree.CPP, the behavior tree library

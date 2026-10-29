@@ -12,7 +12,8 @@ Two things share the word "behavior":
 
 - A **behavior** is data: what a device should do, authored in an editor
   (Semio Studio, the Vizij Workspace) as a `Graph` — nodes bound to
-  functions, their typed inputs and outputs, and the links between them.
+  functions, each holding what its ports are bound to: values, store keys,
+  other nodes' ports.
 - A **behavior interpreter** (`BehaviorInterpreter`) runs one. A device holds
   exactly one and ticks it once per step; loading a behavior into it, or
   editing the one it holds, changes what the device does.
@@ -123,7 +124,7 @@ device's step rate from them, or filters them out.
 | module | contents |
 |---|---|
 | crate root | `BehaviorInterpreter`, `BehaviorContext`, `BehaviorStatus`, `BehaviorError`, `FunctionIndex`, `ModuleFunction` |
-| [`graph`](src/graph.rs) | `Graph`, `Node`, `Io`, `Link`, `LinkSource`, `Port`, `GraphDiff`, `GraphType` |
+| [`graph`](src/graph.rs) | `Graph`, `Node`, `Source`, `Port`, `GraphDiff`, `Binding`, `GraphType` |
 | [`interpreter_module`](src/interpreter_module.rs) | the interpreter module's ids and its calls' encoders and decoders |
 | [`task`](src/task.rs) | `TaskHandle`, `TaskId`, `RunPolicy` |
 | [`status`](src/status.rs) | `Status`, its record's ids and version, `declare_status_enumeration` |
