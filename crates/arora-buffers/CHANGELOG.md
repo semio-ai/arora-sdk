@@ -4,6 +4,18 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.3.0] - 2026-10-29
+
+### Changed
+
+- The build script generates the C header `arora/buffers.h` under its
+  `OUT_DIR`, and no longer writes `target/include/arora/buffers.h` outside the
+  package. The crate declares `links = "arora_buffers"`, which hands the
+  header's directory to the build script of a crate with a regular dependency
+  on it, as `DEP_ARORA_BUFFERS_INCLUDE`; a C or C++ build that read the header
+  from `target/include` reads it from there. As for any `links` key, a
+  dependency graph holds one version of the crate that declares it.
+
 ## [3.2.0] - 2026-10-23
 
 ### Added

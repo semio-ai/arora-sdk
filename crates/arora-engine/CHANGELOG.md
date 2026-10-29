@@ -4,6 +4,14 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.2] - 2026-10-29
+
+### Changed
+
+- No build script, and no `cbindgen` build-dependency: the crate exposes no C
+  ABI, and a build no longer writes a header for one, `arora.h`, to
+  `target/include/arora/` outside the package.
+
 ## [7.0.1] - 2026-10-29
 
 ### Fixed
