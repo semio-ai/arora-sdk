@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ros2"
-version = "11.1.0"
+version = "11.2.0"
 dependencies = [
  "arora",
  "arora-behavior",

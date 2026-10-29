@@ -15,9 +15,10 @@
 //!   up while a spawn is in flight collapse to the newest, which is the state
 //!   the publisher means.
 //!
-//! The binding is checked at startup against the device's described methods
-//! ([`resolve`]), and a message whose fields do not route is dropped with a
-//! warning, leaving the running state as it was.
+//! The binding is checked against the device's described methods
+//! ([`resolve`]) at start and whenever they change, and a message whose
+//! fields do not route is dropped with a warning, leaving the running state as
+//! it was.
 
 use std::sync::Arc;
 
@@ -51,9 +52,11 @@ pub(crate) struct TopicSkill {
     pub ros_type: String,
     /// The binding's delivery profile.
     pub qos: Option<Qos>,
+    /// The module of the method each message spawns.
+    pub module_id: Uuid,
+    /// The method each message spawns.
+    pub function_id: Uuid,
     message_type: low::Type,
-    module_id: Uuid,
-    function_id: Uuid,
     routes: Vec<BoundRoute>,
 }
 

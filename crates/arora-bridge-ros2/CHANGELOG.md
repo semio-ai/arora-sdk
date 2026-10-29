@@ -4,6 +4,20 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.2.0] - 2026-10-29
+
+### Added
+
+- The bridge asks the device for its inputs and functions again every two
+  seconds, and exposes what the device gained since: an input it opens, or a
+  key its HAL describes, gets its topic, a function a module it loads brings
+  gets its service or action, and a profile binding whose function appears is
+  served. What the device lost — an input it closed, a module it unloaded —
+  loses its endpoint, and a function reloaded with another signature gets its
+  endpoint anew. A key the bridge publishes stops being published once its
+  topic becomes an input's. The asks go through the device's in-process
+  command channel, and an answer equal to the last one changes nothing.
+
 ## [11.1.0] - 2026-10-21
 
 ### Changed

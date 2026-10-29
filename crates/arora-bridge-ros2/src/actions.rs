@@ -53,12 +53,13 @@
 //! **standard** `.action` contract instead of the synthesised one: the goal,
 //! result and feedback are registry message types (e.g.
 //! `interaction_skills/LookAt`), the action lives on its own absolute name
-//! (`/skill/look_at`), and the binding is checked at startup against the
-//! device's described methods ([`resolve_bound`]) — the exterior contract
-//! systematically associated with the behavior that implements it. Bound
-//! actions serve **one goal at a time**: `std_skills/Meta.priority`
-//! arbitrates, an equal-or-higher replacement preempting the active run (it
-//! reports `ROS_EINTR`) and a lower one being rejected. The terminal answer
+//! (`/skill/look_at`), and the binding is checked against the device's
+//! described methods ([`resolve_bound`]) at start and whenever they change —
+//! the exterior contract systematically associated with the behavior that
+//! implements it. Bound actions serve **one goal at a time**:
+//! `std_skills/Meta.priority` arbitrates, an equal-or-higher replacement
+//! preempting the active run (it reports `ROS_EINTR`) and a lower one being
+//! rejected. The terminal answer
 //! is the bound Result message carrying the `std_skills` errno of the goal's
 //! lifecycle — unless the run wrote the Result (or an errno) itself.
 
@@ -196,7 +197,7 @@ pub(crate) enum Wire {
     Bound(Box<Bound>),
 }
 
-/// The registry-typed wire of a bound action, resolved once at startup by
+/// The registry-typed wire of a bound action, resolved by
 /// [`resolve_bound`].
 #[derive(Clone)]
 pub(crate) struct Bound {
@@ -380,8 +381,8 @@ pub(crate) fn routed_args(
 }
 
 /// Resolve every profile-declared [`profile::ActionBinding`] against the
-/// device's described methods and the message registry — the startup check
-/// that a skill's exterior contract is actually implemented. Returns the
+/// device's described methods and the message registry — the check that a
+/// skill's exterior contract is actually implemented. Returns the
 /// resolved actions plus one error per binding that does not hold (an
 /// unregistered type, a missing or mis-shaped function, an unroutable goal
 /// field), so the caller can refuse the binding loudly.

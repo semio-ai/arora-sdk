@@ -620,9 +620,9 @@ async fn send_data_reaches_topic_subscriber() {
 
     let mut bridge = Ros2Bridge::new(Ros2BridgeConfig::new(&namespace, domain_id)).await;
 
-    // The bridge's startup service discovery (`run_node` awaits `discover_services`)
-    // sends a `DescribeMethods` command and blocks on its reply *before* it begins
-    // publishing. A caller must consume the inbound command stream; draining it
+    // The bridge's discovery at start (`run_node` asks the device for its
+    // inputs and functions) sends `ListKeys` and `DescribeMethods` commands and
+    // waits for their replies *before* it begins publishing. A caller must consume the inbound command stream; draining it
     // here resolves that reply (the command, and with it the reply channel, is
     // taken) so the bridge proceeds to publish. Without this the bridge never
     // publishes and there is nothing for the subscriber to discover.
