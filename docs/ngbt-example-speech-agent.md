@@ -431,21 +431,43 @@ download it and open it in a browser.
 - **The call contract.** Every design replays the reference's run under
   Arora's call contract (§5) and is checked against it. Its scorecard says
   what the contract changes against the reference, whose ghost shows it.
-- **The system.** Every part composed in one drawing, from a tick's inputs to
-  its outputs. The world's inputs are on the left. Next come the trees, which
-  read inputs and keys and write keys, then the store's keys, which pass values
-  between the parts. Beneath the keys are the providers the tree's calls go to,
-  each call a dotted connector. Then the motion graph, and the outputs on the
-  right, each channel beside the node that writes it. At each tick a part that
-  changed or was called is blue, and a connector between two of them is the
-  change passing. Each node shows what it holds, and the speech provider shows
-  the audio playing on after its leaf stops polling it. The order of a tick is
-  numbered per design; where the motion reads the keys a tick late (#405,
-  #257), those connectors are dashed. A provider is an element of its own, not
-  a detail of a node: it is a module with its own runs, keyed by what they
-  were sent, and its audio outlives the leaf. Its inspector shows its calls and
-  the bytes they sent at each tick, and a call leaf's shows what its call
-  sends.
+- **The system.** Every part composed in one drawing, from what a tick reads
+  to what it changes. Every connector comes from what a node says it reads and
+  writes (§10), so none is drawn by hand. The columns, left to right:
+  1. **What a tick reads:** the world's inputs, and under them the store as the
+     tick starts, as the tick before left it.
+  2. **The nodes the tree reads** (`@round`, `@said`, `@emotion`, `@turn`),
+     each connected from the keys it is computed from.
+  3. **The trees.** A check is connected to what it tests, and a call to its
+     arguments.
+  4. **The store as the tree leaves it,** each key connected from the nodes that
+     write it. Under it are the providers, with a dotted connector from each leaf
+     that calls one. That connector carries the arguments out at every poll and
+     brings back Running, or the result the leaf writes to its keys. A provider
+     shows what its calls sent and what it answered, and the speech provider
+     shows the audio playing on after its leaf stops polling it.
+  5. **The motion graph.**
+  6. **The outputs,** each channel beside the node that writes it.
+
+  How to read it:
+  - **A key written and read in the same tick.** A node ticked after a key's
+    writer reads the write, as the reply run reads the utterance `listen` wrote.
+    That connector runs back from the right, and shows only at the ticks it
+    happens.
+  - **The change passing.** At each tick a part that changed or ran is blue,
+    and a connector between two of them is the change passing.
+  - **A node's connectors.** Selecting a node picks out all of them.
+  - **The order of a tick** is numbered per design. Where the motion reads the
+    keys a tick late (#405, #257), those connectors are dashed.
+  - **Providers stand apart.** A provider is an element of its own, not a
+    detail of a node. It is a module with its own runs, keyed by what they
+    were sent, and its audio outlives the leaf. Its inspector shows its calls
+    and the bytes they sent at each tick, and a call leaf's inspector shows
+    what its call sends.
+
+  One limit is the bench's: it projects a tick's statuses from the state the
+  tick ends in. So on the tick a state changes, the leaf that changed it shows
+  as reached on the tick before, and its key lights without it.
 - **How each design holds it.** One part at a time, the same part on both
   sides: the conversation, attention and reply run, or one of the seven motion
   groups; or Full, every part at once, the three trees above the whole motion
@@ -466,9 +488,15 @@ download it and open it in a browser.
   A node's colour is what the tick did with it, by the design's rule: blue,
   re-evaluated or ticked; amber, visited to collect its data and kept (a
   detached node comparing its arguments, a tree node whose cached status its
-  parent checked); none, not visited, fainter when not needed. Edges between
-  two blue nodes are blue, edges into or out of a visit amber. A tree node's
-  border is its status. A node can be dragged to untangle a graph, with a reset per part.
+  parent checked); none, not visited, fainter when not needed. A store key that
+  changed while no node read it is amber too: its readers sit on a branch a
+  conditional did not take, so the change was noted (its readers marked stale,
+  or a version bumped) and its value not read. `{face/y}` is this on 1,381 of
+  the 3,961 ticks it changes. The reference and the foil run no graph: a node
+  is blue where their code computes it, on the branches it takes, when it or
+  what it follows from changed. Edges between two blue nodes are blue, edges
+  into or out of a visit amber. A tree node's border is its status. A node can
+  be dragged to untangle a graph, with a reset per part.
 - **The inspector and the watch.** Select a node in any view, or a line that
   names one: each side's inspector shows what its design holds for the node's
   inputs and output at this tick, with where it is kept and its state (ran,
@@ -501,6 +529,24 @@ task run. The motion graph is 77 calls of `@arora/dataflow` (`damp`, `slew`,
 `oscillator`, `if`, `read_record`, `blend_weighted_average`…) and of four
 example modules (`@pip/motion`, `@pip/expression`, `@pip/lipsync`,
 `@arora/animation`). It reads 13 store keys and publishes the nine channels.
+
+Every tree node says what it reads and writes, and every view is drawn from
+that: the stored forms, the outline, the tooltips, the inspector, the cost of
+a poll, and the system view's connectors.
+
+| Node | Reads | Writes |
+|---|---|---|
+| A check | its test: `{vad} or {conversation/state} == "listening"` | |
+| A call | its arguments: `agent.rag({reply/utterance})` | its outputs, bound to keys: `{reply/docs} = …` |
+| A set | its values; with `on entry`, its own key, to know its state is entered | its key, and with `on entry` the keys written only then: `{attention/since}`, an emotion triggered |
+| FOR EACH | the list it walks: `{reply/answer}` | the key it puts each item in: `{reply/sentence}` |
+| The task run | `{reply/run}`, and `{reply/held}`, which gates what it shows | |
+
+Every key a node reads has a writer: the world's inputs, a tree node, or a
+leaf writing what its provider answered. The bench checks this when it loads.
+A provider learns what to do only from a call's arguments, so a call sends
+every key it needs: `play` sends `{reply/audio}`, and `listen` sends `{vad}`
+and `{asr/words}`.
 
 None of the open pull requests says what an async node is, or how a paused
 reply is held. Each design below therefore carries a proposal for those
@@ -824,6 +870,12 @@ reference keeps the least.
   lag; the cost stays the same.
 - **Fusing a chain of arithmetic** (the eyes' subtract, scale and clamp) into
   one step. Bespoke code does it, and the counts do not credit it.
+- **Noting only the changes a needed node reads.** A store key's change is
+  noted when no node needs it, its readers sitting on a branch a conditional
+  did not take. The note marks them stale, or bumps a version. That happens
+  0.35 times a tick in every design, nearly all of them `{face/y}`, while Pip
+  wanders or holds a lost face's target. Leaving it for the branch to catch up when it is taken would save 0.017 µs a
+  tick, not worth the bookkeeping.
 
 ## 11. Extensions
 
