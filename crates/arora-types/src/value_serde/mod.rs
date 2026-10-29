@@ -3,8 +3,9 @@
 //! - [`bridge`] — the serde bridge: any `Serialize`/`Deserialize` Rust type
 //!   converts to and from a [`Value`], the `serde_json::to_value`-style path
 //!   with `Value` as the data model. [`to_value`]/[`from_value`] have no type,
-//!   so they carry struct fields and enum variants by *name*, in a
-//!   [`KeyValue`] (only its id and its entries' ids are hashes of names);
+//!   so they carry struct fields and enum variants by *name*: a unit variant
+//!   as its bare name, a [`Value::String`], and a struct or another variant
+//!   in a [`KeyValue`] (only its id and its entries' ids are hashes of names);
 //!   [`to_value_seeded`]/[`from_value_seeded`], given a declared
 //!   [`low::Type`], produce and read a [`Value::Structure`] carrying the
 //!   *type's* ids.
@@ -15,6 +16,7 @@
 //!
 //! [`Value`]: crate::value::Value
 //! [`Value::Structure`]: crate::value::Value::Structure
+//! [`Value::String`]: crate::value::Value::String
 //! [`KeyValue`]: crate::keyvalue::KeyValue
 //! [`low::Type`]: crate::ty::low::Type
 //! [`ValueWriter`]: walk::ValueWriter
