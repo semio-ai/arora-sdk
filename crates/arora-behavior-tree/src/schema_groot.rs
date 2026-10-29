@@ -160,12 +160,13 @@ impl Node {
             })?;
         let mut parameters = HashMap::new();
         for param_arg in &self.param_args {
-            let (param, arg) = groot_param_arg_to_arora(param_arg, function, variables)?;
-            // A return port left empty, as Groot writes an unconnected
-            // output, writes nowhere: it is not bound.
-            if param == _RET_PARAM_ID && param_arg.1.is_empty() {
+            // A port left empty is one Groot leaves unconnected: it is not
+            // bound, but for a string parameter, which takes the empty
+            // string.
+            if param_arg.1.is_empty() && !takes_string(function, param_arg.0) {
                 continue;
             }
+            let (param, arg) = groot_param_arg_to_arora(param_arg, function, variables)?;
             parameters.insert(param, arg);
         }
         Ok(TreeNode {
@@ -672,6 +673,23 @@ fn groot_param_arg_to_arora(
             ),
         }),
     }
+}
+
+/// Whether `function`'s parameter `name` takes a string, as itself or as an
+/// optional's content.
+fn takes_string(function: &ModuleFunction, name: &str) -> bool {
+    fn string(ty: &FrozenTy) -> bool {
+        match ty {
+            FrozenTy::Primitive(primitive) => primitive.kind == PrimitiveKind::String,
+            FrozenTy::FrozenOption(option) => string(&option.element),
+            _ => false,
+        }
+    }
+    function
+        .function
+        .parameters
+        .values()
+        .any(|parameter| parameter.name == name && string(&parameter.ty))
 }
 
 /// A module function's attribute as the value its parameter of type `ty`
@@ -1814,5 +1832,36 @@ mod tests {
         for (id, value) in ids.iter().zip(values) {
             assert_eq!(read.parameters[id], Expression::Value(value), "{xml}");
         }
+    }
+
+    /// An attribute Groot leaves empty, an unconnected port, binds nothing,
+    /// as `groot/cosine_tree_groot_edited.xml`'s `res=""` does; a string
+    /// parameter takes it as the empty string.
+    #[test]
+    fn an_empty_attribute_binds_nothing_but_an_empty_string() {
+        let say = Uuid::new_v4();
+        let ids: Vec<Uuid> = (0..2).map(|_| Uuid::new_v4()).collect();
+        let mut index = HashMap::new();
+        index_typed(
+            &mut index,
+            say,
+            "say",
+            &[
+                ("text", ids[0], PrimitiveKind::String),
+                ("volume", ids[1], PrimitiveKind::F32),
+            ],
+        );
+        let node = match groot(r#"<Say text="" volume=""/>"#)
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+        {
+            Ok(node) => node,
+            Err(e) => panic!("an empty attribute reads: {e:?}"),
+        };
+        assert_eq!(
+            node.parameters.get(&ids[0]),
+            Some(&Expression::Value(Value::String(String::new())))
+        );
+        assert_eq!(node.parameters.get(&ids[1]), None, "volume is unbound");
     }
 }

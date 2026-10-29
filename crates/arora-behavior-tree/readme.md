@@ -141,7 +141,9 @@ text for a string; a port of a string node holds `{name}` or a string. A
 module function's attribute holds `{name}`, `json:` and a value's serde form,
 or plain text read as its parameter's type: a string as it is, `true` or
 `false`, a number with its type's suffix or without (`0.1f32` or `0.1` for an
-`f32`); a parameter of any other type takes plain text as a string. A tree
+`f32`); a parameter of any other type takes plain text as a string. An
+attribute left empty, an unconnected port, binds nothing, but gives a string
+parameter the empty string. A tree
 written back holds each value so that it reads back as itself.
 [`groot/groot_arora_palette.xml`](groot/groot_arora_palette.xml) declares the
 nodes Groot does not know: `Equal`, `Unpack`, `Scatter`, `RunCall`,
