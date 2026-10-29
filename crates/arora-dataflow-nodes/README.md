@@ -67,7 +67,7 @@ the state as arguments:
 ```text
 running
 
-d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, t: {arora/time}, state: ())
+d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, dt: {arora/dt}, state: ())
 ```
 
 Here `d` writes the store key `face/out`, so it is a sink, brought up to date
