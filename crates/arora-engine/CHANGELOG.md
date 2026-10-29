@@ -13,11 +13,19 @@ All notable changes to `arora-engine`. The format follows
   trap, and before the module's next call the executor instantiates the
   component afresh from its compiled code, logging a warning that names the
   module and the trap; that call runs from the module's initial state. The
-  instance the trap left half written is dropped, never entered again.
-  Instantiating afresh runs, as loading does, under `DEFAULT_CALL_BUDGET`;
-  natively, a call whose deadline it used up is not made, and the new
-  instance serves the next call. A module that fails to instantiate afresh
-  runs no more calls until it is reloaded.
+  instance the trap left half written is dropped, never entered again. A
+  module that fails to instantiate afresh runs no more calls until it is
+  reloaded.
+  - Natively, instantiating afresh is a load within the call that triggers
+    it: it, and a guest its initializer calls, end by the earlier of that
+    call's deadline and `DEFAULT_CALL_BUDGET`. Running out of that time is
+    not a failure: the call fails as one with no time left, and the module
+    instantiates afresh at its next call. A call whose deadline a successful
+    instantiation used up is not made either; the new instance serves the
+    next call.
+  - In the browser, a module staged by `SharedLoader::prepare` instantiates
+    afresh asynchronously, as it loaded: its calls fail, saying it is being
+    instantiated afresh, until the new instance is ready.
 
 ## [7.0.2] - 2026-10-29
 

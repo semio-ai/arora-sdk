@@ -96,7 +96,9 @@ A WebAssembly guest is a component of the `arora:module` world
   trap, and before the module's next call the executor instantiates the
   component afresh from its compiled code, logging a warning, so that call
   runs from the module's initial state. A module that fails to instantiate
-  afresh runs no more calls until it is reloaded.
+  afresh runs no more calls until it is reloaded. In the browser, a module
+  staged by `SharedLoader::prepare` instantiates afresh asynchronously, as it
+  loaded: its calls are refused, saying so, until the new instance is ready.
 
 A header naming `wasm` — a `wasm32-wasip1` core module — has no executor.
 Rust guests become components through
@@ -201,8 +203,11 @@ On wasmtime, a call to a guest ends by a deadline and its memory is capped
   deadline is interrupted at the next epoch tick, every `EPOCH` (1 ms): the
   call fails with `DispatchError::Trap`, and the module is instantiated afresh
   before its next call, since the call may have left its state half updated.
-  Instantiating afresh runs, as loading does, under `DEFAULT_CALL_BUDGET`. A
-  call with no time left is not made, and its module keeps its instance.
+  Instantiating afresh is a load within that next call: it, and a guest its
+  initializer calls, end by the earlier of the call's deadline and
+  `DEFAULT_CALL_BUDGET`. Out of time, the call is not made and the module,
+  still to be instantiated afresh, tries again at its next call. A call with
+  no time left is not made, and its module keeps its instance.
 - **Memory.** Each linear memory of an instance holds at most
   `GuestLimits::memory` bytes, `DEFAULT_MEMORY` (256 MiB) by default: a
   `memory.grow` past it returns -1 to the guest, whose allocator reports the

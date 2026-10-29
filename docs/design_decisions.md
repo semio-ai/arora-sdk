@@ -143,9 +143,18 @@ is what a module registry can hold and every host can run.
   of the module's compiled code, from its initial state, and a warning names
   the module and the trap. A device whose call overran its step under load
   keeps its module, which an operator would otherwise have to reload, and no
-  call ever runs in a half-written instance. Instantiating afresh runs under
-  the loading budget; a module that fails to instantiate afresh runs no more
-  calls until it is reloaded, rather than retrying on every call.
+  call ever runs in a half-written instance. Instantiating afresh is a load
+  within the call that triggers it, which runs in a step: it ends by the
+  earlier of that call's deadline and the loading budget, and a guest its
+  initializer calls ends by it too, so recovering never stretches a step.
+  Running out of time is the step's limit, not the module's fault: the call
+  is refused as one with no time left, and the next call tries again. A
+  module that fails to instantiate afresh otherwise runs no more calls until
+  it is reloaded, rather than retrying on every call. The browser
+  re-instantiates a module as it loaded it: one staged asynchronously,
+  because the browser refuses to instantiate it synchronously on the main
+  thread, is instantiated afresh asynchronously, its calls refused until the
+  new instance is ready.
 - `wasip2` is Tier 2 in rustc, and WASI SDK 33 links components with
   `wasm-component-ld`. Rust guests export through `arora_module::artifact!`,
   C++ guests through `arora-cpp-component` (see the C++ section below).
