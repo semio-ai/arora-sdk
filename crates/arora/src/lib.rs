@@ -1655,13 +1655,30 @@ impl AroraBuilder {
         // statement is on their subtree, which a prefix names without the
         // trailing `/`, so a key's own meta still wins; and it goes through
         // the device's store, so over a `NamespacedStore` it covers that
-        // device's subtree alone.
+        // device's subtree alone. A store that refuses the statement keeps no
+        // meta, which leaves every key closed; one that still resolves a
+        // reserved key open would expose it, and fails the build.
         let built_in = arora_behavior::built_in::PREFIX.trim_end_matches('/');
         if let Err(e) = arora
             .store
             .set_prefix_meta(HashMap::from([(built_in.to_string(), KeyMeta::new())]))
         {
-            log::warn!("the store does not keep the runtime's keys closed: {e}");
+            let reserved = [
+                Key::from(arora_behavior::built_in::TIME),
+                Key::from(arora_behavior::built_in::DT),
+                Key::from(format!("{built_in}/tasks")),
+            ];
+            if let Some((key, _)) = reserved
+                .iter()
+                .zip(arora.store.meta(&reserved))
+                .find(|(_, meta)| meta.as_ref().is_some_and(|meta| meta.editable))
+            {
+                anyhow::bail!(
+                    "the store does not keep the runtime's keys closed ({e}) and \
+                     resolves {} open to remote writers",
+                    key.get_path()
+                );
+            }
         }
         // What the HAL says of its keys, stated to the store once nothing can
         // fail the build, and before anything can write: a device's inputs are
@@ -3700,6 +3717,42 @@ mod hal_key_tests {
         assert!(!open("robotA/arora/time"));
         assert!(open("robotB/arora/time"), "a neighbour's");
         assert!(open("arora/time"), "the shared store's own");
+    }
+
+    /// A store that refuses to state the runtime's keys closed, yet resolves
+    /// every key open, fails the build rather than expose them.
+    #[test]
+    fn a_store_that_cannot_close_the_runtime_s_keys_fails_the_build() {
+        #[derive(Clone)]
+        struct OpenToAll(SimpleDataStore);
+        impl DataStore for OpenToAll {
+            fn read(&self, keys: &[Key]) -> Vec<Option<Value>> {
+                self.0.read(keys)
+            }
+            fn write(&self, changes: StateChange) -> Result<(), arora_types::data::DataError> {
+                self.0.write(changes)
+            }
+            fn snapshot(&self) -> arora_types::data::State {
+                self.0.snapshot()
+            }
+            fn slot(&self, key: &Key) -> Box<dyn arora_types::data::Slot> {
+                self.0.slot(key)
+            }
+            fn subscribe(&self) -> Subscription {
+                self.0.subscribe()
+            }
+            fn meta(&self, keys: &[Key]) -> Vec<Option<KeyMeta>> {
+                vec![Some(KeyMeta::new().editable()); keys.len()]
+            }
+            fn clone_box(&self) -> Box<dyn DataStore> {
+                Box::new(self.clone())
+            }
+        }
+        let built = Arora::builder()
+            .with_data_store(Box::new(OpenToAll(SimpleDataStore::new())))
+            .build();
+        let error = built.err().expect("the build fails").to_string();
+        assert!(error.contains("arora/time"), "{error}");
     }
 
     /// A key's own meta the host stated before the build is the host's: the
