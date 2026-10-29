@@ -4,6 +4,15 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [16.0.2] - 2026-10-30
+
+### Changed
+
+- The terminal UI builds on `ratatui` 0.30, `sysinfo` 0.40 and `env_filter` 2;
+  the device directory is found with `dirs` 7; on wasm32 the run loop sleeps on
+  `gloo-timers` 0.4. The indicators show no CPU figure on a host whose process
+  table cannot be read.
+
 ## [16.0.1] - 2026-10-29
 
 ### Fixed
