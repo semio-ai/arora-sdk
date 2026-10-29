@@ -33,7 +33,9 @@ no two writers race: the order of the step decides which write wins.
 
 A remote client writes only the keys the device opens: a key is closed to
 remote writers unless its meta in the store opens it. A HAL opens its own
-inputs by describing its keys; a host opens others itself.
+inputs by describing its keys; a host opens others itself. The runtime's own
+keys under `arora/` — the clock, the task runs' — stay closed whatever wider
+prefix the host opens; a host opens one by stating that key's own meta.
 
 ## Run the device runner
 
@@ -46,7 +48,7 @@ cargo build                     # builds the runner into target/debug/arora
 # install a Groot behavior tree as the device's behavior first
 ./target/debug/arora crates/arora/examples/hello_tree.groot.xml
 
-# let any client write any key: a sandbox, never a shared network
+# let any client write any key but the runtime's: a sandbox, never a shared network
 ./target/debug/arora --open
 
 # a second device on this machine: its own name, directory and port
@@ -54,9 +56,10 @@ cargo build                     # builds the runner into target/debug/arora
 ```
 
 The runner is a device over the in-process fake HAL, which describes no key:
-without `--open`, a client reads every key and writes none. On a terminal it
-shows the terminal operator UI (feature `tui`), headless otherwise; the log
-says when a behavior is loaded or edited and when a task run starts and ends.
+without `--open`, a client reads every key and writes none; with it, a client
+writes every key but the runtime's `arora/` keys. On a terminal it shows the
+terminal operator UI (feature `tui`), headless otherwise; the log says when a
+behavior is loaded or edited and when a task run starts and ends.
 
 The runner loads the modules its device directory carries, then each
 `--module` directory (see [modules](#modules)). A Groot tree's leaves name the
@@ -241,7 +244,7 @@ without `native` carries no executor, only host modules.
 | option | variable | default | meaning |
 |---|---|---|---|
 | `<GROOT>` | | | a Groot behavior tree to install as the device's behavior |
-| `--open` | | off | open every key without meta of its own to remote writers (`arora` only) |
+| `--open` | | off | open every key without meta of its own to remote writers, but the runtime's `arora/` keys (`arora` only) |
 | `--module <DIR>` | | | a module directory to load besides the device directory's; repeatable |
 | `--device <NAME>` | `ARORA_DEVICE` | `default` | the device's name on this machine |
 | `--device-dir <PATH>` | `ARORA_DEVICE_DIR` | per-user directory of the name | the device directory |

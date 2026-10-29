@@ -146,4 +146,4 @@ WebSocket pings.
 
 A device built with `arora` takes the port from `--bridge-port`
 (`ARORA_BRIDGE_PORT`), and `arora --open` opens every key that has no meta of
-its own, for a sandbox or a bench.
+its own but the runtime's `arora/` keys, for a sandbox or a bench.

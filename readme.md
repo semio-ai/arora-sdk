@@ -79,8 +79,8 @@ That is a device with a stand-in HAL, running a small behavior tree and
 serving the open local bridge on `ws://127.0.0.1:9000`. The
 [`arora` runner](crates/arora/readme.md#run-the-device-runner) loads modules
 from module directories (`--module`), and `--open` lets a client write any
-key, for a sandbox. For the duck, follow the
-[Microduck example](examples/policy-modules/README.md#run-it).
+key but the runtime's own `arora/` keys, for a sandbox. For the duck, follow
+the [Microduck example](examples/policy-modules/README.md#run-it).
 
 [Building](docs/building.md) lists the prerequisites (a nightly Rust that
 `rust-toolchain.toml` installs, CMake for the C++ modules).

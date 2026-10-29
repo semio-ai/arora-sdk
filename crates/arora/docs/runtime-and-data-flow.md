@@ -84,7 +84,12 @@ device's own writers — the HAL's readings, the behavior, the clock — are not
 checked. The HAL opens its inputs by describing its keys
 ([below](#the-hal)); a host opens others with `set_meta` / `set_prefix_meta`
 on the store it hands the builder; the `arora` binary's `--open` states the
-empty prefix editable, which opens every key without meta of its own.
+empty prefix editable, which opens every key without meta of its own but the
+runtime's. The build states the runtime's `arora` subtree closed — its clock
+and its task runs' keys — so no wider prefix a host opens hands a remote the
+device's time or a run's state; a host opens one of those keys by stating its
+own meta. Over a `NamespacedStore`, that statement covers the device's own
+subtree alone.
 
 [`arora-simple-data-store`](../../arora-simple-data-store/readme.md) provides
 the default store, `SimpleDataStore`, whose clones share their storage, and
@@ -444,8 +449,11 @@ Tests that pin this page down, by name: in `src/runtime.rs`,
 `dropping_the_run_future_stops_the_device_cleanly` and
 `a_guest_call_overrunning_its_step_is_interrupted_and_the_device_keeps_stepping`;
 in `src/lib.rs`, `a_failing_behavior_is_state_not_a_stop`,
-`a_caller_reaches_a_running_device` and
-`the_hal_s_inputs_are_listed_open_and_its_outputs_closed`;
+`a_caller_reaches_a_running_device`,
+`the_hal_s_inputs_are_listed_open_and_its_outputs_closed`,
+`open_leaves_the_runtime_s_keys_closed`,
+`a_host_opens_one_of_the_runtime_s_keys_by_its_own_meta` and
+`a_device_over_a_shared_store_closes_its_own_runtime_keys`;
 [`src/stepping_tests.rs`](../src/stepping_tests.rs), a remote driving a task
 run end to end; [`src/module_reload_tests.rs`](../src/module_reload_tests.rs);
 and [`tests/local_ws_bridge.rs`](../tests/local_ws_bridge.rs), a WebSocket
