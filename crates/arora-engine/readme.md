@@ -95,8 +95,11 @@ A WebAssembly guest is a component of the `arora:module` world
   interrupted at its deadline) is entered no more: the call fails with its
   trap, and before the module's next call the executor instantiates the
   component afresh from its compiled code, logging a warning, so that call
-  runs from the module's initial state. A module that fails to instantiate
-  afresh runs no more calls until it is reloaded. In the browser, a module
+  runs from the module's initial state. The instance that trapped is
+  released as soon as no call runs in it, before the new one is made, and the
+  new one takes the memory cap `Engine::set_guest_limits` holds for the
+  module then, as a reload does. A module that fails to instantiate afresh
+  runs no more calls until it is reloaded. In the browser, a module
   staged by `SharedLoader::prepare` instantiates afresh asynchronously, as it
   loaded: its calls are refused, saying so, until the new instance is ready.
 

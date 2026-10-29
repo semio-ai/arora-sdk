@@ -33,13 +33,14 @@
 //! trapped in is entered no more, as natively: the call fails with its trap,
 //! and before the module's next call the executor instantiates the guest
 //! module afresh, from its compiled code, logging a warning to the console
-//! that names the module and the trap. It does so as the module was loaded:
-//! synchronously, or, for one staged by [`SharedLoader::prepare`] because the
-//! browser refuses to instantiate it synchronously, asynchronously — the call
-//! that finds it trapped starts `WebAssembly.instantiate`, and the module
-//! refuses its calls, saying it is being instantiated afresh, until the
-//! instance is ready. A module that fails to instantiate afresh runs no more
-//! calls until it is reloaded.
+//! that names the module and the trap. The instance that trapped is released
+//! as soon as no call runs in it, before the new one is made. The new one is
+//! made as the module was loaded: synchronously, or, for one staged by
+//! [`SharedLoader::prepare`] because the browser refuses to instantiate it
+//! synchronously, asynchronously — the call that finds it trapped starts
+//! `WebAssembly.instantiate`, and the module refuses its calls, saying it is
+//! being instantiated afresh, until the instance is ready. A module that
+//! fails to instantiate afresh runs no more calls until it is reloaded.
 //!
 //! [`SharedLoader::prepare`]: super::SharedLoader::prepare
 
@@ -241,7 +242,7 @@ fn load(
         component,
         engine,
         asynchronous,
-        instance,
+        instance: Some(instance),
         function_ids,
         state: State::Ready,
         entered: 0,
@@ -344,13 +345,15 @@ struct ComponentModule {
     component: BrowserComponent,
     engine: EngineRef,
     asynchronous: bool,
-    instance: Instance,
+    /// The module's instance; `None` once one a call trapped in is released,
+    /// until it is instantiated afresh.
+    instance: Option<Instance>,
     /// Functions the module's header declares; dispatch refuses others.
     function_ids: Vec<Uuid>,
     state: State,
     /// How many calls into `instance` are under way: more than one while the
-    /// guest is called back. An instance in use is not replaced: its guest
-    /// still runs in it.
+    /// guest is called back. An instance in use is neither released nor
+    /// replaced: its guest still runs in it.
     entered: usize,
 }
 
@@ -388,11 +391,20 @@ impl Module for ComponentModule {
             return Err(DispatchError::FunctionNotFound { id: *method_id });
         }
         self.recover()?;
+        let instance = self
+            .instance
+            .as_ref()
+            .expect("a module fit to run a call has an instance");
         self.entered += 1;
-        let result = self.call_dispatch(method_id, arg);
+        let result = instance.call_dispatch(method_id, arg);
         self.entered -= 1;
         if let Err(DispatchError::Trap { message }) = &result {
             self.state = State::Trapped(message.clone());
+        }
+        // An instance a call trapped in, once no call is under way in it, is
+        // released at once, its memory with it, as natively.
+        if self.entered == 0 && !matches!(self.state, State::Ready) {
+            self.instance = None;
         }
         result
     }
@@ -434,6 +446,9 @@ impl ComponentModule {
                 message: format!("{TRAPPED} ({trap})"),
             });
         }
+        // The instance a call trapped in is of no further use: released
+        // before the new one is made, the two never hold memory at once.
+        self.instance = None;
         let prepared = if self.asynchronous {
             match self.instantiated_asynchronously(&trap) {
                 Some(prepared) => prepared.map_err(LoadModuleError::Internal),
@@ -453,7 +468,7 @@ impl ComponentModule {
         self.entered -= 1;
         match fresh {
             Ok(fresh) => {
-                self.instance = fresh;
+                self.instance = Some(fresh);
                 self.state = State::Ready;
                 web_sys::console::warn_1(
                     &format!(
@@ -494,8 +509,10 @@ impl ComponentModule {
         self.state = State::Instantiating(trap.to_string(), slot);
         None
     }
+}
 
-    fn call_dispatch(&mut self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
+impl Instance {
+    fn call_dispatch(&self, method_id: &Uuid, arg: &[u8]) -> Result<Box<[u8]>, DispatchError> {
         let trap = |message: String| DispatchError::Trap {
             message: format!("dispatch trapped: {message}"),
         };
@@ -503,7 +520,7 @@ impl ComponentModule {
         // the id's halves and the list's pointer and length go in; a pointer to
         // the result comes back.
         let (hi, lo) = method_id.as_u64_pair();
-        let arg_ptr = self.instance.guest.alloc(1, arg).map_err(trap)?;
+        let arg_ptr = self.guest.alloc(1, arg).map_err(trap)?;
         let args = Array::of4(
             &JsValue::from(hi as i64),
             &JsValue::from(lo as i64),
@@ -511,14 +528,13 @@ impl ComponentModule {
             &JsValue::from(arg.len() as u32),
         );
         let ret = self
-            .instance
             .dispatch
             .apply(&JsValue::NULL, &args)
             .map_err(js_message)
             .and_then(as_u32)
             .map_err(trap)?;
-        let result = self.instance.guest.read_result(ret).map_err(trap)?;
-        if let Some(post_return) = &self.instance.post_dispatch {
+        let result = self.guest.read_result(ret).map_err(trap)?;
+        if let Some(post_return) = &self.post_dispatch {
             post_return
                 .call1(&JsValue::NULL, &JsValue::from(ret))
                 .map_err(|e| trap(js_message(e)))?;

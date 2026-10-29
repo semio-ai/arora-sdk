@@ -290,6 +290,31 @@ fn a_component_that_traps_is_instantiated_afresh_for_its_next_call() {
     }
 }
 
+/// A component instantiated afresh after a trap is capped by the memory limit
+/// the engine holds for it then, as a reload is: a cap lowered after the load
+/// leaves the instance under way as it was, and holds the new one.
+#[test]
+fn a_component_instantiated_afresh_takes_its_module_s_current_memory_cap() {
+    use arora_engine::limits::GuestLimits;
+    let mut engine = EngineBuilder::new()
+        .add_executor(ComponentExecutor::new().unwrap())
+        .build();
+    load_module_from_parts(&mut engine, header(), guest_bytes()).unwrap();
+    let (module, grow): (Uuid, Uuid) = (MODULE_ID.parse().unwrap(), GROW_FN.parse().unwrap());
+    engine.set_guest_limits(
+        module,
+        GuestLimits {
+            memory: 32 << 20,
+            ..GuestLimits::default()
+        },
+    );
+    assert_eq!(&*engine.dispatch(&module, &grow, &[]).unwrap(), &[1]);
+    engine
+        .dispatch(&module, &TRAP_FN.parse().unwrap(), &[])
+        .unwrap_err();
+    assert_eq!(&*engine.dispatch(&module, &grow, &[]).unwrap(), &[0]);
+}
+
 /// A component instantiated afresh after a trap is loaded within the call that
 /// triggers it: its instantiation, and a guest it calls, end by the earlier of
 /// that call's deadline — the step's, in a step — and the load budget, never

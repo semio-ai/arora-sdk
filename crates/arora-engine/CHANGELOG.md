@@ -13,9 +13,11 @@ All notable changes to `arora-engine`. The format follows
   trap, and before the module's next call the executor instantiates the
   component afresh from its compiled code, logging a warning that names the
   module and the trap; that call runs from the module's initial state. The
-  instance the trap left half written is dropped, never entered again. A
-  module that fails to instantiate afresh runs no more calls until it is
-  reloaded.
+  instance the trap left half written is released as soon as no call runs in
+  it, before the new one is made, and never entered again. The new instance
+  takes the memory cap the engine holds for the module then
+  (`Engine::set_guest_limits`), as a reload does. A module that fails to
+  instantiate afresh runs no more calls until it is reloaded.
   - Natively, instantiating afresh is a load within the call that triggers
     it: it, and a guest its initializer calls, end by the earlier of that
     call's deadline and `DEFAULT_CALL_BUDGET`. Running out of that time is
