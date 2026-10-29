@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "arora-hal"
-version = "4.3.0"
+version = "4.3.1"
 dependencies = [
  "arora-types",
  "async-trait",
@@ -463,7 +463,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "serde",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "tokio",
 ]
 
@@ -783,12 +783,12 @@ dependencies = [
 
 [[package]]
 name = "arora-vfs"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-recursion",
  "derive_more 2.1.1",
  "serde",
- "sha2 0.10.9",
+ "sha2 0.11.1",
 ]
 
 [[package]]
