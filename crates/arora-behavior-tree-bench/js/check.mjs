@@ -20,6 +20,12 @@ assert.equal(x.bench_workload_finish(), 1);
 assert.equal(x.bench_measure(0, 0, 0, 0, 10, 1), 1);
 assert.equal(x.bench_measure(10, 0, 0, 0, 10, 0), 1);
 assert.equal(x.bench_measure(10, 0, 0, 0, 10, 2), 1);
+// Arguments a u32 parameter would wrap are refused in JS.
+for (const bad of [2 ** 32 + 10, -1, 1.5]) {
+  assert.throws(() => wasm.measure(bad, 'settled', 'detached', { samples: 1 }), /must be an integer in \[0, 2\^32\)/);
+  assert.throws(() => wasm.loadScale(10, 'settled', { ticks: bad }), /must be an integer in \[0, 2\^32\)/);
+  assert.throws(() => wasm.scaleName(bad, 'settled'), /must be an integer in \[0, 2\^32\)/);
+}
 // A warm-up plus ticks past u32 is invalid input, not a trap.
 assert.equal(x.bench_measure(10, 0, 0, 0xffffffff, 1, 1), 1);
 assert.equal(x.bench_scale_load(10, 0, 0xffffffff, 1), 1);

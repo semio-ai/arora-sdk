@@ -58,6 +58,12 @@ export async function loadBenchWasm(bytes, { now = () => performance.now(), rand
   const defaults = JSON.parse(text(x.bench_defaults(), x.bench_defaults_len()));
   check(() => x.bench_clock_step_us(clock.stepUs));
   check(() => x.bench_minimum_sample_us(clock.minimumSampleUs));
+  // A u32 export parameter takes a JS number modulo 2^32, so an argument outside
+  // [0, 2^32) or not an integer is refused before it can wrap.
+  const u32 = (value, name) => {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) throw new Error(`${name} must be an integer in [0, 2^32)`);
+    return value;
+  };
   const formIndex = form => { const f = forms.indexOf(form); if (f < 0) throw new Error(`unknown form: ${form}`); return f; };
   function loadWorkload(source) {
     const data = typeof source === 'string' ? new TextEncoder().encode(source) : source;
@@ -99,18 +105,18 @@ export async function loadBenchWasm(bytes, { now = () => performance.now(), rand
       check(() => x.bench_builtin_load(index)); return session();
     },
     scaleName(n, scenario) {
-      check(() => x.bench_scale_name(n, scenarios.indexOf(scenario)));
+      check(() => x.bench_scale_name(u32(n, 'n'), scenarios.indexOf(scenario)));
       return JSON.parse(text(x.bench_result(), x.bench_result_len()));
     },
     loadScale(n, scenario, { warmUp = defaults.warmUp, ticks = defaults.ticks } = {}) {
       const s = scenarios.indexOf(scenario);
-      if (s < 0 || ![n, ticks].every(v => Number.isInteger(v) && v > 0) || !Number.isInteger(warmUp) || warmUp < 0) throw new Error('invalid scale cell');
-      check(() => x.bench_scale_load(n, s, warmUp, ticks)); return session();
+      if (s < 0 || u32(n, 'n') === 0 || u32(ticks, 'ticks') === 0) throw new Error('invalid scale cell');
+      check(() => x.bench_scale_load(n, s, u32(warmUp, 'warmUp'), ticks)); return session();
     },
     measure(n, scenario, form, { warmUp = defaults.warmUp, ticks = defaults.ticks, samples = 7 } = {}) {
       const s = scenarios.indexOf(scenario), f = formIndex(form);
-      if (s < 0 || ![n, ticks, samples].every(v => Number.isInteger(v) && v > 0) || !Number.isInteger(warmUp) || warmUp < 0 || samples % 2 === 0) throw new Error('invalid scale cell');
-      check(() => x.bench_measure(n, s, f, warmUp, ticks, samples)); return result();
+      if (s < 0 || u32(n, 'n') === 0 || u32(ticks, 'ticks') === 0 || u32(samples, 'samples') % 2 === 0) throw new Error('invalid scale cell');
+      check(() => x.bench_measure(n, s, f, u32(warmUp, 'warmUp'), ticks, samples)); return result();
     },
     // For tools that need the fixed row/series C ABI rather than JSON.
     exports: x,
