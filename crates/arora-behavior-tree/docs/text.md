@@ -268,7 +268,7 @@ their state as arguments:
 ```text
 running
 
-d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, t: {arora/time}, state: ())
+d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, dt: {arora/dt}, state: ())
 ```
 
 A pure mapping: sinks beside a tree that does nothing.

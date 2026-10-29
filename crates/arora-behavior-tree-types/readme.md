@@ -24,13 +24,14 @@ value form.
 
 ## Using them
 
-- **A module declared in Rust** names them as its functions' types, as the
-  [`test-behavior-tree-nodes`](../../modules/test-behavior-tree-nodes/readme.md)
-  module does: `fn seq(children: Option<Vec<TickId>>) -> Status`.
+- **A module declared in Rust** names them as its functions' types:
+  `fn seq(children: Vec<TickId>) -> Status`.
 - **A `module.yaml`** names `arora.Status` and `arora.TickId`; the code
   generator resolves them from their record files, which
   [`arora-behavior-tree-types-yaml`](../arora-behavior-tree-types-yaml/readme.md)
-  writes.
+  writes. The Rust it generates takes an array argument as an `Option`, as in
+  the [`test-behavior-tree-nodes`](../../modules/test-behavior-tree-nodes/readme.md)
+  module: `fn seq(children: Option<Vec<TickId>>) -> Status`.
 - **A registry** takes their records from `declare_status_enumeration(parent)`
   and `declare_tick_id_structure(parent)`, under the ids and versions
   `STATUS_ENUMERATION_ID`, `STATUS_ENUMERATION_VERSION`,
