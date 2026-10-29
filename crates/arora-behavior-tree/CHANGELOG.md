@@ -43,10 +43,11 @@ All notable changes to `arora-behavior-tree`. The format follows
 - A Groot attribute of a module function is read as its parameter's type:
   `delta="0.1f32"` or `delta="0.1"` is an `f32` for an `f32` parameter, and
   `json:` holds any value. It was a string whatever the type. A tree written
-  back holds a string as it is and any other value so that it reads back as
-  itself: a number with its suffix, a boolean, `json:` for the rest. An
-  attribute left empty, Groot's unconnected port, binds nothing, but for a
-  string parameter, which takes the empty string.
+  back holds each value so that it reads back as itself for its parameter: a
+  string as it is, a number with its suffix, a boolean, `json:` for the rest.
+  An attribute left empty, Groot's unconnected port, binds nothing, but for a
+  string parameter, which takes the empty string; one that names no port is
+  refused.
 - Requires arora-behavior-tree-types 3.
 
 ### Added
