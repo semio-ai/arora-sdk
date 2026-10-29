@@ -217,7 +217,14 @@ The library's `run`, `run_with_hal`, `run_with` and an `AroraBuilder` given no
 choice serve the open local bridge: a Cargo feature is on for every crate a
 build links, so the feature alone does not say that the runner at hand chose
 Studio. An embedder connects with `studio::connect` (or a variant) and
-`with_bridge`, or hands `studio::Choice::Studio` to `with_studio`. The
+`with_bridge`, or hands `studio::Choice::Studio` to `with_studio`. An app that
+connects only a device holding a credential, and enrolls it when a person
+asks, keeps the device's Studio side instead, the device client's
+`StudioDevice`: `studio::of(device)` gives it, or
+`studio::in_device_dir(device_dir, name, store)` on a platform that gives the
+app its data directory at run time. Getting it contacts nobody, and neither
+does its `holds_credential`; its `connect` never enrolls, and
+`studio::enroll` enrolls the device as a run does. The
 [`studio` module docs](src/studio/mod.rs) cover enrollment, the credential, the
 model the device reports and every variable.
 

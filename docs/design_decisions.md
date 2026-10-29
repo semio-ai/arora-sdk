@@ -827,7 +827,11 @@ runner built without Studio beside one built with it sees `studio-bridge` on.
 An `AroraBuilder` that no runner hands a choice therefore serves the open local
 bridge, and a runner flattens `--no-studio` only under its own `studio`
 feature. An embedder connects by calling `studio::connect`, or by handing
-`Choice::Studio` to `AroraBuilder::with_studio`.
+`Choice::Studio` to `AroraBuilder::with_studio`. An app whose installs nobody
+set up must contact nobody keeps the device's `StudioDevice` instead
+(`studio::of`), the device client's object for the device's Studio side: it
+connects the device only when it holds a credential, and enrolls it when a
+person asks.
 
 ### A device enrolls with Semio Studio
 

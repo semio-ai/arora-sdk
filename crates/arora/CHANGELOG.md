@@ -4,6 +4,34 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [16.1.0] - 2026-10-29
+
+### Added
+
+- `studio::of(device)` and `studio::in_device_dir(device_dir, name, store)`:
+  the device's Studio side, the device client's `StudioDevice`
+  (`arora-studio-bridge-client` 11.1), its credentials the ones a run
+  connecting as the device uses, one an earlier arora kept moving in. Getting
+  it touches local files only. An app embedding a device keeps it to ask at
+  launch whether the device holds a credential (`holds_credential`, which
+  contacts nobody), to connect the device only then (`connect`, which never
+  enrolls), and to enroll it when a person asks.
+- `studio::enroll(studio_device, description, operator)` enrolls the device
+  as a run that connects does, and returns its id: with the token in
+  `STUDIO_ENROLLMENT_TOKEN`, else by code, each logged and shown to
+  `operator`; named by `DEVICE_NAME`, else by `operator`, else generated.
+  `studio::reported_model(description)` is the model a run reports as it
+  connects, which `StudioDevice::connect` takes.
+- `studio` re-exports `StudioDevice`, `EnrollWith`, `DeviceDescription`,
+  `PartialDeviceModel` and the client's `Error`: an embedder calls the
+  device's Studio side with no dependency on the client.
+
+### Changed
+
+- Requires `arora-studio-bridge-client` 11.1. The `studio::connect`
+  functions connect through the `StudioDevice` that `studio::of` and
+  `studio::in_device_dir` give, unchanged otherwise.
+
 ## [16.0.0] - 2026-10-23
 
 ### Added

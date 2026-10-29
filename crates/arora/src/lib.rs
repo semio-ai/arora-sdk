@@ -36,10 +36,6 @@ mod module_discovery;
 pub mod operator;
 mod run;
 pub mod runtime;
-/// The Semio Studio connection. Its [`connect`](studio::connect) builds a
-/// ready-to-inject Studio [`Bridge`] an embedder attaches with
-/// [`AroraBuilder::with_bridge`] — the producer side of viewing a runtime's
-/// live data through the Studio bridge.
 #[cfg(feature = "studio-bridge")]
 pub mod studio;
 /// The terminal operator UI. Native, and only when the `tui` feature is on; an

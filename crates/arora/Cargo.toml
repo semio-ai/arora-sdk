@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "16.0.0"
+version = "16.1.0"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -96,8 +96,9 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 # (`Error::NotEnrolled` otherwise), and reports only the device's model to its
 # Studio record; it keeps the device's Studio credentials
 # (`credentials::DeviceCredentials`), with the certificate a TLS bridge knows
-# the device by.
-arora-studio-bridge-client = { version = "11", optional = true }
+# the device by. 11.1: `studio::StudioDevice`, the device's Studio side in one
+# object, which `arora::studio` builds for a device and hands to embedders.
+arora-studio-bridge-client = { version = "11.1", optional = true }
 # Headless device-runner deps (native-only, optional). `dirs` finds the per-user
 # directory the device directory defaults to; `serde_json` reads a module
 # directory's `header.json`.
