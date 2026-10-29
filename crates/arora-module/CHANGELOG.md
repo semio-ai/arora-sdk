@@ -4,6 +4,13 @@ All notable changes to `arora-module`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.3.1] - 2026-10-30
+
+### Changed
+
+- A module built for `wasm32-wasip2` gets its component bindings from
+  `wit-bindgen` 0.63; the `arora:module` world is unchanged.
+
 ## [2.3.0] - 2026-10-23
 
 ### Added
