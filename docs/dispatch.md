@@ -1,180 +1,117 @@
-# Dispatching and indirect dispatch
+# Dispatching calls
 
-How the engine routes a call from a caller to the function that runs it, the
-two addressing schemes it supports today (direct and indirect), and how the
-behavior-tree runtime leans on the indirect one.
+How the engine routes a call from its caller to the function that runs it:
+the two ways a call names its target, what crosses the boundary, and the
+entry point each kind of caller and module uses. The
+[engine's readme](../crates/arora-engine/readme.md) introduces modules,
+executors and calls.
 
-For the buffer/ABI basics see [`crates/arora-engine/readme.md`](../crates/arora-engine/readme.md#call-mechanism);
-for the *why* behind broader choices see [`design_decisions.md`](design_decisions.md).
+## Two ways to name a target
 
-## Two ways to address a call
+A call is **direct** when it names a module function by its ids, and
+**indirect** when it names a callable the host registered with the engine:
 
-The engine implements the [`CallBridge`](../crates/arora-types/src/call.rs) trait
-(defined in `arora-types`, re-exported by the engine), which exposes two distinct
-call paths. They differ in **what the target is addressed by** and **what is
-passed**:
+| | Direct | Indirect |
+|---|---|---|
+| Target | a module's function: module id and function id, two UUIDs | a registered callable: a `CallableId`, a `u64` |
+| Arguments | an argument buffer, keyed by parameter id | none: the callable holds whatever it needs |
+| Result | the return value and the mutated parameters | one `Value` |
+| Lives | while the module is loaded | from `arora_register_callable` to `arora_unregister_callable` |
+| Host entry point | `CallBridge::arora_call(Call)` | `CallBridge::arora_call_indirect(CallableId)` |
+| Guest entry point | `host.dispatch(module, method, arg)` | `host.dispatch-indirect(callable)` |
 
-| | **Direct** | **Indirect** |
-| --- | --- | --- |
-| Host method | `arora_call(Call)` — module routed by `Call::module_id` | `arora_call_indirect(CallableId)` |
-| Guest import | `arora_dispatch(module_id, method_id, arg)` | `arora_dispatch_indirect(callable_id)` |
-| Target addressed by | `(module UUID, function UUID)` — u128 + u128 | `CallableId` — a `u64` |
-| Arguments | an args buffer is passed | **none** — the target captured its state at registration |
-| Returns | full call protocol: a `Structure` parsed into `CallResult { ret, mutated }` | a single serialized `Value` |
-| Target lifetime | a permanent module export (lives while the module is loaded) | a runtime-registered callable (lives between register / unregister) |
-| Resolution | two-level: `modules[module_id]` then `module.dispatch(function_id)` | one-level: `callables[callable_id]` |
+A function id is a declared, stable identity shared by separately built
+artifacts: both sides agree on it through the module's declaration. A
+`CallableId` is a handle the engine draws at random when the host registers
+a callable — an `Rc<dyn Callable>` — and means something only to that
+engine, while the callable is registered. Only the host registers callables;
+a guest can only call one whose id it was handed.
 
-Both are wired into each executor as host callbacks that capture the engine
-pointer (`engine as usize`, see
-[`design_decisions.md`](design_decisions.md#engine-as-usize-for-executor-callbacks-deliberately-unsafe)).
-The wasmtime wiring is in
-[`executor/wasm/mod.rs`](../crates/arora-engine/src/executor/wasm/mod.rs) (`func_wrap`
-for `arora_dispatch` / `arora_dispatch_indirect`); the browser wiring is the
-`env.arora_dispatch*` closures in
-[`executor/browser/mod.rs`](../crates/arora-engine/src/executor/browser/mod.rs).
+## Direct dispatch
 
-### Direct dispatch
+A [`Call`](../crates/arora-types/src/call.rs) names the module and the
+function, and carries the arguments as `StructureField`s whose ids are the
+parameter ids. `Engine::arora_call` serializes them as an
+[Arora Buffer](../crates/arora-buffers/readme.md): a structure whose id is the
+function id and whose fields are the arguments (`call::serialize_to_arg`).
+`Engine::dispatch` then:
 
-`arora_dispatch(module_id, method_id, arg)`
-([`wasm/mod.rs`](../crates/arora-engine/src/executor/wasm/mod.rs)) reads the two UUIDs
-and the argument buffer out of guest memory, then calls
-`Engine::dispatch(module_id, function_id, arg)`
-([`engine.rs`](../crates/arora-engine/src/engine.rs)), which looks the module up in
-`modules: HashMap<Uuid, Box<dyn Module>>` and forwards to `Module::dispatch`.
-The native executor resolves the function by exported symbol name
-(`arora_function_<uuid>`, [`executor/native.rs`](../crates/arora-engine/src/executor/native.rs));
-the wasm executor resolves it through the module's `arora_functions` table.
+1. finds the module by id, or fails with `ModuleNotFound`;
+2. for a guest module, checks the arguments against the parameters its header
+   declares
+   ([details](../crates/arora-engine/readme.md#arguments-checked-against-the-header))
+   and sets the call's deadline
+   ([details](../crates/arora-engine/readme.md#time-and-memory-a-guest-may-spend));
+3. hands the buffer to the module (`Module::dispatch`), which finds the
+   function by id, or fails with `FunctionNotFound`:
+   - a component, through its `dispatch` export;
+   - a shared library, through its exported symbol `arora_function_<id>`;
+   - a host module, through the closure attached under the id.
 
-The higher-level host wrapper `arora_call` adds the call **protocol** on top of
-raw dispatch: it serializes the `Call` into the argument structure, and parses
-the returned `Structure` into a `CallResult` whose first field is the return
-value and whose remaining fields are mutated (out) parameters
-([`engine.rs`](../crates/arora-engine/src/engine.rs)).
+The function answers with a structure under the same function id: its first
+field, under the function id too, holds the return value, and the others the
+mutable parameters it wrote, under their parameter ids
+(`call::encode_call_result`). `arora_call` reads it back as a
+`CallResult { ret, mutated }`. A component's or a host module's error comes
+back as `DispatchError::Guest`.
 
-This is the "call a **named function** with these arguments" path. Both the
-caller and the callee can be separately-compiled artifacts that agree only on
-the UUIDs — the UUIDs are a published contract baked into `module.yaml` and the
-generated stubs.
+`CallBridge::arora_call_borrowed` takes the arguments by reference, for a
+bridge that answers in-process without copying them; the engine builds the
+owned `Call` from them.
 
-### Indirect dispatch
+## Indirect dispatch
 
-`arora_dispatch_indirect(callable_id)`
-([`wasm/mod.rs`](../crates/arora-engine/src/executor/wasm/mod.rs)) takes a single
-`u64`, calls `Engine::arora_call_indirect(CallableId)`, which looks the callable
-up in the [`CallableRegistry`](../crates/arora-engine/src/call.rs) and invokes it. The
-returned `Value` is serialized into a fresh buffer and handed back.
+`arora_call_indirect` looks the callable up in the engine's
+[`CallableRegistry`](../crates/arora-engine/src/call.rs) and calls it with the
+engine itself as its `CallBridge`, so the callable can make calls in turn. A
+guest's `host.dispatch-indirect` returns the callable's `Value` serialized as
+an Arora Buffer.
 
-Callables are registered host-side with `arora_register_callable`, which mints a
-**random** `u64` id (`rng.next_u64()`, [`call.rs`](../crates/arora-engine/src/call.rs))
-and stores an `Rc<dyn Callable>`. `arora_register_callable` is **not** a guest
-import — a guest cannot register a callable; only the process hosting the engine
-can. `arora_dispatch_indirect` only lets a guest *invoke* a callable it was
-handed a handle to.
+## Calls from a guest
 
-This is the "invoke a **registered callable** by handle" path. The callable is a
-closure that captured its state at registration time — which is exactly why
-indirect dispatch passes no arguments.
+A guest calls through the `arora:module` world's `host` interface, which every
+host provides ([`wit/arora-module.wit`](../crates/arora-engine/wit/arora-module.wit)):
 
-## Direct vs indirect: name vs handle, definition vs instance
+```wit
+dispatch: func(module: id, method: id, arg: list<u8>) -> result<list<u8>, string>;
+dispatch-indirect: func(callable: u64) -> result<list<u8>, string>;
+```
 
-The two paths are *not* redundant, and the difference is not static-vs-dynamic
-dispatch (both are runtime hash-map lookups). The real differences:
+The call re-enters the engine while the guest's own call is still under way —
+the engine is borrowed further up the stack, which is why executors hold a raw
+pointer to the pinned engine
+([design decisions](design_decisions.md#raw-engine-pointer-in-executor-host-state-deliberately-unsafe)).
+The callee runs under its caller's deadline, and its arguments are checked
+as any guest's.
 
-- **Name vs handle.** A function UUID is a *declared, stable identity* shared
-  across separately-compiled artifacts. A `CallableId` is an *ephemeral handle*
-  minted by the engine and handed back at runtime — meaningful only within one
-  engine instance, only while registered.
-- **Definition vs instance.** A module function UUID names one definition. A
-  registered callable is an *instance* that has bound state. The behavior tree
-  is the canonical case: many callables can be backed by the same underlying
-  module function, each capturing different arguments and children (see below).
-- **Argument binding.** Direct passes arguments per call. Indirect binds all
-  state at registration and passes nothing.
+Generated bindings call through two functions over that interface, taking the
+addresses of 16-byte UUIDs and of size-prefixed buffers in the guest's memory
+and returning the address of the result buffer:
 
-> ⚠️ **Lifecycle caveat (current state).** As written, nothing in-tree calls
-> `arora_unregister_callable` — there are no callers besides the trait/impl
-> definitions. Registered callables therefore accumulate for the engine's
-> lifetime. The behavior-tree runtime registers one callable **per node** at
-> setup and never unregisters them, so repeatedly building trees grows the
-> registry without bound. See the simplification issue referenced below.
+- `arora_dispatch(module_id, method_id, arg)` — in Rust generated from a
+  `module.yaml` (`arora_module::__rt::engine`) and in C++
+  ([`libs/cpp/src/arora/component.cpp`](../libs/cpp/src/arora/component.cpp));
+- `arora_dispatch_indirect(callable_id)` — in Rust only.
+
+The host's error comes back as an error buffer. In Rust the result buffer
+stays valid until the guest's next call; in C++ the guest owns it.
 
 ## How behavior trees use indirect dispatch
 
-The [`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md) runtime is
-a host-side orchestrator. The **basic control nodes** (sequence, fallback,
-parallel, succeed, fail, run) are ticked **natively in the host** — they never
-leave the process and never consult the engine. Only a node backed by a *module
-function* — a leaf, or a module-provided composite — dispatches into the engine.
-The tree structure and blackboard variables live host-side; **indirect dispatch**
-is what lets a module node tick its children back in the host. (The
-[`test-behavior-tree-nodes`](../modules/test-behavior-tree-nodes/readme.md) guest
-module still carries wasm implementations of the basic nodes, but it is test-only
-now — the runtime does not use it for control flow.)
+[`arora-behavior-tree`](../crates/arora-behavior-tree/readme.md) registers
+one callable per node of a tree when it lowers it, each holding its node and
+its children's `TickId`s, and ticks the root with `arora_call_indirect`. A
+node the library runs natively — a control node, a status leaf, a data node —
+ticks its children through their callables without leaving the host. A node
+backed by a module function is a direct call, `arora_call(Call { module_id, id,
+args })`, whose arguments the tree reads from its variables.
 
-### Setup: one callable per node
+A module's own control node receives its children as its first parameter,
+named `children`, an array of `TickId`s, and ticks a child by calling
+`arora_dispatch_indirect` with its callable id
+([`modules/test-behavior-tree-nodes`](../modules/test-behavior-tree-nodes/readme.md)).
+The guest holds no child's arguments — the tree bound them when it lowered —
+so a handle saying "tick this child" is all it can give, and all it needs.
 
-[`setup_tick_function`](../crates/arora-behavior-tree/readme.md) walks
-the tree bottom-up. For every node it constructs a `TickFunction` capturing that
-node, its already-registered children, and `Rc`-shared clones of the tree-wide
-`function_index`, `locals`, and `node_arg_variables` maps. Each `TickFunction`
-is registered via `arora_register_callable`, yielding a `CallableId` wrapped in
-a `TickId` (defined in `arora-behavior-tree-types`).
-
-Note that of the captured fields, only `node` and `children` are per-node — the
-rest are `Rc` clones of the *same* tree-wide maps. The per-node `node`/`children`
-are themselves recoverable from the tree's `node_index` (`node.children` already
-holds child node UUIDs), which is why the per-node registration is largely
-incidental rather than fundamental.
-
-### Tick: host → guest → host recursion
-
-```mermaid
-sequenceDiagram
-    participant Host as BT runtime (host)
-    participant Eng as Engine
-    participant Mod as module function
-
-    Host->>Eng: arora_call_indirect(root TickId)
-    Eng->>Host: invoke root TickFunction
-    Note over Host: builtin composite ticks its children directly
-    loop each child
-        Host->>Eng: arora_call_indirect(child TickId)
-        Eng->>Host: invoke child TickFunction
-        alt builtin composite
-            Note over Host: recurse in-process (no engine round-trip)
-        else leaf or module-provided node
-            Host->>Eng: arora_call(Call{module_id, id, args})
-            Eng->>Mod: run the function
-            Mod-->>Host: a module composite calls back arora_dispatch_indirect(grandchild)
-        end
-    end
-    Host-->>Eng: composite Status
-```
-
-1. The host ticks the root with `arora_call_indirect(root TickId)`.
-2. A **builtin composite** (sequence, fallback, parallel, …) ticks each child
-   *directly* with `arora_call_indirect(child TickId)` — the control logic runs
-   in-process, with no dispatch into a guest ([`behavior_tree.rs` `tick_builtin`](../crates/arora-behavior-tree/src/behavior_tree.rs)).
-3. A **leaf** — or any node backed by a module function — dispatches into the
-   engine with `arora_call(Call { module_id, id, args })`: one `Call` whose
-   `module_id` routes it to the module.
-4. Recursion: a child that is itself a builtin composite repeats step 2
-   in-process; a **module-provided composite** receives its children as its first
-   parameter (named `children`, UUID `5b6e9515-dbcc-411d-bee9-3d8cba5fedda`,
-   typed `Vec<TickId>`) and calls back `arora_dispatch_indirect(child.callable_id)`
-   to re-enter the host and tick a child
-   ([`modules/test-behavior-tree-nodes/src/lib.rs`](../modules/test-behavior-tree-nodes/src/lib.rs)).
-
-The child's arguments are not passed by the guest — they live host-side in the
-blackboard variable graph and were bound at setup. The guest only knows an
-opaque handle and says "tick this child," which is precisely what indirect
-dispatch provides. This is why direct dispatch cannot replace it as-is: a child
-is a *configured node instance*, not a named module function, and the guest does
-not hold its arguments.
-
-## Related
-
-- A proposal to make indirect dispatch obsolete for behavior trees (by exposing
-  a single `tick(tree_id, node_id)` registered through a unified registration
-  path) is tracked in
-  [semio-ai/arora-sdk#77](https://github.com/semio-ai/arora-sdk/issues/77).
+A tree replaced by another (`LoweredTree::unregister`) unregisters every
+callable it registered.

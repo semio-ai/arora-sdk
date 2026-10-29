@@ -1,24 +1,205 @@
 # Testing
 
-How to run the tests, how to measure what they cover, and the rules that keep
-the suite free of tests that pin nothing new.
+How to run the tests and what they build, the tests that need a feature, a
+browser or a machine of their own, what CI runs, how to measure coverage, and
+the rules that keep the suite free of tests that pin nothing new. What to
+install and how the workspace builds is [`building.md`](building.md).
 
 ## Running the tests
 
 ```bash
-cargo test --release                  # what CI's `test` job runs, over the default members
-cargo test --release -p arora-hal     # one crate
+cargo test
 ```
 
-`--workspace` is an optional, broader run: it adds the members kept out of the
-default build, polly (and its AWS SDK) and the test guests, whose own unit tests
-(`modules/test-rust-wasm`'s, for one) the default run does not reach; the
-integration tests build those guests only as artifacts. On a pull request CI tests
-only the members the diff reaches;
-`.github/scripts/list_modified_targets.sh origin/main` prints that selection.
-The Zenoh backend of the ROS 2 bridge and the wasm32 browser tests run in their
-own CI jobs (see [the CI section of the architecture](architecture.md#ci)); the
-commands are in `.github/workflows/continuous.yml`.
+This runs the unit, integration and doc tests of the default members — the
+crates a bare cargo command acts on ([`building.md`](building.md#build)). It
+builds what those tests load on its own:
+
+- the Rust WebAssembly guests, compiled for `wasm32-wasip2` as artifact
+  dependencies of the crates whose tests load them;
+- the C++ guests `test-cpp`, `test-cpp-2` and `example-cpp`, through the
+  dev-dependencies of the integration tests: their build scripts write each
+  guest's module directory to `target/<profile>/modules/<name>/`. This is the
+  step that needs CMake, and it downloads the WASI SDK on the first run
+  ([`building.md`](building.md#the-wasi-sdk)).
+
+CI runs the same tests optimised, so wasmtime runs the guests at speed, without
+the release profile's thin LTO and with line tables only: every test binary
+links wasmtime, and LTO over each of them would be most of the build. To run
+them as CI does:
+
+```bash
+CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_DEBUG=line-tables-only cargo test --release
+```
+
+Narrower runs:
+
+```bash
+cargo test -p arora-hal                                                    # one crate
+cargo test -p arora-integration-tests --test component                     # one test file
+cargo test -p arora-behavior-tree graph::tests::groot_lowers_to_graph_and_runs   # one test
+cargo test -p test-rust-wasm                                               # a member outside the default set, on the host
+cargo test -p arora-hal -- --nocapture                                     # with the tests' output
+```
+
+`cargo test --workspace` adds the members outside the default set: the test
+guests' own unit tests, which the default run does not reach (the integration
+tests build those guests only as artifacts), and `polly`'s, which stay
+ignored.
+
+### Tests that do not run by default
+
+| Tests | Why | To run them |
+| --- | --- | --- |
+| The live DDS tests: `arora-hal-ros2`'s in `src/ros2_hal.rs` and `src/configs/nao.rs`, `arora-bridge-ros2`'s `tests/tests.rs`, `tests/device.rs` and `tests/refusal_log.rs` | Ignored on macOS, where DDS discovery over multicast is unreliable on loopback. They run on Linux, CI included. | `--ignored`, on a machine with an active multicast-capable interface |
+| `crates/arora-bridge-ros2/tests/zenoh_native.rs` | Needs Docker and an image with ROS 2 Jazzy and `rmw_zenoh`; the file's documentation shows one. | `ROS2_ZENOH_IMAGE=<image> cargo test -p arora-bridge-ros2 --no-default-features --features zenoh --test zenoh_native -- --ignored` |
+| `modules/polly/tests/polly_tests.rs` | Calls AWS Polly. | `cargo test -p polly -- --ignored`, with AWS credentials |
+| `arora`'s `module_reload_tests::measure` (macOS) | A measurement of reload cost, not a check. | `cargo test -p arora --lib module_reload_tests::measure -- --ignored --nocapture --test-threads=1` |
+
+## The integration tests
+
+`arora-integration-tests` ([`tests/`](../tests/Cargo.toml)) drives built
+modules end to end, through `arora-cli`, the engine and the device runtime. Its
+build script needs nothing built beforehand; the tests find their inputs three
+ways:
+
+- **The Rust guests** — `test-rust-wasm`, `test-rust-component`,
+  `test-behavior-tree-nodes` and the animation module — are artifact
+  dependencies of its build script, built for `wasm32-wasip2`.
+  [`tests/build.rs`](../tests/build.rs) forwards their paths as
+  `CARGO_CDYLIB_FILE_*`.
+- **`arora-cli`** is a binary artifact dependency; `tests/build.rs` forwards its
+  path as `ARORA_CLI_BIN`.
+- **The C++ guests** are plain dev-dependencies. Their build scripts write their
+  module directories under `target/<profile>/modules/`, and the tests read
+  `target/debug/` or `target/release/` according to `debug_assertions`.
+
+| File | What it holds |
+| --- | --- |
+| `integration.rs` | `arora-cli` loads a guest from its header and calls it: `test-rust-wasm`, whose header comes from its Rust declaration; `test-cpp`'s optional parameters; `test-cpp-2` calling into `test-cpp` with a structure. |
+| `component.rs` | The component executor, in process, over `test-rust-component` and `test-rust-wasm`: calls, callbacks through `dispatch-indirect`, the WASI interfaces, traps, argument checks, call budgets and memory caps. |
+| `behavior_tree_nodes.rs` | `test-behavior-tree-nodes`, a Rust guest generated from a `module.yaml` by `arora-module-rust`: its exports serve calls, and a control node ticks its children through the `host` interface. |
+| `cpp_module_dirs.rs` | A device given the C++ module directories describes their exports from their records and calls them; `example-cpp` keeps its state across calls; a C++ guest refuses an argument that is not an Arora buffer, and is never handed one of another type. |
+| `guest_parity.rs` | The C++ and Rust guests have one form: a component of the `arora:module` world importing only what every host provides. |
+| `animation.rs` | The animation guest and the host-linked module answer the same calls; a runner given the guest's module directory describes its exports; the records `@vizij/animation-module` publishes load beside the module's own ([`fixtures`](../tests/fixtures/vizij-animation-module-4.1.0/README.md)). |
+
+## Feature builds and the browser
+
+The default run builds every crate with its default features. The code behind
+the other features, and the code that compiles only for `wasm32`, has its own
+commands, which CI runs in jobs of their own
+([`continuous.yml`](../.github/workflows/continuous.yml)).
+
+### The Zenoh backend
+
+The ROS 2 crates build with DDS by default, and their Zenoh backend excludes
+it:
+
+```bash
+cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
+```
+
+### Robot runners and Semio Studio
+
+The `arora-ros2` and `arora-restful` runners build only with their crates'
+`runner` feature, and connect to Semio Studio only with `studio`, which turns
+on `arora`'s `studio-bridge`:
+
+```bash
+cargo test -p arora-hal-ros2 -p arora-hal-restful --features arora-hal-ros2/runner,arora-hal-restful/runner --bins
+cargo test -p arora-hal-ros2 -p arora-hal-restful --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-ros2/studio,arora-hal-restful/studio --bins
+cargo test -p arora-hal-ros2 -p arora-hal-restful --features arora-hal-ros2/runner,arora-hal-restful/runner,arora-hal-restful/studio --bins
+cargo test -p arora --features studio-bridge --lib -- studio:: run::
+```
+
+The third builds the two runners together with `studio` on one of them. Cargo
+unifies features across the packages one command builds, so `arora` carries
+`studio-bridge` for both, and the runner without `studio` must still take no
+Studio option, refusing `--no-studio`.
+
+### Browser tests
+
+The engine's browser executor, the run loop's JavaScript-timer cadence and
+`arora-web` compile only for `wasm32-unknown-unknown`, and run in a headless
+Firefox through `wasm-pack test`. They need the `wasm32-unknown-unknown`
+target, `wasm-pack`, Firefox and geckodriver
+([`building.md`](building.md#the-browser-runtime)):
+
+```bash
+wasm-pack test --headless --firefox crates/arora-engine --no-default-features --test browser_component
+wasm-pack test --headless --firefox crates/arora --no-default-features --lib
+wasm-pack test --headless --firefox crates/arora-web --lib --test browser
+```
+
+`wasm-pack`'s own flags come before the crate's path, cargo's after it. The
+guests these tests load are artifact dependencies, built along with them.
+
+On Apple silicon, the geckodriver `wasm-pack` downloads is an x86_64 build that
+aborts under Rosetta: install a native one (`brew install geckodriver`) and
+point `GECKODRIVER` at it, as in
+`GECKODRIVER=$(which geckodriver) wasm-pack test --headless --firefox …`.
+
+## What CI runs
+
+[`.github/workflows/continuous.yml`](../.github/workflows/continuous.yml) runs
+on every pull request and every push to `main`, as parallel jobs. A pull
+request builds and tests only the members its diff can reach; `main` runs
+everything.
+
+### Which members a change reaches
+
+[`.github/scripts/list_modified_targets.sh`](../.github/scripts/list_modified_targets.sh)
+makes the selection:
+
+- A changed file selects the member whose directory holds it, and the members
+  the script's `INPUTS` lists as reading it.
+- A file that no `INPUTS` line names and the script's `IGNORE` matches selects
+  nothing: Markdown anywhere, `docs/`, `examples/policy-modules/`,
+  `release.yml` and a few more.
+- Any other file in no member — `Cargo.toml`, `.cargo/`, `rust-toolchain.toml`,
+  CI — selects everything.
+- A change to `Cargo.lock` selects the packages whose entry changed.
+- The selection spreads through cargo's dependency graph: along normal, build
+  and artifact edges to everything that depends on a selected package, and one
+  hop along dev-dependency edges.
+
+To see what a branch selects:
+
+```bash
+.github/scripts/list_modified_targets.sh origin/main
+```
+
+After the `test` job's build, `list_modified_targets.sh verify` checks every
+input cargo recorded — the sources rustc read, and the files build scripts
+declared with `cargo:rerun-if-changed` — against those rules, and fails on a
+file whose change would not select the package that read it. A package that
+reads a file outside its own directory (a build script reading `libs/cpp`,
+`wit_bindgen` reading the engine's WIT world) declares it with
+`cargo:rerun-if-changed` and has its line in `INPUTS`; the failure names the
+line to add.
+
+### The jobs
+
+| Job | Runs when the selection holds | What it runs |
+| --- | --- | --- |
+| `select` | always | The selection above. |
+| `test` | a default member | `cargo test --release` over the selected default members, as [above](#running-the-tests), then `verify`. |
+| `zenoh` | `arora-bridge-ros2` or `arora-msgs-ros2` | [The Zenoh backend](#the-zenoh-backend). |
+| `runners` | `arora`, `arora-hal-ros2` or `arora-hal-restful` | [The runners](#robot-runners-and-semio-studio), with clippy over each feature set. |
+| `lint` | a default member, or `polly` | `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` over the selected default members; the same over `polly` when it is selected. |
+| `browser` | `arora-engine`, `arora` or `arora-web` | [The browser tests](#browser-tests), and `cargo build -p arora-web --target wasm32-unknown-unknown`. |
+| `coverage` | pushes to `main` only | [Coverage](#coverage). |
+| `markdown-link-check` | always | Checks the links of every Markdown file. |
+
+`select` has ten minutes, every Rust job forty. The Rust jobs restore a cache of
+the dependencies, which only `main` saves. A pull request that changes only
+files `IGNORE` matches runs `select` and `markdown-link-check` alone.
+
+To check a page's links as CI does:
+
+```bash
+npx markdown-link-check@3.13.7 --quiet --config .github/workflows/markdown-link-check-config.json docs/testing.md
+```
 
 ## Coverage
 
@@ -74,6 +255,7 @@ tests:
   | the ROS 2 bridge over a running device, on both backends | `crates/arora-bridge-ros2/tests/device.rs` |
   | the ROS 2 bridge to a native subscriber (`#[ignore]`d, Docker) | `crates/arora-bridge-ros2/tests/zenoh_native.rs` |
   | guests through `arora-cli` | `tests/tests/integration.rs` |
+  | a device loading module directories | `tests/tests/cpp_module_dirs.rs`, `tests/tests/animation.rs` |
 
   A variant of a behaviour that a unit test can reach — another input, another
   error — belongs in a unit test, not in another end-to-end case.
@@ -95,3 +277,7 @@ tests:
 - **A slow test needs a reason.** Spawning a process, compiling, or a real
   network makes a test slow; anything else that takes over a second is a
   problem to fix, not to accept.
+- **A test that needs a guest takes it as an artifact dependency**, built for
+  the target it loads, and reads its path with `env!`, as
+  [`building.md`](building.md#artifact-dependencies) describes. A C++ guest is
+  the exception: its module directory is read from `target/<profile>/modules/`.

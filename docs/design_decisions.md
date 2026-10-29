@@ -7,20 +7,22 @@ was chosen, why, and what alternatives were considered.
 
 ### Cargo, not CMake, is the top-level build driver
 
-`cargo build --workspace` is the canonical build entry point. The root
-`CMakeLists.txt` and `PreLoad.cmake` are gone. C++ modules still carry their
-own `CMakeLists.txt`, but it is invoked by a Rust `build.rs` (via the `cmake`
-crate) for IDE compatibility and standalone debugging.
+`cargo build` is the build entry point: it builds the workspace's default
+members, and `--workspace` adds the opt-in ones ([building](building.md)).
+There is no top-level CMake project. Each C++ module carries its own
+`CMakeLists.txt`, which its Rust `build.rs` invokes (via the `cmake` crate),
+and which stays usable from an IDE or on its own for debugging.
 
-**Why:** the previous CMake-first layout required users to pick targets via
-CMake cache vars and re-run `cmake` for any cross build. Cargo-first lets
-`--target`, `.cargo/config.toml`, and rust-toolchain.toml drive the build, and
-puts cross-target artefacts in standard locations cargo's tooling already
-knows about.
+**Why:** a CMake-first layout makes users pick targets through CMake cache
+variables and re-run `cmake` for any cross build. Cargo-first lets
+`--target`, `.cargo/config.toml` and `rust-toolchain.toml` drive the build, and
+puts cross-target artefacts where cargo's tooling already looks.
 
-**Trade-off:** the workspace is pinned to nightly because we rely on
-`-Z bindeps` (see below). That is acceptable for an in-tree build but rules
-out shipping the workspace itself on crates.io without further work.
+**Trade-off:** the workspace is pinned to nightly because it relies on
+`-Z bindeps` (see below). The published crates use artifact dependencies only
+among their dev-dependencies, which publishing drops, so their consumers need
+no nightly; the workspace's own build — guests, code generators, integration
+tests — does.
 
 ### `-Z bindeps` (artifact dependencies) over recursive cargo
 
@@ -36,7 +38,7 @@ arora-buffers    = { path = "...", artifact = "staticlib", target = "wasm32-wasi
 ```
 
 Cargo exports the artifact paths to the consumer's `build.rs` as environment
-variables. **Mind the exact names** — this has bitten us:
+variables. **Mind the exact names**:
 
 - The fully-qualified form is `CARGO_<KIND>_FILE_<DEP>_<ARTIFACT-NAME>`, e.g.
   `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm` or
@@ -86,9 +88,9 @@ crate declares them as `artifact = "cdylib", target = "wasm32-wasip2"`, so
 forwarded `CARGO_CDYLIB_FILE_*` env vars. No explicit `--target` build is
 needed — `cargo test --release` is self-sufficient.
 
-(An earlier design used `forced-target` under `-Zper-package-target`; both it
-and the leftover `cargo-features = ["per-package-target"]` opt-ins in the module
-manifests have since been removed.)
+`forced-target` (under `-Zper-package-target`) would pin each guest to
+wasm32 instead, at the cost of a second unstable cargo feature and of the
+guests' host builds, which run their unit tests natively.
 
 ### `cmake-rs` invoked with explicit target overrides
 
@@ -107,7 +109,7 @@ cmake::Config::new(...)
 
 The cmake "target triple" here is purely a hint to cmake-rs's flag synthesis;
 the actual toolchain comes from `CMAKE_TOOLCHAIN_FILE` (wasi-sdk's
-`wasi-sdk-p2.cmake`, or the musl cross-toolchain's).
+`wasi-sdk-p2.cmake`).
 
 ## Target choices
 
@@ -234,7 +236,7 @@ other Aldebaran robot support, and depends on the published Arora crates. See
 
 ## Engine architecture
 
-### Five executors, one engine
+### Three executors, one engine
 
 The engine (`crates/arora-engine`) exposes three `Executor` implementations and
 selects between them by the `executor.name` in a module's header:
@@ -305,8 +307,7 @@ The pointer stays raw because dispatch is re-entrant: a guest call to
 `arora_dispatch` re-enters `Engine::dispatch` while the engine is already
 mutably borrowed further up the same stack, which no safe wrapper
 (`RefCell`, `RwLock`) tolerates. Removing it means reworking module
-ownership so modules are callable without borrowing the engine — planned
-together with the component-model migration.
+ownership so that modules are callable without borrowing the engine.
 
 ## Module surface
 
@@ -320,8 +321,8 @@ generates the bindings from it (`arora-module-cpp`).
 
 `module.yaml` is then one form the interface takes, not the interface: an
 export writes it, from a declaration or from the authored YAML, in the
-"header" form with named symbols stripped that the runtime identifies a module
-by. A store record is another form, and the two differ — records are versioned
+"header" form the runtime identifies a module by, every type name resolved to
+its id. A store record is another form, and the two differ — records are versioned
 and frozen, headers are not.
 
 **The executor is the export's to name.** A declaration cannot know whether it
@@ -390,12 +391,12 @@ its own dir, so consumer build scripts copy both into a single
 The basic control nodes are wired natively into `arora-behavior-tree`, so its
 tests exercise the tree in-process with no wasm module at all:
 `crates/arora-behavior-tree/src/tests.rs` builds trees with
-`load_behavior_tree_yaml` and ticks them directly. The crate's only
-dev-dependencies are `anyhow` and `arora-simple-data-store` — there is no
-wasm-guest bindep and no `CARGO_CDYLIB_FILE_*` env var forwarded from its
-`build.rs`. (The `test-behavior-tree-nodes` wasm module still exists — it
-carries wasm implementations of the same nodes — but it is test-only, and
-nothing in the default build loads it for control flow.)
+`load_behavior_tree_yaml` and ticks them directly. Its dev-dependencies are
+`anyhow`, `arora-simple-data-store` and `arora-dataflow-nodes` (for the text
+language over a real function index); it has no wasm-guest artifact
+dependency and no build script. The `test-behavior-tree-nodes` guest carries
+wasm implementations of the same nodes; it is test-only, and nothing in the
+default build loads it for control flow.
 
 ### Integration tests rely on a mix of bindeps and published artefacts
 
@@ -406,9 +407,9 @@ nothing in the default build loads it for control flow.)
   animation module (`artifact = "cdylib", target = "wasm32-wasip2"`). `tests/build.rs` forwards
   their paths to the test binary via `cargo::rustc-env` (`ARORA_CLI_BIN`,
   `CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm`), and `integration.rs` reads
-  them with `env!`. (`polly` is not a dependency of this crate — it is a
-  workspace member staged under `target/<profile>/modules/`.)
-- **Dev-dependencies** (plain path): `test-cpp` and `test-cpp-2`. They are not
+  them with `env!`. `polly` is not a dependency of this crate.
+- **Dev-dependencies** (plain path): `test-cpp`, `test-cpp-2` and
+  `example-cpp`. They are not
   bindep'd — declaring an empty-lib C++ module as a `cdylib` artifact adds
   nothing and their `build.rs` is what matters. Listing them as
   dev-dependencies makes `cargo test` run those build scripts, which compile
@@ -416,7 +417,7 @@ nothing in the default build loads it for control flow.)
   `<name>.wasm` and `records/` — to `target/<profile>/modules/<name>/`. The
   C++ integration tests read those directories directly.
 
-A bare `cargo build` (default-members) does **not** build `test-cpp`/`test-cpp-2`
+A bare `cargo build` (default-members) does **not** build the C++ guests
 (they are excluded from `default-members`); `cargo test` does, through the
 dev-dependency edge. This is the asymmetry that makes the test step do work the
 build step skips.
@@ -431,15 +432,13 @@ dependency's `CARGO_CDYLIB_FILE_*` path, whatever the profile.
 
 ## Out of scope (recorded so we remember why)
 
-- **Porting `arora-registry` and `arora-cli` to `wasm32`** — the browser
-  engine accepts header YAML + bytes that the JS host fetched however it
-  likes. Registry resolution and the remote-registry / auth flow stay
-  host-only.
+- **Porting `arora-cli` and the remote registry to `wasm32`** — the browser
+  device accepts headers, artifacts and records that the page fetched however
+  it likes, and resolves them against a local registry. Remote resolution and
+  its sign-in flow stay host-only.
 - **Replacing CMake inside individual C++ modules** — the orchestrator is
   cargo; what each module does internally to build its C++ is up to that
   module.
-- **Reworking the module loader / VFS / runtime semantics** — the
-  cargo-first work was a build-system change only.
 
 ## Records
 
@@ -484,21 +483,12 @@ only with a store-side migration plan.
 
 `arora-registry` is local-only and publishable. The registries that talk to
 Semio's hosted store (`RemoteRegistry`, `RemoteCachedRegistry`) live in
-`arora-registry-remote`, a private crate, because they depend on
-`semio-client` — a private git dependency, and crates.io rejects git
-dependencies even behind an off-by-default feature. A feature flag inside
+`arora-registry-remote`, an unpublished crate, because they depend on
+`semio-client` — a git dependency, and crates.io rejects git dependencies
+even behind an off-by-default feature. A feature flag inside
 `arora-registry` was the considered alternative; it reads nicer but is simply
 not publishable. Both crates implement the same registry traits, so consumers
 swap registries without code changes.
-
-### Generated sources are committed
-
-`arora-behavior-tree` ships its generated `src/arora_generated/` sources in
-git and in the published crate. Its build script still regenerates them, but
-the vfs `sync` is content-hash-guarded: an unchanged regeneration writes
-nothing. Committed generated code keeps `cargo publish`'s tarball
-verification happy (build scripts must not modify the source directory) and
-means builds from the crates.io checkout never write into it either.
 
 ## Workspace topology
 
@@ -507,11 +497,17 @@ means builds from the crates.io checkout never write into it either.
 Everything lives in this single `arora-sdk` workspace: the engine, the
 runtime, the vocabulary crates, the seams and their implementations, the
 authoring tools, and the guest modules. A multi-repo split (separate
-`arora-types`, `arora-ecbs`, `arora-sdk`, and a binary repo) was executed and
-then reversed: with crates published to crates.io, external consumers already
-get the narrow surface they need, and the split only added cross-repo
-version choreography for every internal change. Publishing, not repo
-boundaries, is the isolation mechanism.
+`arora-types`, `arora-ecbs`, `arora-sdk`, and a binary repo) adds cross-repo
+version choreography to every internal change, while crates published to
+crates.io already give external consumers the narrow surface they need.
+Publishing, not repo boundaries, is the isolation mechanism.
+
+Support for a particular robot is the exception, and lives in a repository of
+its own that depends on the published crates: its HAL and runner change with
+the robot, not with Arora, and its toolchain (a robot's cross-compiler, a
+vendor SDK) stays out of Arora's build.
+[arora-aldebaran](https://github.com/semio-ai/arora-aldebaran) carries NAO and
+Pepper this way.
 
 ## Runtime surface
 
