@@ -283,10 +283,13 @@ struct TypedOutputs {
     publishers: Vec<Option<TypedKeyPublisher>>,
     /// Bindings that changed since the last publish.
     dirty: Vec<bool>,
-    /// Bindings given up on — a topic this bridge subscribes to, an unknown
-    /// message type, a publisher that could not be created — each reported
-    /// once.
+    /// Bindings given up on — an unknown message type, a publisher that
+    /// could not be created — each reported once.
     refused: Vec<bool>,
+    /// Bindings held back because this bridge subscribes to their topic.
+    /// Their message is still composed from every change of their keys, so
+    /// that once the topic is freed they publish what the keys hold now.
+    echo: Vec<bool>,
 }
 
 impl TypedOutputs {
@@ -308,6 +311,7 @@ impl TypedOutputs {
             publishers: (0..count).map(|_| None).collect(),
             dirty: vec![false; count],
             refused: vec![false; count],
+            echo: vec![false; count],
         }
     }
 
@@ -363,8 +367,8 @@ impl TypedOutputs {
     }
 
     /// Publish every message that changed, creating its publisher on first
-    /// use. A binding whose topic this bridge also subscribes to is refused:
-    /// echoing it back would feed the device its own commands.
+    /// use. A binding whose topic this bridge also subscribes to is held
+    /// back: echoing it back would feed the device its own commands.
     async fn publish_dirty(
         &mut self,
         node: &mut Node,
@@ -373,20 +377,24 @@ impl TypedOutputs {
         subscribed: &HashMap<String, String>,
     ) {
         for index in 0..self.bindings.len() {
-            if !self.dirty[index] || self.refused[index] {
+            if !self.dirty[index] || self.refused[index] || self.echo[index] {
                 continue;
             }
-            self.dirty[index] = false;
             let binding = &self.bindings[index];
             if self.publishers[index].is_none() {
-                let topic = self.topic(index, namespace);
+                let topic = binding
+                    .topic
+                    .clone()
+                    .unwrap_or_else(|| topic_name(namespace, &binding.path));
                 if subscribed.contains_key(&topic) {
+                    // Still dirty: what the keys compose meanwhile publishes
+                    // once the topic is freed.
                     warn!(
                         "Ros2Bridge does not publish '{}': its topic '{topic}' is one this bridge \
                          subscribes to, and echoing it back would feed the device its own commands",
                         binding.path
                     );
-                    self.refused[index] = true;
+                    self.echo[index] = true;
                     continue;
                 }
                 match setup_typed_key_publisher(
@@ -407,6 +415,7 @@ impl TypedOutputs {
                     }
                 }
             }
+            self.dirty[index] = false;
             if let (Some(publisher), Some(message)) =
                 (&self.publishers[index], &self.messages[index])
             {
@@ -426,9 +435,10 @@ impl TypedOutputs {
     }
 
     /// Follow a change of the topics this bridge subscribes to: a binding
-    /// publishing on a topic it now subscribes to stops, as one is refused
-    /// that topic when its publisher is created; a binding refused while its
-    /// topic was subscribed is decided again at its next publish.
+    /// publishing on a topic it now subscribes to is held back, as one is
+    /// when its publisher would be created; a binding held back for a topic
+    /// it no longer subscribes to publishes the message its keys composed
+    /// meanwhile at the next publish.
     fn follow_subscriptions(&mut self, namespace: &str, resubscribed: &Resubscribed) {
         for index in 0..self.bindings.len() {
             let topic = self.topic(index, namespace);
@@ -439,9 +449,9 @@ impl TypedOutputs {
                     self.bindings[index].path
                 );
                 self.publishers[index] = None;
-                self.refused[index] = true;
-            } else if self.refused[index] && resubscribed.freed.contains(&topic) {
-                self.refused[index] = false;
+                self.echo[index] = true;
+            } else if self.echo[index] && resubscribed.freed.contains(&topic) {
+                self.echo[index] = false;
             }
         }
     }
@@ -2342,6 +2352,64 @@ mod tests {
         fn message_of(outputs: &TypedOutputs) -> &Value {
             outputs.messages[0].as_ref().unwrap()
         }
+    }
+
+    /// A message held back because the bridge subscribes to its topic is
+    /// still composed from its keys: once the topic is freed, it publishes
+    /// the frame written meanwhile with the target written after, not the
+    /// frame from before it was held back.
+    #[test]
+    fn a_held_back_typed_output_publishes_what_its_keys_hold_once_freed() {
+        let registry = arora_msgs_ros2::registry();
+        let mut outputs = TypedOutputs::new(vec![TypedOutput {
+            path: "/gaze".into(),
+            ros_type: "geometry_msgs/PointStamped".into(),
+            topic: Some("/gaze".into()),
+            routes: vec![
+                profile::FieldRoute {
+                    field: "point".into(),
+                    key: "gaze/target".into(),
+                },
+                profile::FieldRoute {
+                    field: "header.frame_id".into(),
+                    key: "gaze/frame".into(),
+                },
+            ],
+            qos: None,
+        }]);
+        assert!(outputs.feed("gaze/frame", &Value::String("head".into()), &registry));
+
+        // Held back, as `publish_dirty` holds a binding whose topic is
+        // subscribed; the frame changes meanwhile.
+        outputs.echo[0] = true;
+        assert!(outputs.feed("gaze/frame", &Value::String("face".into()), &registry));
+
+        outputs.follow_subscriptions(
+            "robot",
+            &Resubscribed {
+                subscribed: HashMap::new(),
+                freed: HashSet::from(["/gaze".to_string()]),
+            },
+        );
+        assert!(!outputs.echo[0], "the freed topic publishes again");
+        assert!(outputs.feed(
+            "gaze/target",
+            &Value::ArrayF32(vec![1.0, 2.0, 3.0]),
+            &registry
+        ));
+        assert!(outputs.dirty[0]);
+        let message = outputs.messages[0].as_ref().expect("a message");
+        let ty = registry
+            .get_by_name("geometry_msgs/PointStamped")
+            .expect("registered");
+        assert_eq!(
+            extract_route(message, ty, registry.types(), "header.frame_id").unwrap(),
+            Value::String("face".into())
+        );
+        assert_eq!(
+            extract_route(message, ty, registry.types(), "point").unwrap(),
+            Value::ArrayF32(vec![1.0, 2.0, 3.0])
+        );
     }
 
     /// The seam keeps state, not history: a key written twice before the node
