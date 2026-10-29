@@ -10,14 +10,22 @@ HAL [`arora-hal-ros2`](../arora-hal-ros2/readme.md) is the crate instead.
 
 ## Three planes
 
-The bridge mirrors what the device has, asked of the device when the bridge
-starts — nothing is declared to it:
+The bridge mirrors what the device has, asked of the device — nothing is
+declared to it:
 
 | Device | ROS 2 | Name |
 |---|---|---|
 | a key | a topic | `/{namespace}/keys/{path}` |
 | a function | a service | `/{namespace}/methods/{name}` |
 | a task run (a function returning the behavior `Status`) | an action | `/{namespace}/actions/{name}` |
+
+The bridge asks the device for its inputs and functions when it starts, and
+again every two seconds. What the device gains in between — an input it
+opens, a key its HAL describes, a module it loads — gets its topic, service or
+action when the answer arrives; what it loses — an input it closes, a module
+it unloads — loses its endpoint then. The asks go through the device's own
+command channel, in process, and an answer equal to the last one changes
+nothing.
 
 On top of these, an **exposure profile** serves a standard surface — typed
 messages on well-known names, such as ROS4HRI's — over the device's keys and
@@ -56,7 +64,7 @@ key's meta, and turns each message into a write of that key. The device checks
 the write as it checks every remote write, and the bridge logs a refusal (at
 most once per topic and set of keys every five seconds). An input whose meta
 states no type gets no topic. The bridge publishes nothing on a topic it
-subscribes to.
+subscribes to: a key it publishes stops when its topic becomes an input's.
 
 A ROS name allows only `[A-Za-z0-9_]` in each `/`-separated token, so the
 bridge escapes a key path token by token: any other character becomes `_`, a
@@ -130,9 +138,11 @@ binds a standard surface to the device:
   device task run, for a skill that sets a state held until changed. The latest
   message wins: the run the previous message spawned is halted first.
 
-The bridge checks each binding against the device's functions when it starts —
-the function exists, is a task run, and every routed field lands on a parameter
-of a compatible type — and refuses it, logged, otherwise. A parameter no field
+The bridge checks each binding against the device's functions when it starts
+and whenever they change — the function exists, is a task run, and every
+routed field lands on a parameter of a compatible type — and refuses it,
+logged, while it does not hold: a binding whose function a module loaded
+later provides is served from then on. A parameter no field
 names is left out of the call. `ExposureProfile::coverage` lists what of a
 profile a device does not serve.
 
@@ -200,9 +210,6 @@ against a real ROS 2 stack over Zenoh.
 
 Limits:
 
-- The bridge reads the device's inputs and functions once, when it starts. An
-  input opened, or a module loaded, afterwards gets no topic, service or
-  action until the bridge restarts.
 - A ROS client cannot list the device's keys or call a function by name
   through this bridge: the topics, services and actions are its surface.
 - The bridge has no device registration: `get_device_info` answers none.

@@ -709,6 +709,25 @@ closes one of its HAL's inputs by stating that key's meta, before the build or
 after it. The host is the authority on what its device opens; the HAL only says
 what its hardware takes.
 
+### The ROS 2 bridge asks the device again on an interval
+
+What a device describes of itself changes while it runs: its HAL describes
+keys after it starts, a host opens or closes a key, a module loads or unloads.
+The WebSocket bridge asks on every request (`ListKeys`, `DescribeMethods`), so
+it answers from the current description. The ROS 2 bridge cannot: what it
+serves are endpoints on the ROS graph — a subscription per input, a service per
+function, an action per task run — made before any ROS node asks for them. It
+asks the device again every two seconds and brings its endpoints in line with
+the answer, creating what the device gained and ending what it lost.
+
+It asks rather than being told because the `Bridge` contract carries no
+statement that the device's description changed, and the operations every
+bridge already answers are enough to learn it. An ask is two commands on the
+in-process channel, answered at the device's next step, and the bridge
+compares the answer with the last one, so a device whose description holds
+still costs it a comparison per interval. What the device gains waits at most
+an interval and a step to be exposed.
+
 ### A device carries its modules as module directories
 
 Every device runner — `arora`, and the robot runners `arora-ros2`,
