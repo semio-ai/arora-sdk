@@ -49,3 +49,14 @@ cargo build -p test-rust-wasm --target wasm32-wasip2
 The crates that test with it build it themselves, as an artifact dependency:
 `arora-engine` loads the shared library through `NativeExecutor`, while
 `arora`, `arora-web` and the integration tests load the component.
+
+The `module_dir` example writes `test_rust_wasm`'s module directory, the form
+a device loads a module in: `header.json` and `records/` from the declaration
+and, when its path is given, the component as `test_rust_wasm.wasm`.
+[`arora-web`'s demo pages](../../crates/arora-web/readme.md#demo-pages) stage
+the module this way.
+
+```bash
+cargo run -p test-rust-wasm --example module_dir -- \
+    <dir> target/wasm32-wasip2/debug/test_rust_wasm.wasm
+```

@@ -7341,7 +7341,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arora-module",
+ "arora-registry",
  "arora-types",
+ "futures",
+ "serde_json",
 ]
 
 [[package]]
