@@ -40,6 +40,11 @@ All notable changes to `arora-behavior-tree`. The format follows
 - `schema_groot::BehaviorTree::into_graph` lists the nodes root first, each
   before its children, and binds `{var}` to the key `var`. A return port
   Groot leaves empty (`res=""`, an unconnected output) binds nothing.
+- A Groot attribute of a module function is read as its parameter's type:
+  `delta="0.1f32"` or `delta="0.1"` is an `f32` for an `f32` parameter, and
+  `json:` holds any value. It was a string whatever the type. A tree written
+  back holds a string as it is and any other value so that it reads back as
+  itself: a number with its suffix, a boolean, `json:` for the rest.
 - Requires arora-behavior-tree-types 3.
 
 ### Added

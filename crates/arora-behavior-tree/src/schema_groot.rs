@@ -1,6 +1,6 @@
 use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
 use arora_types::record::module::frozen::Parameter;
-use arora_types::record::ty::FrozenTy;
+use arora_types::record::ty::{FrozenTy, PrimitiveKind};
 use arora_types::value::Value;
 use quick_xml::events::BytesStart;
 use quick_xml::Writer;
@@ -454,26 +454,28 @@ fn builtin_port_text(
     Ok(match expression {
         Expression::VariableId(id) => format!("{{{}}}", groot_variable_name(*id, variables)),
         Expression::Value(Value::String(text)) if reads_back_as_plain(text) => text.clone(),
-        Expression::Value(value) => {
-            let json = serde_json::to_string(value).map_err(|e| {
-                BehaviorTreeError::InconsistentTreeError {
-                    message: format!("a value does not convert to JSON: {e}"),
-                }
-            })?;
-            // A value JSON cannot hold (a non-finite float) has no Groot form.
-            if serde_json::from_str::<Value>(&json).ok().as_ref() != Some(value) {
-                return Err(BehaviorTreeError::InconsistentTreeError {
-                    message: format!("{value} has no exact JSON form"),
-                });
-            }
-            format!("{JSON_PREFIX}{json}")
-        }
+        Expression::Value(value) => json_text(value)?,
         other => {
             return Err(BehaviorTreeError::InconsistentTreeError {
                 message: format!("a native node's argument has no Groot form: {other:?}"),
             })
         }
     })
+}
+
+/// `json:` and `value`'s serde form. A value JSON cannot hold exactly (a
+/// non-finite float) has no Groot form.
+fn json_text(value: &Value) -> Result<String, BehaviorTreeError> {
+    let json =
+        serde_json::to_string(value).map_err(|e| BehaviorTreeError::InconsistentTreeError {
+            message: format!("a value does not convert to JSON: {e}"),
+        })?;
+    if serde_json::from_str::<Value>(&json).ok().as_ref() != Some(value) {
+        return Err(BehaviorTreeError::InconsistentTreeError {
+            message: format!("{value} has no exact JSON form"),
+        });
+    }
+    Ok(format!("{JSON_PREFIX}{json}"))
 }
 
 pub fn seq(children: Vec<Node>) -> Node {
@@ -638,6 +640,7 @@ fn groot_param_arg_to_arora(
             }
         }
         1 => {
+            let parameter_id = param_matches.first().unwrap();
             let expression = if param_arg.1.starts_with("{") && param_arg.1.ends_with("}") {
                 let variable_name = &param_arg.1[1..param_arg.1.len() - 1];
                 let maybe_id = variables.get(variable_name);
@@ -650,9 +653,16 @@ fn groot_param_arg_to_arora(
                 };
                 Expression::VariableId(id)
             } else {
-                Expression::Value(Value::String(param_arg.1.to_owned()))
+                let parameter = &module_function.function.parameters[*parameter_id];
+                Expression::Value(attribute_value(param_arg.1, &parameter.ty).map_err(
+                    |message| BehaviorTreeError::ParsingError {
+                        message: format!(
+                            "attribute {}=\"{}\" of {}: {message}",
+                            param_arg.0, param_arg.1, module_function.function_name
+                        ),
+                    },
+                )?)
             };
-            let parameter_id = param_matches.first().unwrap();
             Ok((*parameter_id.to_owned(), expression))
         }
         _ => Err(BehaviorTreeError::InternalError {
@@ -662,6 +672,71 @@ fn groot_param_arg_to_arora(
             ),
         }),
     }
+}
+
+/// A module function's attribute as the value its parameter of type `ty`
+/// takes, the inverse of [`attribute_text`]: `json:…` is a value in its serde
+/// form, whatever the type. Otherwise, a string parameter takes the text as
+/// it is; a boolean one `true` or `false`; a number its digits, with its
+/// type's suffix or without (`0.1f32` or `0.1` for an `f32`); an optional
+/// one what its content takes. A parameter of any other type takes the text
+/// as a string, as Groot gives it.
+fn attribute_value(text: &str, ty: &FrozenTy) -> Result<Value, String> {
+    if let Some(json) = text.strip_prefix(JSON_PREFIX) {
+        return serde_json::from_str(json)
+            .map_err(|e| format!("`{text}` is not a value in JSON: {e}"));
+    }
+    let kind = match ty {
+        FrozenTy::FrozenOption(option) => return attribute_value(text, &option.element),
+        FrozenTy::Primitive(primitive) => primitive.kind,
+        _ => return Ok(Value::String(text.to_string())),
+    };
+    match kind {
+        PrimitiveKind::String => Ok(Value::String(text.to_string())),
+        PrimitiveKind::Boolean => match text {
+            "true" => Ok(Value::Boolean(true)),
+            "false" => Ok(Value::Boolean(false)),
+            _ => Err(format!("`{text}` is no boolean: write `true` or `false`")),
+        },
+        PrimitiveKind::U8
+        | PrimitiveKind::U16
+        | PrimitiveKind::U32
+        | PrimitiveKind::U64
+        | PrimitiveKind::I8
+        | PrimitiveKind::I16
+        | PrimitiveKind::I32
+        | PrimitiveKind::I64
+        | PrimitiveKind::F32
+        | PrimitiveKind::F64 => {
+            let digits = text.strip_suffix(&kind.to_string()).unwrap_or(text);
+            crate::text::number(digits, kind)
+        }
+        _ => Err(format!(
+            "a {kind} is written as a value in JSON: `{JSON_PREFIX}…`"
+        )),
+    }
+}
+
+/// A module function's argument as an attribute, which [`attribute_value`]
+/// reads back as itself: a string as it is when it reads back so, a boolean
+/// or a number as the text language writes it (`true`, `0.1f32`), any other
+/// value as `json:` and its serde form.
+fn attribute_text(value: &Value) -> Result<String, BehaviorTreeError> {
+    Ok(match value {
+        Value::String(text) if reads_back_as_plain(text) => text.clone(),
+        Value::Boolean(_)
+        | Value::U8(_)
+        | Value::U16(_)
+        | Value::U32(_)
+        | Value::U64(_)
+        | Value::I8(_)
+        | Value::I16(_)
+        | Value::I32(_)
+        | Value::I64(_)
+        | Value::F32(_)
+        | Value::F64(_) => value.to_string(),
+        value => json_text(value)?,
+    })
 }
 
 fn arora_param_to_groot(
@@ -711,7 +786,7 @@ fn arora_param_to_groot(
                 Expression::Uuid(id) | Expression::VariableId(id) => {
                     format!("{{{}}}", groot_variable_name(*id, variables))
                 }
-                Expression::Value(value) => value.to_string(),
+                Expression::Value(value) => attribute_text(value)?,
                 _ => {
                     return Err(BehaviorTreeError::InconsistentTreeError {
                         message: format!(
@@ -1122,6 +1197,8 @@ mod tests {
     use arora_types::record::module::frozen::Function;
     use arora_types::record::ty::{FrozenScalar, PrimitiveKind};
     use arora_types::record::FrozenReference;
+
+    use crate::nodes::{INCREASE_DELTA_PARAM_ID, INCREASE_STORAGE_PARAM_ID};
 
     /// Index a `Status`-returning function `name(speed: f32)` under `module`,
     /// the way a loaded module's export is indexed. Returns its function id.
@@ -1607,5 +1684,135 @@ mod tests {
             Some(Source::Key("cos".to_string())),
             "a named one binds its key"
         );
+    }
+
+    /// Index `name(<parameters>)`, returning `Status`, under the function id
+    /// `function_id`, its parameters' ids given: returns their ids by name.
+    fn index_typed(
+        index: &mut HashMap<Uuid, ModuleFunction>,
+        function_id: Uuid,
+        name: &str,
+        parameters: &[(&str, Uuid, PrimitiveKind)],
+    ) {
+        let module = Uuid::new_v4();
+        index_status_leaf(index, module, name);
+        let leaf = index
+            .values()
+            .find(|f| f.function_name == name)
+            .unwrap()
+            .clone();
+        index.retain(|_, f| f.function_name != name);
+        let mut function = leaf.function;
+        function.parameters = parameters
+            .iter()
+            .map(|(name, id, kind)| {
+                (
+                    *id,
+                    Parameter {
+                        name: name.to_string(),
+                        ty: FrozenTy::from(*kind),
+                        mutable: false,
+                    },
+                )
+            })
+            .collect();
+        function.parameter_ordering = parameters.iter().map(|(_, id, _)| *id).collect();
+        index.insert(
+            function_id,
+            ModuleFunction {
+                module_id: module,
+                function_id,
+                function_name: name.to_string(),
+                function,
+            },
+        );
+    }
+
+    /// A module function's attribute is read as its parameter's type: the
+    /// `delta="0.1f32"` of `groot/cosine_tree.xml` is an `f32`, not a string,
+    /// with its suffix or without.
+    #[test]
+    fn a_module_function_s_attribute_takes_its_parameter_s_type() {
+        let mut index = HashMap::new();
+        index_typed(
+            &mut index,
+            INCREASE_FUNCTION_ID,
+            "increase",
+            &[
+                ("storage", INCREASE_STORAGE_PARAM_ID, PrimitiveKind::F32),
+                ("delta", INCREASE_DELTA_PARAM_ID, PrimitiveKind::F32),
+            ],
+        );
+        for delta in ["0.1f32", "0.1", r#"json:{"f32":0.1}"#] {
+            let tree = groot(&format!(
+                r#"<Increase storage="{{angle}}" delta='{delta}'/>"#
+            ));
+            let node = tree
+                .root
+                .try_into_tree_node(&index, &mut HashMap::new())
+                .expect("the attributes read");
+            assert_eq!(
+                node.parameters[&INCREASE_DELTA_PARAM_ID],
+                Expression::Value(Value::F32(0.1)),
+                "{delta}"
+            );
+        }
+        let refused = groot(r#"<Increase storage="{angle}" delta="0.1f64"/>"#)
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .err()
+            .expect("an f64 is refused to an f32");
+        assert!(format!("{refused:?}").contains("delta"), "{refused:?}");
+    }
+
+    /// Every argument a module function's node holds is written so that it
+    /// reads back as itself: a string as it is, even one that looks like a
+    /// number or holds quotes, a number or a boolean as the text language
+    /// writes it, any other value as `json:`.
+    #[test]
+    fn a_module_function_s_arguments_read_back_through_groot() {
+        let ids: Vec<Uuid> = (0..6).map(|_| Uuid::new_v4()).collect();
+        let pose = Uuid::new_v4();
+        let mut index = HashMap::new();
+        index_typed(
+            &mut index,
+            pose,
+            "pose",
+            &[
+                ("label", ids[0], PrimitiveKind::String),
+                ("quoted", ids[1], PrimitiveKind::String),
+                ("on", ids[2], PrimitiveKind::Boolean),
+                ("count", ids[3], PrimitiveKind::U8),
+                ("level", ids[4], PrimitiveKind::F64),
+                ("gains", ids[5], PrimitiveKind::ArrayF32),
+            ],
+        );
+        let values = [
+            Value::String("0.5".to_string()),
+            Value::String(r#"say "hi""#.to_string()),
+            Value::Boolean(true),
+            Value::U8(7),
+            Value::F64(-0.25),
+            Value::ArrayF32(vec![1.0, 2.5]),
+        ];
+        let node = TreeNode {
+            function: pose,
+            children: None,
+            parameters: ids
+                .iter()
+                .zip(&values)
+                .map(|(id, value)| (*id, Expression::Value(value.clone())))
+                .collect(),
+        };
+        let exported = Node::try_from_tree_node(&node, &index, &mut HashMap::new()).unwrap();
+        let xml = String::from_utf8(BehaviorTree { root: exported }.to_groot_xml()).unwrap();
+        let read = BehaviorTree::try_from_groot_xml(&xml)
+            .unwrap()
+            .root
+            .try_into_tree_node(&index, &mut HashMap::new())
+            .unwrap_or_else(|e| panic!("{xml}: {e:?}"));
+        for (id, value) in ids.iter().zip(values) {
+            assert_eq!(read.parameters[id], Expression::Value(value), "{xml}");
+        }
     }
 }

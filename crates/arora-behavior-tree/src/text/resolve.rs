@@ -1039,7 +1039,7 @@ fn literal(expression: &Expr, expected: &Expected, depth: usize) -> Typed {
 
 /// `text` as a number of type `kind`. A finite text is a finite number: one
 /// past the type's range is refused, not rounded to an infinity.
-fn number(text: &str, kind: PrimitiveKind) -> Result<Value, String> {
+pub(crate) fn number(text: &str, kind: PrimitiveKind) -> Result<Value, String> {
     use PrimitiveKind::*;
     let not = || format!("`{text}` is no {kind}");
     let finite = !text.contains("inf") && !text.contains("NaN");
