@@ -189,13 +189,16 @@ fn direct_resolver(store: &dyn DataStore) -> Rc<VariableResolver<'static>> {
 }
 
 /// The nodes of `graph`, by id.
-fn by_id(graph: &Graph) -> HashMap<Uuid, &GraphNode> {
+fn by_id(graph: &Graph) -> Index<'_> {
     graph.nodes.iter().map(|node| (node.id, node)).collect()
 }
 
-/// `from` and the nodes under it in `graph`, through the children relation.
-fn subtree(graph: &Graph, from: Uuid) -> HashSet<Uuid> {
-    reach(graph, [from])
+/// A graph's nodes by id, built once for each operation that walks them.
+type Index<'a> = HashMap<Uuid, &'a GraphNode>;
+
+/// `from` and the nodes under it, through the children relation of `nodes`.
+fn subtree(nodes: &Index, from: Uuid) -> HashSet<Uuid> {
+    reach(nodes, [from])
 }
 
 /// Check that `graph` lists each node once, and is one tree rooted at `root`,
@@ -248,7 +251,7 @@ fn check_tree(graph: &Graph, root: Uuid) -> Result<Vec<Uuid>, BehaviorError> {
     }
     // One parent each and a parentless root: a cycle would leave its nodes
     // unreachable from the root.
-    if subtree(graph, root).len() + detached.len() != graph.nodes.len() {
+    if subtree(&nodes, root).len() + detached.len() != graph.nodes.len() {
         return Err(behavior_error("the graph's children form a cycle"));
     }
     detached.sort();
@@ -328,10 +331,9 @@ fn check_selections(graph: &Graph, index: &FunctionIndex) -> Result<(), Behavior
     Ok(())
 }
 
-/// The nodes `starts` reach through the children relation, `starts`
-/// included.
-fn reach(graph: &Graph, starts: impl IntoIterator<Item = Uuid>) -> HashSet<Uuid> {
-    let nodes = by_id(graph);
+/// The nodes `starts` reach through the children relation of `nodes`,
+/// `starts` included.
+fn reach(nodes: &Index, starts: impl IntoIterator<Item = Uuid>) -> HashSet<Uuid> {
     let mut found = HashSet::new();
     let mut pending: Vec<Uuid> = starts.into_iter().collect();
     while let Some(id) = pending.pop() {
@@ -459,10 +461,11 @@ impl BehaviorTreeInterpreter {
         }
     }
 
-    /// The root of `run`'s program: its decorator's one child.
-    fn root_of(&self, run: &Run) -> Option<Uuid> {
-        self.graph
-            .node(&run.decorator)
+    /// The root of `run`'s program: its decorator's one child, in `nodes`,
+    /// the graph's index.
+    fn root_of(nodes: &Index, run: &Run) -> Option<Uuid> {
+        nodes
+            .get(&run.decorator)
             .and_then(|decorator| decorator.children.as_deref())
             .and_then(|children| children.first().copied())
     }
@@ -477,16 +480,20 @@ impl BehaviorTreeInterpreter {
         self.all_runs().find(|run| run.decorator == *id)
     }
 
-    /// `run`'s nodes: its decorator, its subtree and its detached nodes.
-    fn nodes_of(&self, run: &Run) -> HashSet<Uuid> {
-        let mut nodes = subtree(&self.graph, run.decorator);
-        nodes.extend(&run.detached);
-        nodes
+    /// `run`'s nodes: its decorator, its subtree in `nodes`, the graph's
+    /// index, and its detached nodes.
+    fn nodes_of(nodes: &Index, run: &Run) -> HashSet<Uuid> {
+        let mut held = subtree(nodes, run.decorator);
+        held.extend(&run.detached);
+        held
     }
 
     /// Every run's nodes.
     fn run_nodes(&self) -> HashSet<Uuid> {
-        self.all_runs().flat_map(|run| self.nodes_of(run)).collect()
+        let nodes = by_id(&self.graph);
+        self.all_runs()
+            .flat_map(|run| Self::nodes_of(&nodes, run))
+            .collect()
     }
 
     /// Apply `diff` to the scaffold graph and mark it for re-lowering. The
@@ -590,7 +597,7 @@ impl BehaviorTreeInterpreter {
     /// every node `leaving` does not have.
     fn held_outside(&self, leaving: &HashSet<Uuid>) -> HashSet<Uuid> {
         reach(
-            &self.graph,
+            &by_id(&self.graph),
             self.graph
                 .nodes
                 .iter()
@@ -615,12 +622,12 @@ impl BehaviorTreeInterpreter {
         detached: Vec<Uuid>,
     ) -> Result<TaskHandle, BehaviorError> {
         let decorator = self.runs[at].decorator;
-        let mut held = self.nodes_of(&self.runs[at]);
+        let device = by_id(&self.graph);
+        let mut held = Self::nodes_of(&device, &self.runs[at]);
         held.remove(&decorator);
         let mut leaving = held.clone();
         leaving.insert(decorator);
         let staying = self.held_outside(&leaving);
-        let device = by_id(&self.graph);
         if let Some(node) = graph
             .nodes
             .iter()
@@ -666,7 +673,7 @@ impl BehaviorTreeInterpreter {
         if runs.is_empty() {
             return Ok(());
         }
-        let mut leaving = reach(&self.graph, runs.iter().map(|run| run.decorator));
+        let mut leaving = reach(&by_id(&self.graph), runs.iter().map(|run| run.decorator));
         leaving.extend(runs.iter().flat_map(|run| &run.detached));
         let staying = self.held_outside(&leaving);
         let diff = GraphDiff {
@@ -799,8 +806,9 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 )));
             }
         }
+        let nodes = by_id(&self.graph);
         for run in self.all_runs() {
-            if let Some(root) = self.root_of(run).filter(|root| {
+            if let Some(root) = Self::root_of(&nodes, run).filter(|root| {
                 diff.remove.contains(root) && !diff.set.iter().any(|node| node.id == *root)
             }) {
                 return Err(behavior_error(format!(
@@ -951,14 +959,15 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         self.prune_finished()?;
         // A run is known by its root: the live run whose root this is runs
         // the graph from now on.
+        let nodes = by_id(&self.graph);
         if let Some(at) = self
             .runs
             .iter()
-            .position(|run| self.root_of(run) == Some(root))
+            .position(|run| Self::root_of(&nodes, run) == Some(root))
         {
             return self.respawn(at, graph, detached);
         }
-        let device = by_id(&self.graph);
+        let device = nodes;
         if let Some(node) = graph
             .nodes
             .iter()
