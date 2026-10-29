@@ -842,7 +842,7 @@ fn parse_groot_root(
     let root = match reader.read_event() {
         Ok(Event::Decl(_)) => parse_groot_root(reader, buf)?,
         Ok(Event::Start(ref root_start)) => {
-            if root_start.name().as_ref() != b"root" {
+            if root_start.name().as_ref() != "root" {
                 return Err(BehaviorTreeError::ParsingError {
                     message: "root tag is not \"root\"".to_string(),
                 });
@@ -861,7 +861,7 @@ fn parse_groot_behavior_tree_node(
 ) -> Result<Node, BehaviorTreeError> {
     match reader.read_event() {
         Ok(Event::Start(ref node_start)) => {
-            if node_start.name().as_ref() != b"BehaviorTree" {
+            if node_start.name().as_ref() != "BehaviorTree" {
                 return Err(BehaviorTreeError::ParsingError {
                     message: "found node that is not a \"BehaviorTree\"".to_string(),
                 });
@@ -883,8 +883,7 @@ fn parse_groot_node(
 ) -> Result<Option<Node>, BehaviorTreeError> {
     match reader.read_event() {
         Ok(Event::Start(ref node_start)) => {
-            let id = String::from_utf8(node_start.name().as_ref().to_vec());
-            let id = map_parsing_error(id, "invalid utf8 in action ID", reader)?;
+            let id = node_start.name().as_ref().to_owned();
 
             let mut attributes = collect_action_attributes(node_start, reader)?;
             if !attributes.remove(ID_ATTRIBUTE_KEY).is_none() {
@@ -908,7 +907,7 @@ fn parse_groot_node(
             }))
         }
         Ok(Event::Empty(ref node_empty)) => match node_empty.name().as_ref() {
-            b"Action" => {
+            "Action" => {
                 let mut attributes = collect_action_attributes(node_empty, reader)?;
                 let id = attributes
                     .remove(ID_ATTRIBUTE_KEY)
@@ -922,8 +921,7 @@ fn parse_groot_node(
                 }))
             }
             tag => {
-                let id = String::from_utf8(tag.to_vec());
-                let id = map_parsing_error(id, "invalid utf8 in action ID", reader)?;
+                let id = tag.to_owned();
                 let mut attributes = collect_action_attributes(node_empty, reader)?;
                 if !attributes.remove(ID_ATTRIBUTE_KEY).is_none() {
                     new_parsing_error_result("redundant ID attribute for action", reader)?
@@ -957,8 +955,7 @@ fn collect_action_attributes(
     let mut attributes = HashMap::new();
     for attr in node.attributes() {
         let attr = map_parsing_error(attr, "cannot get attribute", reader)?;
-        let key = String::from_utf8(attr.key.as_ref().to_vec());
-        let key = map_parsing_error(key, "invalid utf8 in attribute key", reader)?;
+        let key = attr.key.as_ref().to_owned();
         let value = attr.normalized_value(quick_xml::XmlVersion::Explicit1_1);
         let value = map_parsing_error(
             value,
