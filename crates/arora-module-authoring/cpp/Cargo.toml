@@ -13,7 +13,7 @@ arora-types = { path = "../../arora-types", version = "3" }
 arora-vfs = { path = "../../arora-vfs" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-convert_case = "0.11"
+convert_case = "0.12"
 derive_more = { version = "2", features = ["from"] }
 lazy_static = "*"
 semver = "1"

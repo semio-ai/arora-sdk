@@ -64,5 +64,5 @@ env_logger = "0.11"
 # Serialize the live-DDS tests: running concurrently, their DDS participants pile
 # discovery traffic onto the writers (WouldBlock), slowing discovery. `#[serial]`
 # runs them one at a time.
-serial_test = "3"
+serial_test = "4"
 tokio = { version = "1", features = ["full"] }
