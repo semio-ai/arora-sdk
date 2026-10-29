@@ -1228,6 +1228,12 @@ impl AroraBuilder {
     /// endpoint's inbound stream and merge them, subscribe to the HAL and store
     /// feeds, and return the finished [`Arora`].
     ///
+    /// It states the runtime's own keys — the `arora` subtree of
+    /// [`arora_behavior::built_in`], the clock and the task runs' keys — closed
+    /// to remote writers, so no wider prefix the host opened reaches them; a
+    /// host opens one of them by stating that key's own meta, before the build
+    /// or after it.
+    ///
     /// Fails, naming what it refuses, when the device's parts do not fit
     /// together — a guest module that does not load or that its record does
     /// not describe, two modules (guest or host) under one id, a method both a
@@ -1642,6 +1648,20 @@ impl AroraBuilder {
         };
         if let Some(xml) = self.groot {
             arora.load_groot(&xml)?;
+        }
+        // The runtime's own keys — its clock, its task runs' — are closed to
+        // remote writers whatever wider prefix the host opens: a remote that
+        // set them would rewrite the device's time and its runs' state. The
+        // statement is on their subtree, which a prefix names without the
+        // trailing `/`, so a key's own meta still wins; and it goes through
+        // the device's store, so over a `NamespacedStore` it covers that
+        // device's subtree alone.
+        let built_in = arora_behavior::built_in::PREFIX.trim_end_matches('/');
+        if let Err(e) = arora
+            .store
+            .set_prefix_meta(HashMap::from([(built_in.to_string(), KeyMeta::new())]))
+        {
+            log::warn!("the store does not keep the runtime's keys closed: {e}");
         }
         // What the HAL says of its keys, stated to the store once nothing can
         // fail the build, and before anything can write: a device's inputs are
@@ -3510,6 +3530,8 @@ mod caller_tests {
 #[cfg(test)]
 mod hal_key_tests {
     use super::*;
+    use arora_behavior::built_in;
+    use arora_simple_data_store::NamespacedStore;
     use arora_types::value::{Type, Value};
     use caller_tests::settle;
 
@@ -3592,7 +3614,7 @@ mod hal_key_tests {
 
     /// `arora --open` opens every key with the empty prefix: a key the HAL
     /// describes takes the HAL's meta, which is more specific, and every other
-    /// key stays open.
+    /// key outside the runtime's own stays open.
     #[test]
     fn open_keeps_every_key_the_hal_does_not_describe_open() {
         let store = SimpleDataStore::new();
@@ -3607,6 +3629,77 @@ mod hal_key_tests {
         assert!(output.contains("not an input"), "{output}");
         let ill_typed = refused(&mut arora, "joint1/target.position", Value::I64(1));
         assert!(ill_typed.contains("declared type"), "{ill_typed}");
+    }
+
+    /// A task run's key, as the behavior-tree interpreter names it:
+    /// `arora/tasks/<module>/<function>/<run>/…`.
+    const TASK_RUN_STATUS: &str = "arora/tasks/m/f/1/status";
+
+    /// The runtime's own keys stay closed under the opened empty prefix: a
+    /// remote sets neither the device's clock nor a task run's keys.
+    #[test]
+    fn open_leaves_the_runtime_s_keys_closed() {
+        let store = SimpleDataStore::new();
+        store
+            .set_prefix_meta(HashMap::from([(String::new(), KeyMeta::new().editable())]))
+            .expect("open everything");
+        let mut arora = device_with(FakeHal::new(), store);
+        for key in [built_in::TIME, built_in::DT, TASK_RUN_STATUS] {
+            let closed = refused(&mut arora, key, Value::U64(0));
+            assert!(closed.contains("not an input"), "{key}: {closed}");
+        }
+        update(&mut arora, "anything", Value::U64(1)).expect("an ordinary key");
+    }
+
+    /// A host opens one of the runtime's keys by stating that key's own meta,
+    /// before the build or after it; the others stay closed.
+    #[test]
+    fn a_host_opens_one_of_the_runtime_s_keys_by_its_own_meta() {
+        let store = SimpleDataStore::new();
+        store
+            .set_meta(HashMap::from([(
+                Key::from(built_in::TIME),
+                KeyMeta::new().editable(),
+            )]))
+            .expect("open the clock");
+        let mut arora = device_with(FakeHal::new(), store);
+        update(&mut arora, built_in::TIME, Value::U64(0)).expect("opened before the build");
+        refused(&mut arora, TASK_RUN_STATUS, Value::U64(0));
+        arora
+            .store()
+            .set_meta(HashMap::from([(
+                Key::from(TASK_RUN_STATUS),
+                KeyMeta::new().editable(),
+            )]))
+            .expect("open a task run's key");
+        update(&mut arora, TASK_RUN_STATUS, Value::U64(0)).expect("opened after the build");
+        refused(&mut arora, built_in::DT, Value::U64(0));
+    }
+
+    /// Over a shared store, a device closes its own runtime keys alone: its
+    /// statement lands under its namespace, where a neighbour's keys and the
+    /// shared store's other keys keep what the store says of them.
+    #[test]
+    fn a_device_over_a_shared_store_closes_its_own_runtime_keys() {
+        let shared = SimpleDataStore::new();
+        shared
+            .set_prefix_meta(HashMap::from([(String::new(), KeyMeta::new().editable())]))
+            .expect("open everything");
+        let view = NamespacedStore::new(Arc::new(shared.clone()), "robotA");
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(view))
+            .build()
+            .expect("build the device");
+        refused(&mut arora, built_in::TIME, Value::U64(0));
+        update(&mut arora, "anything", Value::U64(1)).expect("an ordinary key");
+        let open = |path: &str| {
+            shared.meta(&[Key::from(path)])[0]
+                .as_ref()
+                .is_some_and(|meta| meta.editable)
+        };
+        assert!(!open("robotA/arora/time"));
+        assert!(open("robotB/arora/time"), "a neighbour's");
+        assert!(open("arora/time"), "the shared store's own");
     }
 
     /// A key's own meta the host stated before the build is the host's: the

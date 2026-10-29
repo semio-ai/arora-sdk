@@ -24,9 +24,10 @@ use clap::Parser;
 async fn main() -> anyhow::Result<()> {
     let cli = arora::DeviceCli::parse();
     let store = SimpleDataStore::new();
-    // `--open`: every key is an input. The empty prefix covers them all, and a
-    // key's own meta — the HAL's description of its keys among it — is more
-    // specific.
+    // `--open`: every key is an input but the runtime's own. The empty prefix
+    // covers them all, and two statements are more specific: a key's own meta
+    // — the HAL's description of its keys among it — and the `arora` subtree,
+    // which the build states closed.
     if cli.open {
         store
             .set_prefix_meta(HashMap::from([(

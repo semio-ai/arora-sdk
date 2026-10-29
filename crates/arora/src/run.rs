@@ -100,11 +100,12 @@ pub struct DeviceCli {
     /// carries.
     pub groot: Option<std::path::PathBuf>,
 
-    /// Let any bridge write any key that has no meta of its own. A key is
-    /// closed to remote writers unless the device opens it; this opens every
-    /// key at once, for a sandbox or a bench — never a device on a network
-    /// others share. A key with meta of its own keeps it: a HAL's outputs it
-    /// describes stay closed, and its inputs take only their declared type.
+    /// Let any bridge write any key that has no meta of its own, outside the
+    /// runtime's `arora/` keys. A key is closed to remote writers unless the
+    /// device opens it; this opens every other key at once, for a sandbox or a
+    /// bench — never a device on a network others share. A key with meta of
+    /// its own keeps it: a HAL's outputs it describes stay closed, and its
+    /// inputs take only their declared type.
     #[arg(long)]
     pub open: bool,
 
