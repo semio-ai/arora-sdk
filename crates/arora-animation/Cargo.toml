@@ -2,7 +2,7 @@
 name = "arora-animation"
 version = "1.0.0"
 edition = "2021"
-description = "Keyframe animation for Arora: the clip format, exact evaluation with velocities, and players that run unattended on a device clock."
+description = "Keyframe animation for Arora: the animation format, exact evaluation with velocities, and players that run unattended on a device clock."
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
