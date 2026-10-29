@@ -17,9 +17,16 @@
 //! links its file descriptors' code, as a debug build of the Rust libraries it
 //! links does. A component importing another interface fails to instantiate.
 //!
-//! A component that traps — a Rust guest's panic, a C++ guest's failed
-//! `assert` — is entered no more: every later call fails with the trap it
-//! met, until the module is reloaded, which instantiates it afresh.
+//! A component instance a call trapped in — a Rust guest's panic, a C++
+//! guest's failed `assert`, a call interrupted at its deadline
+//! ([`crate::limits`]) — is entered no more: wasmtime refuses to, and the
+//! trap may have left its state half written. The call fails with its trap;
+//! before the module's next call, the executor instantiates the component
+//! afresh, from its compiled code, and that call runs in the new instance,
+//! from the module's initial state. The executor logs a warning naming the
+//! module and the trap. Instantiating afresh runs, as loading does, under
+//! [`DEFAULT_CALL_BUDGET`](limits::DEFAULT_CALL_BUDGET); a module that fails
+//! to instantiate afresh runs no more calls until it is reloaded.
 
 use std::sync::OnceLock;
 
@@ -70,8 +77,8 @@ struct HostState {
     /// re-enter the engine while it is already mutably borrowed further up
     /// the stack, hence the raw pointer (see [`EngineRef`]).
     engine: EnginePtr,
-    /// When the call under way must end ([`limits::bound`]): the load's
-    /// deadline until the first call sets its own.
+    /// When the call under way must end ([`limits::bound`]): the
+    /// instantiation's deadline until a call sets its own.
     deadline: std::time::Instant,
 }
 
@@ -226,54 +233,82 @@ impl ComponentExecutor {
     }
 
     /// Instantiate `component` in a store of its own, linked to this
-    /// executor's Arora engine, serving the functions `exports` declares.
+    /// executor's Arora engine, serving the functions `header` declares.
     fn instantiate(
         &self,
         header: &Header,
         component: &Component,
         limits: GuestLimits,
     ) -> Result<Box<dyn AroraModule>, LoadModuleError> {
-        let exports = &header.exports;
-        let state = HostState {
-            wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-            table: ResourceTable::new(),
-            limits: StoreLimitsBuilder::new().memory_size(limits.memory).build(),
-            engine: EnginePtr(self.arora_engine.ok_or_else(|| {
-                LoadModuleError::Internal("ComponentExecutor: set_engine not called".into())
-            })?),
-            // Instantiating runs the component's initializer and `functions`.
-            deadline: std::time::Instant::now() + limits::DEFAULT_CALL_BUDGET,
-        };
-        let mut store = Store::new(component.engine(), state);
-        store.limiter(|state| &mut state.limits);
-        limits::bound(&mut store, |state: &HostState| state.deadline);
-
-        let bindings = Module::instantiate(&mut store, component, &self.linker)
+        let engine = self.arora_engine.ok_or_else(|| {
+            LoadModuleError::Internal("ComponentExecutor: set_engine not called".into())
+        })?;
+        let pre = self
+            .linker
+            .instantiate_pre(component)
+            .and_then(ModulePre::new)
             .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
-
-        // Every function the header declares is one the component serves.
-        let served = bindings
-            .call_functions(&mut store)
-            .map_err(|e| LoadModuleError::Internal(format!("functions trapped: {e:#}")))?;
-        let function_ids: Vec<Uuid> = exports.iter().map(|e| *e.id()).collect();
-        if let Some(missing) = function_ids
-            .iter()
-            .find(|id| !served.iter().any(|served| id_to_uuid(*served) == **id))
-        {
-            return Err(LoadModuleError::Internal(format!(
-                "failed to find function export {missing}: the component does not serve it"
-            )));
-        }
-
+        let function_ids: Vec<Uuid> = header.exports.iter().map(|e| *e.id()).collect();
+        let instance = instance(&pre, engine, limits.memory, &function_ids)?;
         Ok(Box::new(ComponentModule {
+            id: header.id,
             name: header.name.clone(),
-            bindings,
-            store,
-            function_ids,
-            trapped: None,
             budget: limits::DEFAULT_CALL_BUDGET,
+            pre,
+            engine,
+            memory: limits.memory,
+            instance,
+            function_ids,
+            state: State::Ready,
+            entered: 0,
         }))
     }
+}
+
+/// A component's instance: its store, and its exports bound in it.
+struct Instance {
+    bindings: Module,
+    store: Store<HostState>,
+}
+
+/// An instance of `pre` in a store of its own, linked to the Arora engine
+/// `engine`, each of its memories held to `memory` bytes, serving every
+/// function of `function_ids`. Instantiating runs the component's initializer
+/// and its `functions`, under [`DEFAULT_CALL_BUDGET`](limits::DEFAULT_CALL_BUDGET).
+fn instance(
+    pre: &ModulePre<HostState>,
+    engine: EngineRef,
+    memory: usize,
+    function_ids: &[Uuid],
+) -> Result<Instance, LoadModuleError> {
+    let state = HostState {
+        wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+        table: ResourceTable::new(),
+        limits: StoreLimitsBuilder::new().memory_size(memory).build(),
+        engine: EnginePtr(engine),
+        deadline: std::time::Instant::now() + limits::DEFAULT_CALL_BUDGET,
+    };
+    let mut store = Store::new(pre.engine(), state);
+    store.limiter(|state| &mut state.limits);
+    limits::bound(&mut store, |state: &HostState| state.deadline);
+
+    let bindings = pre
+        .instantiate(&mut store)
+        .map_err(|e| LoadModuleError::Internal(format!("instantiate: {e:#}")))?;
+
+    // Every function the header declares is one the component serves.
+    let served = bindings
+        .call_functions(&mut store)
+        .map_err(|e| LoadModuleError::Internal(format!("functions trapped: {e:#}")))?;
+    if let Some(missing) = function_ids
+        .iter()
+        .find(|id| !served.iter().any(|served| id_to_uuid(*served) == **id))
+    {
+        return Err(LoadModuleError::Internal(format!(
+            "failed to find function export {missing}: the component does not serve it"
+        )));
+    }
+    Ok(Instance { bindings, store })
 }
 
 impl Executor for ComponentExecutor {
@@ -334,23 +369,95 @@ impl Executor for ComponentExecutor {
 }
 
 struct ComponentModule {
-    /// The module's name, which an overrun's error names.
+    /// The module's id and name, which an error names.
+    id: Uuid,
     name: String,
     /// The budget of the call under way, which an overrun's error names.
     budget: std::time::Duration,
-    bindings: Module,
-    store: Store<HostState>,
+    /// The compiled component, linked, which instantiates it afresh after a
+    /// trap, linked to `engine`, each memory held to `memory` bytes.
+    pre: ModulePre<HostState>,
+    engine: EngineRef,
+    memory: usize,
+    instance: Instance,
     /// Functions the module's header declares; dispatch refuses others.
     function_ids: Vec<Uuid>,
-    /// Why a call trapped, once one has: wasmtime enters a component instance
-    /// no more after a trap, and the module says so, naming the trap, until
-    /// it is reloaded.
-    trapped: Option<String>,
+    state: State,
+    /// How many calls into `instance` are under way: more than one while the
+    /// guest is called back. An instance in use is not replaced: its guest
+    /// still runs in it.
+    entered: usize,
+}
+
+/// Whether a module's instance may be entered.
+enum State {
+    Ready,
+    /// A call trapped in it, as the message says: the module instantiates
+    /// afresh before its next call.
+    Trapped(String),
+    /// Instantiating afresh failed, as the message says: the module runs no
+    /// more calls until it is reloaded.
+    Lost(String),
+}
+
+impl ComponentModule {
+    /// Make the module fit to run a call to `function`: one whose call
+    /// trapped is instantiated afresh first, its call's deadline carried over.
+    /// The call is refused while the instance that trapped is in use, once
+    /// instantiating afresh has failed, and when no time is left before the
+    /// call's deadline.
+    fn recover(&mut self, function: &Uuid) -> Result<(), DispatchError> {
+        let trap = match &self.state {
+            State::Ready => return Ok(()),
+            State::Lost(message) => {
+                return Err(DispatchError::Trap {
+                    message: message.clone(),
+                })
+            }
+            State::Trapped(trap) => trap.clone(),
+        };
+        if self.entered > 0 {
+            return Err(DispatchError::Trap {
+                message: format!("{TRAPPED} ({trap})"),
+            });
+        }
+        let deadline = self.instance.store.data().deadline;
+        // A guest calling the module back while it instantiates finds it in
+        // use.
+        self.entered += 1;
+        let fresh = instance(&self.pre, self.engine, self.memory, &self.function_ids);
+        self.entered -= 1;
+        match fresh {
+            Ok(mut fresh) => {
+                fresh.store.data_mut().deadline = deadline;
+                self.instance = fresh;
+                self.state = State::Ready;
+                log::warn!(
+                    "module '{}' was instantiated afresh after a trap: {trap}",
+                    self.name
+                );
+            }
+            Err(error) => {
+                let message = format!("{LOST} (trap: {trap}; instantiating: {error})");
+                log::warn!("module '{}': {message}", self.name);
+                self.state = State::Lost(message.clone());
+                return Err(DispatchError::Trap { message });
+            }
+        }
+        // Instantiating may have taken the call's time: the new instance,
+        // never entered, serves the next call.
+        if deadline <= std::time::Instant::now() {
+            return Err(DispatchError::Trap {
+                message: limits::no_time_left(&self.id, function),
+            });
+        }
+        Ok(())
+    }
 }
 
 impl AroraModule for ComponentModule {
     fn set_call_deadline(&mut self, deadline: std::time::Instant, budget: std::time::Duration) {
-        self.store.data_mut().deadline = deadline;
+        self.instance.store.data_mut().deadline = deadline;
         self.budget = budget;
     }
 
@@ -358,15 +465,15 @@ impl AroraModule for ComponentModule {
         if !self.function_ids.contains(method_id) {
             return Err(DispatchError::FunctionNotFound { id: *method_id });
         }
-        if let Some(trap) = &self.trapped {
-            return Err(DispatchError::Trap {
-                message: format!("{TRAPPED} ({trap})"),
-            });
-        }
-        let result = match self
-            .bindings
-            .call_dispatch(&mut self.store, uuid_to_id(method_id), arg)
-        {
+        self.recover(method_id)?;
+        self.entered += 1;
+        let result = self.instance.bindings.call_dispatch(
+            &mut self.instance.store,
+            uuid_to_id(method_id),
+            arg,
+        );
+        self.entered -= 1;
+        let result = match result {
             Ok(result) => result,
             Err(e) => {
                 let message = match e.downcast_ref::<wasmtime::Trap>() {
@@ -375,7 +482,7 @@ impl AroraModule for ComponentModule {
                     }
                     _ => format!("dispatch trapped: {e:#?}"),
                 };
-                self.trapped = Some(message.clone());
+                self.state = State::Trapped(message.clone());
                 return Err(DispatchError::Trap { message });
             }
         };
@@ -391,9 +498,15 @@ impl AroraModule for ComponentModule {
     }
 }
 
-/// What a component that trapped answers each later call with.
-pub(crate) const TRAPPED: &str =
-    "the module trapped in an earlier call and runs no more calls until it is reloaded";
+/// What a component that trapped answers a call made while its instance that
+/// trapped is still in use.
+const TRAPPED: &str = "the module trapped in an earlier call and runs no call until the call \
+                       to it under way returns; its next call after that instantiates it afresh";
+
+/// What a component that trapped, and then failed to instantiate afresh,
+/// answers each later call with.
+const LOST: &str = "the module trapped in an earlier call and failed to instantiate afresh: \
+                    it runs no more calls until it is reloaded";
 
 #[cfg(test)]
 mod tests {

@@ -12,18 +12,22 @@
 //! past its deadline, never before it. Time a guest spends in a host
 //! function, a WASI wait or a call to another module, is not interrupted:
 //! the guest is, once the host function returns. Its call fails with
-//! [`DispatchError::Trap`], naming the module, the function and the budget,
-//! and the module refuses its later calls until it is reloaded: an
-//! interrupted call can leave its state half updated.
+//! [`DispatchError::Trap`], naming the module, the function and the budget.
+//! An interrupted call can leave its instance's state half updated, so the
+//! instance is entered no more: before the module's next call, its executor
+//! instantiates it afresh from its compiled code, and that call runs from the
+//! module's initial state. The device keeps its module, and no call runs in a
+//! half-updated instance.
 //!
 //! At a device's 15 Hz, one step's guest calls share 66.7 ms; at 60 Hz,
-//! 16.7 ms. Loading a module (its `_initialize`, a component's `functions`)
-//! runs under [`DEFAULT_CALL_BUDGET`].
+//! 16.7 ms. Loading a module (its `_initialize`, a component's `functions`),
+//! or instantiating it afresh, runs under [`DEFAULT_CALL_BUDGET`].
 //!
 //! A call with no time left before its deadline is not made: it fails
-//! with [`DispatchError::Trap`], and its module, never entered, serves its
-//! later calls, rather than refusing them for a deadline another call used
-//! up.
+//! with [`DispatchError::Trap`], and its module, never entered, keeps its
+//! instance, rather than losing its state for a deadline another call used
+//! up. So does a call whose time instantiating its module afresh took: the
+//! new instance serves the next call.
 //!
 //! A guest's call to another guest ends by its caller's deadline, a guest
 //! loading counting as a call to its callees. A module called back while its

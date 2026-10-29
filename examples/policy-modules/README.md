@@ -211,10 +211,11 @@ write naming it is refused whole.
 
 The runtime ends each call into a wasm module by the step's period. A call
 the machine stalls past it — on a heavily loaded machine — is interrupted,
-and the policy module then runs no more calls until it is reloaded: the duck
-falls and stays down, and the log says the call "overran its budget". Restart
-the device; `--executor native` runs the module in-process, outside that
-bound.
+and the log says the call "overran its budget". The device keeps its policy:
+before the module's next call, the runtime instantiates it afresh, from its
+initial state — the controller's memory empty, the network loaded again on
+first use — and a warning says so. `--executor native` runs the module
+in-process, outside that bound.
 
 ### In Semio Studio (opt-in)
 

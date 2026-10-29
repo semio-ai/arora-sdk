@@ -91,8 +91,12 @@ A WebAssembly guest is a component of the `arora:module` world
 - a guest exporting `_initialize` — a C or C++ guest linked as a WASI reactor —
   has it run once, when it loads, before any call;
 - a guest's error is the `err` of `dispatch`, or an error buffer in its `ok`;
-- a component that traps (a Rust panic, a failed C++ `assert`) is entered no
-  more: every later call fails with that trap until the module is reloaded.
+- an instance a call trapped in (a Rust panic, a failed C++ `assert`, a call
+  interrupted at its deadline) is entered no more: the call fails with its
+  trap, and before the module's next call the executor instantiates the
+  component afresh from its compiled code, logging a warning, so that call
+  runs from the module's initial state. A module that fails to instantiate
+  afresh runs no more calls until it is reloaded.
 
 A header naming `wasm` — a `wasm32-wasip1` core module — has no executor.
 Rust guests become components through
@@ -195,9 +199,10 @@ On wasmtime, a call to a guest ends by a deadline and its memory is capped
   `EngineBuilder::with_guest_limits` for every module) tightens it. A call to
   another guest ends by its caller's deadline. A guest still running at its
   deadline is interrupted at the next epoch tick, every `EPOCH` (1 ms): the
-  call fails with `DispatchError::Trap`, and the module refuses its calls
-  until reloaded, since the call may have left its state half updated. A call
-  with no time left is not made, and its module keeps serving.
+  call fails with `DispatchError::Trap`, and the module is instantiated afresh
+  before its next call, since the call may have left its state half updated.
+  Instantiating afresh runs, as loading does, under `DEFAULT_CALL_BUDGET`. A
+  call with no time left is not made, and its module keeps its instance.
 - **Memory.** Each linear memory of an instance holds at most
   `GuestLimits::memory` bytes, `DEFAULT_MEMORY` (256 MiB) by default: a
   `memory.grow` past it returns -1 to the guest, whose allocator reports the
@@ -221,7 +226,7 @@ and gets the browser executor.
 | `ModuleNotFound` | `ModuleNotFound` | no module under the id |
 | `FunctionNotFound` | `FunctionNotFound` | the module serves no such function |
 | `Argument` | `Generic` | an argument does not match the header |
-| `Trap` | `Trap` | the guest trapped, overran its deadline, or trapped earlier |
+| `Trap` | `Trap` | the guest trapped, overran its deadline, or could not be instantiated afresh after a trap |
 | `Guest` | `Guest` | a component's or a host module's function returned an error |
 | `Internal` | `Internal` | the engine or the executor failed |
 

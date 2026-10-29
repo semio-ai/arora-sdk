@@ -4,6 +4,21 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.1.0] - 2026-10-29
+
+### Changed
+
+- A component whose call trapped or was interrupted at its deadline recovers
+  without a reload, natively and in the browser: the call fails with its
+  trap, and before the module's next call the executor instantiates the
+  component afresh from its compiled code, logging a warning that names the
+  module and the trap; that call runs from the module's initial state. The
+  instance the trap left half written is dropped, never entered again.
+  Instantiating afresh runs, as loading does, under `DEFAULT_CALL_BUDGET`;
+  natively, a call whose deadline it used up is not made, and the new
+  instance serves the next call. A module that fails to instantiate afresh
+  runs no more calls until it is reloaded.
+
 ## [7.0.2] - 2026-10-29
 
 ### Changed

@@ -230,8 +230,8 @@ What a guest may spend is its `GuestLimits` (`with_guest_limits`,
 `with_module_limits`, `Arora::set_guest_limits`): by default one second per
 call made outside a step and 256 MiB of memory. Under `Arora::run`, the guest
 calls of one step share the step's period: natively, a call still running at
-its deadline is interrupted, fails, and its module refuses calls until it is
-reloaded, while the device keeps stepping
+its deadline is interrupted and fails, its module is instantiated afresh
+before its next call, and the device keeps stepping
 ([`arora_engine::limits`](../../arora-engine/src/limits.rs)). In the browser
 nothing interrupts a guest.
 
