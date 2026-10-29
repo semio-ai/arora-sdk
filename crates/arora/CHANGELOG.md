@@ -15,7 +15,8 @@ All notable changes to `arora`. The format follows
   device's clock (`arora/time`, `arora/dt`) or its task runs' keys
   (`arora/tasks/…`). A host opens one of those keys by stating that key's own
   meta, before the build or after it. Over a `NamespacedStore`, the statement
-  covers the device's own subtree alone.
+  covers the device's own subtree alone. A store that refuses the statement
+  fails the build.
 
 ## [16.0.0] - 2026-10-23
 
