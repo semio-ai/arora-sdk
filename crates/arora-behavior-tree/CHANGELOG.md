@@ -14,8 +14,9 @@ All notable changes to `arora-behavior-tree`. The format follows
   links.
   - Lowering: each node's bindings are its arguments, a port bound to a key
     the variable of that key, whichever way the function uses the port.
-  - An edit restarts the nodes it sets and those whose bindings it changes;
-    every other node keeps its state, as before.
+  - An edit restarts the nodes it sets and those whose bindings it changes,
+    a binding reading a node it removes included; every other node keeps
+    its state, as before.
   - Removing the main behavior's root unroots it, even in a diff that sets
     the node again; the diff's `root` roots it again.
   - `load` and `spawn_graph` refuse a graph listing a node twice. Variables
@@ -29,7 +30,8 @@ All notable changes to `arora-behavior-tree`. The format follows
   the shape of a parameter, `@node.parameter`. A bare `@node` is an error
   naming `@node._ret`, and `ExprKind::Port::parameter` is a `Name`, no
   longer optional. `BehaviorTree::display` and `text::format` write
-  `@node._ret`.
+  `@node._ret`, and a reference to a parameter named `_ret` with the
+  parameter's id.
 - `text::resolve` binds `{key}` to the key itself, and lists the graph's
   nodes in the order the text writes them. `{<uuid>}`, a variable known by
   its id alone, binds the tree-local key `.<uuid>`. The graph carries no
@@ -59,7 +61,9 @@ All notable changes to `arora-behavior-tree`. The format follows
   parameter's name or `_ret`. `readable::Graph::resolve` and
   `readable::GraphDiff::resolve` read a file into the shared form, reporting
   each reference that does not resolve or is ambiguous with where it is
-  written (`ReferenceError`); `from_graph` and `from_diff` write the shared
+  written (`ReferenceError`): a port two references name, or a
+  `<module>::name` naming two functions of that module. A node whose `bind`
+  writes one port twice is refused as it is read; `from_graph` and `from_diff` write the shared
   form with a name wherever one resolves back to the same id.
   [`docs/text.md`](docs/text.md#which-form-to-use) says which form to use
   where: the text for behaviors, readable files for what people review, ids
