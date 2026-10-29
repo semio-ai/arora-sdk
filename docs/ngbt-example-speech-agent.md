@@ -41,7 +41,7 @@ vad, asr, face ─▶ STATECHART ── states, emotion, gesture ──▶ MOTIO
                    │      ▲                                   ▲
      start, hold,  │      │ sentence, audio ready,            │
      resume, drop  ▼      │ playing, done                     │
-                  SPEECH PIPELINE ──── visemes, playhead ─────┘
+                  SPEECH PIPELINE ──── viseme, playing ───────┘
 ```
 
 - **The statechart decides.** It holds the states and their transitions, and
@@ -60,7 +60,7 @@ What passes between them:
 | statechart → motion graph | the states and when each started; the active emotions and their trigger times; the gesture |
 | statechart → pipeline | start a run, hold, resume, drop; start a judge |
 | pipeline → statechart | a sentence arrived (with its emotion and gesture), audio ready, playback started and ended, a tool call started, the reply ended, a verdict |
-| pipeline → motion graph | the playing sentence's visemes, the audio playhead, whether speech is playing |
+| pipeline → motion graph | the viseme the speech reports at its playhead, whether speech is playing |
 
 ## 3. Statechart
 
@@ -157,7 +157,7 @@ its end, even through a cut-in.
 ## 4. Motion graph
 
 Every tick it reads the states and when each started, the active emotions,
-the face position, the visemes and playhead and the assets, and writes the
+the face position, the viseme and the assets, and writes the
 nine channels:
 
 - **Nothing jumps.** A gaze target, a posture or a viseme is a target the
@@ -176,9 +176,10 @@ nine channels:
 - **Posture:** the blended emotions (§3.3), with the thinking expression over
   them.
 - **Mouth:** the posture, with lipsync over it. The speech weight eases in and
-  out over 80 ms; `open` and `stretch` blend toward the viseme at the
-  playhead, and `corners` adds the viseme's offset to the posture's. The mouth
-  mixes lipsync and the emotion fades at all times.
+  out over 80 ms; `open` and `stretch` blend toward the viseme the speech
+  reports, crossfaded over 50 ms from the tick its code changes, and `corners`
+  adds the viseme's offset to the posture's. The mouth mixes lipsync and the
+  emotion fades at all times.
 - **Lid:** the posture's lid × blink.
 - **Arm:** the posture plus the idle clip's sway, overridden by a gesture clip.
 
@@ -203,7 +204,7 @@ Holds and fades:
 utterance ─┬─ rag 1 s ──────┐
            └─ recall 0.5 s ─┴─ prompt (+ tools) ─▶ llm ─┬─ tool call ─▶ tool ─▶ prompt + result ─▶ llm again
                                                         │      └─▶ filler line
-                                                        └─ sentences {say, emotion, gesture?} ─▶ tts ─▶ play ─▶ playhead
+                                                        └─ sentences {say, emotion, gesture?} ─▶ tts ─▶ play ─▶ viseme
 round + new words ─ judge ⇢ verdict, then follow-up sentences ─▶ added after the reply
 reply end ─ remember
 ```
@@ -218,7 +219,7 @@ reply end ─ remember
 | filler | stored | its length | a tool call started → audio and visemes |
 | judge | async, streams | the verdict at +1 s, follow-ups by +2 s | round, reply so far, new words → `continue` or `invalidated`, then follow-up sentences |
 | tts | async | 1 s a sentence, one at a time, in order | sentence → audio and visemes |
-| play | the audio's clock | the audio's length | audio → playhead; pausable |
+| play | the audio's clock | the audio's length | audio → the viseme at its playhead; pausable |
 | remember | async, fire and forget | | the turn → memory |
 
 - **Tools:** each LLM round either calls a tool or starts the reply, with at
@@ -236,8 +237,23 @@ reply end ─ remember
   reached its prompt (§6), so a design that builds the prompt before the facts
   arrive says the wrong thing.
 
-Long-running work follows Arora's contract: a function returns `Running` and
-is polled each step ([async-functions.md](async-functions.md)).
+Long-running work follows Arora's call contract
+([async-functions.md](async-functions.md)):
+
+- **A call is polled.** A function returns `Running` and is called again at
+  every step, its arguments encoded and sent again. A provider does the work
+  off the tick, in a producer, and the call only checks on it.
+- **A run is keyed by its arguments.** A call carries no run id, so a
+  provider finds its run by what it was sent: a prompt that changed while the
+  llm waits is another call.
+- **Nothing tells a provider its leaf stopped.** A speech provider plays on
+  until it has seen no call for 250 ms, then drops the run; called again with
+  the same text, it starts the sentence over (vizij-arora-tts, say-piper).
+- **Outputs come back with each call.** The speech provider reports the
+  viseme at its playhead, sampled every 15 ms, as an output of `play`.
+
+Every design runs on Arora and keeps this contract. The bespoke reference does
+not have to; §10 shows what the contract changes.
 
 ## 6. Assets
 
@@ -367,8 +383,8 @@ times are rounded; the reference computes them from the TTS rule (§6).
   the designs count theirs by their rules (§10). The modeled µs of each tick
   comes from these counts.
 - **Waiting.** One second waiting on the llm: what each build does for the
-  wait over its 100 ticks. A waiting leaf is ticked when its call starts and
-  when it completes, and in between is woken on completion, not polled.
+  wait over its 100 ticks. Under Arora's call contract that is 100 polls, each
+  a call that sends the prompt again.
 - **Each build at its best.** Each build is measured with every optimization
   its framework can take, each checked to leave its channels exact (§10).
 - **Effects.** Per run: one rag and one recall; one prompt per LLM round; one
@@ -377,8 +393,10 @@ times are rounded; the reference computes them from the TTS rule (§6).
 - **Stale output.** No words, emotion, filler line or action tool from a held
   or dropped run.
 - **Barge-in.** Ticks from the VAD to the audio pausing.
-- **Resume.** A resumed sentence continues from its paused playhead.
-- **Lipsync.** The mouth's lag behind the playhead, in ms.
+- **Resume.** A resumed sentence continues from its paused playhead, or is
+  counted as starting over.
+- **Lipsync.** The mouth's lag behind the audio, in ms: from the tick the audio
+  enters a viseme to the tick the motion reads it.
 - **Gaze lock.** The eyes' error on the person while the head moves.
 - **Eye pops.** The largest eye move in one tick.
 - **Emotion timing.** Each trigger at its time (§3.3), and no earlier emotion
@@ -406,7 +424,11 @@ download it and open it in a browser.
   captions; the states, and every leaf waiting, polled or not; what it said; the service strip; the channels; the
   cost of each tick, charted as µs, node ticks, executions or checks, with
   this tick's work by area; and the scorecard. A failed check jumps to its
-  moment.
+  moment. The caption marks a sentence paused, playing on after its leaf
+  stopped, or stopped.
+- **The call contract.** Every design replays the reference's run under
+  Arora's call contract (§5) and is checked against it. Its scorecard says
+  what the contract changes against the reference, whose ghost shows it.
 - **How each design holds it.** One part at a time, the same part on both
   sides: the conversation, attention and reply run, or one of the seven motion
   groups; or Full, every part at once, the three trees above the whole motion
@@ -440,13 +462,14 @@ download it and open it in a browser.
   line is a value that is stale, a tick late, or not what the node ran with;
   a gap, one the design does not keep. Text is not plotted.
 - **Every implementation at a glance.** The whole run's numbers for the
-  reference, the foil and the designs: each one's average tick and its work.
+  reference, the foil and the designs: each one's average tick, what of it
+  goes to the engine's path, and its work.
 - **Inspecting values, at a glance.** What an inspector finds in each build
   over the run (§10, Inspecting values).
 - **The assets.** Every asset of §6, with the live ones following the left
   side: the postures showing, the prompts built, the memory written.
 - **The implementations.** The reference, the spec as bespoke code, which
-  every design is checked against; a naive foil, the reference's code with
+  every design is checked against, under the call contract; a naive foil, the reference's code with
   three rules broken for the scorecard to catch (it drops the reply on any
   cut-in, replaces emotions and reads the previous tick's head); and the five
   designs of §10.
@@ -472,29 +495,69 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 - **The reply run is a task run** the conversation spawns, with Arora's spawn
   and halt. It outlives the branch that started it. The tree writes
   `{reply/held}` to gate what it shows, and halts the run to drop it.
-- **Its stages are module-call leaves,** returning `Running` until done. This
-  is Arora's async contract, and the way arora-dataflow-nodes places external
-  calls and task runs.
-- **The prompt is a node the llm leaf reads** when its call starts, cached by
-  its arguments. The llm keeps the request it started.
+- **Its stages are module-call leaves,** returning `Running` until done and
+  polled at every tick. This is Arora's call contract (§5), and the way
+  arora-dataflow-nodes places external calls and task runs.
+- **The prompt is built once a call,** by a leaf under `SEQUENCE*`
+  (`sequence_star`), which resumes the llm past it while it waits. `{.prompt}`
+  keeps it, and the llm leaf sends it at every poll. Built by a node that runs
+  when its arguments change, the prompt would change while the llm waits, three
+  times in run 2's second call as the emotion moves, and each change would be
+  another call to the provider.
 
 | Design | Motion graph | When the motion sees the statechart | Prompt | Split into |
 |---|---|---|---|---|
-| #396 detached nodes (as #407 runs it) | 77 detached calls, pulled at their first read and cached by their arguments; sinks publish after the tree | The same tick | A detached node, run when its arguments change | Subtrees for the conversation and attention, a task run for the reply, detached nodes grouped by part |
+| #396 detached nodes (as #407 runs it) | 77 detached calls, pulled at their first read and cached by their arguments; sinks publish after the tree | The same tick | A leaf under `SEQUENCE*`, once a call | Subtrees for the conversation and attention, a task run for the reply, detached nodes grouped by part |
 | #409 full tree nodes | The same, each call also a full tree node | The same tick | The same | #396's file |
-| #404 incremental tree | One node-graph shape per group, `PARALLEL[ leaf …, RUNNING ]`, leaves on change and bound to keys, after the statechart | The same tick | A leaf on change | One shape per group under the root `PARALLEL` |
-| #405 macros, placed | One macro per group, placed at the root in a `WITH` before the tree | A tick late | A macro placed before llm | One macro per group, authored and placed |
-| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion one graph whose nodes keep their outputs until a node they read changes and marks them | A tick late: a state the control writes reaches the motion through the store | A lazy node under llm, run when its arguments change | One graph per region, joined to the motion by keys; the motion one graph, shown a group at a time, since a store hop between its groups would put the eyes a tick behind the head |
+| #404 incremental tree | One node-graph shape per group, `PARALLEL[ leaf …, RUNNING ]`, leaves on change and bound to keys, after the statechart | The same tick | The same | One shape per group under the root `PARALLEL` |
+| #405 macros, placed | One macro per group, placed at the root in a `WITH` before the tree | A tick late | The same; a macro placed before the llm would build again whenever the emotion moved | One macro per group, authored and placed |
+| #257 BT in NG | Vizij graphs: control nodes for the conversation, attention and reply run; the motion one graph whose nodes keep their outputs until a node they read changes and marks them | A tick late: a state the control writes reaches the motion through the store | An action under `sequence_with_memory`, once a call; its output port, kept, is what the llm action sends | One graph per region, joined to the motion by keys; the motion one graph, shown a group at a time, since a store hop between its groups would put the eyes a tick behind the head |
 
 #257's pull request was closed on 21 October in favor of #396.
+
+### Arora's call contract
+
+Every design runs on Arora, so every one keeps its call contract (§5); the
+bespoke reference does not have to. Each design therefore replays the
+reference's run under that contract, and is checked against it. What the
+contract changes is the same for every design, since it lives in the
+providers, not in the trees:
+
+- **The audio plays on 250 ms at each cut-in,** twice: nothing tells the speech
+  provider its leaf stopped. Every design fails "Audio pauses as Sam speaks"
+  for it, and for nothing else.
+- **A held sentence starts over** when it is handed back, twice: the provider
+  dropped its run after 250 ms without a call, and the same text is a new run.
+  The reply ends 0.75 s after the reference's.
+- **The mouth reads the viseme the provider reports,** a code sampled every
+  15 ms, at most 10 ms after the audio for #396, #409 and #404, and 20 ms for
+  #405 and #257, which read the store a tick late. The reference reads its own
+  playhead.
+- **Every tick of a wait is a module call** that sends its arguments again: a
+  second on the llm is 100 calls, each carrying the prompt, about 650 bytes.
+  In CPU that is little: 70 µs a second.
+
+Three changes to the contract would cut the polling, and the bench used to
+apply them as optimizations. They save little, 0.6 µs and 5 node ticks a tick
+together, and none touches what the contract changes in the run:
+
+| Change | What it does | Saves a tick |
+|---|---|---|
+| Latched arguments | A waiting leaf sends its arguments once, when its call starts; a run id names the call after that | 0.08 µs |
+| Native polls | A waiting leaf checks its call's handle, `start → handle, poll → Option`, without a module call | 0.45 µs |
+| Wake on completion | A provider signals its call done, so a waiting leaf stays clean and its branch is not ticked while it waits | 0.14 µs |
+
+What would change the run is a halt the provider hears, which ends the
+250 ms the audio plays on, and a pause it is told of, which keeps a held
+sentence's place instead of starting it over.
 
 ### How the work is counted
 
 The bench runs on one clock at 100 Hz, and nothing in it is async: a wait is
-a leaf that answers `Running` until its work is done. A waiting leaf reads its
-arguments when its call starts and stays clean until the call completes, so a
-second of waiting on the llm is 100 checks of its clean branch, one a tick,
-and nothing else.
+a leaf that answers `Running` until its work is done. Under Arora's call
+contract a waiting leaf is polled at every tick: it reads what it sends, and
+calls its module through the engine, so a second of waiting on the llm is 100
+calls, each sending the prompt.
 
 - **The reference** counts with tracer calls in its own code, in the motion
   graph's units: a function of the graph that its code computes is a node tick
@@ -507,9 +570,10 @@ and nothing else.
 - **The designs** count by their rules:
   - The statechart is the dirty nodes its tick reaches, with a check for each
     clean child.
-  - A call's start and its result are a module call each. A store key is a
-    check. A node is a node tick that answers from its cache (detached: a
-    check for each argument; versioned cells: one check) or runs again.
+  - Every tick of a wait is a poll: a node tick, a module call, and a check
+    for each store key or cell it reads to send its arguments. A node is a
+    node tick that answers from its cache (detached: a check for each
+    argument; versioned cells: one check) or runs again.
   - The motion graph follows each design's rule in the table above, with the
     optimizations below: in #396, #409 and #257 a node that recomputes to a
     new value marks its readers, and only marked nodes are visited; #404's and
@@ -519,6 +583,19 @@ and nothing else.
   plus 2 µs of work a call and 2 ms a prompt build. A poll that answers
   `Running` does no work and pays only its module call. The reference pays for
   its own work and nothing else.
+- **The engine's path.** The spectrum's rates were measured with an
+  in-process bridge, which hands a call its values. Through Arora's engine, a
+  call's arguments are encoded into an Arora Buffer, decoded by the module and
+  cloned for the function, and its result is encoded and decoded back, even for
+  a module linked into the runtime. A wasm component adds the copies into and
+  out of its memory, and does its half in wasm. The bench charges 0.3 µs a call
+  and 0.4 ns a byte into a linked module (`@arora/dataflow`, and the providers
+  `@pip/agent`, `@pip/speech`, `@pip/tools`, which need threads, the network
+  and a speaker), and 1 µs and 1.2 ns a byte into a wasm component (the
+  example's `@pip/motion`, `@pip/expression`, `@pip/lipsync` and
+  `@arora/animation`), each call's bytes counted from its values. These two
+  rates are modeled from the code path: no bench calls through the engine yet
+  (§12).
 
 ### The optimizations each build runs with
 
@@ -536,10 +613,11 @@ tick.
 | The tree on #404's executor | A clean subtree of the statechart answers from its cache | #404, which any tree can opt into | #396, #409 |
 | Sinks publish on change | A sink writes its key when its value changed | #404's comparison with #396 | #396, #409 |
 | Lazy conditionals | `if`, `and`, `or`, `hold` and a blend at weight 0 pull only the inputs their result needs | the bench | all |
-| Time horizons | A clip, an envelope or the thinking glance says when its value next changes, and its node does not run until then | the bench | all |
-| Latched arguments | A waiting leaf reads its arguments once, when its call starts, so the prompt is built once a call | the bench | all |
-| Native polls | A waiting leaf checks its call's handle without calling its module | the bench | all |
-| Wake on completion | A waiting leaf stays clean until its call completes, so its branch is not ticked while it waits | the bench | the trees on #404's executor, and #257 with its incremental control tick |
+| Time horizons | A clip, an envelope, the thinking glance or a viseme's crossfade says when its value next changes, and its node does not run until then | the bench | all |
+
+Latched arguments, native polls and wake on completion, which this table used
+to list, change Arora's call contract, so no build can take them (Arora's call
+contract, above).
 
 **Invalidation on #396 and #409 costs 0.24 µs more a tick, and is kept.** A
 detached node is held by no node and has no list of its readers: pulled, it
@@ -547,7 +625,7 @@ checks its arguments to know its cached value still holds, and they are
 detached nodes too, so every needed node is visited and compared at every
 tick. With invalidation the executor builds each node's readers when the file
 loads, and a node that recomputes to a new value marks them. That halves their
-node ticks, from 64 to 32 a tick, and cuts their checks from 104 to 60; they
+node ticks, from 70 to 37 a tick, and cuts their checks from 108 to 64; they
 then visit what #257 visits, node for node. In µs it costs more, since a value
 comparison here (9.5 ns) costs less than the version write that marks a reader
 (38 ns), and 28 of the 75 needed nodes change at every tick. For #257 it saves
@@ -577,51 +655,58 @@ The reference is the spec written bespoke:
   emotion fades or the thinking expression moves, and the mouth when the
   viseme or the speech weight does.
 - **The script's schedule.** It knows when a blink, the wave, an emotion's
-  fade, the thinking glance or the glance away next changes. It also knows when
-  the viseme moves: only in the 50 ms crossfade at the start of each segment of
-  the track.
+  fade, the thinking glance or the glance away next changes, and that the
+  viseme moves only in the 50 ms crossfade after its code changes.
+- **Its own player.** It pauses the audio at a cut-in and resumes it where it
+  paused, and reads the viseme at its own playhead: no call contract stands
+  between it and its speech.
 
 It costs 55 µs a tick and computes 26.6 of the graph's functions a tick.
 
-At the graph's granularity, 28.3 functions a tick are needed and change value.
+At the graph's granularity, 28.2 functions a tick are needed and change value.
 That is the floor for an exact implementation that computes every one of them,
-and the designs run 29.0. The bespoke reference runs fewer, 26.6:
+and the designs run 28.8. The bespoke reference runs fewer, 26.6:
 it takes a branch where the graph has a selection node, skips the arm's blend
-while no wave plays, and knows two schedules a design does not (the glance
-away and the viseme's crossfades).
+while no wave plays, and knows a schedule a design does not (the glance away).
 
 ### What the bench shows over the whole run
 
-- **#396, #409 and #404** produce the reference's nine channels at every
-  tick.
+- **#396, #409 and #404** produce the nine channels of the reference's run
+  under the call contract at every tick.
 - **#405 and #257** produce them a tick late wherever the statechart drives
-  them. At 100 Hz the mouth runs 10 ms behind the audio, under the 45 ms
-  people notice, and the eyes move a tick late when a face appears.
+  them. The mouth reads each viseme 10 ms later, 20 ms at most behind the
+  audio, under the 45 ms people notice, and the eyes move a tick late when a
+  face appears.
 - **Work a tick,** on average, with one second waiting on the llm as node
   ticks · executions · checks:
 
-  | Implementation | µs | Node ticks | Executions | Checks | 1 s on the llm | Prompt builds |
-  |---|---|---|---|---|---|---|
-  | Reference | **55** | 28 | 27 | 18 | 0 · 0 · 100 | 4 |
-  | #396 detached nodes | 65.7 | 32 | 29 | 60 | 0 · 0 · 100 | 4 |
-  | #409 full tree nodes | 66.4 | 32 | 29 | 60 | 0 · 0 · 100 | 4 |
-  | #404 incremental tree | 66 | 46 | 29 | 64 | 0 · 0 · 100 | 4 |
-  | #405 macros, placed | 66 | 43 | 29 | 64 | 0 · 0 · 100 | 4 |
-  | #257 BT in NG | 66 | 40 | 29 | 60 | 0 · 0 · 100 | 4 |
+  | Implementation | µs | Engine's path | Node ticks | Executions | Checks | 1 s on the llm | Prompt builds |
+  |---|---|---|---|---|---|---|---|
+  | Reference | **55** | — | 28 | 27 | 18 | 0 · 0 · 100 | 4 |
+  | #396 detached nodes | 78 | 12.3 | 37 | 30 | 64 | 100 · 100 · 100, 70 µs | 4 |
+  | #409 full tree nodes | 78.6 | 12.3 | 37 | 30 | 64 | the same | 4 |
+  | #404 incremental tree | 78.4 | 12.3 | 51 | 30 | 69 | the same | 4 |
+  | #405 macros, placed | 78.3 | 12.3 | 48 | 30 | 69 | the same | 4 |
+  | #257 BT in NG | 78.4 | 12.3 | 45 | 30 | 64 | the same | 4 |
 
 - **The designs end within 0.7 µs of each other.** What is left is
-  the 29 functions that change a tick, at 2 µs each, and each framework's
-  bookkeeping. #396, #409 and #257, with invalidation, visit only what changed:
-  the same nodes at nearly every tick, and the same 60 checks. #396 and #409
-  tick the fewest nodes (32 a tick); #257 also visits its graph's input and
-  output nodes (40). #404 and #405 tick 46 and 43, with 64 checks.
-- **The bespoke reference is the cheapest,** 10.4 µs a tick under the best
-  design. It makes 2.3 fewer calls a tick (4.6 µs): the selections it takes as
-  branches, the arm's blend it skips while no wave plays, and the two
-  schedules. The other 5.8 µs is bookkeeping a framework pays and it does not.
+  the 30 functions that change a tick, at 2 µs each, the engine's path for
+  each call, and each framework's bookkeeping. #396, #409 and #257, with
+  invalidation, visit only what changed: the same nodes at nearly every tick,
+  and the same 64 checks. #396 and #409 tick the fewest nodes (37 a tick);
+  #257 also visits its graph's input and output nodes (45). #404 and #405 tick
+  51 and 48, with 69 checks. The polls are the same in every design: one node
+  tick and one call a tick on average.
+- **The bespoke reference is the cheapest,** 22.8 µs a tick under the best
+  design. It makes 3.2 fewer calls a tick (6.4 µs): the selections it takes as
+  branches, the arm's blend it skips while no wave plays, the glance away's
+  schedule, and the polls its event loop does not make. It pays no engine's
+  path (12.3 µs), and the other 4 µs is bookkeeping a framework pays and it
+  does not.
 - **The prompt.** Every design builds it once per call, four times, as the
   reference does.
-- **No build fails a check.**
+- **Every design fails one check, and only for the call contract:** the audio
+  plays on 250 ms after Sam starts speaking. The reference passes every check.
 
 ### Inspecting values
 
@@ -637,9 +722,9 @@ motion graph over the run:
 | Reference | 45% | — | — | 0% | none: no tree | nothing it names: instrument the code |
 | #396 detached nodes | 100% | 13% | 98% | 0% | kept, private | `detached_output`; `observe_detached` |
 | #409 full tree nodes | 100% | 13% | 98% | 0% | kept; each call's `detached_status` | as #396, with a status and a trace line per call |
-| #404 incremental tree | 100% | 13% | 87% | 0% | kept, private | nothing outside the tree |
-| #405 macros, placed | 100% | 13% | 92% | 9.2% | kept, private | less than #404 for placed nodes |
-| #257 BT in NG | 100% | 13% | 92% | 9.2% | the `out` port, typed `Status` | `eval_all`, `get_outputs_delta` |
+| #404 incremental tree | 100% | 13% | 86% | 0% | kept, private | nothing outside the tree |
+| #405 macros, placed | 100% | 13% | 93% | 8.6% | kept, private | less than #404 for placed nodes |
+| #257 BT in NG | 100% | 13% | 93% | 8.6% | the `out` port, typed `Status` | `eval_all`, `get_outputs_delta` |
 
 - **No design passes node values by publish and subscribe.** Each keeps them
   in a cache, a cell or a port, for the next tick to read. The store is the
@@ -668,7 +753,7 @@ motion graph over the run:
 - **#404 keeps statuses and cells, but no values of a node's own.** A leaf's
   output is the cell it is bound to, and its inputs are the cells it reads, as
   they are now (`behavior_tree.rs:1398-1406`). Those are what it ran with only
-  while the leaf is clean: an input row shows a newer value at 13% of
+  while the leaf is clean: an input row shows a newer value at 14% of
   input-ticks, and what the node ran with is gone. A cell counts versions only
   while it has readers. The dirty bit and the statuses are private
   (`incremental.rs:49-58`), and nothing reaches an observer outside the tree.
@@ -676,7 +761,7 @@ motion graph over the run:
   private port, which `observe_detached` and `detached_outputs` no longer reach
   (`docs/proposal-placing-detached-nodes.md:264-270` on #405). Unplaced nodes
   keep #396's cache, so one file has two regimes. Its groups run before the
-  tree, so at 9.2% of ticks the graph and the store hold different values of
+  tree, so at 8.6% of ticks the graph and the store hold different values of
   a key.
 - **#257 has the surface an inspector wants, and keeps no inputs.** Every port
   is typed and shaped, a control node's status is its `out` port, and the wasm
@@ -706,15 +791,16 @@ reference keeps the least.
   nodes (since, phase, modulo and two comparisons) at every tick while someone
   is there and Pip is not talking: 0.4 calls a tick. Written as one
   `@pip/motion` window with a horizon, it would run when the window opens or
-  closes, as the reference's does: 0.8 µs a tick.
-- **A lipsync function with a horizon on the playhead.** The viseme changes
-  only in its crossfades, 0.09 times a tick, but its node runs whenever the
-  playhead moves, 0.19 times: 0.2 µs a tick.
+  closes, as the reference's does: about 1 µs a tick.
 - **Selections, holds and field reads run natively.** About 5 calls a tick in
   every design only select (`if`), hold or read a field, and pay 2 µs each in
-  this model: 10 µs. Run in the executor without a module call, they would cost
-  a node tick each. The flat 2 µs a call cannot tell a selection from a blend;
-  work by kind of function is the model's next refinement.
+  this model, and the engine's path: 11.5 µs. Run in the executor without a
+  module call, they would cost a node tick each. The flat 2 µs a call cannot
+  tell a selection from a blend; work by kind of function is the model's next
+  refinement.
+- **The call contract's changes** (Arora's call contract, above): latched
+  arguments, native polls and wake on completion, 0.6 µs a tick together; a
+  halt the provider hears and a pause it is told of, which change the run.
 - **#409's comparison inside its node's tick,** as its pull request suggests:
   at most its full-node cost, 0.7 µs a tick here.
 - **#405's groups placed after the tree's body,** which removes its tick of
@@ -740,18 +826,24 @@ The speech pipeline is the part with the most room to grow. Left for later:
 
 1. **The async proposals of §10.** Each pull request's author to confirm or
    replace theirs: the reply run as a task run gated by `{reply/held}`, its
-   stages as module-call leaves, and the prompt as a node.
+   stages as module-call leaves, and the prompt as a leaf under `SEQUENCE*`.
 2. **Control timing in #257.** Only the motion's lag is modeled. Statechart
    transitions that cross ticks through latched state are not.
 3. **A Rust replay of the run,** as for the Quori workloads, to replace the
    modeled costs with measured ones.
 4. **Which of the bench's optimizations each design takes up.** Lazy
-   conditionals, time horizons, latched arguments, native polls and wake on
-   completion are the bench's proposals (§10). Some change a framework's
-   evaluator; latched arguments and native polls also change Arora's async
-   contract, with a leaf that reads its arguments once and a call that signals
-   its completion. Each pull request's author to say which their design takes.
+   conditionals and time horizons are the bench's proposals (§10), and change
+   a framework's evaluator. Each pull request's author to say which their
+   design takes.
 5. **Work by kind of function.** The flat 2 µs a call charges a selection what
    it charges a blend (§10, found, not applied). Measured costs per kind of
    function would weigh caching against recomputing for what each function
    actually costs.
+6. **The call contract.** Whether Arora's contract gains a halt a provider
+   hears, a pause, a run id or a completion signal (§10, Arora's call
+   contract). The first two change what the robot does; the others only its
+   polling.
+7. **The engine's path, measured.** The bench models a call through the
+   engine at 0.3 µs into a linked module and 1 µs into a wasm component, from
+   the code path. The behavior-tree bench of #434 runs natively and in wasm;
+   given a mode that calls through the engine, it would measure both.

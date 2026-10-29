@@ -477,6 +477,10 @@ const SCRIPT = {
   ],
 };
 const LATENCY = { rag: 1, recall: .5, prompt: .002, toolCall: 1, firstSentence: 2, lastSentence: 3, tool: 1, verdict: 1, followUps: 2, tts: 1 };
+// Arora's call contract, as its speech providers keep it (vizij-arora-tts, say-piper): a run its leaf stops polling
+// plays on for IDLE_STOP, then goes quiet and is dropped; the provider samples its playhead into the viseme code it
+// reports every VISEME_SAMPLE.
+const IDLE_STOP = 0.25, VISEME_SAMPLE = 0.015;
 const REPLIES = [
   ['run 1 (place unknown)', 'weather(here, Saturday) → {happy} “Sunny all day, twenty-four degrees!”'],
   ['run 2 (Riverside)', 'weather(Riverside, Saturday) → {happy} “Sunny at Riverside all day!” · {surprised, wave} “Oh, and you burn easily, so bring a hat!” — needs “UV index 8” and “burns easily” in the prompt, else {neutral} “Have fun!”'],
@@ -528,6 +532,20 @@ function synthesize(text) {
     if (/[mbp]/.test(tail)) push('MBP', .06, i);
   });
   return { track, length: t, words };
+}
+// The viseme code of a track at a playhead: the segment it is in.
+function codeAt(track, playhead) { let i = track.findIndex((sg) => playhead < sg.t + sg.d); if (i < 0) i = track.length - 1; return track[i].v; }
+// A viseme code followed into the mouth's shape: a 50 ms crossfade from the shape it had, from the tick the code
+// changed. Done, it holds its shape until the code changes.
+function followViseme(s, code, t) {
+  if (s.code === undefined) { s.code = code; s.t0 = -Infinity; s.out = VISEMES[code]; }
+  if (code !== s.code) { s.from = s.out; s.code = code; s.t0 = t; }
+  const x = (t - s.t0) / 0.05, to = VISEMES[code];
+  s.done = x >= 1;
+  if (s.done) return (s.out = to);
+  const u = smooth(x), out = {};
+  for (const k in VISEMES.rest) out[k] = lerp(s.from[k], to[k], u);
+  return (s.out = out);
 }
 
 const MOCK = {
@@ -825,15 +843,36 @@ class Sim {
       if (item.s.gesture) this.gesture = { name: item.s.gesture, t0: t };
     }
   }
-  pauseItem(t) { const it = this.player; it.paused = true; it.seg.t1 = t; it.seg.outcome = 'paused'; it.log.pauses.push([t, null]); }
-  resumeItem(t) { const it = this.player; it.paused = false; it.seg = this.lane('audio', it.run, t, t + (it.length - it.playhead), quote(it.text)); it.log.pauses[it.log.pauses.length - 1][1] = t; this.log(t, 'resume', quote(it.text)); }
+  // Paused, bespoke, the audio stops. Under the call contract its leaf is no longer polled, and nothing tells the
+  // provider: the audio plays on until it has seen no poll for IDLE_STOP, then the provider drops the run.
+  pauseItem(t) {
+    const it = this.player; it.paused = true; it.log.pauses.push([t, null]);
+    if (this.flags.contract) { it.quietAt = t + IDLE_STOP; it.seg.t1 = Math.min(it.seg.t1, it.quietAt); } else it.seg.t1 = t;
+    it.seg.outcome = 'paused';
+  }
+  // Resumed, bespoke, the audio carries on from where it paused. Under the call contract the leaf polls again with the
+  // same text: a run still playing carries on where the audio got to, and one dropped starts over, keyed by its text.
+  resumeItem(t) {
+    const it = this.player; it.paused = false; it.log.pauses[it.log.pauses.length - 1][1] = t;
+    const over = this.flags.contract && (t >= it.quietAt - 1e-9 || it.playhead >= it.length - 1e-9);
+    if (over) { it.playhead = 0; it.log.restarts = (it.log.restarts || 0) + 1; }
+    it.seg = this.lane('audio', it.run, t, t + (it.length - it.playhead), `${quote(it.text)}${over ? ' · from its start' : ''}`);
+    this.log(t, 'resume', `${quote(it.text)}${over ? ', from its start' : ''}`);
+  }
   stopItem(t, outcome) {
-    const it = this.player;
-    it.seg.t1 = Math.min(it.seg.t1, t); it.seg.outcome = outcome; it.log.end = t; it.log.outcome = outcome; this.player = null;
-    if (it.kind === 'filler') { const f = this.lanes.filter((r) => r.lane === 'filler' && r.run === it.run).pop(); if (f) { f.t1 = t; f.outcome = outcome; } }
+    const it = this.player, end = this.flags.contract ? t + IDLE_STOP : t;
+    it.seg.t1 = Math.min(it.seg.t1, end); it.seg.outcome = outcome; it.log.end = t; it.log.outcome = outcome; this.player = null;
+    if (this.flags.contract && !it.paused) this.tail = { it, until: end };
+    if (it.kind === 'filler') { const f = this.lanes.filter((r) => r.lane === 'filler' && r.run === it.run).pop(); if (f) { f.t1 = Math.min(f.t1, end); f.outcome = outcome; } }
   }
   stepPlayer(t) {
     const it = this.player;
+    // Under the call contract, audio nobody polls plays on until the provider takes it as halted.
+    if (this.flags.contract) {
+      const T = this.tail;
+      if (T) { if (t < T.until - 1e-9 && T.it.playhead < T.it.length) T.it.playhead += DT; else this.tail = null; }
+      if (it && it.paused && t < it.quietAt - 1e-9 && it.playhead < it.length) it.playhead += DT;
+    }
     if (!it || it.paused) return;
     // The player: the playhead moves on; has it reached the end? Bespoke, the end is a deadline in the queue.
     if (!this.flags.opt) { this.tr('polls', 1, 0, 1); this.polled.push(it.kind === 'filler' ? 'filler' : 'play'); }
@@ -979,28 +1018,43 @@ class Sim {
     const sg = tr[i], pv = tr[i - 1] || { v: 'rest' }, x = (tau - sg.t) / 0.05;
     return { sg, pv, x, u: smooth(x), next: tr[i + 1], word: sg.word >= 0 ? sg.word : (tr[i + 1] ? tr[i + 1].word : -1) };
   }
-  visemeOf(at) { const vis = {}; for (const key in VISEMES.rest) vis[key] = lerp(VISEMES[at.pv.v][key], VISEMES[at.sg.v][key], at.u); return vis; }
+  // The viseme the motion reads. Bespoke, the code at the player's playhead. Under the call contract, the speech
+  // provider's, sampled from its playhead every VISEME_SAMPLE and handed back when the play leaf polls; the tree writes
+  // rest while it does not poll.
+  visemeCode() {
+    const it = this.player;
+    if (!it || it.paused) return 'rest';
+    return codeAt(it.track, this.flags.contract ? Math.floor(it.playhead / VISEME_SAMPLE + 1e-9) * VISEME_SAMPLE : it.playhead);
+  }
   motion(t, seg) {
     const C = this.conv, tg = this.target;
     // What the statechart and the player hand the motion graph this tick: the keys a design's graph reads.
     const keys = {
       att: this.att.state, attSince: this.att.since, conv: C.state, sub: C.sub, thinkSince: this.think.enteredAt,
       active: this.emotions.map((e) => ({ name: e.name, t0: e.t0, fadeStart: e.fadeStart, fadeLen: e.fadeLen, fadeFrom: e.fadeFrom })),
-      item: this.player ? this.player.uid : 0, playhead: this.player ? this.player.playhead : 0, playing: !!this.player && !this.player.paused,
+      viseme: this.visemeCode(), playing: !!this.player && !this.player.paused,
       gStart: this.gesture ? this.gesture.t0 : null,
     };
-    const v = this.flags.opt ? this.motionBespoke(t) : this.motionPlain(t), it = this.player;
+    const v = this.flags.opt ? this.motionBespoke(t, keys) : this.motionPlain(t, keys), it = this.player;
     this.prevHead = { yaw: v.yaw, pitch: v.pitch };
+    // What is heard: the item playing, or under the call contract one its leaf stopped polling, playing on.
+    const T = this.tail, heard = it && (!it.paused || (this.flags.contract && t < it.quietAt - 1e-9 && it.playhead < it.length)) ? it : T && t < T.until - 1e-9 ? T.it : null;
     return {
+      heard: heard ? codeAt(heard.track, heard.playhead) : null,
       t, c: [v.yaw, v.pitch, v.eyesX, v.eyesY, v.lid, v.open, v.stretch, v.corners, v.arm], posture: POSE_KEYS.map((key) => v.p[key]), conv: C.state, sub: C.sub, held: !!(C.run && C.run.held), runId: C.run ? C.run.id : 0,
       att: this.att.state, emotions: this.emotions.map((e) => [e.name, this.weight(e, t)]).filter((x) => x[1] > 0.005),
       think: this.think.w, glance: v.glance, gesture: this.gesture ? this.gesture.name : '',
-      user: seg ? (seg.text || '(coughs)') : '', robot: it ? { text: it.text, word: this.trackAt(it).word, kind: it.kind, paused: it.paused, words: it.words } : null,
+      user: seg ? (seg.text || '(coughs)') : '', robot: (() => {
+        const r = it || heard;
+        if (!r) return null;
+        const note = r !== it || (it.paused && heard === it) ? 'plays on' : it.paused ? (this.flags.contract ? 'stopped' : 'paused') : '';
+        return { text: r.text, word: this.trackAt(r).word, kind: r.kind, paused: !!note && note !== 'plays on', note, words: r.words };
+      })(),
       target: { x: tg.x, y: tg.y }, eyeGaze: { x: this.eyeGaze.x, y: this.eyeGaze.y }, speechW: v.w, vis: v.vis, keys,
     };
   }
   // The plain motion: every function its branches need, at every tick.
-  motionPlain(t) {
+  motionPlain(t, keys) {
     const C = this.conv, tg = this.target, k = 1 - Math.pow(2, -DT / 0.25);
     this.head.yaw += (tg.x - this.head.yaw) * k;
     this.head.pitch += (tg.y * 0.6 - this.head.pitch) * k;
@@ -1024,7 +1078,7 @@ class Sim {
     const it = this.player, playing = !!it && !it.paused;
     this.tr('motion', it ? 12 : 8, it ? 12 : 8, 1);   // mouth: the speech weight and three blends, and with audio, the viseme at its playhead
     this.speechW = clamp(this.speechW + (playing ? 1 : -1) * DT / 0.08, 0, 1);
-    const vis = it ? this.visemeOf(this.trackAt(it)) : VISEMES.rest, w = smooth(this.speechW);
+    const vis = followViseme(this.vs || (this.vs = {}), keys.viseme, t), w = smooth(this.speechW);
     let arm = p.arm + idleA, waving = false;
     if (this.gesture) {
       const tau = t - this.gesture.t0;
@@ -1038,9 +1092,9 @@ class Sim {
   // The bespoke motion: the plain motion's values, each computed only when what it follows from changed. What the
   // script fixes ahead holds until its next change: the blinks, the wave, the emotions' fades, the thinking glance, a
   // viseme between its crossfades. A follower at its target stays put. Counted in the motion graph's units.
-  motionBespoke(t) {
+  motionBespoke(t, keys) {
     const C = this.conv, tg = this.target, k = 1 - Math.pow(2, -DT / 0.25), ke = 1 - Math.pow(2, -DT / EYE_HALF_LIFE);
-    const M = this.mc || (this.mc = { tyIn: NaN, ty: 0, conv: null, sub: null, thinking: false, tw: NaN, ts: 0, emoVer: -1, envUntil: -Infinity, ws: null, base: null, p: null, ex: NaN, eyaw: NaN, eyesX: 0, playing: null, sw: NaN, w: 0, visItem: -1, visPh: NaN, visUntil: -Infinity, vis: null, mp: null, open: 0, stretch: 0, corners: 0, blinkUntil: -Infinity, blink: 1, lidP: NaN, lidB: NaN, lid: 1 });
+    const M = this.mc || (this.mc = { tyIn: NaN, ty: 0, conv: null, sub: null, thinking: false, tw: NaN, ts: 0, emoVer: -1, envUntil: -Infinity, ws: null, base: null, p: null, ex: NaN, eyaw: NaN, eyesX: 0, playing: null, sw: NaN, w: 0, vis: null, mp: null, open: 0, stretch: 0, corners: 0, blinkUntil: -Infinity, blink: 1, lidP: NaN, lidB: NaN, lid: 1 });
     // Posture: the thinking target follows the conversation and its weight slews to it; the emotions' weights change only
     // while one fades; the blend and its six values follow what moved.
     let n = 0;
@@ -1076,20 +1130,18 @@ class Sim {
     if (this.eyeGaze.x !== M.ex || eyeHead.yaw !== M.eyaw) { M.ex = this.eyeGaze.x; M.eyaw = eyeHead.yaw; M.eyesX = clamp((this.eyeGaze.x - eyeHead.yaw) * 1.6, -1, 1); n += 3; }
     const eyesX = M.eyesX, eyesY = clamp((this.eyeGaze.y - eyeHead.pitch) * 1.6 + glance, -1, 1);
     this.tr('motion', n, n, 4);
-    // Mouth: the speech weight slews when the audio starts or stops; the viseme moves only in the 50 ms crossfade at
-    // the start of each segment of the track; the blends follow what moved.
+    // Mouth: the speech weight slews when the audio starts or stops; the viseme moves only in the 50 ms crossfade after
+    // its code changes; the blends follow what moved.
     const it = this.player, playing = !!it && !it.paused;
     n = 0;
     if (playing !== M.playing) { M.playing = playing; n++; }
     if (this.speechW !== (playing ? 1 : 0)) { this.speechW = clamp(this.speechW + (playing ? 1 : -1) * DT / 0.08, 0, 1); n++; }
     const wMoved = this.speechW !== M.sw;
     if (wMoved) { M.sw = this.speechW; M.w = smooth(this.speechW); n++; }
-    const uid = it ? it.uid : 0, ph = it ? it.playhead : 0;
+    const vs = M.vs || (M.vs = {});
     let visMoved = false;
-    if (uid !== M.visItem || (ph !== M.visPh && ph >= M.visUntil)) {
-      let vis = VISEMES.rest, until = Infinity;
-      if (it) { const at = this.trackAt(it); vis = this.visemeOf(at); until = at.x < 1 ? ph : at.next ? at.next.t : Infinity; }
-      M.visItem = uid; M.visPh = ph; M.visUntil = until; n++;
+    if (vs.code === undefined || keys.viseme !== vs.code || !vs.done) {
+      const vis = followViseme(vs, keys.viseme, t); n++;
       if (!M.vis || !same(vis, M.vis)) { M.vis = vis; visMoved = true; n += 3; }
     }
     const vis = M.vis, w = M.w;
@@ -1128,7 +1180,22 @@ function simulate(flags) {
 // ============================================================================
 // The scorecard: the spec's measures, computed from a recording.
 // ============================================================================
-function score(rec) {
+// When each viseme heard reaches the motion: from the tick the audio is in its segment to the tick the motion reads
+// its code, `lag` ticks behind for a design that reads the store a tick late. A viseme gone before it is read is missed.
+function mouthLag(rec, lag = 0) {
+  const F = rec.frames; let worst = 0, sum = 0, n = 0, missed = 0, at = null;
+  for (let i = 1; i < F.length; i++) {
+    const h = F[i].heard;
+    if (!h || h === F[i - 1].heard || !F[i].keys.playing) continue;
+    let seen = -1;
+    for (let j = i; j < F.length && F[j].heard === h; j++) if (j >= lag && F[j - lag].keys.viseme === h) { seen = j; break; }
+    if (seen < 0) { missed++; continue; }
+    const d = (seen - i) * DT; n++; sum += d;
+    if (d > worst + 1e-9) { worst = d; at = F[i].t; }
+  }
+  return { worst, mean: n ? sum / n : 0, missed, at };
+}
+function score(rec, lag = 0) {
   const items = [];
   const counts = {};
   for (const r of rec.lanes) if (r.run && /^(rag|recall|prompt|llm|tool|tts|filler)$/.test(r.lane)) { const c = (counts[r.run] = counts[r.run] || {}); c[r.lane] = (c[r.lane] || 0) + 1; }
@@ -1145,7 +1212,10 @@ function score(rec) {
   items.push({ ok: worst.lag <= DT + 1e-6, title: 'Audio pauses as Sam speaks', detail: lags.length ? `within ${Math.round(worst.lag * 1000)} ms of the voice, ${lags.length} times` : 'no cut-in during speech', at: worst.lag > DT ? worst.t : null });
   const invalidated = rec.events.filter((e) => e.kind === 'verdict' && e.text === 'invalidated').map((e) => e.t);
   const lost = rec.spoken.filter((s) => s.kind === 'sentence' && s.outcome !== 'finished' && s.outcome !== 'playing' && !invalidated.some((v) => Math.abs(v - s.end) < 1e-6));
-  items.push({ ok: !lost.length, title: 'No reply lost to a cut-in', detail: lost.length ? lost.map((s) => `${quote(s.text)} cut at ${s.end.toFixed(1)} s`).join('\n') : 'every paused sentence came back', at: lost.length ? lost[0].end : null });
+  const restarts = rec.spoken.reduce((k, s) => k + (s.restarts || 0), 0);
+  items.push({ ok: !lost.length, title: 'No reply lost to a cut-in', detail: lost.length ? lost.map((s) => `${quote(s.text)} cut at ${s.end.toFixed(1)} s`).join('\n') : `every paused sentence came back${restarts ? `, ${restarts === 1 ? 'one' : restarts} from its start` : ''}`, at: lost.length ? lost[0].end : null });
+  const lip = mouthLag(rec, lag), ms = (x) => Math.round(x * 1000);
+  items.push({ ok: ms(lip.worst) <= 45 && !lip.missed, title: 'Mouth on the audio', detail: lip.worst ? `each viseme ${ms(lip.mean)} ms after the audio on average, ${ms(lip.worst)} ms at most, under the 45 ms people notice${lip.missed ? `; ${lip.missed} never shown` : ''}` : 'each viseme at the tick the audio reaches it', at: lip.worst ? lip.at : null });
   const confirmed = rec.events.filter((e) => e.kind === 'asr' && e.cutIn).length;
   items.push({ ok: rec.judges === confirmed, title: 'One judge per confirmed cut-in', detail: `${rec.judges} judged of ${confirmed} cut-ins with words` });
   let gaze = { err: 0, t: null }, pop = { d: 0, t: null };
@@ -1195,7 +1265,7 @@ const MOTION_GROUPS = [
   ['head', 'Head', 'follows the target, with the posture’s pitch and the idle sway'],
   ['eyes', 'Eyes', 'the target, followed three times faster than the head, minus this tick’s head, and the thinking glance up'],
   ['lid', 'Lid', 'the posture’s lid times the blink clip'],
-  ['mouth', 'Mouth', 'the posture, with the viseme at the playhead blended over it'],
+  ['mouth', 'Mouth', 'the posture, with the viseme the speech provider reports blended over it'],
   ['arm', 'Arm', 'the posture and the idle sway, overridden by the wave clip'],
 ];
 const src = (id, key) => ({ id, kind: key === 'arora/time' ? 'Time' : 'Input', key, args: [], params: {}, group: 'inputs', module: '@arora/dataflow' });
@@ -1204,7 +1274,7 @@ const MOTION = [
   src('t', 'arora/time'), src('face_x', 'face/x'), src('face_y', 'face/y'),
   src('att', 'attention/state'), src('att_since', 'attention/since'),
   src('conv', 'conversation/state'), src('sub', 'conversation/sub'), src('think_since', 'thinking/since'),
-  src('active', 'emotion/active'), src('item', 'speech/item'), src('playhead', 'speech/playhead'), src('playing', 'speech/playing'),
+  src('active', 'emotion/active'), src('viseme', 'speech/viseme'), src('playing', 'speech/playing'),
   src('g_start', 'gesture/start'),
   fn('gaze', 'w_osc_x', 'Oscillator', ['@t'], { frequency: 0.37 / (2 * Math.PI), phase: 0.5 }),
   fn('gaze', 'wander_x', 'Multiply', ['@w_osc_x', 0.45]),
@@ -1264,7 +1334,7 @@ const MOTION = [
   fn('eyes', 'eyes_y', 'Clamp', ['@dy_up', -1, 1]),
   fn('lid', 'blink', 'Sample', ['@t'], { clip: 'blinks' }, '@arora/animation'),
   fn('lid', 'lid', 'Multiply', ['@p_lid', '@blink']),
-  fn('mouth', 'vis', 'Viseme', ['@item', '@playhead'], {}, '@pip/lipsync'),
+  fn('mouth', 'vis', 'Viseme', ['@viseme', '@t'], {}, '@pip/lipsync'),
   fn('mouth', 'sp_target', 'If', ['@playing', 1, 0]),
   fn('mouth', 'sp_w', 'Slew', ['@sp_target'], { max_rate: 12.5, initial: 0 }),
   fn('mouth', 'sp_s', 'Smooth', ['@sp_w'], {}, '@pip/motion'),
@@ -1318,13 +1388,6 @@ function blendPosture(env) {
   for (const k of POSE_KEYS) acc[k] = (acc[k] + n * POSTURES.neutral[k]) / d;
   return acc;
 }
-function visemeAt(item, playhead) {
-  if (!item) return VISEMES.rest;
-  const tr = item.track; let i = tr.findIndex((sg) => playhead < sg.t + sg.d); if (i < 0) i = tr.length - 1;
-  const sg = tr[i], pv = tr[i - 1] || { v: 'rest' }, u = smooth((playhead - sg.t) / 0.05), vis = {};
-  for (const k in VISEMES.rest) vis[k] = lerp(VISEMES[pv.v][k], VISEMES[sg.v][k], u);
-  return vis;
-}
 const blinkAtTime = (t) => { for (const b of BLINKS) if (t >= b && t < b + CLIPS.blink.length) return sampleKeys(CLIPS.blink.keys, t - b); return 1; };
 const FN = {
   Oscillator: ([t], p) => Math.sin(2 * Math.PI * p.frequency * t + p.phase),
@@ -1351,7 +1414,7 @@ const FN = {
     return a[2] === 0 ? a[0] : lerp(a[0], a[1], a[2]);
   },
   ReadRecord: ([r], p) => r[p.key],
-  Viseme: ([item, playhead], p, s, t, items) => visemeAt(items[item], playhead),
+  Viseme: ([code, t], p, s) => followViseme(s, code, t),
   Sample: (a, p) => {
     if (p.clip === 'blinks') return blinkAtTime(a[0]);
     const [t, start] = a; if (start === null || start === undefined) return { value: 0, weight: 0 };
@@ -1363,19 +1426,20 @@ const FN = {
 // ---- the five designs ------------------------------------------------------------
 const DESIGNS = [
   { id: 'compute', short: '#396', name: '#396 detached nodes', strategy: 'compute', lag: 0,
-    note: `The statechart is the tree. The motion graph is ${FUNCS.length} detached calls, held by no node and run only when an argument changed; nine sinks publish after the tree. The reply run is a task run the conversation spawns: its stages are module-call leaves that wait on their calls, and the prompt is a detached node the llm leaf reads.` },
+    note: `The statechart is the tree. The motion graph is ${FUNCS.length} detached calls, held by no node and run only when an argument changed; nine sinks publish after the tree. The reply run is a task run the conversation spawns: its stages are module-call leaves, polled while they wait, and the prompt is built once a call by a leaf under SEQUENCE*, for the llm leaf to send at every poll.` },
   { id: 'full', short: '#409', name: '#409 full tree nodes', strategy: 'full', lag: 0,
     note: '#396’s file and rule, with every detached call also a full tree node: a status, a trace line and the attached call path. The same calls at the same ticks; each call also pays a full node.' },
   { id: 'inc', short: '#404', name: '#404 incremental tree', strategy: 'inc', lag: 0,
-    note: 'One tree. Each motion group is a node-graph shape, PARALLEL[ leaf …, RUNNING ], its leaves on change and bound to keys, placed after the statechart. RUNNING keeps each shape running; the dirty queue ticks only the leaves whose inputs changed, and the clean ones answer from their cache. The prompt is a leaf on change.' },
+    note: 'One tree. Each motion group is a node-graph shape, PARALLEL[ leaf …, RUNNING ], its leaves on change and bound to keys, placed after the statechart. RUNNING keeps each shape running; the dirty queue ticks only the leaves whose inputs changed, and the clean ones answer from their cache. The prompt is built once a call by a leaf under SEQUENCE*, as in #396.' },
   { id: 'macro', short: '#405', name: '#405 macros, placed', strategy: 'macro', lag: 1,
     note: 'Authored as #396’s file, each motion group a macro. Every group publishes a sink, so the loader anchors it at the root: WITH[ groups …, tree ]. Clean groups answer from their cache. They run before the tree, so they read what the tree wrote last tick: what the statechart drives arrives a tick late.' },
   { id: 'control', short: '#257', name: '#257 BT in NG', strategy: 'control', lag: 1,
-    note: 'Vizij graphs: the conversation, attention and reply run as control nodes ticking actions, the motion as one graph whose nodes keep their outputs until a node they read changes and marks them. A state the control writes reaches the motion through the store at the next tick. The prompt is a lazy node under the llm action, cached by its arguments as in every design.' },
+    note: 'Vizij graphs: the conversation, attention and reply run as control nodes ticking actions, the motion as one graph whose nodes keep their outputs until a node they read changes and marks them. A state the control writes reaches the motion through the store at the next tick. The prompt is an action under sequence_with_memory, run once a call; its output port, kept, is what the llm action sends at every poll.' },
 ];
 // What each build can do better, and where the idea comes from: its own pull request, another's, or the bench.
 // Optimized, a build runs with every one of its own; each was kept only if it lowered the modeled cost (§10), but
-// invalidation on #396 and #409, kept although it costs them 0.24 µs a tick, for half their node ticks.
+// invalidation on #396 and #409, kept although it costs them 0.24 µs a tick, for half their node ticks. The last three
+// change Arora's call contract, which every design is bound by: found, not applied (CONTRACT_CHANGES).
 const OPT_INFO = {
   cacheAll: { label: 'a cache on every node', source: 'the other designs, which all cache', text: 'a node whose inputs did not change keeps its output, and so its readers find theirs unchanged' },
   invalidate: { label: 'invalidation instead of comparison', source: 'the bench, as #404’s cells do', text: 'a node that recomputes to a new value marks its readers; a tick runs only the marked nodes, and a clean one is neither visited nor compared' },
@@ -1385,25 +1449,50 @@ const OPT_INFO = {
   incTree: { label: 'the tree on #404’s executor', source: '#404, which any tree can opt into', text: 'a clean subtree of the statechart answers from its cache instead of being ticked' },
   lazy: { label: 'lazy conditionals', source: 'the bench', text: 'if, and, or, hold and a blend at weight 0 pull only the inputs their result needs: the wander is not computed while someone is there' },
   horizon: { label: 'time horizons', source: 'the bench', text: 'a clip, an envelope or the thinking glance says when its value next changes, and does not run until then' },
-  latch: { label: 'latched arguments', source: 'the bench', text: 'a waiting leaf reads its arguments once, when its call starts, so the prompt is built once a call' },
-  nativePolls: { label: 'native polls', source: 'the bench', text: 'a waiting leaf checks its call’s handle without calling its module' },
-  wake: { label: 'wake on completion', source: 'the bench', text: 'a waiting leaf stays clean until its call completes, so its branch is not ticked while it waits' },
+  latch: { label: 'latched arguments', source: 'the bench; a run id in the call (async-functions.md)', text: 'a waiting leaf sends its arguments once, when its call starts; a run id names the call after that' },
+  nativePolls: { label: 'native polls', source: 'the bench; start → handle, poll → Option (async-functions.md)', text: 'a waiting leaf checks its call’s handle without a module call' },
+  wake: { label: 'wake on completion', source: 'the bench; completion signals (#404 §5)', text: 'a provider signals its call done, so a waiting leaf stays clean and its branch is not ticked while it waits' },
 };
 const OPTIMIZATIONS = {
-  compute: ['invalidate', 'lazy', 'horizon', 'latch', 'nativePolls', 'publishChanged', 'incTree', 'subscription', 'wake'],
-  full: ['invalidate', 'lazy', 'horizon', 'latch', 'nativePolls', 'publishChanged', 'incTree', 'subscription', 'wake'],
-  inc: ['subscription', 'lazy', 'horizon', 'latch', 'nativePolls', 'wake'],
-  macro: ['subscription', 'lazy', 'horizon', 'latch', 'nativePolls', 'wake'],
-  control: ['cacheAll', 'invalidate', 'lazy', 'horizon', 'latch', 'nativePolls', 'incControl', 'subscription', 'wake'],
+  compute: ['invalidate', 'lazy', 'horizon', 'publishChanged', 'incTree', 'subscription'],
+  full: ['invalidate', 'lazy', 'horizon', 'publishChanged', 'incTree', 'subscription'],
+  inc: ['subscription', 'lazy', 'horizon'],
+  macro: ['subscription', 'lazy', 'horizon'],
+  control: ['cacheAll', 'invalidate', 'lazy', 'horizon', 'incControl', 'subscription'],
 };
+// Changes to Arora's call contract the bench found: no design can take them today.
+const CONTRACT_CHANGES = ['latch', 'nativePolls', 'wake'];
 const optionsFor = (design, optimized) => (optimized ? Object.fromEntries(OPTIMIZATIONS[design.strategy].map((k) => [k, true])) : {});
 const COST_US = { fullNode: 0.02258660410253709, hostWrite: 0.07207905131266586, tick: 0.08054631507819726, native: 0.02942999195571001, module: 0.13278202941423906, storeWrite: 0.06509534618334416, detachedCheck: 0.009512341457231909, detachedPublish: 0.03262927691013938, detachedCall: 0.1405157081974673, cacheCheck: 0.0051276265604468345, storeObserve: 0.008794477399395248, versionWrite: 0.03825155565970652 };
-const blankMetrics = () => ({ tick: 0, calls: 0, visits: 0, compares: 0, writes: 0, module: 0, native: 0, detachedEval: 0, detachedCall: 0, detachedCheck: 0, detachedPublish: 0, cacheCheck: 0, storeObserve: 0, versionWrite: 0, storeWrite: 0, fullNode: 0, hostWrite: 0, prompt: 0, poll: 0 });
+const blankMetrics = () => ({ tick: 0, calls: 0, visits: 0, compares: 0, writes: 0, module: 0, native: 0, detachedEval: 0, detachedCall: 0, detachedCheck: 0, detachedPublish: 0, cacheCheck: 0, storeObserve: 0, versionWrite: 0, storeWrite: 0, fullNode: 0, hostWrite: 0, prompt: 0, poll: 0, hostCall: 0, hostBytes: 0, wasmCall: 0, wasmBytes: 0 });
 const METRIC_KEYS = Object.keys(blankMetrics());
-// A call does CALL_US of work and a prompt build PROMPT_US; a poll that answers Running does none, and pays only its module call.
-function modeledUs(m) { let us = 0; for (const k in COST_US) us += (m[k] || 0) * COST_US[k]; return us + (m.calls - m.prompt - m.poll) * CALL_US + m.prompt * PROMPT_US; }
-const CONTROL_KEYS = ['att', 'attSince', 'conv', 'sub', 'thinkSince', 'active', 'item', 'playhead', 'playing', 'gStart'];
-const INITIAL_KEYS = { att: 'nobody', attSince: 0, conv: 'idle', sub: '', thinkSince: -10, active: [], item: 0, playhead: 0, playing: false, gStart: null };
+// Where each module runs. The runtime links arora-dataflow-nodes and the providers, which need threads, the network
+// and a speaker; the example's own modules ship as wasm components in module directories.
+const EXECUTOR = { '@arora/dataflow': 'host', '@arora/animation': 'wasm', '@pip/motion': 'wasm', '@pip/expression': 'wasm', '@pip/lipsync': 'wasm', '@pip/agent': 'host', '@pip/speech': 'host', '@pip/tools': 'host' };
+// What a call through Arora's engine adds to the executor's dispatch, which COST_US counts as measured with an
+// in-process bridge: the call encoded into an Arora Buffer and decoded by the module, each argument cloned for the
+// function, and the result encoded and decoded back; a wasm component adds the copies into and out of its memory, and
+// does its half in wasm. Modeled from the code path, not measured: no bench calls through the engine yet.
+const ENGINE_US = { host: { call: 0.3, byte: 0.0004 }, wasm: { call: 1, byte: 0.0012 } };
+// A value's size in an Arora Buffer: a tag, then the value; a string its length and UTF-8 bytes, a list or a record
+// its count and members, each field of a record named.
+function bufBytes(v) {
+  if (v === null || v === undefined) return 1;
+  if (typeof v === 'number') return 9;
+  if (typeof v === 'boolean') return 2;
+  if (typeof v === 'string') { let n = 5; for (let i = 0; i < v.length; i++) { const c = v.charCodeAt(i); n += c < 0x80 ? 1 : c < 0x800 ? 2 : 3; } return n; }
+  if (Array.isArray(v)) { let n = 5; for (const x of v) n += bufBytes(x); return n; }
+  let n = 5; for (const k in v) n += 5 + k.length + bufBytes(v[k]); return n;
+}
+// A call and its result: the function's id, a field a parameter, its id and value; a field for the status and each output.
+const callBytes = (args, ret) => 21 + args.reduce((n, a) => n + 16 + bufBytes(a), 0) + 21 + 16 + bufBytes(ret);
+function engineInto(m, module, bytes) { if (EXECUTOR[module] === 'wasm') { m.wasmCall++; m.wasmBytes += bytes; } else { m.hostCall++; m.hostBytes += bytes; } }
+const engineUs = (m) => m.hostCall * ENGINE_US.host.call + m.hostBytes * ENGINE_US.host.byte + m.wasmCall * ENGINE_US.wasm.call + m.wasmBytes * ENGINE_US.wasm.byte;
+// A call does CALL_US of work and a prompt build PROMPT_US; a poll that answers Running does none, and pays only its
+// module call and the engine's path.
+function modeledUs(m) { let us = 0; for (const k in COST_US) us += (m[k] || 0) * COST_US[k]; return us + (m.calls - m.prompt - m.poll) * CALL_US + m.prompt * PROMPT_US + engineUs(m); }
+const CONTROL_KEYS = ['att', 'attSince', 'conv', 'sub', 'thinkSince', 'active', 'viseme', 'playing', 'gStart'];
+const INITIAL_KEYS = { att: 'nobody', attSince: 0, conv: 'idle', sub: '', thinkSince: -10, active: [], viseme: 'rest', playing: false, gStart: null };
 
 // Each node's place in data order, where each of its arguments comes from (a node's place, or -1 for a literal),
 // and which of them is the clock.
@@ -1427,6 +1516,7 @@ const HORIZON = {
   Sample: (a, p, t) => (p.clip === 'blinks' ? blinkHorizon(t) : a[1] === null || a[1] === undefined ? Infinity : t < a[1] ? a[1] : t - a[1] > CLIPS.wave.length ? Infinity : t),
   ThinkGlance: (a, p, t) => { const d = t - a[1]; return d < 0 ? a[1] : d > 1.2 ? Infinity : t; },
   Envelopes: (a, p, t) => envelopeHorizon(a[0], t),
+  Viseme: (a, p, t, st) => (st.done ? Infinity : t),
 };
 // One design's run of the motion graph: strategy compute, full, inc, macro or control, with its optimizations (OPT_INFO).
 // Evaluation pulls from the sinks; a node runs at most once a tick. What each node did, by the design's rule, is its
@@ -1481,11 +1571,12 @@ class MotionGraphRun {
       } else run = !prev || differs(false);
       if (run) {
         const v = FN[n.kind](args, n.params, st, t, this.items), changed = !same(vals[n.idx], v);
+        engineInto(m, n.module, callBytes(args, v));
         if (inc) { m.visits++; m.calls++; m.module++; m.compares++; if (changed) { m.versionWrite++; m.compares += n.readers; } }
         else if (marks) { m.visits++; m.calls++; m.detachedEval++; m.detachedCall++; if (S === 'full') m.fullNode++; m.compares++; if (changed) { m.versionWrite++; m.compares += n.readers; } }
         else if (O.versions) { m.compares++; if (changed) m.versionWrite++; }
         vals[n.idx] = v; this.last[n.idx] = full; ran.add(n.idx);
-        if (horizon) this.h[n.idx] = HORIZON[n.kind](args, n.params, t);
+        if (horizon) this.h[n.idx] = HORIZON[n.kind](args, n.params, t, st);
       }
       // Kept: visited when the executor reached the node to compare its arguments or its horizon, untouched otherwise.
       act[n.idx] = run ? RAN : (detached && !marks) || (within && !marks) ? VISITED : UNTOUCHED;
@@ -1530,10 +1621,13 @@ class MotionGraphRun {
 // A waiting leaf answers Running until its work is done; latched, it reads its arguments when its call starts.
 // What each leaf reads: {store keys}, @nodes and literals. A node read is a tick: a cache hit that checks its
 // arguments (detached), one version check (versioned cells), or a run.
-const POLL_READS = { listen: ['{vad}', '{asr/words}'], judge: ['@round', '@said', '{asr/words}'], play: ['{reply/next}'], await: ['{reply/run}'], rag: ['{reply/utterance}'], recall: ['{reply/utterance}'], llm: ['@prompt'], tool: ['{reply/tool_call}'], tts: ['{reply/sentence}'], filler: [] };
+const POLL_READS = { listen: ['{vad}', '{asr/words}'], judge: ['@round', '@said', '{asr/words}'], play: ['{reply/next}'], await: ['{reply/run}'], rag: ['{reply/utterance}'], recall: ['{reply/utterance}'], llm: ['{.prompt}'], tool: ['{reply/tool_call}'], tts: ['{reply/sentence}'], filler: [] };
+// The module each wait calls.
+const POLL_MODULE = { listen: '@pip/agent', judge: '@pip/agent', play: '@pip/speech', await: '@pip/agent', rag: '@pip/agent', recall: '@pip/agent', llm: '@pip/agent', tool: '@pip/tools', tts: '@pip/speech', filler: '@pip/speech' };
 const NODE_READS = { emotion: ['{emotion/active}'], round: ['{conversation/round}'], said: ['{speech/spoken}'] };
 const SERVICES = ['rag', 'recall', 'llm', 'tool', 'tts', 'filler'];
 function readInto(m, S, r) {
+  if (r.startsWith('{.')) { m.cacheCheck++; return; }   // a tree-local cell
   if (r[0] === '{') { m.storeObserve++; m.compares++; return; }
   if (r[0] !== '@') return;
   const args = NODE_READS[r.slice(1)];
@@ -1542,27 +1636,24 @@ function readInto(m, S, r) {
   if (S === 'control') { m.calls++; m.detachedCall++; for (const a of args) readInto(m, S, a); }
   else { m.compares += args.length; m.detachedCheck += args.length; }
 }
-function readsInto(m, S, leaf) { for (const r of POLL_READS[leaf]) if (r !== '@prompt') readInto(m, S, r); }
-function pollInto(m, S, leaf) { m.visits++; m.calls++; m.module++; m.poll++; readsInto(m, S, leaf); }
+function readsInto(m, S, leaf) { for (const r of POLL_READS[leaf]) readInto(m, S, r); }
+// A poll: the leaf ticked, a module call through the engine with its arguments, and what it reads to send them.
+function pollInto(m, S, w) { m.visits++; m.calls++; m.module++; m.poll++; engineInto(m, POLL_MODULE[w.leaf], w.bytes); readsInto(m, S, w.leaf); }
 // One wait at one tick. Latched, a leaf reads its arguments when its call starts. With native polls the call starts
 // with a module call and its result comes back with another; in between the leaf checks the call's handle, or with
 // wake on completion, is not ticked at all.
 function waitInto(m, S, w, opt) {
-  if (!opt.latch && !opt.nativePolls) return pollInto(m, S, w.leaf);
-  if (!opt.nativePolls) { m.visits++; m.calls++; m.module++; m.poll++; if (w.start) readsInto(m, S, w.leaf); return; }
-  if (w.start || w.end) { m.visits++; m.calls++; m.module++; }
+  if (!opt.latch && !opt.nativePolls) return pollInto(m, S, w);
+  if (!opt.nativePolls) { m.visits++; m.calls++; m.module++; m.poll++; engineInto(m, POLL_MODULE[w.leaf], w.start ? w.bytes : 64); if (w.start) readsInto(m, S, w.leaf); return; }
+  if (w.start || w.end) { m.visits++; m.calls++; m.module++; engineInto(m, POLL_MODULE[w.leaf], w.bytes); }
   else if (!opt.wake) { m.visits++; m.compares++; }
   if (w.start || !opt.latch) readsInto(m, S, w.leaf);
 }
-// The prompt, read by the llm. Every design caches it, a basic measure: it compares its eight arguments, the nodes
-// among them read first, and builds only when one changed.
-function promptInto(m, S, changed) {
-  if (S === 'inc' || S === 'macro') { m.cacheCheck++; if (changed) { m.visits++; m.calls++; m.module++; m.prompt++; } return; }
-  m.visits++; m.detachedEval++;
-  for (const a of PROMPT_ARGS) if (a[0] === '@') readInto(m, S, a);
-  if (!changed) { m.compares += PROMPT_ARGS.length; m.detachedCheck += PROMPT_ARGS.length; return; }
-  m.compares++; m.detachedCheck++; m.calls++; m.detachedCall++; m.prompt++;
-  if (S === 'full') m.fullNode++;
+// The prompt: a leaf under SEQUENCE*, run once when an llm call starts. It reads its eight arguments and builds.
+function promptInto(m, S, bytes) {
+  m.visits++; m.calls++; m.module++; m.prompt++;
+  engineInto(m, '@pip/agent', bytes);
+  for (const a of PROMPT_ARGS) readInto(m, S, a);
 }
 // How a design reads the nodes under a poll: #257 runs them again, unless every node has a cache.
 const readRule = (design, opt) => (design.strategy === 'control' && (opt.cacheAll || opt.invalidate) ? 'compute' : design.strategy);
@@ -1601,11 +1692,33 @@ function controlContext(base) {
     if (i1 >= i0) { starts[i0].add(`${r.run}:${r.lane}`); ends[i1].add(`${r.run}:${r.lane}`); }
   }
   const trees = base.frames.map((f, i) => {
-    const laneOn = (lane) => laneAt[i].has(`${f.runId}:${lane}`);
-    return { conversation: treeStatus('conversation', f, laneOn), attention: treeStatus('attention', f, laneOn), reply: treeStatus('reply', f, laneOn) };
+    const laneOn = (lane) => laneAt[i].has(`${f.runId}:${lane}`), startOn = (lane) => starts[i].has(`${f.runId}:${lane}`);
+    return { conversation: treeStatus('conversation', f, laneOn, startOn), attention: treeStatus('attention', f, laneOn, startOn), reply: treeStatus('reply', f, laneOn, startOn) };
   });
   const convLeaf = trees.map((T) => { for (const [uid, s] of T.conversation) { const node = TREE_NODE.get(uid); if (node.k === 'action' && s === 'R') return node.fn.split('.').pop(); } return null; });
-  return (base.ctx = { laneAt, prompt, starts, ends, trees, convLeaf });
+  // What the tts and tool calls in flight carry, from their lanes.
+  const ttsText = new Array(n).fill(''), toolText = new Array(n).fill('');
+  for (const r of base.lanes) {
+    if (r.lane !== 'tts' && r.lane !== 'tool') continue;
+    const [i0, i1] = laneTicks(r, n);
+    for (let i = i0; i <= i1; i++) (r.lane === 'tts' ? ttsText : toolText)[i] = r.label;
+  }
+  return (base.ctx = { laneAt, prompt, starts, ends, trees, convLeaf, ttsText, toolText, runs: new Map(base.runs.map((r) => [r.id, r])) });
+}
+// What a wait's call carries at tick i, sent again at every poll, and what it answers with: Running, and for the play
+// leaf the viseme and the speech it reports.
+function sendBytes(ctx, f, i, leaf) {
+  const run = ctx.runs.get(f.runId), said = f.robot ? f.robot.text : '';
+  switch (leaf) {
+    case 'llm': { const p = ctx.prompt[i], built = p && run && run.prompts.filter((x) => x.kind === `prompt ${p.round}`)[0]; return callBytes([built ? built.text : ''], 'Running'); }
+    case 'judge': { const j = run && run.prompts.filter((x) => x.kind === 'judge' && x.at <= f.t + 1e-9).pop(); return callBytes([j ? j.text : ''], 'Running'); }
+    case 'rag': case 'recall': return callBytes([run ? run.utterance : ''], 'Running');
+    case 'tts': return callBytes([ctx.ttsText[i]], 'Running');
+    case 'tool': return callBytes([ctx.toolText[i]], 'Running');
+    case 'play': case 'filler': return callBytes([said, 'Ruth'], { viseme: f.keys.viseme, speech: said });
+    case 'listen': return callBytes([true, f.user], 'Running');
+    default: return callBytes([f.runId], 'Running');
+  }
 }
 const TREE_PARTS = ['conversation', 'attention', 'reply'];
 // Today's executor ticks every node a tick reaches; an action's tick is its poll.
@@ -1649,6 +1762,7 @@ function waitsAt(ctx, f, i) {
   if (leaf) waits.push({ leaf, start: ctx.convLeaf[i - 1] !== leaf, end: ctx.convLeaf[i + 1] !== leaf });
   for (const lane of SERVICES) if (ctx.laneAt[i].has(key(lane))) waits.push({ leaf: lane, start: ctx.starts[i].has(key(lane)), end: ctx.ends[i].has(key(lane)) });
   if (ctx.laneAt[i].has(key('judge')) && f.conv !== 'judging') waits.push({ leaf: 'judge', start: false, end: ctx.ends[i].has(key('judge')) });
+  for (const w of waits) w.bytes = sendBytes(ctx, f, i, w.leaf);
   return waits;
 }
 // Idle, the conversation's RUNNING leaf, which waits for Sam's voice.
@@ -1675,8 +1789,8 @@ function controlWork(design, opt0, f, prevKeys, ctx, i) {
   // Idle is re-ticked at every tick, unless it is clean on #404’s executor with wake.
   if (!ctx.convLeaf[i]) { const idle = idleOf(T); if (idle && !(opt.wake && P && P.conversation.get(idle[0]) === 'R')) polled.push('idle'); }
   if (opt.wake && waits.length) sc.cacheCheck++;   // the executor's queue of completed calls
-  // The prompt, read by the llm: at every poll, or latched, when its call starts.
-  if (laneOn('llm') && (!opt.latch || ctx.starts[i].has(key('llm')))) promptInto(prompt, R, opt.latch || ctx.prompt[i].changed);
+  // The prompt, built by its leaf when an llm call starts: its eight arguments in, the prompt out.
+  if (ctx.starts[i].has(key('llm'))) { const w = waits.find((x) => x.leaf === 'llm'); promptInto(prompt, R, w ? 2 * w.bytes : 0); }
   const changed = prevKeys ? CONTROL_KEYS.filter((k) => !same(prevKeys[k], f.keys[k])).length : CONTROL_KEYS.length;
   sc.storeWrite += changed; sc.writes += changed;
   if (incremental) { const k = opt.subscription ? changedReads(T, P) : 6; sc.storeObserve += k; sc.compares += k; }
@@ -1686,7 +1800,7 @@ const workOf = (m) => ({ ticks: m.visits, execs: m.calls, checks: m.compares + m
 // The store keys the motion graph reads at tick i, as the statechart left them `lag` ticks before.
 function motionInput(frames, i, lag = 0) {
   const k = lag ? (i >= lag ? frames[i - lag].keys : INITIAL_KEYS) : frames[i].keys, face = faceAt(frames[i].t);
-  return { 'face/x': face.x, 'face/y': face.y, 'attention/state': k.att, 'attention/since': k.attSince, 'conversation/state': k.conv, 'conversation/sub': k.sub, 'thinking/since': k.thinkSince, 'emotion/active': k.active, 'speech/item': k.item, 'speech/playhead': k.playhead, 'speech/playing': k.playing, 'gesture/start': k.gStart };
+  return { 'face/x': face.x, 'face/y': face.y, 'attention/state': k.att, 'attention/since': k.attSince, 'conversation/state': k.conv, 'conversation/sub': k.sub, 'thinking/since': k.thinkSince, 'emotion/active': k.active, 'speech/viseme': k.viseme, 'speech/playing': k.playing, 'gesture/start': k.gStart };
 }
 // A design's run of the whole script, with its optimizations (true) or the options given.
 function designRecording(design, base, optimized = false) {
@@ -1727,42 +1841,46 @@ function probeOf(rec) {
   probes.set(rec, probe);
   return probe;
 }
-// One second waiting on the llm, the prompt unchanged. The reference's event loop checks one queue for every wait;
-// a design's waiting leaf costs what its options allow.
-function llmSecond(design, opt0 = {}) {
+// One second waiting on the llm, sending a prompt of `bytes`. The reference's event loop checks one queue for every
+// wait; a design's waiting leaf is polled at every tick, unless its options change the call contract.
+// What an llm poll sends, on average over the run: the prompt, and the call around it.
+function llmBytes(rec) {
+  const ctx = controlContext(rec); let sum = 0, k = 0;
+  rec.frames.forEach((f, i) => { if (ctx.prompt[i]) { sum += sendBytes(ctx, f, i, 'llm'); k++; } });
+  return k ? sum / k : 0;
+}
+function llmSecond(design, opt0 = {}, bytes = 0) {
   const n = Math.round(1 / DT);
   if (!design) return { ticks: opt0.bespoke ? 0 : n, execs: 0, checks: n, builds: 0, us: 0 };
   const opt = incrementalTree(design, opt0) ? opt0 : { ...opt0, wake: false }, m = blankMetrics(), R = readRule(design, opt);
-  waitInto(m, R, { leaf: 'llm', start: false, end: false }, opt);
-  if (!opt.latch) promptInto(m, R, false);
+  waitInto(m, R, { leaf: 'llm', start: false, end: false, bytes }, opt);
   if (opt.wake) m.cacheCheck++;
   for (const k in m) m[k] *= n;
   m.native = Math.max(0, m.visits - m.module - m.detachedEval);
   return { ...workOf(m), builds: m.prompt, us: modeledUs(m) };
 }
-function bestLag(rec, ref, channel, during) {
-  let best = { k: 0, err: Infinity };
-  for (let k = 0; k <= 3; k++) {
-    let err = 0;
-    for (let i = k; i < rec.frames.length; i++) if (!during || during(ref.frames[i])) err = Math.max(err, Math.abs(rec.frames[i].c[channel] - ref.frames[i - k].c[channel]));
-    if (err < best.err - 1e-12) best = { k, err };
-  }
-  return best;
+// What Arora's call contract changes in the run every design replays, against the bespoke reference's.
+function contractEffect(base, ideal) {
+  const pauses = base.spoken.reduce((k, s) => k + s.pauses.length, 0), restarts = base.spoken.reduce((k, s) => k + (s.restarts || 0), 0);
+  const lastAudio = (rec) => Math.max(...rec.lanes.filter((r) => r.lane === 'audio').map((r) => r.t1));
+  const later = lastAudio(base) - lastAudio(ideal), ms = Math.round(IDLE_STOP * 1000);
+  return `a held sentence plays on ${ms} ms, ${pauses === 1 ? 'once' : `${pauses} times`}, since nothing tells the provider; held longer, it is dropped and starts over when handed back, ${restarts === 1 ? 'once' : `${restarts} times`}; the reply ends ${later.toFixed(2)} s after the reference’s; the provider reports its viseme sampled every ${Math.round(VISEME_SAMPLE * 1000)} ms`;
 }
-function designScore(rec, ref) {
-  const items = score(rec);
+// A design against the run it replays, the reference's under the call contract, and what the contract changes.
+function designScore(rec, base, ideal) {
+  const items = score(rec, rec.design.lag);
   let diff = 0, at = null;
-  for (let i = 0; i < rec.frames.length; i++) for (let j = 0; j < CHANNELS.length; j++) { const d = Math.abs(rec.frames[i].c[j] - ref.frames[i].c[j]); if (d > diff) { diff = d; at = rec.frames[i].t; } }
-  const speaking = (f) => f.speechW > 0.99, lip = bestLag(rec, ref, 5, speaking), ms = Math.round(lip.k * DT * 1000);
+  for (let i = 0; i < rec.frames.length; i++) for (let j = 0; j < CHANNELS.length; j++) { const d = Math.abs(rec.frames[i].c[j] - base.frames[i].c[j]); if (d > diff) { diff = d; at = rec.frames[i].t; } }
   items.unshift(
-    { ok: null, title: 'Against the reference', detail: diff < 1e-9 ? 'the same nine channels at every tick' : `largest difference ${diff.toFixed(3)}; what the statechart drives arrives ${rec.design.lag} tick late`, at: diff < 1e-9 ? null : at },
-    { ok: ms <= 45, title: 'Mouth on the audio', detail: ms ? `${ms} ms behind the playhead, under the 45 ms people notice` : 'on the playhead at every tick' },
+    { ok: null, title: 'Against the reference, under the call contract', detail: diff < 1e-9 ? 'the same nine channels at every tick' : `largest difference ${diff.toFixed(3)}; what the statechart drives arrives ${rec.design.lag} tick late`, at: diff < 1e-9 ? null : at },
+    { ok: null, title: 'Arora’s call contract', detail: contractEffect(base, ideal) },
   );
   return items;
 }
 
 // ---- the statechart and the reply run, as trees -------------------------------------
 const T = (k, label, children = [], extra = {}) => ({ k, label, children, ...extra });
+const PROMPT_ARGS = ['persona', 'tools', '@emotion', '{reply/memories}', '{reply/docs}', '{reply/tool_results}', '@round', '{reply/utterance}'];
 const TREES = {
   conversation: T('fallback', 'conversation', [
     T('seq', 'listen', [
@@ -1806,7 +1924,10 @@ const TREES = {
         T('action', 'recall', [], { fn: '@pip/agent.recall', args: ['{reply/utterance}'], out: 'reply/memories', lane: 'recall' }),
       ]),
       T('repeat', 'until it answers, at most two tool rounds', [
-        T('action', 'llm', [], { fn: '@pip/agent.llm', args: ['@prompt'], out: 'reply/answer', lane: 'llm', prompt: true }),
+        T('seqstar', 'ask once', [
+          T('action', 'build the prompt', [], { fn: '@pip/agent.prompt', args: PROMPT_ARGS, out: '.prompt', builds: true, note: 'runs once a call: SEQUENCE* resumes the llm past it' }),
+          T('action', 'llm', [], { fn: '@pip/agent.llm', args: ['{.prompt}'], out: 'reply/answer', lane: 'llm', prompt: true, note: 'polled at every tick, the prompt sent again; the provider keys its run by it' }),
+        ]),
         T('parallel', 'a tool call', [
           T('action', 'tool', [], { fn: '@pip/tools.call', args: ['{reply/tool_call}'], out: 'reply/tool_results', lane: 'tool' }),
           T('action', 'filler', [], { fn: '@pip/speech.play', args: ['“Let me check.”'], lane: 'filler' }),
@@ -1819,7 +1940,6 @@ const TREES = {
     ]),
   ]),
 };
-const PROMPT_ARGS = ['persona', 'tools', '@emotion', '{reply/memories}', '{reply/docs}', '{reply/tool_results}', '@round', '{reply/utterance}'];
 let treeIds = 0;
 const TREE_NODE = new Map();
 for (const root of [TREES.conversation, TREES.attention, TREES.reply]) (function number(n) { n.uid = ++treeIds; TREE_NODE.set(n.uid, n); n.children.forEach(number); })(root);
@@ -1827,7 +1947,7 @@ for (const root of [TREES.conversation, TREES.attention, TREES.reply]) (function
 const TREE_NAMES = {
   conversation: ['conversation', 'listen_branch', 'is_listening', 'listen', 'judge_branch', 'is_judging', 'judge', 'reply_branch', 'has_reply_run', 'speak_or_think', 'speak_branch', 'is_audio_ready', 'play', 'think_branch', 'show_thinking', 'await_sentence', 'idle'],
   attention: ['attention', 'someone_there', 'is_face_visible', 'set_present', 'cooldown', 'was_seen_lately', 'set_lost', 'set_nobody'],
-  reply: ['reply_run', 'turn', 'context', 'rag', 'recall', 'answer_loop', 'llm', 'tool_round', 'tool', 'filler', 'each_sentence', 'tts', 'remember'],
+  reply: ['reply_run', 'turn', 'context', 'rag', 'recall', 'answer_loop', 'ask', 'prompt', 'llm', 'tool_round', 'tool', 'filler', 'each_sentence', 'tts', 'remember'],
 };
 for (const [part, names] of Object.entries(TREE_NAMES)) {
   const nodes = []; (function list(n) { nodes.push(n); n.children.forEach(list); })(TREES[part]);
@@ -1838,16 +1958,22 @@ for (const [part, names] of Object.entries(TREE_NAMES)) {
 const POLL_UID = {};
 (function walk(n) { if (n.k === 'action') POLL_UID[n.fn.split('.').pop()] = n.uid; if (n.k === 'running') POLL_UID.idle = n.uid; n.children.forEach(walk); })(TREES.conversation);
 (function walk(n) { if (n.k === 'action' && n.lane) POLL_UID[n.lane] = n.uid; n.children.forEach(walk); })(TREES.reply);
-// One tick of a part: each node's status, or none when the tick does not reach it.
-function treeStatus(part, f, laneOn) {
+// One tick of a part: each node's status, or none when the tick does not reach it. A SEQUENCE* resumes a child still
+// running from the last tick, past the children that succeeded; startOn says whether a call starts this tick.
+function treeStatus(part, f, laneOn, startOn = () => true) {
   const out = new Map();
   const tick = (n) => {
     let s;
     switch (n.k) {
       case 'check': s = n.cond(f) ? 'S' : 'F'; break;
       case 'set': case 'running': s = n.k === 'set' ? 'S' : 'R'; break;
-      case 'action': s = n.lane ? (laneOn(n.lane) ? 'R' : 'S') : 'R'; break;
+      case 'action': s = n.lane ? (laneOn(n.lane) ? 'R' : 'S') : n.builds ? 'S' : 'R'; break;
       case 'seq': s = 'S'; for (const c of n.children) { const cs = tick(c); if (cs !== 'S') { s = cs; break; } } break;
+      case 'seqstar': {
+        const k = Math.max(0, n.children.findIndex((c) => c.lane && laneOn(c.lane) && !startOn(c.lane)));
+        s = 'S'; for (const c of n.children.slice(k)) { const cs = tick(c); if (cs !== 'S') { s = cs; break; } }
+        break;
+      }
       case 'fallback': s = 'F'; for (const c of n.children) { const cs = tick(c); if (cs !== 'F') { s = cs; break; } } break;
       default: { const ss = n.children.map(tick); s = ss.includes('R') ? 'R' : ss.includes('F') ? 'F' : 'S'; }
     }
@@ -1910,12 +2036,12 @@ function chainHead(part, chain, style, pad) {
   if (chain.earlier.length) lines.push(`${pad}// also reads ${chain.earlier.map(ref).join(', ')}, listed above`);
   return lines;
 }
-const treeGlyph = { fallback: 'FALLBACK', seq: 'SEQUENCE', parallel: 'PARALLEL', repeat: 'REPEAT', foreach: 'FOR EACH', taskrun: 'TASK RUN' };
+const treeGlyph = { fallback: 'FALLBACK', seq: 'SEQUENCE', seqstar: 'SEQUENCE*', parallel: 'PARALLEL', repeat: 'REPEAT', foreach: 'FOR EACH', taskrun: 'TASK RUN' };
 // Commentary in a form is a // comment, so it never reads as part of the file.
 const cmt = (text) => (text ? `   // ${text}` : '');
 // A node's label, as a comment, when its name does not already say it.
 const said = (n) => (n.label && !n.name.replace(/_/g, ' ').includes(n.label.replace(/\?$/, '')) ? n.label : '');
-function treeLines(node, opts = {}, pad = '') {
+function treeLines(node, pad = '') {
   const out = [];
   const walk = (n, p) => {
     const head = `${p}${n.name}: `;
@@ -1923,11 +2049,8 @@ function treeLines(node, opts = {}, pad = '') {
     if (n.k === 'check') line = `${head}Truthy({${n.key}})${cmt(said(n))}`;
     else if (n.k === 'set') line = `${head}{${n.key}} = ${n.value ? `"${n.value}"` : '…'}${cmt(said(n))}`;
     else if (n.k === 'running') line = `${head}RUNNING${cmt(said(n))}`;
-    else if (n.k === 'action') {
-      const args = n.args.map((a) => (a === '@prompt' && opts.prompt ? opts.prompt : a)).join(', ');
-      line = `${head}${n.out ? `{${n.out}} = ` : ''}${fnText(n.fn)}(${args})${cmt(n.note)}`;
-      if (n.prompt && opts.beforeLlm) out.push({ uid: n.uid, text: `${p}${opts.beforeLlm}` });
-    } else line = `${head}${treeGlyph[n.k]}${cmt(said(n))}`;
+    else if (n.k === 'action') line = `${head}${n.out ? `{${n.out}} = ` : ''}${fnText(n.fn)}(${n.args.join(', ')})${cmt(n.note)}`;
+    else line = `${head}${treeGlyph[n.k]}${cmt(said(n))}`;
     out.push({ uid: n.uid, text: line });
     n.children.forEach((c) => walk(c, p + '  '));
   };
@@ -2010,15 +2133,16 @@ function storedLines(design, part, opt = {}) {
     push(`// graph ${part} · control nodes tick what is wired into their child_0, child_1, … inputs, in order`);
     push('// a call is an action node; actions and their inputs are lazy');
     push(`// ${VIZIJ_NESTED}`);
-    const kinds = { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'repeat', foreach: 'for_each', taskrun: 'sequence' };
+    const kinds = { fallback: 'fallback', seq: 'sequence', seqstar: 'sequence_with_memory', parallel: 'parallel', repeat: 'repeat', foreach: 'for_each', taskrun: 'sequence' };
     const walk = (n, pad) => {
       const lazy = (text) => cmt([text, 'lazy'].filter(Boolean).join(' · '));
-      const line = n.k === 'action' ? `${n.out ? `{${n.out}} = ` : ''}${fnText(n.fn)}(${n.args.join(', ')})${lazy(n.note)}`
+      // A graph has no tree-local cells: the prompt is the prompt action's output port, wired into the llm action.
+      const args = n.k === 'action' ? n.args.map((a) => (a === '{.prompt}' ? '@prompt' : a)).join(', ') : '';
+      const line = n.k === 'action' ? `${n.out && !n.builds ? `{${n.out}} = ` : ''}${fnText(n.fn)}(${args})${n.builds ? cmt('runs once a call: sequence_with_memory resumes the llm past it; its output port, kept, is what llm sends') : lazy(n.note)}`
         : n.k === 'check' ? `condition({${n.key}})${lazy(said(n))}`
         : n.k === 'set' ? `{${n.key}} = output(${n.value ? `"${n.value}"` : '…'})${cmt(said(n))}`
         : n.k === 'running' ? `constant(Running)${cmt(said(n))}` : `${kinds[n.k]}${cmt(said(n))}`;
       push(`${pad}${n.name}: ${line}`, n.uid);
-      if (n.prompt) push(`${pad}  prompt: ${PROMPT_CALL}${cmt('lazy, with an argument cache: it runs when its arguments change')}`, 'prompt');
       n.children.forEach((c) => walk(c, pad + '  '));
     };
     walk(tree, '');
@@ -2026,23 +2150,8 @@ function storedLines(design, part, opt = {}) {
   }
   const head = { conversation: 'Conversation, a subtree under the root PARALLEL', attention: 'Attention, a subtree under the root PARALLEL', reply: 'ReplyRun, a task run the conversation spawns; it outlives its branch, and {reply/held} gates what it shows' }[part];
   push(`// tree, held from its root · ${head}`);
-  if (part === 'reply' && S === 'inc') {
-    treeLines(tree, { prompt: '{.prompt}', beforeLlm: `prompt: {.prompt} = ${PROMPT_CALL}   _on_change` }).forEach((l) => push(l.text, l.uid));
-  } else if (part === 'reply' && S === 'macro') {
-    treeLines(tree, { prompt: '#prompt' }).forEach((l) => push(l.text, l.uid));
-    push('');
-    push('// authored · macro #prompt, read by llm');
-    push(`prompt: ${PROMPT_CALL}`, 'prompt');
-    push('// executed · placed before its reader: WITH[ PARALLEL[ {.prompt} on change ], llm ]', 'prompt');
-  } else {
-    treeLines(tree).forEach((l) => push(l.text, l.uid));
-    if (part === 'reply') {
-      push('');
-      push(`// detached nodes: listed after the tree, held by no node${S === 'full' ? '; each is also a full tree node, with a status' : ''}`);
-      push(`prompt: ${PROMPT_CALL}${cmt('read by llm; runs only when its arguments changed')}`, 'prompt');
-    }
-  }
-  if (S === 'inc' && part !== 'reply') push('// a clean branch answers from its cache; a waiting leaf stays clean until its call completes');
+  treeLines(tree).forEach((l) => push(l.text, l.uid));
+  if (S === 'inc' && part !== 'reply') push('// a clean branch answers from its cache; a Running leaf is dirty, and polled, at every tick');
   return out;
 }
 // The whole motion graph in one drawing: every function, the store keys it reads, the channels it writes.
@@ -2086,18 +2195,17 @@ function graphModel(design, part, opt = {}) {
   }
   const nodes = [], edges = [];
   const label = (n) => (n.k === 'action' ? n.fn.split('.').pop() : n.label);
-  const kindOf = (n) => (S === 'control' ? { fallback: 'fallback', seq: 'sequence', parallel: 'parallel', repeat: 'repeat', foreach: 'for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'running', action: 'action' }[n.k] : { fallback: '? fallback', seq: '→ sequence', parallel: '⇉ parallel', repeat: '↻ repeat', foreach: '↻ for each', taskrun: '▶ task run', check: '◇ check', set: '= set', running: '… running', action: '▢ action' }[n.k]);
+  const kindOf = (n) => (S === 'control' ? { fallback: 'fallback', seq: 'sequence', seqstar: 'sequence_with_memory', parallel: 'parallel', repeat: 'repeat', foreach: 'for_each', taskrun: 'sequence', check: 'condition', set: 'output', running: 'running', action: 'action' }[n.k] : { fallback: '? fallback', seq: '→ sequence', seqstar: '→* sequence*', parallel: '⇉ parallel', repeat: '↻ repeat', foreach: '↻ for each', taskrun: '▶ task run', check: '◇ check', set: '= set', running: '… running', action: '▢ action' }[n.k]);
   const walk = (n, parent, k) => {
     nodes.push({ id: n.uid, kind: kindOf(n), label: label(n), tree: n });
     if (parent) edges.push({ from: parent.uid, to: n.uid, label: S === 'control' ? `child_${k}` : '' });
     n.children.forEach((c, i) => walk(c, n, i));
   };
   walk(TREES[part], null, 0);
+  // The prompt the builder leaves for the llm, which sends it at every poll.
   if (part === 'reply') {
-    const llm = nodes.find((x) => x.tree && x.tree.prompt);
-    const kind = S === 'inc' ? 'leaf, on change' : S === 'macro' ? 'macro, placed' : S === 'control' ? 'lazy node, cached' : S === 'reference' ? 'function' : 'detached node';
-    nodes.push({ id: 'prompt', kind, label: 'prompt', port: false, data: true, attach: llm.id });
-    edges.push({ from: 'prompt', to: llm.id, data: true, label: S === 'reference' ? 'once per call' : 'on change' });
+    const builder = nodes.find((x) => x.tree && x.tree.builds), llm = nodes.find((x) => x.tree && x.tree.prompt);
+    edges.push({ from: builder.id, to: llm.id, data: true, label: S === 'control' ? '@prompt' : S === 'reference' ? 'prompt' : '{.prompt}' });
   }
   return { kind: 'tree', nodes, edges, box: S === 'control' ? `graph ${part}` : part === 'reply' ? 'task run' : 'subtree' };
 }
@@ -2107,7 +2215,7 @@ function graphModel(design, part, opt = {}) {
 // 6 an input shown as its source holds it now, newer than what the node ran with, which nothing kept, and 7 an input
 // shown as the node ran with it, older than what feeds it now.
 const NONE = 0, FRESH = 1, KEPT = 2, STALE = 3, LATE = 4, LITERAL = 5, NEWER = 6, OLDER = 7;
-const ENUM_OF = { 'attention/state': ['nobody', 'present', 'engaged', 'lost'], 'conversation/state': ['idle', 'listening', 'judging', 'thinking', 'speaking'], 'conversation/sub': ['', 'pondering', 'preparing'] };
+const ENUM_OF = { 'attention/state': ['nobody', 'present', 'engaged', 'lost'], 'conversation/state': ['idle', 'listening', 'judging', 'thinking', 'speaking'], 'conversation/sub': ['', 'pondering', 'preparing'], 'speech/viseme': ['rest', 'MBP', 'AA', 'EE', 'OO'] };
 const STATUS_NAMES = ['Success', 'Failure', 'Running'], STATUS_OF = { S: 'Success', F: 'Failure', R: 'Running' };
 const EMOTION_NAMES = ['neutral', 'happy', 'sad', 'surprised'];
 // A value's type, for the inspector and the watch plot's scales: a state from the key it comes from, else from the value.
@@ -2150,8 +2258,8 @@ function keySeries(rec, value) {
   for (let i = 0; i < n; i++) { v[i] = value(rec.frames[i]); st[i] = i && v[i] !== v[i - 1] ? FRESH : KEPT; }
   return { v, st };
 }
-// The prompt: built when an llm call starts (its arguments latched), then held by its cache while the call runs, and
-// stale once no call reads it; the emotion it was built with, and the emotion now.
+// The prompt: built by its leaf when an llm call starts, kept while the call runs and sent at every poll, and stale
+// once no call reads it; the emotion written in it, and the emotion now.
 function promptSeries(rec, which) {
   const ctx = controlContext(rec), n = rec.frames.length, v = new Array(n), st = new Uint8Array(n);
   let text, emo;
@@ -2242,23 +2350,28 @@ function inspectNode(rec, sel) {
     const n = NODE.get(sel.id);
     return { name: n.id, kind: n.group === 'inputs' ? `store key {${n.key}}` : `${fname(n)} · ${n.group}`, where: motionWhere(S, n, rec), ports: motionPorts(rec, n) };
   }
-  if (sel.kind === 'prompt') {
+  const t = TREE_NODE.get(sel.id), ports = [], promptName = S === 'control' ? '@prompt' : S === 'reference' ? 'prompt' : '{.prompt}';
+  if (t.builds) {
+    // The prompt is built once a call and kept for the llm, which sends it at every poll: a prompt that changed while
+    // the llm waits would be another call to its provider, which keys its runs by their arguments.
     const where = {
       reference: 'The reference builds the prompt in its code when an llm call starts, and logs it: the log, and the emotion written in it, are what a debugger sees.',
-      compute: 'A detached node: its cache holds the prompt and the arguments it was built with, read once when an llm call starts, until the next call.',
-      full: 'As #396: its cache holds the prompt and the arguments it was built with; as a tree node it also has a status.',
-      inc: 'A leaf on change, bound to {.prompt}: the cell holds the prompt, and the llm leaf latches it when its call starts. The leaf keeps versions of what it reads, not values: what it was built with is gone once the emotion moves on.',
-      macro: 'Placed before the llm: a leaf on change with a private port, as in #404. It keeps no arguments: what it was built with is gone once the emotion moves on.',
-      control: 'A lazy node under the llm action: its output port holds the prompt, and the bench’s argument cache, which every build here has, keeps the arguments it was built with. #257’s code keeps no inputs.',
+      compute: 'A leaf under SEQUENCE*, run once when an llm call starts: {.prompt} keeps what it built, which the llm leaf sends at every poll. The cell keeps the text, not the arguments; the emotion it was built with is the one written in it.',
+      full: 'As #396: a leaf under SEQUENCE*, run once a call, and {.prompt} keeps what it built; as every call here, it is also a full tree node, with a status.',
+      inc: 'As #396: a leaf under SEQUENCE*, run once a call; {.prompt} keeps what it built, and its version, for the llm leaf, which sends it at every poll.',
+      macro: 'As #404: a leaf under SEQUENCE*, run once a call, and {.prompt} keeps what it built. It is a tree leaf, not a macro: placed before its reader, a macro would build again whenever the emotion moved.',
+      control: 'An action under sequence_with_memory, run once a call: its output port, kept by the bench’s cache, holds the prompt the llm action sends at every poll. #257’s code clears ports at each tick, so it needs that cache, or a store key, to keep it.',
     }[S];
-    return { name: 'prompt', kind: 'agent.prompt · reply run', where,
-      ports: [{ key: 'emo', role: 'in', short: 'emotion', label: '@emotion, built with', type: { kind: 'enum', values: EMOTION_NAMES } }, { key: 'now', role: 'now', short: 'emotion now', label: '@emotion, now', type: { kind: 'enum', values: EMOTION_NAMES } }, { key: 'out', role: 'out', short: 'out', label: 'the prompt', type: { kind: 'string' } }] };
+    ports.push({ key: 'emo', role: 'in', short: 'emotion', label: 'the emotion written in it', type: { kind: 'enum', values: EMOTION_NAMES } },
+      { key: 'now', role: 'now', short: 'emotion now', label: '@emotion, now', type: { kind: 'enum', values: EMOTION_NAMES } },
+      { key: 'out', role: 'out', short: 'out', label: promptName, type: { kind: 'string' } },
+      { key: 'status', role: 'status', short: 'status', label: 'status', type: { kind: 'enum', values: STATUS_NAMES } });
+    return { name: t.name, kind: `${fnText(t.fn)} · reply`, where, ports };
   }
-  const t = TREE_NODE.get(sel.id), ports = [];
   if (t.k === 'check') ports.push({ key: 'key', role: 'reads', short: 'reads', label: `{${t.key}}`, type: { kind: 'bool' } });
   if (t.k === 'set' && t.key === 'attention/state') ports.push({ key: 'key', role: 'writes', short: 'writes', label: `{${t.key}}`, type: { kind: 'enum', values: ENUM_OF['attention/state'] } });
   t.children.forEach((c, j) => ports.push({ key: `child${j}`, role: S === 'control' ? `child_${j}` : `child ${j + 1}`, short: c.name, label: c.name, type: { kind: 'enum', values: STATUS_NAMES } }));
-  if (t.prompt) ports.push({ key: 'prompt', role: 'in', short: 'prompt', label: S === 'inc' ? '{.prompt}' : S === 'macro' ? '#prompt' : '@prompt', type: { kind: 'string' } });
+  if (t.prompt) ports.push({ key: 'prompt', role: 'in', short: 'prompt', label: promptName, type: { kind: 'string' } });
   ports.push({ key: 'status', role: 'out', short: 'status', label: 'status', type: { kind: 'enum', values: STATUS_NAMES } });
   return { name: t.name, kind: `${t.k === 'action' ? fnText(t.fn) : t.k} · ${TREE_PART.get(t.uid)}`, where: treeWhere(S, t), ports };
 }
@@ -2271,10 +2384,10 @@ function seriesOf(rec, sel, port) {
   const dot = port.indexOf('.'), base = dot < 0 ? port : port.slice(0, dot), field = dot < 0 ? null : port.slice(dot + 1);
   if (field) { const s = seriesOf(rec, sel, base); out = { v: s.v.map((x) => (x && typeof x === 'object' ? x[field] : undefined)), st: s.st }; }
   else if (sel.kind === 'motion') out = motionSeries(rec, NODE.get(sel.id), port);
-  else if (sel.kind === 'prompt') { out = promptSeries(rec, port); if (port === 'emo' && rec.design && holdsOf(rec).args === 'source' && rec.design.strategy !== 'control') out.st.fill(NONE); }
   else {
     const t = TREE_NODE.get(sel.id), keeps = !!rec.design;
-    if (port === 'status') out = statusSeries(rec, t.uid, keeps);
+    if (t.builds && port !== 'status') out = promptSeries(rec, port);
+    else if (port === 'status') out = statusSeries(rec, t.uid, keeps);
     else if (port.startsWith('child')) out = statusSeries(rec, t.children[+port.slice(5)].uid, keeps);
     else if (port === 'prompt') out = promptSeries(rec, 'out');
     else if (t.k === 'check') { out = keySeries(rec, (f) => t.cond(f)); if (!keeps) out.st.fill(NONE); }
@@ -2319,7 +2432,8 @@ function motionWhere(S, n, rec) {
   }[S] || '';
 }
 function treeWhere(S, t) {
-  const what = t.k === 'check' ? ` It reads {${t.key}}, a store key the bridge lists and pushes on change.` : t.k === 'set' ? ` It writes {${t.key}}, a store key.` : t.prompt ? ' Its prompt is its argument, latched when the call starts.' : '';
+  const call = t.k === 'action' ? ` A call through the engine at every tick it is reached: while it answers Running it is polled, its arguments encoded and sent again, and its provider finds its run by them. Nothing tells the provider when the leaf stops.${t.prompt ? ' Its argument is the prompt the leaf before it built, kept for the whole call.' : ''}` : '';
+  const what = t.k === 'check' ? ` It reads {${t.key}}, a store key the bridge lists and pushes on change.` : t.k === 'set' ? ` It writes {${t.key}}, a store key.` : call;
   return {
     reference: `The reference has no tree: its state machine keeps its states in fields, and a node’s status exists nowhere.${t.k === 'set' ? ` {${t.key}} is one of its states.` : ''}`,
     compute: `On #404’s executor, which this build takes, each node keeps its last status, privately; a clean branch answers from it.${what}`,
@@ -2333,7 +2447,7 @@ const PARTS = [
   { id: 'conversation', label: 'Conversation' }, { id: 'attention', label: 'Attention' }, { id: 'reply', label: 'Reply run' },
   ...MOTION_GROUPS.map(([id, label]) => ({ id, label, motion: true })),
 ];
-if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, waitingAt, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim, probeOf, ORDER, INDEX, NODE, SINK_IDX, SOURCES, TREES, TREE_NODE, motionInput, seriesOf, inspectNode, motionPorts, FUNCS };
+if (typeof module !== 'undefined') module.exports = { simulate, score, synthesize, waitingAt, inspectionStats, engineUs, modeledUs, llmBytes, sendBytes, callBytes, contractEffect, mouthLag, CONTRACT_CHANGES, EXECUTOR, ENGINE_US, RUN_END, DT, DESIGNS, designRecording, designScore, storedLines, graphModel, treeStatus, PARTS, ORDER, FUNCS, MOTION, SINKS, AREAS, workTotals, llmSecond, laneIndex, controlContext, OPT_INFO, OPTIMIZATIONS, optionsFor, MOTION_GROUPS, BLINKS, MotionGraphRun, faceAt, Sim, probeOf, ORDER, INDEX, NODE, SINK_IDX, SOURCES, TREES, TREE_NODE, motionInput, seriesOf, inspectNode, motionPorts, FUNCS };
 </script>
 
 <script>
@@ -2371,14 +2485,19 @@ const runColor = (id) => (id >= 1 && id <= 3 ? `var(--run-${id})` : 'var(--run-x
 const POLL_LABEL = { idle: 'the voice', listen: 'listen', judge: 'judge', play: 'audio', await: 'next sentence', rag: 'rag', recall: 'recall', llm: 'llm', tool: 'tool', tts: 'tts', filler: 'filler' };
 const TABS = [['graph', 'Graph'], ['outline', 'As it runs'], ['stored', 'Stored form']];
 
-// One recording per implementation, with every optimization its framework can take. Every design replays the
-// reference's run and is checked against it.
+// One recording per implementation, with every optimization its framework can take. Every design runs on Arora and
+// is bound by its call contract: it replays the reference's run under that contract and is checked against it.
 const cache = new Map();
+let contractRun = null;
+function contractBase() {
+  if (!contractRun) { contractRun = simulate({ opt: true, contract: true }); contractRun.laneAt = laneIndex(contractRun); }
+  return contractRun;
+}
 function recordingFor(id) {
   if (!cache.has(id)) {
     const impl = IMPLS.find((x) => x.id === id);
     let rec;
-    if (impl.design) { const ref = recordingFor('reference'); rec = designRecording(impl.design, ref, true); rec.score = designScore(rec, ref); }
+    if (impl.design) { const base = contractBase(); rec = designRecording(impl.design, base, true); rec.score = designScore(rec, base, recordingFor('reference')); }
     else { rec = simulate({ ...impl.flags, opt: true }); rec.score = score(rec); }
     rec.impl = impl; rec.laneAt = laneIndex(rec);
     cache.set(id, rec);
@@ -2553,9 +2672,9 @@ function repNote(design, part, tab) {
   if (!design) return motion ? `The reference computes the ${motion[1].toLowerCase()} in its own code, each value only when what it follows from changed: ${motion[2]}.` : 'The reference runs this part as an explicit state machine; it is drawn here as the tree a design would hold.' + (tab === 'stored' ? '' : ' It polls nothing: its event loop hands each wait its result.');
   if (tab === 'graph') {
     if (motion) return { compute: 'Each node is a detached call. A call that recomputes to a new value marks its readers, and only marked calls are visited, each run: blue. Ports on the left come from other groups or the store.', full: 'The same detached calls as #396, each also a full tree node; only marked calls are visited, each run: blue.', inc: 'Leaves of the group’s node-graph shape; RUNNING keeps the shape running. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', macro: 'The macro as placed: a PARALLEL inside the WITH at the root, run before the tree’s body. Only the leaves whose inputs changed are visited: blue when one ran, amber when it only checked its horizon.', control: 'Each node keeps its output until a node it reads changes and marks it; only marked nodes are visited, and each runs: blue. A store key is visited when it changes.' }[design.strategy] + ' Faint: not visited; fainter: not needed this tick, on a branch a conditional did not take.';
-    return (design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs.' : 'The tree as it ticks.') + ' Blue fill: ticked; amber: its parent checked its cached status and did not tick it; faint: not visited; fainter: not reached this tick. The blue path is what the tick ticked, the amber edges what it checked.';
+    return (design.strategy === 'control' ? 'Control nodes and the actions wired into their child inputs.' : 'The tree as it ticks.') + ' A waiting leaf is polled at every tick, as Arora’s call contract has it: light green. Blue fill: ticked; amber: its parent checked its cached status and did not tick it; faint: not visited; fainter: not reached this tick. The blue path is what the tick ticked, the amber edges what it checked.';
   }
-  return tab === 'outline' ? 'Each line marked with what it did this tick; a wait polled this tick is light green.' : 'The text a person edits, or the file the loader reads, for this part.';
+  return tab === 'outline' ? 'Each line marked with what it did this tick; a waiting leaf, polled at every tick under Arora’s call contract, is light green.' : 'The text a person edits, or the file the loader reads, for this part.';
 }
 function buildRep(side) {
   const design = side.rec.design || null, part = S.part, tab = S.tab;
@@ -2668,7 +2787,12 @@ function buildGraph(side, design, part) {
   });
   const placeEdge = ({ e, path, label }) => {
     const a = at.get(e.from), b = at.get(e.to);
-    if (e.data) {
+    if (e.data && Math.abs(a.x - b.x) < 1) {
+      // Between two nodes of one column: a bulge on their right.
+      const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x + b.w, y2 = b.y + b.h / 2, bx = Math.max(x1, x2) + 34;
+      path.setAttribute('d', `M${x1} ${y1} C${bx} ${y1} ${bx} ${y2} ${x2} ${y2}`);
+      if (label) { label.setAttribute('x', bx + 4); label.setAttribute('y', (y1 + y2) / 2 + 4); label.setAttribute('text-anchor', 'start'); }
+    } else if (e.data) {
       const x1 = a.x, y1 = a.y + a.h / 2, x2 = b.x + b.w, y2 = b.y + b.h / 2;
       path.setAttribute('d', `M${x1} ${y1} C${x1 - 20} ${y1} ${x2 + 20} ${y2} ${x2} ${y2}`);
       if (label) { label.setAttribute('x', (x1 + x2) / 2); label.setAttribute('y', Math.min(y1, y2) - 6); }
@@ -2731,7 +2855,6 @@ function buildGraph(side, design, part) {
     if (n.tree) g.append(sv('text', { class: 'badge-s', x: n.w - 8, y: 13, 'text-anchor': 'end' }, ''));
     const describe = () => {
       if (n.tree) { const t = n.tree; return `<b>${escapeHtml(t.label)}</b><br>${escapeHtml(t.k === 'action' ? `${t.fn}(${t.args.join(', ')})` : t.k === 'check' ? `Truthy({${t.key}})` : t.k === 'set' ? `{${t.key}}` : n.kind)}${t.note ? `<br>${escapeHtml(t.note)}` : ''}`; }
-      if (n.data) return `<b>prompt</b><br>@pip/agent.prompt(${escapeHtml(PROMPT_ARGS.join(', '))})<br>${PROMPT_US / 1000} ms of work a call`;
       const id = n.ref || n.id, mn = MOTION.find((x) => x.id === id);
       return mn ? `<b>${escapeHtml(mn.id)}</b><br>${escapeHtml(mn.group === 'inputs' ? `{${mn.key}}` : `${mn.module} · ${mn.kind}`)}${mn.group !== 'inputs' ? `<br>${escapeHtml(mn.args.map((x) => (typeof x === 'string' ? x : String(+x.toFixed(4)))).join(', '))}` : ''}` : escapeHtml(n.label);
     };
@@ -2755,7 +2878,7 @@ function liveRep(side, i) {
   const rec = side.rec, f = rec.frames[i], part = S.part, full = part === 'full', motion = isMotion(part);
   const act = rec.acts ? rec.acts[i] : null;
   const laneOn = (lane) => rec.laneAt[i].has(`${f.runId}:${lane}`);
-  const statuses = motion ? null : full ? new Map(['conversation', 'attention', 'reply'].flatMap((p) => [...treeStatus(p, f, laneOn)])) : treeStatus(part, f, laneOn);
+  const trees = motion ? null : controlContext(rec).trees[i], statuses = motion ? null : full ? new Map(['conversation', 'attention', 'reply'].flatMap((p) => [...trees[p]])) : trees[part];
   const polled = new Set((rec.polls && rec.polls[i] || []).map((k) => POLL_UID[k]));
   const tk = rec.treeTicks && rec.treeTicks[i];   // on an incremental executor: which tree nodes it ticked
   // What a node did this tick, as its fill: re-evaluated or ticked (ran), visited to collect its data and kept
@@ -2773,7 +2896,6 @@ function liveRep(side, i) {
     for (const { g, n, badge, sel } of side.gnodes.values()) {
       let cls = '';
       if (n.tree) { const s = statuses.get(n.tree.uid), p = s === 'R' && polled.has(n.tree.uid); cls = s ? treeClass(n.tree.uid) : 'st-none'; if (badge) badge.textContent = p ? 'POLLED' : s === 'R' ? 'RUNNING' : s === 'S' ? 'SUCCESS' : s === 'F' ? 'FAILURE' : ''; if (!tk && s === 'R') state.set(n.id, 'ran'); }
-      else if (n.data) cls = rec.cost[i].builds ? 'ran' : laneOn('llm') ? 'untouched' : 'st-none';
       else if (motion || full) cls = motionClass(n.ref || n.id);
       g.setAttribute('class', `g-node${n.port ? ' port' : ''}${n.data ? ' data' : ''}${cls ? ` ${cls}` : ''}${sameSel(sel, S.sel) ? ' sel' : ''}`);
       const words = cls.split(' ');
@@ -2791,7 +2913,6 @@ function liveRep(side, i) {
       if (id !== undefined && id !== null) {
         if (motion) cls = motionClass(id);
         else if (typeof id === 'number') cls = statuses.get(id) ? treeClass(id) : 'dim';
-        else if (id === 'prompt') cls = rec.cost[i].builds ? 'ran' : '';
         else if (full) cls = motionClass(id);
       }
       span.className = cls;
@@ -2807,13 +2928,11 @@ const WATCH_MAX = 6;
 const sameSel = (a, b) => !!a && !!b && a.kind === b.kind && a.id === b.id;
 function selFor(id) {
   if (typeof id === 'number') return { kind: 'tree', id };
-  if (id === 'prompt') return { kind: 'prompt', id };
   return NODE.has(id) ? { kind: 'motion', id } : null;
 }
 // A drawn node's selection: a tree node, the prompt, or a motion node, a port standing for the node it names.
 function selOfNode(n) {
   if (n.tree) return { kind: 'tree', id: n.tree.uid };
-  if (n.data) return { kind: 'prompt', id: 'prompt' };
   const id = n.ref || n.id;
   return NODE.has(id) ? { kind: 'motion', id } : null;
 }
@@ -2986,7 +3105,7 @@ function costSummary(rec) {
   if (!summaries.has(rec)) {
     const n = rec.cost.length, avg = (f) => rec.cost.reduce((s, c) => s + f(c), 0) / n;
     const peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
-    summaries.set(rec, { us: avg((c) => c.us), ticks: avg((c) => c.all.ticks), execs: avg((c) => c.all.execs), checks: avg((c) => c.all.checks), peak, builds: rec.cost.reduce((s, c) => s + c.builds, 0), llm: rec.design ? llmSecond(rec.design, rec.opt) : llmSecond(null, { bespoke: rec.optimized }) });
+    summaries.set(rec, { us: avg((c) => c.us), engine: avg((c) => (c.m ? engineUs(c.m) : 0)), ticks: avg((c) => c.all.ticks), execs: avg((c) => c.all.execs), checks: avg((c) => c.all.checks), peak, builds: rec.cost.reduce((s, c) => s + c.builds, 0), llm: rec.design ? llmSecond(rec.design, rec.opt, llmBytes(rec)) : llmSecond(null, { bespoke: rec.optimized }) });
   }
   return summaries.get(rec);
 }
@@ -3150,14 +3269,14 @@ function renderSide(side, at) {
   if (showGhost) poseRobot(side.shade, recordingFor('reference').frames[at].c);
   poseSam(side.sam, f.t);
   const samNow = samText(samAt(f.t));
-  const capKey = `${f.user}|${samNow}|${f.robot ? `${f.robot.text}|${f.robot.word}|${f.robot.paused}` : ''}`;
+  const capKey = `${f.user}|${samNow}|${f.robot ? `${f.robot.text}|${f.robot.word}|${f.robot.note}` : ''}`;
   if (capKey !== side.capKey) {
     side.capKey = capKey;
     const u = side.capUser.querySelector('.said'), r = side.capRobot.querySelector('.said');
     u.textContent = f.user || samNow; side.capUser.classList.toggle('quiet', !f.user);
     r.replaceChildren();
     if (f.robot) {
-      if (f.robot.paused) r.append(el('span', { class: 'k', text: '(paused) ' }));
+      if (f.robot.note) r.append(el('span', { class: 'k', text: `(${f.robot.note}) ` }));
       f.robot.words.forEach((w, j) => { r.append(el('span', { class: `${j === f.robot.word && !f.robot.paused ? 'now' : ''} ${f.robot.kind === 'filler' ? 'filler' : ''}`, text: w })); r.append(' '); });
     } else r.textContent = '…';
     side.capRobot.classList.toggle('quiet', !f.robot);
@@ -3215,22 +3334,24 @@ function buildRepControls() {
 
 // ---- every implementation at a glance -------------------------------------------------------
 function buildGlance() {
-  const head = ['implementation', 'against the reference', 'µs a tick', 'node ticks', 'executions', 'checks', '1 s on the llm', 'its cost', 'prompt builds', 'failed checks'];
+  const head = ['implementation', 'against the reference', 'µs a tick', 'engine path', 'node ticks', 'executions', 'checks', '1 s on the llm', 'its cost', 'prompt builds', 'failed checks'];
   const rows = IMPLS.map((impl) => ({ impl, tr: el('tr', {}, el('td', { text: impl.name }), head.slice(1).map(() => el('td', { text: '…' }))) }));
   const box = el('section', { class: 'glance', 'aria-label': 'Every implementation at a glance' },
     el('h2', { text: 'Every implementation at a glance' }),
-    el('p', { text: `The whole run on a ${HZ} Hz clock. A leaf that waits on a call is ticked when the call starts and when it completes; in between, each build leaves it to be woken on completion, so it is not polled. A tick’s node ticks are every node it steps through, those waiting leaves and what they read included; executions are what runs; checks are what it reads or compares to decide. “1 s on the llm” is one second of that wait, as node ticks · executions · checks, and its cost.` }),
-    el('p', { text: 'Each build runs with every optimization its framework can take, each checked to leave its channels exact. The reference is bespoke: it computes a value only when what it follows from changed, knows from the script when a clip, a fade or a glance next changes, and pays nothing for a framework. The designs’ cost is modeled with the NGBT spectrum’s per-operation rates, fitted to the Rust benches, plus 2 µs of work a call and 2 ms a prompt build.' }),
+    el('p', { text: `The whole run on a ${HZ} Hz clock. Every design runs on Arora and keeps its call contract: a leaf that waits on a call is polled at every tick, a call through the engine that sends its arguments again; the reference’s event loop polls nothing. A tick’s node ticks are every node it steps through, polls and what they read included; executions are what runs; checks are what it reads or compares to decide. “1 s on the llm” is one second of that wait, as node ticks · executions · checks, and its cost.` }),
+    el('p', { text: 'Each build runs with every optimization its framework can take, each checked to leave its channels exact. The reference is bespoke: it computes a value only when what it follows from changed, knows from the script when a clip, a fade or a glance next changes, and pays nothing for a framework. The designs’ cost is modeled with the NGBT spectrum’s per-operation rates, fitted to the Rust benches, plus 2 µs of work a call and 2 ms a prompt build, and the engine’s path for every module call: its arguments and result encoded and decoded, 0.3 µs and 0.4 ns a byte into a module linked into the runtime, 1 µs and 1.2 ns a byte into a wasm component. Those two rates are modeled from the code path; no bench calls through the engine yet.' }),
     el('div', { class: 'tablebox' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h) => el('th', { scope: 'col', text: h })))), el('tbody', {}, rows.map((r) => r.tr)))));
   document.querySelector('.traces').after(box);
   const fillRow = ({ impl, tr }) => {
     const rec = recordingFor(impl.id), s = costSummary(rec), base = recordingFor('reference');
     let against = 'itself';
     if (impl.id !== 'reference') {
-      let diff = 0; rec.frames.forEach((f, i) => f.c.forEach((v, j) => { diff = Math.max(diff, Math.abs(v - base.frames[i].c[j])); }));
-      against = !impl.design ? 'its own, broken' : diff < 1e-9 ? 'same' : `${impl.design.lag} tick late`;
+      // A design replays the reference's run under the call contract: against that, it is the same or a tick late.
+      const run = impl.design ? contractBase() : base;
+      let diff = 0; rec.frames.forEach((f, i) => f.c.forEach((v, j) => { diff = Math.max(diff, Math.abs(v - run.frames[i].c[j])); }));
+      against = !impl.design ? 'its own, broken' : diff < 1e-9 ? 'same, under the contract' : `${impl.design.lag} tick late, under the contract`;
     }
-    const cells = [against, usText(s.us), num(s.ticks), num(s.execs), num(s.checks), `${num(s.llm.ticks)} · ${num(s.llm.execs)} · ${num(s.llm.checks)}`, usText(s.llm.us), String(s.builds), String(rec.score.filter((x) => x.ok === false).length)];
+    const cells = [against, usText(s.us), rec.design ? usText(s.engine) : '—', num(s.ticks), num(s.execs), num(s.checks), `${num(s.llm.ticks)} · ${num(s.llm.execs)} · ${num(s.llm.checks)}`, usText(s.llm.us), String(s.builds), String(rec.score.filter((x) => x.ok === false).length)];
     cells.forEach((c, j) => { tr.children[j + 1].textContent = c; });
   };
   // One row at a time, after the page has drawn: a build takes a moment to run 40 s at 100 Hz.
