@@ -42,7 +42,17 @@ fn main() -> Result<()> {
             .join("crates/arora-engine/wit/arora-module.wit")
             .display()
     );
-    let arora_include_dir = workspace_root.join("target").join("include");
+    // The C headers, generated under the OUT_DIRs of arora-buffers and
+    // arora-util. Their `links` metadata names the directories, and reaches
+    // this build script through the regular dependencies on them in
+    // Cargo.toml: the artifact dependencies carry none. The headers are the
+    // same for every target, so the host build's serve the wasm32-wasip2 one.
+    let arora_buffers_include = PathBuf::from(
+        env::var_os("DEP_ARORA_BUFFERS_INCLUDE").context("DEP_ARORA_BUFFERS_INCLUDE not set")?,
+    );
+    let arora_util_include = PathBuf::from(
+        env::var_os("DEP_ARORA_UTIL_INCLUDE").context("DEP_ARORA_UTIL_INCLUDE not set")?,
+    );
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let test_cpp_records = workspace_root
         .join("target")
@@ -70,7 +80,8 @@ fn main() -> Result<()> {
         .define("ARORA_BUFFERS_LIB", &arora_buffers_lib)
         .define("ARORA_UTIL_LIB", &arora_util_lib)
         .define("ARORA_CPP_SOURCE_DIR", &arora_cpp_source)
-        .define("ARORA_INCLUDE_DIR", &arora_include_dir)
+        .define("ARORA_BUFFERS_INCLUDE_DIR", &arora_buffers_include)
+        .define("ARORA_UTIL_INCLUDE_DIR", &arora_util_include)
         .define("TEST_CPP_RECORDS", &test_cpp_records)
         .define("LOCAL_RECORDS", &local_records)
         .define("ARORA_MODULE_DIR", &module_dir)

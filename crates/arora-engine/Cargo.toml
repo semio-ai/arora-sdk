@@ -1,6 +1,6 @@
 [package]
 name = "arora-engine"
-version = "7.0.1"
+version = "7.0.2"
 authors = ["Braden McDorman <bmcdorman@gmail.com>"]
 edition = "2021"
 description = "The Arora engine: loads and executes Arora modules (wasm and native hosts)."
@@ -51,9 +51,6 @@ web-sys = { version = "0.3", features = ["console"] }
 # Browser RNG backend for `rand`. `wasm_js` (plus the getrandom_backend cfg in
 # .cargo/config.toml) lets getrandom build for wasm32-unknown-unknown.
 getrandom = { version = "0.4", features = ["wasm_js"] }
-
-[build-dependencies]
-cbindgen = "0.29"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

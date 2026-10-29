@@ -5,25 +5,26 @@ project(arora-cpp CXX)
 # friendlier C++ interface. It is meant to be linked into wasm guest modules
 # alongside the arora-buffers and arora-util static libraries.
 #
-# When invoked stand-alone, the caller must set ARORA_INCLUDE_DIR to a
-# directory containing the generated arora C headers (produced by the
-# arora-buffers and arora-util Rust crates during their build), and provide
-# arora-buffers and arora-util as link targets (typically IMPORTED static
-# libraries pointing at the wasm32-wasip2 outputs of those crates). When
-# add_subdirectory'd from a module's CMakeLists.txt (e.g. modules/test-cpp),
-# the parent CMake provides those targets.
+# The caller sets ARORA_BUFFERS_INCLUDE_DIR to the directory holding
+# arora/buffers.h, the C header the arora-buffers crate's build script
+# generates: `include/` under its OUT_DIR, which cargo hands to the build
+# scripts of the crates depending on arora-buffers as DEP_ARORA_BUFFERS_INCLUDE.
+# It also provides arora-buffers and arora-util as link targets (typically
+# IMPORTED static libraries pointing at the wasm32-wasip2 outputs of those
+# crates). When add_subdirectory'd from a module's CMakeLists.txt (e.g.
+# modules/test-cpp), the parent CMake provides both.
 
-if(NOT DEFINED ARORA_INCLUDE_DIR)
-  message(FATAL_ERROR "ARORA_INCLUDE_DIR must be set so arora-cpp can find arora C headers.")
+if(NOT DEFINED ARORA_BUFFERS_INCLUDE_DIR)
+  message(FATAL_ERROR "ARORA_BUFFERS_INCLUDE_DIR must be set so arora-cpp can find arora/buffers.h.")
 endif()
 
 add_library(arora-cpp STATIC src/arora/buffer/deserialize.cpp)
-target_include_directories(arora-cpp PUBLIC include ${ARORA_INCLUDE_DIR})
+target_include_directories(arora-cpp PUBLIC include ${ARORA_BUFFERS_INCLUDE_DIR})
 target_compile_options(arora-cpp PRIVATE -fPIC -O3 -flto)
 
-# arora-buffers must be available as a target from the parent project. We do
-# not link arora-c explicitly: it was an INTERFACE-only target in the old
-# build, and the include paths it carried are now folded into ARORA_INCLUDE_DIR.
+# arora-buffers links in when the parent project defines it as a target before
+# adding this directory; its header comes from ARORA_BUFFERS_INCLUDE_DIR either
+# way.
 if(TARGET arora-buffers)
   target_link_libraries(arora-cpp PRIVATE arora-buffers)
 endif()
@@ -38,7 +39,7 @@ endif()
 set(ARORA_WIT ${CMAKE_CURRENT_LIST_DIR}/../../crates/arora-engine/wit/arora-module.wit
   CACHE FILEPATH "The arora:module world's WIT file, which C++ guests are components of")
 add_library(arora-cpp-component OBJECT src/arora/component.cpp)
-target_include_directories(arora-cpp-component PUBLIC include ${ARORA_INCLUDE_DIR})
+target_include_directories(arora-cpp-component PUBLIC include ${ARORA_BUFFERS_INCLUDE_DIR})
 target_compile_options(arora-cpp-component PRIVATE -O3 -flto)
 # The canonical ABI allocates in the guest with its `cabi_realloc` export.
 # wasi-libc and the Rust standard library of the staticlibs each define one,

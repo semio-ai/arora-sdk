@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "arora-types",
@@ -407,7 +407,6 @@ dependencies = [
  "arora-types",
  "async-trait",
  "bytes",
- "cbindgen",
  "console_error_panic_hook",
  "derive_more 2.1.1",
  "getrandom 0.4.3",
@@ -775,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "arora-util"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cbindgen",
  "uuid",
