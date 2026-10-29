@@ -331,3 +331,27 @@ nodes:
     let error = serde_yaml::from_str::<Graph>(yaml).unwrap_err();
     assert!(error.to_string().contains("lo"), "{error}");
 }
+
+/// A module-qualified name naming two functions of that module is refused,
+/// whichever the index lists first: the function is named by its id.
+#[test]
+fn a_qualified_name_of_two_functions_of_a_module_is_refused() {
+    let mut functions = index();
+    let module = Uuid::from_u128(0x7800);
+    let [first, second] = [Uuid::from_u128(0x7801), Uuid::from_u128(0x7802)];
+    functions.extend([first, second].map(|id| function(module, id, "twin", vec![])));
+    let graph: Graph = yaml(&format!(
+        "
+nodes:
+- id: t
+  function: {module}::twin
+"
+    ));
+    assert_eq!(
+        errors(graph.resolve(&functions)),
+        [format!(
+            "nodes[0].function: `twin` names several functions of module {module}: \
+             the function is named by its id, one of {first}, {second}"
+        )]
+    );
+}

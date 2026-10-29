@@ -197,12 +197,31 @@ impl<'a> Functions<'a> {
                 Some(function) => Some(function),
                 None => return Ok(Found::Unknown(id)),
             },
-            None => self.by_name.get(text).and_then(|functions| {
-                functions
-                    .iter()
+            None => {
+                let mut of_module = self
+                    .by_name
+                    .get(text)
+                    .into_iter()
+                    .flatten()
                     .copied()
-                    .find(|function| function.module_id == module_id)
-            }),
+                    .filter(|function| function.module_id == module_id);
+                let found = of_module.next();
+                let mut others = of_module.peekable();
+                if found.is_some() && others.peek().is_some() {
+                    let mut ids: Vec<String> = found
+                        .into_iter()
+                        .chain(others)
+                        .map(|function| function.function_id.to_string())
+                        .collect();
+                    ids.sort();
+                    return Err(format!(
+                        "`{text}` names several functions of module {module_id}: \
+                         the function is named by its id, one of {}",
+                        ids.join(", ")
+                    ));
+                }
+                found
+            }
         };
         match found {
             Some(function) if function.module_id == module_id => Ok(Found::Known(function)),
