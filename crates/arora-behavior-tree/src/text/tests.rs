@@ -1503,6 +1503,17 @@ s: spring(in: @d._ret, param.stiffness: 120f32, param.damping: 14f32, t: {arora/
         })
         .to_string();
     assert!(shown.contains("param.half_life: 0.12f32"), "{shown}");
+    let naming_no_variable = tree
+        .display(Names {
+            functions: Some(&index),
+            variables: Some(&HashMap::new()),
+            nodes: Some(&node_names),
+        })
+        .to_string();
+    assert_eq!(
+        naming_no_variable, shown,
+        "a variable the names do not name keeps its key"
+    );
     let read = resolve(&parsed(&shown), &index);
     assert_eq!(
         errors(&read.diagnostics),
