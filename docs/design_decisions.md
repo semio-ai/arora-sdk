@@ -697,7 +697,10 @@ takes the HAL's meta, whatever a prefix says: under `arora --open` (the empty
 prefix opened) or a subtree a host opened, the HAL's outputs are closed and its
 inputs take only their declared type. Every key the HAL does not describe keeps
 what the store says of it, so an undescribed key under an opened prefix stays
-open.
+open — except the runtime's own: the build states the `arora` subtree closed,
+because a sandbox flag that opens everything must not hand remotes the
+device's clock and its task runs' state, and a host that means to open one of
+those keys states that key's own meta.
 
 A key's own meta that the host states is the host's. The runtime fills, from
 the HAL's description, the keys that have no meta of their own, and replaces

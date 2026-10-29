@@ -3,7 +3,6 @@ project(test-cpp-2 CXX)
 
 # Required cache vars (normally passed by the wrapping build.rs):
 #   ARORA_MODULE_CLI            host bin (with arora-module-cpp sibling)
-#   records dir for arora-behavior-tree-types-yaml
 #   ARORA_BUFFERS_LIB           wasm32-wasip2 static lib (.a) of arora-buffers
 #   ARORA_UTIL_LIB              wasm32-wasip2 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp

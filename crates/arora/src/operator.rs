@@ -208,7 +208,9 @@ pub fn default_frontend() -> Frontend {
 /// Forward every access request from `requests` to `operator` and reply with
 /// its ruling, one request at a time. Rulings marked `remember` short-circuit
 /// later requests from the same subject (per-run "always allow" / "always
-/// reject"). Runs until the stream ends — spawn it alongside the runtime.
+/// reject"). Runs until the stream ends — drive it concurrently with the
+/// device's step loop, in the same future, as the run entry points do, so
+/// dropping that future stops both.
 pub async fn serve_access_requests(requests: AccessRequestStream, operator: Arc<dyn Operator>) {
     let mut remembered: HashMap<String, AccessDecision> = HashMap::new();
     let mut requests = requests;

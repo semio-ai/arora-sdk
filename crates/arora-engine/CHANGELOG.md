@@ -4,6 +4,15 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.1] - 2026-10-29
+
+### Fixed
+
+- A native module's error buffer — a declared module's answer to a call
+  missing a required argument — fails the call with the guest's error,
+  `DispatchError::Guest`, as a component's does, instead of panicking the
+  host.
+
 ## [7.0.0] - 2026-10-23
 
 ### Removed

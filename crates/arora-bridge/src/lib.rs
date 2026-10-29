@@ -1,9 +1,11 @@
 //! The Arora Bridge interface.
 //!
-//! A [`Bridge`] connects an Arora runtime to a remote — in practice Semio Studio
-//! over `studio-bridge`. It is modelled on studio-bridge's `device-client`
-//! trait: push local state changes out, receive device-info updates and
-//! commands in, and learn when a client is asking for data.
+//! A [`Bridge`] connects an Arora runtime to a remote — any client that reads
+//! or drives the device: an editor or app over the open local WebSocket
+//! bridge, a ROS 2 graph, or, opt-in, Semio Studio over `studio-bridge`. It is
+//! modelled on studio-bridge's `device-client` trait: push local state changes
+//! out, receive device-info updates and commands in, and learn when a client
+//! is asking for data.
 //!
 //! # The seam: an owned inbound stream, a non-blocking outbound push
 //!
@@ -340,12 +342,12 @@ pub trait Bridge: Send + Sync {
 
     /// A stream of [`AccessRequest`]s from remote clients — Studio's "session
     /// joining access control". Defaults to a stream that never yields, for
-    /// bridges whose remote does not (yet) send access requests; such bridges
-    /// keep their current behavior of granting access implicitly.
+    /// bridges whose remote sends no access requests; such a bridge grants
+    /// access implicitly.
     ///
     /// This is a separate concern from the inbound data plane
     /// ([`take_inbound`](Bridge::take_inbound)): the operator front end serves
-    /// it on its own task, one request at a time.
+    /// it beside the step loop, one request at a time.
     async fn access_requests(&self) -> AccessRequestStream {
         Box::pin(futures_util::stream::pending())
     }

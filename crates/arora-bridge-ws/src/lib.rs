@@ -1,11 +1,11 @@
 //! The open local bridge for Arora: a WebSocket server that bridges the Arora
 //! API, implementing [`arora_bridge::Bridge`] (see [`bridge::WsBridge`]), with
-//! type-safe message definitions, a method registry, and a ready-to-use server.
+//! type-safe message definitions and a ready-to-use server.
 //!
 //! Messages speak the Arora data-layer vocabulary: the store is a shared,
 //! path-keyed blackboard, so clients **write** and **read** [`Value`]s at
 //! **keys** (hierarchical paths, e.g. `face/mouth`), list the available keys,
-//! and invoke registered RPC methods. The server binds the loopback interface
+//! and invoke the device's methods. The server binds the loopback interface
 //! by default: the link is unauthenticated and meant for editors and apps on
 //! trusted local links.
 //!

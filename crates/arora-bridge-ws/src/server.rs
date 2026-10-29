@@ -84,7 +84,8 @@ pub struct AroraWSServer {
     /// Cancel token for the single active client. When cancelled, the client is disconnected.
     active_client: Arc<RwLock<Option<CancellationToken>>>,
     is_running: RwLock<bool>,
-    /// Server-initiated pushes (Bridge::send_data) reach the active client here.
+    /// Server-initiated pushes ([`push`](Self::push), which the bridge's
+    /// `try_send` makes) reach the active client here.
     outbound_tx: broadcast::Sender<Outgoing>,
     /// Cancelled when the serve loop exits — on the external cancel, a bind
     /// failure, or any accept-loop end — so an observer
@@ -138,8 +139,8 @@ impl AroraWSServer {
     }
 
     /// Set the device behind this server: where `list_keys` goes for the keys it
-    /// holds, and `list_methods` / `invoke` for every method the registry does
-    /// not own itself. [`WsBridge`](crate::bridge::WsBridge) sets it to the
+    /// holds, and `list_methods` / `invoke` for the methods it has.
+    /// [`WsBridge`](crate::bridge::WsBridge) sets it to the
     /// device it bridges, so an embedder wiring the bridge discovers the device
     /// without declaring any of it here.
     pub async fn set_device(&self, device: DeviceHandler) {
