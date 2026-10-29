@@ -72,8 +72,9 @@ pub const DATAFLOW: Module = Module {
 
 /// The three-vector node kinds: `vec3cross`, the cross product of two
 /// operands of three numbers each, returned in the first operand's form. When
-/// an operand is not three numbers, the result is NaN in that form (the
-/// second operand's when the first is not numeric).
+/// an operand is not three numbers, the result is NaN in that form: the
+/// second operand's when the first is not numeric, and a `vec3` when neither
+/// is.
 pub const GEOMETRY: Module = Module {
     id: Uuid::from_u128(0x6765_6f6d_6574_7279_0000_0000_0000_0001),
     name: "@arora/geometry",

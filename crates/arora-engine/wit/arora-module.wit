@@ -3,8 +3,8 @@
 /// Component guests implement `dispatch` (routing by function id) and may
 /// call back into the engine through the imported `host` interface. Data
 /// crosses the boundary as Arora Buffers (`list<u8>`) through the canonical
-/// ABI, so the engine drives no guest allocator and reads no raw linear
-/// memory.
+/// ABI: a guest exposes no allocator protocol of its own, only the canonical
+/// ABI's `cabi_realloc`, with which a host lowers the lists it passes.
 ///
 /// The world targets WASIp2. Its functions keep their shape under WASIp3,
 /// where they can become `async` and buffers `stream<u8>`.
