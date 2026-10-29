@@ -54,7 +54,7 @@ impl Client {
 
     async fn send(&mut self, message: Json) {
         self.socket
-            .send(Message::Text(message.to_string()))
+            .send(Message::text(message.to_string()))
             .await
             .expect("send a message");
     }
