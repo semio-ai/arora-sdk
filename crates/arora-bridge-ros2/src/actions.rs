@@ -1430,21 +1430,41 @@ type ResultOutbox = Outbox<RmwRequestId, Vec<u8>>;
 // The action task — one per action, driving its endpoints and its goal book.
 // =============================================================================
 
+/// What the node task sends a skill task — an action's or a topic skill's —
+/// in the order it happens: each outbound state change, which says how the
+/// task's runs are going, and the task's endpoint resolved anew whenever the
+/// device's functions change, which the next goal or message takes. The
+/// channel closing ends the task: the device no longer has the function, or
+/// the bridge stopped.
+///
+/// One endpoint name keeps one task for as long as the device has its
+/// function: a reloaded function reaches the task as a new resolution rather
+/// than a new task, so its goals and runs stay in one book and one task
+/// decides which run is the latest.
+pub(crate) enum Watch<T> {
+    Change(StateChange),
+    Resolved(T),
+}
+
 /// Serve one action: the task the node task spawns per resolved
 /// [`MethodAction`]. Owns the action's endpoints, its [`GoalBook`] and its
 /// [`Outboxes`] (single-owner, no locks) and selects over the four things
 /// that advance a goal: a SendGoal request (decode → SPAWN → accept), a
 /// CancelGoal request (stop calls → `Canceling`), a GetResult request
-/// (queued until terminal), and the device's outbound state changes (the
-/// run's status/feedback/result keys), forwarded by the node task on
-/// `changes` — plus, while a writer's send window is full, the retry of
-/// what its outbox holds back.
+/// (queued until terminal), and what the node task sends on `watch` (the
+/// run's status/feedback/result keys, and the action resolved anew) — plus,
+/// while a writer's send window is full, the retry of what its outbox holds
+/// back.
+///
+/// A goal is taken only once everything the node task sent before it has
+/// been applied: it spawns the function as the device last described it, and
+/// an action retired in the meantime takes no goal.
 pub(crate) async fn action_task(
     server: RawActionServer,
-    action: MethodAction,
+    mut action: MethodAction,
     registry: Arc<Ros2Registry>,
     cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
-    mut changes: tmpsc::UnboundedReceiver<StateChange>,
+    mut watch: tmpsc::UnboundedReceiver<Watch<MethodAction>>,
 ) {
     let mut book = GoalBook::default();
     let mut outboxes = Outboxes::default();
@@ -1452,6 +1472,23 @@ pub(crate) async fn action_task(
         tokio::select! {
             goal = server.receive_goal_request() => match goal {
                 Ok((request, bytes)) => {
+                    let mut retired = false;
+                    loop {
+                        match watch.try_recv() {
+                            Ok(Watch::Change(change)) => observe_change(
+                                &server, &action, &registry, &mut book, &mut outboxes, &change,
+                            ),
+                            Ok(Watch::Resolved(resolved)) => action = resolved,
+                            Err(tmpsc::error::TryRecvError::Empty) => break,
+                            Err(tmpsc::error::TryRecvError::Disconnected) => {
+                                retired = true;
+                                break;
+                            }
+                        }
+                    }
+                    if retired {
+                        break;
+                    }
                     if handle_goal(&server, &action, &registry, &cmd_tx, &mut book, request, &bytes)
                         .await
                     {
@@ -1486,11 +1523,13 @@ pub(crate) async fn action_task(
                     break;
                 }
             },
-            change = changes.recv() => match change {
-                Some(change) => {
+            watched = watch.recv() => match watched {
+                Some(Watch::Change(change)) => {
                     observe_change(&server, &action, &registry, &mut book, &mut outboxes, &change);
                 }
-                // The node task ended; so does this action.
+                Some(Watch::Resolved(resolved)) => action = resolved,
+                // The device no longer has the function, or the node task
+                // ended; so does this action.
                 None => break,
             },
             _ = tokio::time::sleep_until(outboxes.retry_at().unwrap_or_else(Instant::now)),

@@ -36,7 +36,7 @@ use tokio::sync::mpsc as tmpsc;
 
 use crate::actions::{
     resolve_routes, routed_args, run_status_of, runtime_call, spawn_call, spawned_run_of, task_run,
-    BoundRoute, RunStatus,
+    BoundRoute, RunStatus, Watch,
 };
 use crate::conversions::MessageStream;
 use crate::profile::TopicSkillBinding;
@@ -161,14 +161,21 @@ impl LatestRun {
 /// Serve one topic skill: the task the node task spawns per resolved
 /// [`TopicSkill`]. Owns the run its latest message spawned and selects over
 /// the two things that move it: a message on the topic (halt the live run,
-/// spawn the new one) and the device's outbound state changes, forwarded by
-/// the node task, which say when the live run ended.
+/// spawn the new one) and what the node task sends on `watch` — the device's
+/// outbound state changes, which say when the live run ended, and the skill
+/// resolved anew when the device's functions change.
+///
+/// A message is handled only once everything the node task sent before it
+/// has been applied: it spawns the function as the device last described it,
+/// and a skill retired in the meantime handles no message. One task serves
+/// the topic across reloads of its function, so the latest message still
+/// halts the run an earlier one spawned.
 pub(crate) async fn topic_skill_task(
-    skill: TopicSkill,
+    mut skill: TopicSkill,
     registry: Arc<Ros2Registry>,
     cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
     messages: MessageStream,
-    mut changes: tmpsc::UnboundedReceiver<StateChange>,
+    mut watch: tmpsc::UnboundedReceiver<Watch<TopicSkill>>,
 ) {
     // Fused: draining the queue may meet the stream's end, and the next
     // select then reads that end again rather than polling a finished stream.
@@ -186,15 +193,30 @@ pub(crate) async fn topic_skill_task(
                 while let Some(Some(newer)) = messages.next().now_or_never() {
                     message = newer;
                 }
-                // A run that already ended is not halted.
-                while let Ok(change) = changes.try_recv() {
-                    latest.observe(&change);
+                // A run that already ended is not halted, and the message
+                // spawns the function as last resolved.
+                let mut retired = false;
+                loop {
+                    match watch.try_recv() {
+                        Ok(Watch::Change(change)) => latest.observe(&change),
+                        Ok(Watch::Resolved(resolved)) => skill = resolved,
+                        Err(tmpsc::error::TryRecvError::Empty) => break,
+                        Err(tmpsc::error::TryRecvError::Disconnected) => {
+                            retired = true;
+                            break;
+                        }
+                    }
+                }
+                if retired {
+                    break;
                 }
                 handle_message(&skill, &registry, &cmd_tx, &mut latest, &message).await;
             }
-            change = changes.recv() => match change {
-                Some(change) => latest.observe(&change),
-                // The node task ended; so does this skill.
+            watched = watch.recv() => match watched {
+                Some(Watch::Change(change)) => latest.observe(&change),
+                Some(Watch::Resolved(resolved)) => skill = resolved,
+                // The device no longer has the function, or the node task
+                // ended; so does this skill.
                 None => break,
             },
         }
@@ -619,7 +641,7 @@ mod tests {
         running
             .set
             .insert(run0.status.clone(), Some(status(STATUS_RUNNING_VARIANT_ID)));
-        change_tx.send(running).unwrap();
+        change_tx.send(Watch::Change(running)).unwrap();
         message_tx
             .unbounded_send(action_units(&[1], &[1.0]))
             .unwrap();
@@ -635,7 +657,7 @@ mod tests {
         ended
             .set
             .insert(run1.status.clone(), Some(status(STATUS_SUCCESS_VARIANT_ID)));
-        change_tx.send(ended).unwrap();
+        change_tx.send(Watch::Change(ended)).unwrap();
         message_tx
             .unbounded_send(action_units(&[2], &[0.25]))
             .unwrap();
@@ -661,6 +683,78 @@ mod tests {
             .await
             .expect("the task ends with its subscription")
             .unwrap();
+    }
+
+    /// A function reloaded in another module reaches the task as a new
+    /// resolution: the next message halts the run the earlier one spawned and
+    /// spawns the function where the device now has it. Once retired, the
+    /// task handles no message, even one already queued.
+    #[tokio::test]
+    async fn a_reloaded_function_is_spawned_by_the_same_task_and_a_retired_one_by_none() {
+        let registry = Arc::new(arora_msgs_ros2::registry());
+        let skill = set_facial_action_units_skill(&registry);
+        let reloaded = {
+            let contract: Vec<MethodSignature> = face_contract()
+                .into_iter()
+                .map(|mut signature| {
+                    signature.module_id = gen_uuid_from_str("face-module-2");
+                    signature
+                })
+                .collect();
+            let binding = binding(
+                "vizij_face_msgs/SetFacialActionUnits",
+                "set_facial_action_units",
+                &[
+                    ("facial_action_units.codes", "codes"),
+                    ("facial_action_units.intensities", "intensities"),
+                ],
+            );
+            let (mut skills, errors) = resolve(&[binding], &contract, &registry);
+            assert!(errors.is_empty(), "{errors:?}");
+            skills.remove(0)
+        };
+        let (cmd_tx, mut commands) = fmpsc::unbounded();
+        let (message_tx, message_rx) = fmpsc::unbounded::<Value>();
+        let (watch_tx, watch_rx) = tmpsc::unbounded_channel();
+        let task = tokio::spawn(topic_skill_task(
+            skill,
+            registry.clone(),
+            cmd_tx,
+            Box::pin(message_rx),
+            watch_rx,
+        ));
+
+        message_tx
+            .unbounded_send(action_units(&[12], &[0.5]))
+            .unwrap();
+        let (call, run0) = answer_spawn(next_command(&mut commands).await, 0);
+        assert_eq!(call.module_id, Some(gen_uuid_from_str("face-module")));
+
+        let mut running = StateChange::new();
+        running
+            .set
+            .insert(run0.status.clone(), Some(status(STATUS_RUNNING_VARIANT_ID)));
+        watch_tx.send(Watch::Change(running)).unwrap();
+        watch_tx.send(Watch::Resolved(reloaded)).unwrap();
+        message_tx
+            .unbounded_send(action_units(&[1], &[1.0]))
+            .unwrap();
+        assert_eq!(answer_halt(next_command(&mut commands).await), run0.id);
+        let (call, _run1) = answer_spawn(next_command(&mut commands).await, 1);
+        assert_eq!(call.module_id, Some(gen_uuid_from_str("face-module-2")));
+
+        message_tx
+            .unbounded_send(action_units(&[2], &[0.25]))
+            .unwrap();
+        drop(watch_tx);
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("a retired task ends")
+            .unwrap();
+        assert!(
+            commands.next().now_or_never().flatten().is_none(),
+            "a retired task handled a message"
+        );
     }
 
     /// Messages that queue up before the task reads them collapse to the

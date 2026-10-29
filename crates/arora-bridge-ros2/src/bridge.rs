@@ -736,9 +736,7 @@ async fn run_node(
                 }
                 // The action and topic-skill tasks watch their runs' keys on
                 // the same outbound state the topics mirror.
-                for watcher in exposed.watchers() {
-                    let _ = watcher.send(change.clone());
-                }
+                exposed.watch(&change);
                 publish_change(
                     &mut node,
                     &namespace,
@@ -908,10 +906,21 @@ async fn ask_device<T: serde::de::DeserializeOwned>(
 type ServiceRequests = Pin<Box<dyn Stream<Item = ()> + Send>>;
 
 /// Endpoints by name, each with the source it was made from — a device
-/// function's signature, an input's key and shape — and the handle whose drop
-/// ends it.
+/// function's signature, an input's key and shape — and its handle: what
+/// reaches it, and whose drop ends it.
 struct Served<S, H> {
     endpoints: HashMap<String, (S, H)>,
+}
+
+/// How [`Served::update`] brings the endpoints in line with what is wanted.
+struct Diff<S, H, T> {
+    /// Wanted and not served: to create.
+    create: Vec<(String, S, T)>,
+    /// Wanted and served from an equal source: left serving.
+    kept: Vec<(String, T)>,
+    /// Served and not wanted from the same source: removed, their handles
+    /// handed back to be dropped or retired.
+    ended: Vec<(String, H)>,
 }
 
 impl<S: PartialEq, H> Served<S, H> {
@@ -921,32 +930,57 @@ impl<S: PartialEq, H> Served<S, H> {
         }
     }
 
-    /// End every endpoint `wanted` does not name with the same source, and
-    /// return the wanted ones not served: those to create. One name made from
-    /// an equal source is the same endpoint, so it is left as it is.
-    fn update<T>(&mut self, wanted: Vec<(String, S, T)>) -> Vec<(String, S, T)> {
+    /// Remove every endpoint `wanted` does not name with the same source, and
+    /// say what to create. One name made from an equal source is the same
+    /// endpoint, so it is left as it is.
+    fn update<T>(&mut self, wanted: Vec<(String, S, T)>) -> Diff<S, H, T> {
         let sources: HashMap<&str, &S> = wanted
             .iter()
             .map(|(name, source, _)| (name.as_str(), source))
             .collect();
-        self.endpoints.retain(|name, (source, _)| {
-            sources
-                .get(name.as_str())
-                .is_some_and(|wanted| **wanted == *source)
-        });
-        wanted
+        let gone: Vec<String> = self
+            .endpoints
+            .iter()
+            .filter(|(name, (source, _))| {
+                !sources
+                    .get(name.as_str())
+                    .is_some_and(|wanted| **wanted == *source)
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        let ended = gone
             .into_iter()
-            .filter(|(name, _, _)| !self.endpoints.contains_key(name))
-            .collect()
+            .filter_map(|name| {
+                let (_, handle) = self.endpoints.remove(&name)?;
+                Some((name, handle))
+            })
+            .collect();
+        let mut diff = Diff {
+            create: Vec::new(),
+            kept: Vec::new(),
+            ended,
+        };
+        for (name, source, made) in wanted {
+            if self.endpoints.contains_key(&name) {
+                diff.kept.push((name, made));
+            } else {
+                diff.create.push((name, source, made));
+            }
+        }
+        diff
     }
 
     fn insert(&mut self, name: String, source: S, handle: H) {
         self.endpoints.insert(name, (source, handle));
     }
+}
 
-    fn handles(&self) -> impl Iterator<Item = &H> {
-        self.endpoints.values().map(|(_, handle)| handle)
-    }
+/// A skill task — an action's or a topic skill's — and the channel that
+/// reaches it ([`actions::Watch`]). Dropping the channel retires the task: it
+/// finishes the goal or message it is handling, takes no other, and ends.
+struct SkillTask<T> {
+    watch: tmpsc::UnboundedSender<actions::Watch<T>>,
+    task: tokio::task::JoinHandle<()>,
 }
 
 /// How the topics this bridge subscribes to changed: what it now subscribes
@@ -987,15 +1021,22 @@ struct Exposed {
     inputs: Served<(String, Type), oneshot::Sender<()>>,
     /// The method services, by name.
     services: Served<MethodSignature, oneshot::Sender<()>>,
-    /// The actions, discovered and bound, by name: each a task, sent every
-    /// outbound state change.
-    actions: Served<MethodSignature, tmpsc::UnboundedSender<StateChange>>,
-    /// The topic skills, by topic: each a task, sent every outbound state
-    /// change.
-    topic_skills: Served<MethodSignature, tmpsc::UnboundedSender<StateChange>>,
-    /// The inputs and the functions as the device last described them.
+    /// The actions, discovered and bound, by name, and the topic skills, by
+    /// topic: each a task, sent every outbound state change and its
+    /// resolution whenever the device's functions change. A task serves its
+    /// name for as long as the device has the function, across reloads.
+    actions: Served<(), SkillTask<actions::MethodAction>>,
+    topic_skills: Served<(), SkillTask<topic_skills::TopicSkill>>,
+    /// The tasks of actions and topic skills the device no longer has, by
+    /// name, until they end. A name the device has again is served anew only
+    /// once its retired task has ended, so two tasks never serve one name.
+    retiring: HashMap<String, tokio::task::JoinHandle<()>>,
+    /// The inputs and the functions as the device last described them, and
+    /// whether the functions are to be exposed again at the next ask: an
+    /// endpoint waits on its retired task.
     inputs_described: Vec<(String, Option<Type>)>,
     methods_described: Vec<MethodSignature>,
+    methods_pending: bool,
     /// Every topic this bridge subscribes to. Publishing on one would hand the
     /// device its own command back: the sample re-enters as an inbound update,
     /// is written to the store, comes out again on the next step, and
@@ -1061,16 +1102,18 @@ impl Exposed {
             services: Served::new(),
             actions: Served::new(),
             topic_skills: Served::new(),
+            retiring: HashMap::new(),
             inputs_described: Vec::new(),
             methods_described: Vec::new(),
+            methods_pending: false,
         }
     }
 
     /// Bring what is served in line with what the device describes: create
     /// the endpoints of what it gained, end those of what it lost, and leave
     /// the rest as they are. A part the device did not answer, or answered as
-    /// it last did, is left as it is. Returns how the topics this bridge
-    /// subscribes to changed.
+    /// it last did with nothing left to expose, is left as it is. Returns how
+    /// the topics this bridge subscribes to changed.
     fn expose(&mut self, node: &mut Node, described: Described) -> Resubscribed {
         if let Some(inputs) = described
             .inputs
@@ -1081,8 +1124,9 @@ impl Exposed {
         }
         if let Some(methods) = described
             .methods
-            .filter(|methods| *methods != self.methods_described)
+            .filter(|methods| self.methods_pending || *methods != self.methods_described)
         {
+            self.methods_pending = false;
             self.expose_methods(node, &methods);
             self.methods_described = methods;
         }
@@ -1112,7 +1156,7 @@ impl Exposed {
             .into_iter()
             .map(|(path, value_type, topic)| (topic, (path, value_type), ()))
             .collect();
-        for (topic, (path, value_type), ()) in self.inputs.update(wanted) {
+        for (topic, (path, value_type), ()) in self.inputs.update(wanted).create {
             let qos = Qos::default_for(profile::Flow::In);
             match setup_key_subscriber(node, &self.namespace, &path, &value_type, qos) {
                 Ok(stream) => {
@@ -1138,7 +1182,10 @@ impl Exposed {
     /// One task per action owns its endpoints and goal book, and one per
     /// topic skill its subscription and the run its latest message spawned;
     /// the node task sends each every outbound state change, so it can watch
-    /// its runs' status, feedback and result keys.
+    /// its runs' status, feedback and result keys. A service is made anew
+    /// when its function's signature changes, its request and response types
+    /// with it; an action's or a topic skill's endpoints do not depend on the
+    /// signature, so its task is sent the new resolution instead.
     fn expose_methods(&mut self, node: &mut Node, signatures: &[MethodSignature]) {
         let (services, actions, topic_skills) = resolve_methods(
             &self.namespace,
@@ -1147,25 +1194,19 @@ impl Exposed {
             &self.action_bindings,
             &self.topic_skill_bindings,
         );
-        // Each endpoint made from a function, with that function's signature.
+        // Each service made from a function, with that function's signature.
         let by_id: HashMap<(Uuid, Uuid), &MethodSignature> = signatures
             .iter()
             .map(|signature| ((signature.module_id, signature.id), signature))
             .collect();
-        let source = |module_id: Uuid, function_id: Uuid| {
-            by_id
-                .get(&(module_id, function_id))
-                .map(|signature| (*signature).clone())
-        };
-
         let wanted = services
             .into_iter()
             .filter_map(|service| {
-                let signature = source(service.module_id?, service.function_id)?;
-                Some((service.name.clone(), signature, service))
+                let signature = by_id.get(&(service.module_id?, service.function_id))?;
+                Some((service.name.clone(), (*signature).clone(), service))
             })
             .collect();
-        for (name, signature, service) in self.services.update(wanted) {
+        for (name, signature, service) in self.services.update(wanted).create {
             let Some(requests) =
                 service_stream(node, service, self.registry.clone(), self.cmd_tx.clone())
             else {
@@ -1177,25 +1218,37 @@ impl Exposed {
             self.services.insert(name, signature, stop);
         }
 
+        self.retiring.retain(|_, task| !task.is_finished());
+
         let wanted = actions
             .into_iter()
-            .filter_map(|action| {
-                let signature = source(action.module_id, action.function_id)?;
-                Some((action.name.clone(), signature, action))
-            })
+            .map(|action| (action.name.clone(), (), action))
             .collect();
-        for (name, signature, action) in self.actions.update(wanted) {
+        let diff = self.actions.update(wanted);
+        for (name, action) in diff.kept {
+            if let Some(((), served)) = self.actions.endpoints.get(&name) {
+                let _ = served.watch.send(actions::Watch::Resolved(action));
+            }
+        }
+        for (name, ended) in diff.ended {
+            self.retiring.insert(name, ended.task);
+        }
+        for (name, (), action) in diff.create {
+            if self.retiring.contains_key(&name) {
+                self.methods_pending = true;
+                continue;
+            }
             match create_raw_action_server(node, &action, &self.registry) {
                 Ok(server) => {
-                    let (change_tx, change_rx) = tmpsc::unbounded_channel();
-                    tokio::spawn(actions::action_task(
+                    let (watch, watched) = tmpsc::unbounded_channel();
+                    let task = tokio::spawn(actions::action_task(
                         server,
                         action,
                         self.registry.clone(),
                         self.cmd_tx.clone(),
-                        change_rx,
+                        watched,
                     ));
-                    self.actions.insert(name, signature, change_tx);
+                    self.actions.insert(name, (), SkillTask { watch, task });
                 }
                 Err(e) => warn!("Ros2Bridge could not create action '{name}': {e}"),
             }
@@ -1203,12 +1256,22 @@ impl Exposed {
 
         let wanted = topic_skills
             .into_iter()
-            .filter_map(|skill| {
-                let signature = source(skill.module_id, skill.function_id)?;
-                Some((skill.topic.clone(), signature, skill))
-            })
+            .map(|skill| (skill.topic.clone(), (), skill))
             .collect();
-        for (topic, signature, skill) in self.topic_skills.update(wanted) {
+        let diff = self.topic_skills.update(wanted);
+        for (topic, skill) in diff.kept {
+            if let Some(((), served)) = self.topic_skills.endpoints.get(&topic) {
+                let _ = served.watch.send(actions::Watch::Resolved(skill));
+            }
+        }
+        for (topic, ended) in diff.ended {
+            self.retiring.insert(topic, ended.task);
+        }
+        for (topic, (), skill) in diff.create {
+            if self.retiring.contains_key(&topic) {
+                self.methods_pending = true;
+                continue;
+            }
             let qos = skill.qos.unwrap_or(Qos::default_for(profile::Flow::In));
             match setup_typed_message_subscriber(
                 node,
@@ -1218,25 +1281,31 @@ impl Exposed {
                 qos,
             ) {
                 Ok(messages) => {
-                    let (change_tx, change_rx) = tmpsc::unbounded_channel();
-                    tokio::spawn(topic_skills::topic_skill_task(
+                    let (watch, watched) = tmpsc::unbounded_channel();
+                    let task = tokio::spawn(topic_skills::topic_skill_task(
                         skill,
                         self.registry.clone(),
                         self.cmd_tx.clone(),
                         messages,
-                        change_rx,
+                        watched,
                     ));
-                    self.topic_skills.insert(topic, signature, change_tx);
+                    self.topic_skills
+                        .insert(topic, (), SkillTask { watch, task });
                 }
                 Err(e) => warn!("Ros2Bridge could not subscribe to the skill topic '{topic}': {e}"),
             }
         }
     }
 
-    /// The tasks to send each outbound state change: the actions' and the
-    /// topic skills'.
-    fn watchers(&self) -> impl Iterator<Item = &tmpsc::UnboundedSender<StateChange>> {
-        self.actions.handles().chain(self.topic_skills.handles())
+    /// Send an outbound state change to the actions' and the topic skills'
+    /// tasks, which watch their runs' keys on it.
+    fn watch(&self, change: &StateChange) {
+        for ((), served) in self.actions.endpoints.values() {
+            let _ = served.watch.send(actions::Watch::Change(change.clone()));
+        }
+        for ((), served) in self.topic_skills.endpoints.values() {
+            let _ = served.watch.send(actions::Watch::Change(change.clone()));
+        }
     }
 
     /// Recompute [`subscribed`](Self::subscribed) from the typed inputs, the
@@ -1954,10 +2023,11 @@ mod tests {
         assert!(next.ends_with("(499 more since the last report)"), "{next}");
     }
 
-    /// An endpoint named again from an equal source is left serving; one
-    /// named from another source, or no longer named, is ended by dropping
-    /// its handle; what is named and not served is returned, to be created —
-    /// a function the device reloaded with another signature among them.
+    /// An endpoint named again from an equal source is kept; one named from
+    /// another source, or no longer named, is removed and its handle handed
+    /// back, its drop ending it; what is named and not served is to be
+    /// created — a function the device reloaded with another signature among
+    /// them.
     #[test]
     fn served_endpoints_follow_what_the_device_describes() {
         let mut served: Served<u32, oneshot::Sender<()>> = Served::new();
@@ -1968,19 +2038,24 @@ mod tests {
             ends.insert(name, stopped);
         }
 
-        let mut created = served.update(vec![
-            ("kept".to_string(), 1, ()),
-            ("reloaded".to_string(), 20, ()),
-            ("loaded".to_string(), 4, ()),
+        let diff = served.update(vec![
+            ("kept".to_string(), 1, 'k'),
+            ("reloaded".to_string(), 20, 'r'),
+            ("loaded".to_string(), 4, 'l'),
         ]);
+        let mut created = diff.create;
         created.sort();
         assert_eq!(
             created,
             [
-                ("loaded".to_string(), 4, ()),
-                ("reloaded".to_string(), 20, ())
+                ("loaded".to_string(), 4, 'l'),
+                ("reloaded".to_string(), 20, 'r')
             ]
         );
+        assert_eq!(diff.kept, [("kept".to_string(), 'k')]);
+        let mut ended: Vec<String> = diff.ended.into_iter().map(|(name, _)| name).collect();
+        ended.sort();
+        assert_eq!(ended, ["reloaded", "unloaded"]);
         let serving: Vec<&String> = served.endpoints.keys().collect();
         assert_eq!(serving, ["kept"]);
         for (name, ended) in [("kept", false), ("reloaded", true), ("unloaded", true)] {

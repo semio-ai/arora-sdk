@@ -13,10 +13,14 @@ All notable changes to `arora-bridge-ros2`. The format follows
   key its HAL describes, gets its topic, a function a module it loads brings
   gets its service or action, and a profile binding whose function appears is
   served. What the device lost — an input it closed, a module it unloaded —
-  loses its endpoint, and a function reloaded with another signature gets its
-  endpoint anew. A key the bridge publishes stops being published once its
-  topic becomes an input's. The asks go through the device's in-process
-  command channel, and an answer equal to the last one changes nothing.
+  loses its endpoint. A function reloaded with another signature gets its
+  service anew; its action or topic skill keeps serving, and its next goal or
+  message calls the reloaded function, so the latest message on a topic skill
+  still halts the run an earlier one spawned. A key the bridge publishes
+  stops being published while its topic is an input's, and a typed output
+  held back that way publishes what its keys hold once the topic is freed.
+  The asks go through the device's in-process command channel, and an answer
+  equal to the last one changes nothing.
 
 ## [11.1.0] - 2026-10-21
 
