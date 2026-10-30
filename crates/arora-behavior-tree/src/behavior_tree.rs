@@ -1081,7 +1081,7 @@ fn tick(
     } else {
         // A value no binding keeps: a trace watching the node reads it here.
         if record.is_on() && record.watches(node.id) {
-            record.returned(node.id, &result.ret);
+            record.returned(node.id, &result.ret, function.return_ty.is_option());
         }
         result.ret.try_into().unwrap_or(Status::Success)
     };

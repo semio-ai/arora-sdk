@@ -567,3 +567,70 @@ fn a_trace_reports_unbound_returns_and_written_parameters() {
         )])
     );
 }
+
+/// A node removed and set again under its id starts with no return: the
+/// value its former self returned is not reported for it.
+#[test]
+fn a_node_set_again_reports_no_former_return() {
+    let sum = || Node {
+        id: SUM,
+        function: ADD,
+        bind: [(ADD_A, key("in")), (ADD_B, value(1.0))].into(),
+        children: None,
+    };
+    let root = |children: Vec<Uuid>| Node {
+        id: ROOT,
+        function: SEQ_FUNCTION_ID,
+        children: Some(children),
+        ..Node::default()
+    };
+    let gate = behavior()
+        .nodes
+        .into_iter()
+        .find(|node| node.id == GATE)
+        .unwrap();
+    let mut device = Device::running(Graph {
+        root: Some(ROOT),
+        nodes: vec![root(vec![GATE, SUM]), gate, sum()],
+    });
+    let trace = device
+        .interpreter
+        .trace(TraceOptions {
+            values: vec![SUM],
+            min_interval_ns: None,
+        })
+        .unwrap();
+    device.tick();
+    assert_eq!(
+        device.report_at(&trace, 1).unwrap().values[&SUM][&_RET_PARAM_ID],
+        Value::F64(11.0)
+    );
+
+    // Removed: its return is unset.
+    device
+        .interpreter
+        .apply(GraphDiff {
+            remove: vec![SUM],
+            set: vec![root(vec![GATE])],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    device.tick();
+    assert_eq!(
+        device.report_at(&trace, 2).unwrap().values[&SUM][&_RET_PARAM_ID],
+        Value::Unit
+    );
+
+    // Set again behind a closed gate: never ticked, it returned nothing.
+    device.set("gate", 1.0);
+    device
+        .interpreter
+        .apply(GraphDiff {
+            set: vec![sum(), root(vec![GATE, SUM])],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    device.tick();
+    let report = device.report_at(&trace, 3).unwrap();
+    assert!(report.values.is_empty(), "{report:?}");
+}

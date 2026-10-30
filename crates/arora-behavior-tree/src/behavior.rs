@@ -783,6 +783,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 }
             }
             self.traces.arm(&lowered.tree().record);
+            self.traces.keep_returns_of(lowered.tree());
             self.fresh.clear();
             self.lowered = Some(lowered);
             self.dirty = false;

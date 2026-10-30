@@ -40,8 +40,8 @@ pub(crate) struct TickRecord {
     /// The nodes a trace watches.
     watched: RefCell<IdSet<Uuid>>,
     /// The watched nodes that returned a value no binding keeps, with that
-    /// value.
-    returns: RefCell<Vec<(Uuid, Value)>>,
+    /// value; `None` for an optional return that holds nothing.
+    returns: RefCell<Vec<(Uuid, Option<Value>)>>,
 }
 
 impl TickRecord {
@@ -66,12 +66,19 @@ impl TickRecord {
         self.watched.borrow().contains(&node)
     }
 
-    /// Watched node `node` returned `value`, which no binding keeps. A status
-    /// is no value: the node's status reports it.
-    pub(crate) fn returned(&self, node: Uuid, value: &Value) {
-        if Status::try_from(value.clone()).is_err() {
-            self.returns.borrow_mut().push((node, value.clone()));
+    /// Watched node `node` returned `value`, which no binding keeps; its
+    /// function's return is an optional when `optional`, which reads as a
+    /// bound return's cell does: its value, or nothing. A status is no value:
+    /// the node's status reports it.
+    pub(crate) fn returned(&self, node: Uuid, value: &Value, optional: bool) {
+        if Status::try_from(value.clone()).is_ok() {
+            return;
         }
+        let kept = match value {
+            Value::Option(held) if optional => held.as_deref().cloned(),
+            value => Some(value.clone()),
+        };
+        self.returns.borrow_mut().push((node, kept));
     }
 
     /// Node `node` returned `status`.
@@ -181,6 +188,13 @@ impl Traces {
         Some(trace.handle.status)
     }
 
+    /// Forget what the nodes `tree` no longer has returned: a node set again
+    /// under their id starts with no return.
+    pub(crate) fn keep_returns_of(&mut self, tree: &BehaviorTree) {
+        self.returns
+            .retain(|node, _| tree.node_index.contains_key(node));
+    }
+
     /// The nodes in `restarted` start afresh: each trace that has reported
     /// forgets what it reported of them, and its next report names them and
     /// states them anew.
@@ -216,7 +230,12 @@ impl Traces {
         statuses.extend(record.statuses.borrow_mut().drain(..));
         activity.clear();
         activity.extend(record.activity.borrow_mut().drain(..));
-        self.returns.extend(record.returns.borrow_mut().drain(..));
+        for (node, returned) in record.returns.borrow_mut().drain(..) {
+            match returned {
+                Some(value) => self.returns.insert(node, value),
+                None => self.returns.remove(&node),
+            };
+        }
         let (mut status_delta, mut activity_delta) = std::mem::take(&mut self.delta);
         changes(&self.statuses, &statuses, &mut status_delta);
         changes(&self.activity, &activity, &mut activity_delta);
