@@ -4,6 +4,25 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [17.1.0] - 2026-10-30
+
+### Added
+
+- The interpreter module's `READ` function, reaching
+  `BehaviorInterpreter::read`: it answers the behavior as a `LOAD` takes it,
+  without a task run's nodes, and its revision. `LocalCaller::read_behavior`
+  calls it. It stays out of the method index, as `LOAD`, `EDIT` and `TRACE`
+  do, and its id is reserved: an interpreter cannot describe a method under
+  it.
+- The default interpreter writes the behavior's revision to
+  `arora/behavior/revision` at the step after each load or edit, closed to
+  remote writers with the runtime's other keys: a client follows it to learn
+  that another client changed the behavior.
+
+### Changed
+
+- Requires arora-behavior 10.1 and arora-behavior-tree 10.1.
+
 ## [17.0.0] - 2026-10-30
 
 ### Changed

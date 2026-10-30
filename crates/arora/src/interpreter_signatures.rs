@@ -3,10 +3,10 @@
 //! `spawn`, `spawn_graph` and `halt` — so that `DescribeMethods` lists them by
 //! name like any module's.
 //!
-//! `load`, `edit` and `trace` keep their ids without a description: a client
-//! reaches the main behavior through the interpreter module's ids, and the
-//! names stay free for the typed functions of the composed behavior host
-//! (`load_graph`, `edit_graph`).
+//! `load`, `edit`, `read` and `trace` keep their ids without a description:
+//! they act on the main behavior, which a client reaches through the
+//! interpreter module's ids, and the names stay free for the typed functions
+//! of the composed behavior host (`load_graph`, `edit_graph`).
 //!
 //! A graph, a call and a task handle travel as dynamic key-values, keyed by
 //! their field names, so they are described as the dynamic key-value type. A

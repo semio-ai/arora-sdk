@@ -733,6 +733,22 @@ impl LocalCaller {
         async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
     }
 
+    /// Read the device's behavior: the graph its interpreter runs, as a
+    /// `LOAD` takes it — no task run's nodes — and its revision
+    /// ([`arora_behavior::LoadedBehavior`]). The revision changes with each
+    /// load and each edit of the behavior, whoever makes it, and the
+    /// interpreter writes it to
+    /// [`built_in::BEHAVIOR_REVISION`](arora_behavior::built_in::BEHAVIOR_REVISION):
+    /// a client that follows that key reads again when it changes. An
+    /// interpreter that cannot read refuses.
+    pub fn read_behavior(
+        &self,
+    ) -> impl Future<Output = Result<arora_behavior::LoadedBehavior, CallError>> + Send + 'static
+    {
+        let reply = self.ask(BridgeOp::Call(interpreter_module::encode_read()));
+        async move { interpreter_module::decode_read_result(&reply.await?.ret).map_err(generic) }
+    }
+
     /// Stop the run `run` names: it ends `Failure` on the step after the halt is
     /// applied. Idempotent — halting a finished or unknown run is a clean no-op.
     pub fn halt(
@@ -1380,6 +1396,7 @@ impl AroraBuilder {
         let reserved = [
             interpreter_module::LOAD,
             interpreter_module::EDIT,
+            interpreter_module::READ,
             interpreter_module::SPAWN,
             interpreter_module::SPAWN_GRAPH,
             interpreter_module::TRACE,
@@ -1479,8 +1496,8 @@ impl AroraBuilder {
             .unwrap_or_else(|| Box::new(BehaviorTreeInterpreter::new()));
 
         // The interpreter as a module: a host module under
-        // `interpreter_module::ID` whose `LOAD`/`EDIT`/`SPAWN`/`SPAWN_GRAPH`/
-        // `TRACE`/`HALT` functions
+        // `interpreter_module::ID` whose `LOAD`/`EDIT`/`READ`/`SPAWN`/
+        // `SPAWN_GRAPH`/`TRACE`/`HALT` functions
         // run on the same cell the step loop ticks. A Call to those ids — from a
         // remote or from a behavior — reaches the interpreter through the
         // engine's normal dispatch, like any module function.
@@ -1527,6 +1544,18 @@ impl AroraBuilder {
                         runtime::with_interpreter(&cell, |interpreter| interpreter.apply(diff))?;
                     log::info!("behavior edited: {summary}, running from the next step");
                     Ok(result)
+                }
+            })
+            .function(interpreter_module::READ, {
+                let cell = interpreter.clone();
+                move |call| {
+                    interpreter_module::decode_read(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    runtime::with_interpreter_value(&cell, |interpreter| {
+                        interpreter
+                            .read()
+                            .map(|loaded| interpreter_module::encode_read_result(&loaded))
+                    })
                 }
             })
             .function(interpreter_module::SPAWN, {
@@ -3453,6 +3482,144 @@ mod caller_tests {
         );
     }
 
+    /// A behavior editor attached to a device: a `READ` call answers the
+    /// behavior as loaded, with no task run's node, and its revision; the
+    /// revision key, and the editor's trace, change when another client loads
+    /// or edits the behavior, and the editor reads it again.
+    #[test]
+    fn a_client_reads_the_behavior_and_follows_its_revision() {
+        use arora_behavior::graph::{Binding, Graph, GraphDiff, Node, Source};
+        use arora_behavior::{built_in, LoadedBehavior};
+        use arora_behavior_tree::nodes::RUN_FUNCTION_ID;
+
+        let mut arora = device();
+        let editor = arora.caller();
+        let other = arora.caller();
+        let revision = |arora: &Arora| {
+            arora
+                .store()
+                .read(&[Key::new(built_in::BEHAVIOR_REVISION)])
+                .remove(0)
+        };
+        let read = |arora: &mut Arora| {
+            let answer = settle(arora, editor.call(interpreter_module::encode_read()))
+                .expect("the default interpreter reads");
+            interpreter_module::decode_read_result(&answer.ret).expect("a loaded behavior")
+        };
+
+        // Nothing loaded: the empty graph, at revision 0.
+        assert_eq!(read(&mut arora), LoadedBehavior::default());
+        assert_eq!(revision(&arora), Some(Value::U64(0)));
+
+        // Another client loads a behavior; a run starts beside it.
+        let behavior = doubling_graph(2.0);
+        settle(
+            &mut arora,
+            other.call(interpreter_module::encode_load(&behavior)),
+        )
+        .expect("the load applies");
+        let run = Uuid::from_u128(0x10);
+        let run_graph = Graph {
+            root: Some(run),
+            nodes: vec![Node {
+                id: run,
+                function: RUN_FUNCTION_ID,
+                ..Node::default()
+            }],
+        };
+        let graph_type = arora_behavior_tree::behavior::graph_type();
+        settle(&mut arora, other.spawn_graph(&graph_type, &run_graph)).expect("the run starts");
+        arora.step(Duration::from_millis(10)).expect("step");
+        assert_eq!(
+            revision(&arora),
+            Some(Value::U64(1)),
+            "the load, not the run"
+        );
+        let loaded = read(&mut arora);
+        assert_eq!(
+            loaded,
+            LoadedBehavior {
+                revision: 1,
+                graph: behavior.clone(),
+            }
+        );
+
+        // The editor traces; the other client edits: the next report carries
+        // the new revision, and the key holds it.
+        let trace = settle(
+            &mut arora,
+            editor.trace(&arora_behavior::TraceOptions::default()),
+        )
+        .expect("the default interpreter traces");
+        let report = |arora: &Arora| {
+            arora
+                .store()
+                .read(std::slice::from_ref(&trace.feedback[0]))
+                .remove(0)
+                .map(|value| arora_behavior::trace::decode_report(&value).expect("a report"))
+                .expect("a report")
+        };
+        assert_eq!(report(&arora).revision, Some(1), "the first report");
+        let rebind = GraphDiff {
+            bind: vec![Binding {
+                node: Uuid::from_u128(0x2),
+                port: DOUBLE_X,
+                source: Source::Value(Value::F64(3.0)),
+            }],
+            ..GraphDiff::default()
+        };
+        settle(
+            &mut arora,
+            other.call(interpreter_module::encode_edit(&rebind)),
+        )
+        .expect("the edit applies");
+        arora.step(Duration::from_millis(10)).expect("step");
+        assert_eq!(revision(&arora), Some(Value::U64(2)));
+        let edited = report(&arora);
+        assert_eq!(edited.revision, Some(2), "{edited:?}");
+
+        let mut expected = behavior;
+        expected
+            .apply(rebind)
+            .expect("the edit applies to the graph");
+        assert_eq!(
+            settle(&mut arora, editor.read_behavior()).expect("read"),
+            LoadedBehavior {
+                revision: 2,
+                graph: expected,
+            }
+        );
+    }
+
+    /// An interpreter that does not read refuses `READ`, and writes no
+    /// revision.
+    #[test]
+    fn an_interpreter_that_does_not_read_refuses_it() {
+        struct Idle;
+        impl BehaviorInterpreter for Idle {
+            fn tick(
+                &mut self,
+                _ctx: &mut arora_behavior::BehaviorContext,
+            ) -> std::result::Result<arora_behavior::BehaviorStatus, arora_behavior::BehaviorError>
+            {
+                Ok(arora_behavior::BehaviorStatus::Running)
+            }
+        }
+        let mut arora = Arora::builder()
+            .with_behavior_interpreter(Box::new(Idle))
+            .build()
+            .expect("the device builds");
+        let caller = arora.caller();
+        let refused = settle(&mut arora, caller.read_behavior()).expect_err("refused");
+        assert!(format!("{refused:?}").contains("reading"), "{refused:?}");
+        assert_eq!(
+            arora
+                .store()
+                .read(&[Key::new(arora_behavior::built_in::BEHAVIOR_REVISION)]),
+            vec![None]
+        );
+    }
+
     /// The interpreter module's functions are described: a client finds them
     /// by name and invokes them with arguments by name.
     #[test]
@@ -3474,8 +3641,18 @@ mod caller_tests {
             !described
                 .iter()
                 .any(|method| method.module_id == interpreter_module::ID
-                    && ["load", "edit"].contains(&method.name.as_str())),
-            "load and edit are reached by id"
+                    && ["load", "edit", "read", "trace"].contains(&method.name.as_str())),
+            "load, edit, read and trace are reached by id"
+        );
+        assert!(
+            !described.iter().any(|method| [
+                interpreter_module::LOAD,
+                interpreter_module::EDIT,
+                interpreter_module::READ,
+                interpreter_module::TRACE
+            ]
+            .contains(&method.id)),
+            "nor described under another name"
         );
 
         // `spawn`, its call a key-value as described.
@@ -3718,7 +3895,8 @@ mod hal_key_tests {
     const TASK_RUN_STATUS: &str = "arora/tasks/m/f/1/status";
 
     /// The runtime's own keys stay closed under the opened empty prefix: a
-    /// remote sets neither the device's clock nor a task run's keys.
+    /// remote sets neither the device's clock, nor the behavior's revision,
+    /// nor a task run's keys.
     #[test]
     fn open_leaves_the_runtime_s_keys_closed() {
         let store = SimpleDataStore::new();
@@ -3726,7 +3904,12 @@ mod hal_key_tests {
             .set_prefix_meta(HashMap::from([(String::new(), KeyMeta::new().editable())]))
             .expect("open everything");
         let mut arora = device_with(FakeHal::new(), store);
-        for key in [built_in::TIME, built_in::DT, TASK_RUN_STATUS] {
+        for key in [
+            built_in::TIME,
+            built_in::DT,
+            built_in::BEHAVIOR_REVISION,
+            TASK_RUN_STATUS,
+        ] {
             let closed = refused(&mut arora, key, Value::U64(0));
             assert!(closed.contains("not an input"), "{key}: {closed}");
         }
