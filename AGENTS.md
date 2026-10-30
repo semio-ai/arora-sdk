@@ -57,7 +57,10 @@ Cargo traps that cost hours when unknown:
   unaffected.
 - On `wasm32-unknown-unknown`, tokio compiles only with `sync`, `macros`,
   `io-util`, `rt` and `time`. Never `tokio = { features = ["full"] }` in the
-  runtime's graph; use `std::fs` for startup and code-generation I/O.
+  runtime's graph. Filesystem access in the native runtime's startup and in
+  host-side code generation uses `std::fs`; the browser build has no
+  filesystem and receives modules and records as bytes through JavaScript
+  ([`crates/arora-web/readme.md`](crates/arora-web/readme.md)).
 - A `[target.'cfg(…)'.build-dependencies]` gate is evaluated against the
   host, so it cannot keep a build dependency out of a wasm build: make the
   dependency optional behind a feature.
@@ -220,10 +223,13 @@ case it does not name.
 - **The HAL carries actuation.** A simulated sensor reading is a store write,
   not a HAL path. The device binary runs the same on the robot and in
   simulation; only the HAL differs.
-- **The runtime holds no mutex and spawns nothing it does not need.** An
-  async module function is polled on the tick
-  ([`docs/async-functions.md`](docs/async-functions.md)). Stopping a run is
-  dropping its future: there is no `run_until` or `with_shutdown`.
+- **The runtime holds no mutex and spawns nothing it does not need.** A
+  long-running module function is a synchronous call that returns
+  `Status::Running` and is called again on every step until it returns
+  `Success` or `Failure`; it never blocks the step
+  ([`docs/async-functions.md`](docs/async-functions.md)). Separately, the
+  device stops when its `run` future is dropped: there is no `run_until` or
+  `with_shutdown`.
 - **A library never reads `argv`.** The binary parses its arguments (a clap
   helper in the library is fine), and Arora is not patched for one app's
   command line. A feature is named for the concept it gates, not for the
