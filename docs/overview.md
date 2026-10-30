@@ -49,7 +49,8 @@ statement to the outside world:
   runner's `--open` opens every key that has no meta of its own, for a
   sandbox — every key but the runtime's.
 - The runtime's own keys under `arora/` — its clock (`arora/time`,
-  `arora/dt`) and its task runs' (`arora/tasks/…`) — are closed: the runtime
+  `arora/dt`), its behavior's revision (`arora/behavior/revision`) and its
+  task runs' (`arora/tasks/…`) — are closed: the runtime
   states their subtree closed when the device is built, so no wider prefix
   opens them. A host opens one by stating that key's own meta.
 - The device's own writers — its hardware, its behavior — are never checked:

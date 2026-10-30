@@ -4,6 +4,32 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.1.0] - 2026-10-30
+
+### Added
+
+- `BehaviorTreeInterpreter` answers `BehaviorInterpreter::read`: the main
+  behavior without the runner or a task run's nodes, rooted where it was
+  loaded or last edited to be, which a `load` reproduces, and its revision.
+  The revision advances at each `load`, and at each `apply`, halt, end or
+  respawn of a run that changes the graph `read` answers — a run leaving
+  takes with it the main behavior's bindings reading it. An edit that
+  changes only a run's nodes, a spawn, a halt that unbinds nothing of the
+  main behavior and a tick leave it as it is. The interpreter writes it to
+  `arora/behavior/revision` at its first tick and at the tick after each
+  change, and each trace's report carries it after a change and in its
+  first report.
+
+### Changed
+
+- `load` takes a node the main behavior holds with a task run, setting it
+  in place, so a graph `read` answers loads back. A node only a run holds
+  is still refused. The previous behavior's nodes leave but for those the
+  runs hold once the new nodes are set.
+- Requires arora-behavior 10.1.
+- A tree cannot call the interpreter module's `READ`, as it cannot call
+  `LOAD` or `EDIT`.
+
 ## [10.0.0] - 2026-10-30
 
 ### Changed

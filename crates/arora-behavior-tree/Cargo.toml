@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree"
-version = "10.0.0"
+version = "10.1.0"
 edition = "2021"
 description = "The Arora behavior tree: Groot-compatible trees ticking Arora modules."
 license = "Apache-2.0"
@@ -26,7 +26,9 @@ harness = false
 
 [dependencies]
 arora-buffers = { path = "../arora-buffers", version = "3" }
-arora-behavior = { path = "../arora-behavior", version = "10" }
+# 10.1: `BehaviorInterpreter::read`, `built_in::BEHAVIOR_REVISION`,
+# `TraceReport::revision`.
+arora-behavior = { path = "../arora-behavior", version = "10.1" }
 arora-types = { path = "../arora-types", version = "3.9" }
 # 3: on arora-behavior 10, whose `Status` it re-exports.
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "3" }

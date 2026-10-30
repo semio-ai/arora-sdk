@@ -9,6 +9,9 @@
 //!   replace the running behavior with a whole [`Graph`];
 //! - [`EDIT`] → [`BehaviorInterpreter::apply`](crate::BehaviorInterpreter::apply):
 //!   apply a [`GraphDiff`] to it;
+//! - [`READ`] → [`BehaviorInterpreter::read`](crate::BehaviorInterpreter::read):
+//!   answer the running behavior as a [`LoadedBehavior`] — the [`Graph`] a
+//!   [`LOAD`] of it reproduces, and its revision;
 //! - [`SPAWN`] → [`BehaviorInterpreter::spawn`](crate::BehaviorInterpreter::spawn):
 //!   start a task run from a [`Call`] under a [`RunPolicy`], returning a
 //!   [`TaskHandle`];
@@ -27,8 +30,9 @@
 //! graph type and version as strings. A compound payload (a graph, a diff, a
 //! call, a policy, trace options) is converted generically through
 //! [`arora_types::value_serde`], and the [`TaskHandle`] that [`SPAWN`],
-//! [`SPAWN_GRAPH`] and [`TRACE`] answer with returns the same way. A
-//! `Call{module_id: ID, id: LOAD|EDIT|SPAWN|SPAWN_GRAPH|TRACE|HALT}` — a remote's
+//! [`SPAWN_GRAPH`] and [`TRACE`] answer with, and the [`LoadedBehavior`]
+//! [`READ`] answers with, return the same way. A
+//! `Call{module_id: ID, id: LOAD|EDIT|READ|SPAWN|SPAWN_GRAPH|TRACE|HALT}` — a remote's
 //! `BridgeOp::Call`, or a behavior's own call bridge — reaches the interpreter
 //! through the engine's normal dispatch, like any module function.
 
@@ -42,6 +46,7 @@ use uuid::{uuid, Uuid};
 use crate::graph::{Graph, GraphDiff, GraphType};
 use crate::task::{RunPolicy, TaskHandle, TaskId};
 use crate::trace::TraceOptions;
+use crate::LoadedBehavior;
 
 /// Module id under which the runtime registers the behavior interpreter on
 /// the engine. Self-identifying like the vizij type ids: the ASCII bytes of
@@ -109,6 +114,11 @@ pub const TRACE: Uuid = uuid!("61726f72-6100-0000-0000-000000000010");
 /// structured [`Value`].
 pub const TRACE_ARG: Uuid = uuid!("61726f72-6100-0000-0000-000000000011");
 
+/// Function id of **read**: answer the running behavior as a
+/// [`LoadedBehavior`] — the [`Graph`] a [`LOAD`] of it reproduces, and its
+/// revision. It takes no argument.
+pub const READ: Uuid = uuid!("61726f72-6100-0000-0000-000000000012");
+
 /// Build the [`Call`] that applies `diff` to the running behavior.
 pub fn encode_edit(diff: &GraphDiff) -> Call {
     encode(EDIT, EDIT_ARG, diff)
@@ -127,6 +137,38 @@ pub fn encode_load(graph: &Graph) -> Call {
 /// Read the [`Graph`] out of a [`LOAD`] call.
 pub fn decode_load(call: &Call) -> Result<Graph, String> {
     decode(call, LOAD, LOAD_ARG, "Graph")
+}
+
+/// Build the [`Call`] that reads the running behavior.
+pub fn encode_read() -> Call {
+    Call {
+        module_id: Some(ID),
+        id: READ,
+        args: Vec::new(),
+    }
+}
+
+/// Check that `call` is a [`READ`] call.
+pub fn decode_read(call: &Call) -> Result<(), String> {
+    if call.id != READ {
+        return Err(format!(
+            "not the expected interpreter function: {}",
+            call.id
+        ));
+    }
+    Ok(())
+}
+
+/// Convert the [`LoadedBehavior`] that [`READ`] answers to a [`Value`], to
+/// travel back as the call's return: a key-value whose `revision` field is a
+/// `u64` and whose `graph` field is the [`Graph`] as [`LOAD`] takes it.
+pub fn encode_read_result(behavior: &LoadedBehavior) -> Value {
+    value_serde::to_value(behavior).expect("a LoadedBehavior converts to a Value")
+}
+
+/// Read the [`LoadedBehavior`] out of a [`READ`] call's return [`Value`].
+pub fn decode_read_result(value: &Value) -> Result<LoadedBehavior, String> {
+    value_serde::from_value(value.clone()).map_err(|e| format!("malformed LoadedBehavior: {e}"))
 }
 
 /// Build the [`Call`] that spawns `call` as a task run under `policy`.
@@ -331,6 +373,65 @@ mod tests {
         assert_eq!(call.module_id, Some(ID));
         assert_eq!(call.id, LOAD);
         assert_eq!(decode_load(&call).unwrap(), graph);
+    }
+
+    #[test]
+    fn read_call_and_result_round_trip() {
+        let call = encode_read();
+        assert_eq!(call.module_id, Some(ID));
+        assert_eq!(call.id, READ);
+        assert!(call.args.is_empty());
+        assert_eq!(decode_read(&call), Ok(()));
+        let mut wrong = call;
+        wrong.id = LOAD;
+        assert!(decode_read(&wrong).is_err());
+
+        let mut graph = Graph::empty();
+        graph.root = Some(Uuid::from_u128(3));
+        graph.nodes.push(crate::graph::Node {
+            id: Uuid::from_u128(3),
+            function: Uuid::from_u128(4),
+            bind: [(
+                Uuid::from_u128(5),
+                crate::graph::Source::Key("face/x".to_string()),
+            )]
+            .into(),
+            ..Default::default()
+        });
+        for behavior in [
+            LoadedBehavior::default(),
+            LoadedBehavior {
+                revision: u64::MAX,
+                graph,
+            },
+        ] {
+            let value = encode_read_result(&behavior);
+            assert_eq!(decode_read_result(&value).unwrap(), behavior);
+        }
+        assert!(decode_read_result(&Value::U64(1)).is_err());
+    }
+
+    /// The answer's graph is the form `LOAD` takes: a client loads it back
+    /// as it reads it.
+    #[test]
+    fn a_read_graph_loads_as_it_reads() {
+        let mut graph = Graph::empty();
+        graph.root = Some(Uuid::from_u128(3));
+        graph.nodes.push(crate::graph::Node {
+            id: Uuid::from_u128(3),
+            function: Uuid::from_u128(4),
+            ..Default::default()
+        });
+        let Value::KeyValue(answer) = encode_read_result(&LoadedBehavior {
+            revision: 2,
+            graph: graph.clone(),
+        }) else {
+            panic!("a LoadedBehavior is a key-value");
+        };
+        let field = |name: &str| *answer.fields[name].value.clone().expect("set");
+        assert_eq!(field("revision"), Value::U64(2));
+        let load = encode_load(&graph);
+        assert_eq!(field("graph"), *load.args[0].value);
     }
 
     #[test]

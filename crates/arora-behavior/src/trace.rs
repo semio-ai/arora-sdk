@@ -162,6 +162,14 @@ pub struct TraceReport {
     /// afresh, and this report states its status and values anew.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restarted: Vec<Uuid>,
+    /// The behavior's revision
+    /// ([`LoadedBehavior::revision`](crate::LoadedBehavior::revision)), when
+    /// it changed since the trace's previous report, and in its first: a
+    /// tracing client learns that the behavior was loaded or edited, by it
+    /// or another client, in the report that follows the change. `None`
+    /// when it did not change, or the interpreter keeps none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
 }
 
 impl TraceReport {
@@ -171,11 +179,12 @@ impl TraceReport {
             && self.activity.is_empty()
             && self.values.is_empty()
             && self.restarted.is_empty()
+            && self.revision.is_none()
     }
 }
 
 /// The names of the encoded report's fields, in [`fields`]' order.
-const NAMES: [&str; 10] = [
+const NAMES: [&str; 11] = [
     "tick",
     "since",
     "status_nodes",
@@ -186,12 +195,13 @@ const NAMES: [&str; 10] = [
     "value_ports",
     "values",
     "restarted",
+    "revision",
 ];
 
 /// The encoded report's id and its fields' ids: the hashes of their names,
 /// as [`arora_types::value_serde`] names a key-value and its entries.
-fn fields() -> &'static (Uuid, [Uuid; 10]) {
-    static IDS: OnceLock<(Uuid, [Uuid; 10])> = OnceLock::new();
+fn fields() -> &'static (Uuid, [Uuid; 11]) {
+    static IDS: OnceLock<(Uuid, [Uuid; 11])> = OnceLock::new();
     IDS.get_or_init(|| {
         (
             arora_types::gen_uuid_from_str("TraceReport"),
@@ -252,6 +262,9 @@ pub fn encode_report(report: &TraceReport) -> Value {
     }
     if !report.restarted.is_empty() {
         set(9, ids(report.restarted.iter().copied()));
+    }
+    if let Some(revision) = report.revision {
+        set(10, Value::U64(revision));
     }
     Value::KeyValue(encoded)
 }
@@ -339,6 +352,7 @@ pub fn decode_report(value: &Value) -> Result<TraceReport, String> {
             .map(|((node, port), value)| PortValue { node, port, value })
             .collect(),
         restarted: ids_at(9)?,
+        revision: u64_at(10)?,
     })
 }
 
@@ -368,6 +382,7 @@ mod tests {
                 },
             ],
             restarted: vec![Uuid::from_u128(1)],
+            revision: Some(3),
         }
     }
 
@@ -378,6 +393,12 @@ mod tests {
         let empty = TraceReport::default();
         assert!(empty.is_empty());
         assert_eq!(decode_report(&encode_report(&empty)).unwrap(), empty);
+        let revised = TraceReport {
+            revision: Some(1),
+            ..TraceReport::default()
+        };
+        assert!(!revised.is_empty(), "a new revision is a change");
+        assert_eq!(decode_report(&encode_report(&revised)).unwrap(), revised);
     }
 
     /// The form a WebSocket client reads: the value vocabulary's JSON of a
@@ -387,6 +408,7 @@ mod tests {
         let json = serde_json::to_value(encode_report(&TraceReport {
             restarted: Vec::new(),
             since: None,
+            revision: None,
             ..report()
         }))
         .unwrap();
@@ -407,6 +429,12 @@ mod tests {
             serde_json::json!({"values": [{"f64": 0.5}, "unit"]})
         );
         assert!(fields.get("since").is_none() && fields.get("restarted").is_none());
+        assert!(fields.get("revision").is_none());
+        let json = serde_json::to_value(encode_report(&report())).unwrap();
+        assert_eq!(
+            json["keyvalue"]["fields"]["revision"]["value"],
+            serde_json::json!({"u64": 3})
+        );
     }
 
     #[test]

@@ -10,6 +10,8 @@ pub mod error;
 pub mod graph;
 mod id_hash;
 pub mod nodes;
+#[cfg(test)]
+mod read_tests;
 pub mod readable;
 mod scatter;
 pub mod schema;
@@ -1887,8 +1889,8 @@ pub(crate) fn is_interpreter_function(function: &ModuleFunction) -> bool {
 /// Whether `function` is the id of one of the interpreter module's own
 /// functions; see [`is_interpreter_function`].
 pub(crate) fn is_interpreter_function_id(function: Uuid) -> bool {
-    use arora_behavior::interpreter_module::{EDIT, HALT, LOAD, SPAWN, SPAWN_GRAPH, TRACE};
-    [LOAD, EDIT, SPAWN, SPAWN_GRAPH, TRACE, HALT].contains(&function)
+    use arora_behavior::interpreter_module::{EDIT, HALT, LOAD, READ, SPAWN, SPAWN_GRAPH, TRACE};
+    [LOAD, EDIT, READ, SPAWN, SPAWN_GRAPH, TRACE, HALT].contains(&function)
 }
 
 // Call expressions.

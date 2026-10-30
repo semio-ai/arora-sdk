@@ -28,6 +28,16 @@
 //! The runner ticks the main behavior first, then the runs in the order they
 //! were spawned.
 //!
+//! [`read`](BehaviorInterpreter::read) answers the main behavior alone, with
+//! neither the runner nor a node only a run holds, rooted where it was
+//! loaded: the graph a [`load`](BehaviorInterpreter::load) of it reproduces. A
+//! binding of the main behavior that reads a run's node is answered as it
+//! stands, so the graph loads back beside that run. Its revision counts the
+//! loads, and the other changes of the graph `read` answers: an edit, or a
+//! run leaving (halted, ended, spawned again) with a binding of the main
+//! behavior reading it. A change of a run alone leaves it. Each tick after a
+//! change writes it to [`built_in::BEHAVIOR_REVISION`].
+//!
 //! Everything is ordinary graph data, edited through the same
 //! [`apply`](BehaviorInterpreter::apply)/[`GraphDiff`] path an editor uses and
 //! visible through [`graph`](BehaviorTreeInterpreter::graph) — the runs, their
@@ -83,8 +93,8 @@ use std::rc::Rc;
 
 use arora_behavior::graph::{source_port, Graph, GraphDiff, GraphType, Node as GraphNode, Source};
 use arora_behavior::{
-    interpreter_module, BehaviorContext, BehaviorError, BehaviorInterpreter, BehaviorStatus,
-    RunPolicy, TaskHandle, TaskId, TraceOptions,
+    built_in, interpreter_module, BehaviorContext, BehaviorError, BehaviorInterpreter,
+    BehaviorStatus, LoadedBehavior, RunPolicy, TaskHandle, TaskId, TraceOptions,
 };
 use arora_types::call::Call;
 use arora_types::data::{DataStore, Key, StateChange};
@@ -181,6 +191,11 @@ pub struct BehaviorTreeInterpreter {
     traces: Traces,
     /// The ticks so far: the tick a trace's report names.
     ticks: u64,
+    /// The main behavior's revision: the loads, and the other changes of the
+    /// graph a read answers.
+    revision: u64,
+    /// The revision last written to the store; `None` before the first tick.
+    written_revision: Option<u64>,
 }
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
@@ -424,6 +439,8 @@ impl BehaviorTreeInterpreter {
             functions: FunctionIndex::new(),
             traces: Traces::default(),
             ticks: 0,
+            revision: 0,
+            written_revision: None,
         }
     }
 
@@ -503,12 +520,80 @@ impl BehaviorTreeInterpreter {
         held
     }
 
-    /// Every run's nodes.
-    fn run_nodes(&self) -> HashSet<Uuid> {
-        let nodes = by_id(&self.graph);
-        self.all_runs()
-            .flat_map(|run| Self::nodes_of(&nodes, run))
-            .collect()
+    /// The nodes that are not the main behavior's: the runner, and the runs'
+    /// nodes the main behavior's tree does not also hold.
+    fn not_main(&self) -> HashSet<Uuid> {
+        self.not_main_beside(&[])
+    }
+
+    /// [`not_main`](Self::not_main), counting `others` among the runs: runs
+    /// taken out of the lists and not yet pruned.
+    fn not_main_beside(&self, others: &[Run]) -> HashSet<Uuid> {
+        let index = by_id(&self.graph);
+        let mut nodes: HashSet<Uuid> = self
+            .all_runs()
+            .chain(others)
+            .flat_map(|run| Self::nodes_of(&index, run))
+            .collect();
+        if let Some(root) = self.main_root {
+            for held in reach(&index, [root]) {
+                nodes.remove(&held);
+            }
+        }
+        nodes.insert(self.runner);
+        nodes
+    }
+
+    /// The main behavior: every node but the scaffold's and those only runs
+    /// hold, in the scaffold's order, which keeps a loaded graph's, rooted at
+    /// the main root.
+    fn main_graph(&self) -> Graph {
+        self.main_graph_beside(&[])
+    }
+
+    /// [`main_graph`](Self::main_graph), counting `others` among the runs.
+    fn main_graph_beside(&self, others: &[Run]) -> Graph {
+        let not_main = self.not_main_beside(others);
+        Graph {
+            root: self.main_root,
+            nodes: self
+                .graph
+                .nodes
+                .iter()
+                .filter(|node| !not_main.contains(&node.id))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// Advance the revision when the main behavior is not `before`. A change
+    /// to a run changes it when it unbinds a binding of the main behavior
+    /// that reads the run, or lets go of a node.
+    fn revise_since(&mut self, before: &Graph) {
+        if self.main_graph() != *before {
+            self.revision += 1;
+        }
+    }
+
+    /// Write the revision to its built-in key when it is not the one last
+    /// written: the first tick, and the tick after each change.
+    fn write_revision(&mut self, store: &dyn DataStore) -> Result<(), BehaviorError> {
+        if self.written_revision == Some(self.revision) {
+            return Ok(());
+        }
+        store
+            .write(StateChange::set(
+                Key::from(built_in::BEHAVIOR_REVISION),
+                Value::U64(self.revision),
+            ))
+            .map_err(|e| {
+                behavior_error(format!(
+                    "{}: writing the behavior's revision: {e}",
+                    built_in::BEHAVIOR_REVISION
+                ))
+            })?;
+        self.written_revision = Some(self.revision);
+        Ok(())
     }
 
     /// Apply `diff` to the scaffold graph and mark it for re-lowering. The
@@ -674,11 +759,15 @@ impl BehaviorTreeInterpreter {
         };
         let diff = own.diff(&graph);
         if diff != GraphDiff::default() {
+            let before = self.main_graph();
             self.edit_lowering(diff, true)?;
+            // The run's detached nodes are its own before the comparison.
+            self.runs[at].detached = detached;
+            self.revise_since(&before);
+        } else {
+            self.runs[at].detached = detached;
         }
-        let run = &mut self.runs[at];
-        run.detached = detached;
-        Ok(run.handle.clone())
+        Ok(self.runs[at].handle.clone())
     }
 
     /// Prune `runs`, already taken out of the live and finished lists: each
@@ -696,7 +785,10 @@ impl BehaviorTreeInterpreter {
             set: vec![self.runner_node()],
             ..GraphDiff::default()
         };
-        self.edit(diff)
+        let before = self.main_graph_beside(&runs);
+        self.edit(diff)?;
+        self.revise_since(&before);
+        Ok(())
     }
 
     /// Write the terminal status of the runs and traces halted since the
@@ -750,6 +842,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         self.ticks += 1;
         // The halted runs' terminal status first: this tick owns the store.
         self.write_halts(ctx.store)?;
+        self.write_revision(ctx.store)?;
 
         // The graph changed: replace the lowering. Finished fragments leave
         // first. The new tree is lowered beside the old one; once it is, it
@@ -794,6 +887,8 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             self.lowered = Some(lowered);
             self.dirty = false;
             self.functions.clone_from(ctx.functions);
+            // Pruning the finished runs may have changed the main behavior.
+            self.write_revision(ctx.store)?;
         }
 
         // One runtime tick is one tree tick. The runner's own status is not an
@@ -812,6 +907,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         let reported = match &self.lowered {
             Some(lowered) if !self.traces.is_empty() => self.traces.report(
                 self.ticks,
+                self.revision,
                 &lowered.tree().record,
                 Some(lowered.tree()),
                 &self.functions,
@@ -878,6 +974,11 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         }
 
         diff.remove.retain(|id| *id != self.runner);
+        // The revision advances when the main behavior a read answers
+        // changes: what an edit names, what it unbinds by removing a node,
+        // and which nodes are the main behavior's all count, through the
+        // graph itself.
+        let before = self.main_graph();
         // A fresh main root (or a removed one) re-parents under the runner;
         // a refused edit leaves the main root as it was.
         let previous = self.main_root;
@@ -891,7 +992,9 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             self.main_root = Some(root);
         }
         diff.set.push(self.runner_node());
-        self.edit(diff).inspect_err(|_| self.main_root = previous)
+        self.edit(diff).inspect_err(|_| self.main_root = previous)?;
+        self.revise_since(&before);
+        Ok(())
     }
 
     fn load(&mut self, graph: Graph) -> Result<(), BehaviorError> {
@@ -899,29 +1002,43 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // that is not the scaffold's or a run's — leaves the scaffold, the new
         // behavior grafts under the runner. Live task runs are untouched — they
         // belong to their callers, not to the behavior — so the new behavior
-        // may not reuse their nodes.
+        // may not reuse a node only a run holds. A node the main behavior
+        // holds with a run is the main behavior's too: a read answers it, and
+        // its load sets it in place.
         self.prune_finished()?;
         if by_id(&graph).len() != graph.nodes.len() {
             return Err(listed_twice(&graph));
         }
-        let run_nodes = self.run_nodes();
-        if let Some(node) = graph
-            .nodes
-            .iter()
-            .find(|node| node.id == self.runner || run_nodes.contains(&node.id))
-        {
+        let not_main = self.not_main();
+        if let Some(node) = graph.nodes.iter().find(|node| not_main.contains(&node.id)) {
             return Err(behavior_error(format!(
                 "node {} belongs to the runner or a task run: a loaded behavior cannot \
                  replace it",
                 node.id
             )));
         }
+        // The previous main behavior leaves but for the nodes the runs hold
+        // once the new nodes are set: a node shared with a run and set again
+        // with other children lets go of the ones it no longer has.
+        let mut after = self.graph.clone();
+        after
+            .apply(GraphDiff {
+                set: graph.nodes.clone(),
+                ..GraphDiff::default()
+            })
+            .map_err(|e| behavior_error(format!("graph diff: {e}")))?;
+        let held: HashSet<Uuid> = {
+            let nodes = by_id(&after);
+            self.all_runs()
+                .flat_map(|run| Self::nodes_of(&nodes, run))
+                .collect()
+        };
         let remove = self
             .graph
             .nodes
             .iter()
             .map(|node| node.id)
-            .filter(|id| *id != self.runner && !run_nodes.contains(id))
+            .filter(|id| *id != self.runner && !held.contains(id))
             .collect();
         // The loaded root becomes the runner's main child: the scaffold root
         // stays the runner. A refused load leaves the main root as it was.
@@ -933,7 +1050,16 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             set,
             ..GraphDiff::default()
         })
-        .inspect_err(|_| self.main_root = previous)
+        .inspect_err(|_| self.main_root = previous)?;
+        self.revision += 1;
+        Ok(())
+    }
+
+    fn read(&self) -> Result<LoadedBehavior, BehaviorError> {
+        Ok(LoadedBehavior {
+            revision: self.revision,
+            graph: self.main_graph(),
+        })
     }
 
     fn spawn(&mut self, call: Call, policy: RunPolicy) -> Result<TaskHandle, BehaviorError> {

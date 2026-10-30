@@ -4,6 +4,27 @@ All notable changes to `arora-behavior`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.1.0] - 2026-10-30
+
+### Added
+
+- `BehaviorInterpreter::read`, answering the main behavior as a
+  `LoadedBehavior { revision, graph }`: the graph a `load` of it reproduces
+  (no node of the interpreter's own, none of a task run's, the root as
+  loaded), and its revision, which each `load` and each other change of that
+  graph advances by one. It defaults to refusing.
+- `interpreter_module::READ`, its call with no argument, and
+  `encode_read`, `decode_read`, `encode_read_result` and
+  `decode_read_result`. The answer is a key-value of a `u64` `revision` and
+  the `graph` in the form `LOAD` takes.
+- `built_in::BEHAVIOR_REVISION` (`arora/behavior/revision`): the revision an
+  interpreter that answers `read` writes once per change, under the
+  runtime's closed `arora/` namespace.
+- `TraceReport::revision`, and the report's `revision` field on the wire:
+  the behavior's revision when it changed since the trace's previous report,
+  and in its first. A struct literal of `TraceReport` names it, or ends with
+  `..TraceReport::default()`.
+
 ## [10.0.0] - 2026-10-30
 
 ### Changed
