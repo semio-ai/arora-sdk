@@ -16,7 +16,7 @@ arora-behavior.workspace = true
 arora-module.workspace = true
 log.workspace = true
 # Playback on the host's audio output (cpal): nothing to install.
-rodio = { version = "0.20", default-features = false }
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
 
 [build-dependencies]
-bindgen = "0.69"
+bindgen = "0.73"

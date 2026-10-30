@@ -303,7 +303,7 @@ impl MujocoHal {
         let keyframe = match &config.keyframe {
             Some(name) => Some(
                 model
-                    .name_to_id(MjtObj::mjOBJ_KEY, name)
+                    .name_to_id(MjtObjBase::mjOBJ_KEY, name)
                     .ok_or_else(|| HalError::NoSuchKey(format!("keyframe {name}")))?,
             ),
             None => None,

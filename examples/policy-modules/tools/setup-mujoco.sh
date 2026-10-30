@@ -10,7 +10,7 @@
 # wheel ships, for instance) has another layout.
 set -euo pipefail
 
-MUJOCO_VERSION="3.12.0"
+MUJOCO_VERSION="3.17.0"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dir="${1:-$here/.mujoco}"
 mkdir -p "$dir"
