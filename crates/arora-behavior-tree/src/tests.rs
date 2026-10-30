@@ -3041,6 +3041,12 @@ fn a_tree_does_not_call_the_interpreter_module_s_functions() {
     });
     let mut interp = BehaviorTreeInterpreter::new();
     assert!(interp
+        .spawn_graph(&graph_type(), graph.clone(), RunPolicy::Concurrent)
+        .is_err());
+
+    // Nor one starting a trace.
+    graph.nodes[0].function = interpreter_module::TRACE;
+    assert!(interp
         .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
         .is_err());
 }
