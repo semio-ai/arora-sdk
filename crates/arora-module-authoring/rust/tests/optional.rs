@@ -298,7 +298,7 @@ fn main() {{
 async fn optionals_generate_compile_run_and_export() {
     let mut registry = build_registry().await;
     let definition: ModuleDefinition =
-        serde_yaml::from_str(&module_yaml()).expect("the fixture header is valid");
+        yaml_serde::from_str(&module_yaml()).expect("the fixture header is valid");
     let assets = analyze_module(definition, &mut registry)
         .await
         .expect("analyze_module");

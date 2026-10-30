@@ -7,7 +7,7 @@ node graph's, published from [vizij-rs](https://github.com/vizij-ai/vizij-rs)
 as `vizij-graph-core`, whose node code this crate continues; the graph
 format continues there, in `vizij-graph-core` 4.
 
-## [2.0.0] - 2026-10-29
+## [2.0.0] - 2026-10-30
 
 ### Changed
 

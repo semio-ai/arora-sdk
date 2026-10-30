@@ -1,14 +1,12 @@
 [package]
 name = "arora-vfs"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A minimal in-memory virtual filesystem (files and directories) for the Arora runtime."
 license = "Apache-2.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 async-recursion = "1"
 derive_more = { version = "2", features = ["display"] }
 serde = { version = "1", features = ["derive", "rc"] }
-sha2 = "0.10"
+sha2 = "0.11"

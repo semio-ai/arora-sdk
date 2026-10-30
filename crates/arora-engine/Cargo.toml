@@ -9,13 +9,11 @@ license = "Apache-2.0"
 [lib]
 crate-type = ["rlib"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
 default = ["wasmtime-host", "native-host"]
-# Native host using wasmtime to instantiate guest modules.
+# The native host running wasm guests.
 wasmtime-host = ["dep:wasmtime", "dep:wasmtime-wasi"]
-# Native host using libloading to load .so/.dylib modules.
+# The native host loading dynamic-library modules.
 native-host = ["dep:libloading", "dep:tempfile"]
 
 [dependencies]
@@ -31,12 +29,10 @@ rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
-# Reads a component's layer (`component_layout`), which the browser checks
-# before it runs the guest module: the parser alone, without the validator,
-# which would ship ~0.9 MB more to the browser. 0.261 is wasmtime 50's.
+# `component_layout`: the parser without the validator, which would add ~0.9 MB
+# to the browser build. 0.261 is wasmtime 50's, so native builds hold one copy.
 wasmparser = { version = "0.261", default-features = false, features = ["std", "component-model"] }
 
-# Native-only optional deps. Disabled when targeting wasm32 (browser host).
 libloading = { version = "0.9", optional = true }
 tempfile = { version = "3", optional = true }
 wasmtime = { version = "50", features = ["async"], optional = true }
@@ -49,31 +45,26 @@ wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 web-sys = { version = "0.3", features = ["console"] }
-# Browser RNG backend for `rand`. `wasm_js` (plus the getrandom_backend cfg in
-# .cargo/config.toml) lets getrandom build for wasm32-unknown-unknown.
+# `rand` in the browser: `wasm_js`, with the getrandom_backend cfg in
+# .cargo/config.toml.
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 uuid = { version = "1", features = ["serde", "v4"] }
 # The text-format assembler for the hand-written guests and components.
 wat = "1"
 
-# Browser-host integration test (tests/browser_component.rs), wasm32-only.
-# serde_yaml + uuid above supply the header/value types; these add the test
-# harness, the panic hook, and the guest the test loads through the browser
-# component executor.
+# The browser-host test (tests/browser_component.rs).
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 arora-types = { path = "../arora-types", version = "3" }
 wasm-bindgen-test = "0.3"
 console_error_panic_hook = "0.1"
-# The component guest tests/browser_component.rs include_bytes!s; cargo exposes
-# its path as CARGO_CDYLIB_FILE_TEST_RUST_COMPONENT_test_rust_component.
+# The guest it loads (CARGO_CDYLIB_FILE_TEST_RUST_COMPONENT_test_rust_component).
 test-rust-component = { path = "../../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
 
-# Native-host integration test (tests/native.rs): the test-rust-wasm guest
-# built for the host as a cdylib, loaded through NativeExecutor; cargo exposes its path as
-# CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
+# The native-host test (tests/native.rs) loads this guest built for the host
+# (CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm).
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", lib = true }

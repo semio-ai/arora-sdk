@@ -87,7 +87,7 @@ fn header_with(executor: &str, functions: &[(&str, &str)]) -> Header {
             )
         })
         .collect();
-    serde_yaml::from_str(&format!(
+    yaml_serde::from_str(&format!(
         r#"
 id: {MODULE_ID}
 name: test-rust-component

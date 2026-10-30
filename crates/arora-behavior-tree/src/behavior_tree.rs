@@ -1446,7 +1446,7 @@ pub fn load_behavior_tree_nodes_with(
 }
 
 pub fn load_behavior_tree_yaml(yaml: &str) -> Result<BehaviorTree, BehaviorTreeError> {
-    load_behavior_tree_nodes(serde_yaml::from_str(yaml)?)
+    load_behavior_tree_nodes(yaml_serde::from_str(yaml)?)
 }
 
 /// Load a tree from its [text], its functions found in `functions`,

@@ -75,7 +75,7 @@ pub struct Node {
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        serialize_with = "serde_yaml::with::singleton_map_recursive::serialize",
+        serialize_with = "yaml_serde::with::singleton_map_recursive::serialize",
         deserialize_with = "bindings"
     )]
     pub bind: BTreeMap<String, Source>,
@@ -115,7 +115,7 @@ fn bindings<'de, D: serde::Deserializer<'de>>(
             deserializer.deserialize_map(Visitor)
         }
     }
-    serde_yaml::with::singleton_map_recursive::deserialize::<Once, D>(deserializer)
+    yaml_serde::with::singleton_map_recursive::deserialize::<Once, D>(deserializer)
         .map(|once| once.0)
 }
 
@@ -135,7 +135,7 @@ pub struct Graph {
 pub struct Binding {
     pub node: String,
     pub port: String,
-    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    #[serde(with = "yaml_serde::with::singleton_map_recursive")]
     pub source: Source,
 }
 

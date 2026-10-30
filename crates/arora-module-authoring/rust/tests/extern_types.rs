@@ -175,7 +175,7 @@ executable_mime: application/wasm
 async fn generate(extern_types: &ExternTypes) -> Directory {
     let mut registry = build_registry().await;
     let definition: ModuleDefinition =
-        serde_yaml::from_str(&module_yaml()).expect("the fixture header is valid");
+        yaml_serde::from_str(&module_yaml()).expect("the fixture header is valid");
     let assets = analyze_module(definition, &mut registry)
         .await
         .expect("analyze_module");

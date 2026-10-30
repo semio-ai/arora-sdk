@@ -7,9 +7,8 @@ license.workspace = true
 authors.workspace = true
 
 [lib]
-# The `cdylib` is the wasm guest the device loads; the `rlib` lets the same
-# crate run in-process (`HostModule::of`) and carries the declaration (ids,
-# header, signatures) to whoever loads the guest.
+# `cdylib`: the wasm guest. `rlib`: the in-process module and the declaration
+# its loaders use.
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

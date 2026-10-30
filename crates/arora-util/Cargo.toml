@@ -4,15 +4,12 @@ version = "0.1.1"
 edition = "2021"
 description = "Internal utility helpers for the Arora runtime."
 license = "Apache-2.0"
-# No native library: the key carries the directory of the C header the build
-# script generates to the build scripts of the crates depending on this one,
-# as DEP_ARORA_UTIL_INCLUDE.
+# No native library: the key hands dependents' build scripts the generated C
+# header's directory, as DEP_ARORA_UTIL_INCLUDE.
 links = "arora_util"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 uuid = { version = "1", features = ["serde"] }

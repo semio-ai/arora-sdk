@@ -4,7 +4,7 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [5.1.0] - 2026-10-29
+## [5.1.0] - 2026-10-30
 
 ### Changed
 

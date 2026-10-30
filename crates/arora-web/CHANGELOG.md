@@ -4,7 +4,7 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [14.0.0] - 2026-10-29
+## [14.0.0] - 2026-10-30
 
 ### Changed
 

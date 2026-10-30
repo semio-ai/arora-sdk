@@ -139,7 +139,8 @@ impl AroraWSServer {
     }
 
     /// Set the device behind this server: where `list_keys` goes for the keys it
-    /// holds, and `list_methods` / `invoke` for the methods it has.
+    /// holds, and `list_methods` / `describe_methods` / `invoke` / `call` for
+    /// the functions it has.
     /// [`WsBridge`](crate::bridge::WsBridge) sets it to the
     /// device it bridges, so an embedder wiring the bridge discovers the device
     /// without declaring any of it here.
@@ -347,13 +348,11 @@ async fn handle_connection(
 ) {
     info!("New WebSocket connection from: {}", addr);
 
-    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-        // The largest legitimate message is a few KiB; cap far below the
-        // 64 MiB tungstenite default so a client cannot force huge allocations.
-        max_message_size: Some(1 << 20),
-        max_frame_size: Some(256 << 10),
-        ..Default::default()
-    };
+    // The largest legitimate message is a few KiB; cap far below the 64 MiB
+    // tungstenite default so a client cannot force huge allocations.
+    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(1 << 20))
+        .max_frame_size(Some(256 << 10));
     let ws_stream = match tokio_tungstenite::accept_async_with_config(stream, Some(ws_config)).await
     {
         Ok(ws) => ws,
@@ -402,7 +401,7 @@ async fn handle_connection(
                                 break;
                             }
                         };
-                        if let Err(e) = write.send(Message::Text(response_text)).await {
+                        if let Err(e) = write.send(Message::text(response_text)).await {
                             error!("Failed to send response: {}", e);
                             break;
                         }
@@ -456,7 +455,7 @@ async fn handle_connection(
                                 continue;
                             }
                         };
-                        if let Err(e) = write.send(Message::Text(text)).await {
+                        if let Err(e) = write.send(Message::text(text)).await {
                             error!("Failed to push message: {}", e);
                             break;
                         }
@@ -594,6 +593,43 @@ async fn process_message(incoming: Incoming, dispatch: &Dispatch) -> Outgoing {
             }
             methods.sort_by(|left, right| left.path.cmp(&right.path));
             Outgoing::ListMethodsResp { methods }
+        }
+
+        Incoming::DescribeMethods { path } => {
+            // The same functions as `list_methods`, each with the ids a call
+            // names and its frozen signature.
+            let mut methods = match device {
+                Some(device) => device.describe_methods().await,
+                None => Vec::new(),
+            };
+            if let Some(prefix) = path.as_deref().map(|p| p.trim_end_matches('/')) {
+                methods.retain(|method| method.name.starts_with(prefix));
+            }
+            methods.sort_by(|left, right| {
+                (&left.name, left.module_id, left.id).cmp(&(&right.name, right.module_id, right.id))
+            });
+            Outgoing::DescribeMethodsResp { methods }
+        }
+
+        Incoming::Call { call, request_id } => {
+            let result = match device {
+                Some(device) => device.call(call).await,
+                None => Err(format!("no device to call function {} on", call.id)),
+            };
+            match result {
+                Ok(result) => Outgoing::CallResp {
+                    success: true,
+                    request_id,
+                    result: Some(result),
+                    message: None,
+                },
+                Err(message) => Outgoing::CallResp {
+                    success: false,
+                    request_id,
+                    result: None,
+                    message: Some(message),
+                },
+            }
         }
 
         Incoming::Invoke {

@@ -134,7 +134,7 @@ pub struct Node {
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        with = "serde_yaml::with::singleton_map_recursive"
+        with = "yaml_serde::with::singleton_map_recursive"
     )]
     pub bind: BTreeMap<Uuid, Source>,
     /// Ordered children, for interpreters (like the tree) whose structure is a
@@ -218,7 +218,7 @@ pub struct Binding {
     /// The port bound.
     pub port: Uuid,
     /// What the port is bound to.
-    #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+    #[serde(with = "yaml_serde::with::singleton_map_recursive")]
     pub source: Source,
 }
 
@@ -789,8 +789,8 @@ mod tests {
                 path: Key::new(".field"),
             },
         );
-        let yaml = serde_yaml::to_string(&g).unwrap();
-        assert_eq!(serde_yaml::from_str::<Graph>(&yaml).unwrap(), g, "{yaml}");
+        let yaml = yaml_serde::to_string(&g).unwrap();
+        assert_eq!(yaml_serde::from_str::<Graph>(&yaml).unwrap(), g, "{yaml}");
 
         let diff = Graph::empty().diff(&g);
         let diff = GraphDiff {
@@ -801,9 +801,9 @@ mod tests {
             }],
             ..diff
         };
-        let yaml = serde_yaml::to_string(&diff).unwrap();
+        let yaml = yaml_serde::to_string(&diff).unwrap();
         assert_eq!(
-            serde_yaml::from_str::<GraphDiff>(&yaml).unwrap(),
+            yaml_serde::from_str::<GraphDiff>(&yaml).unwrap(),
             diff,
             "{yaml}"
         );

@@ -4,7 +4,7 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [17.0.0] - 2026-10-29
+## [17.0.0] - 2026-10-30
 
 ### Changed
 
@@ -15,6 +15,8 @@ All notable changes to `arora`. The format follows
   `EDIT` and `SPAWN_GRAPH` carry the new forms. The log of an edit counts
   the nodes it sets and removes and the ports it binds and unbinds.
 - Requires arora-bridge 6.3, on arora-behavior 10.
+- Requires arora-bridge-ws 7.3: the local bridge a device serves answers
+  `describe_methods` and `call`.
 
 ### Added
 
@@ -22,6 +24,15 @@ All notable changes to `arora`. The format follows
   `BehaviorInterpreter::trace`, and `Caller::trace`. It stays out of the
   method index, as `LOAD` and `EDIT` do. The device follows and logs a trace
   as it does a task run.
+
+## [16.0.2] - 2026-10-30
+
+### Changed
+
+- The terminal UI builds on `ratatui` 0.30, `sysinfo` 0.40 and `env_filter` 2;
+  the device directory is found with `dirs` 7; on wasm32 the run loop sleeps on
+  `gloo-timers` 0.4. The indicators show no CPU figure on a host whose process
+  table cannot be read.
 
 ## [16.0.1] - 2026-10-29
 

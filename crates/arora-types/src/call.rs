@@ -141,8 +141,8 @@ mod tests {
   #[test]
   pub fn parse_call_test() {
     // The call format keeps values in their singleton-map YAML form.
-    let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
-      serde_yaml::Deserializer::from_str(CALL_TEST),
+    let call: Call = yaml_serde::with::singleton_map_recursive::deserialize(
+      yaml_serde::Deserializer::from_str(CALL_TEST),
     )
     .unwrap();
     assert_eq!(
@@ -166,8 +166,8 @@ mod tests {
 
   #[test]
   pub fn parse_call_test_2() {
-    let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
-      serde_yaml::Deserializer::from_str(CALL_TEST_2),
+    let call: Call = yaml_serde::with::singleton_map_recursive::deserialize(
+      yaml_serde::Deserializer::from_str(CALL_TEST_2),
     )
     .unwrap();
     assert_eq!(

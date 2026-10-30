@@ -8,57 +8,43 @@ description = "ROS 2 HAL for Arora: drives ROS robots (NAO, Pepper, Quori, UR3/U
 [lib]
 name = "arora_hal_ros2"
 
-# The device runner: one binary, the robot is picked at runtime (CLI arg or
-# ROBOT env var — a well-known name or a JSON config path).
+# The device runner; the robot (a known name or a JSON config) is picked at run
+# time.
 [[bin]]
 name = "arora-ros2"
 path = "src/bin/arora-ros2.rs"
 required-features = ["runner"]
 
 [features]
-# Middleware backend selection, forwarded to ros2-client (which requires exactly
-# one of `dds`/`zenoh`) and to arora-msgs-ros2 (whose REP-2016 type-hash needs the
-# same backend). DDS is the default; build the Zenoh backend with
-# `--no-default-features --features zenoh`.
+# The middleware backend: exactly one of `dds` and `zenoh`, forwarded to
+# ros2-client and arora-msgs-ros2. Zenoh: `--no-default-features --features zenoh`.
 default = ["dds"]
 dds = ["ros2-client/dds", "arora-msgs-ros2/dds"]
 zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
-# The arora-ros2 binary: pulls the full arora runtime. The library (the HAL
-# itself) stays lean without it. It serves the open local bridge; a runner that
-# connects to Semio Studio is built with `--features runner,studio`.
+# The arora-ros2 binary, over the full arora runtime.
 runner = ["dep:arora", "dep:anyhow", "dep:clap"]
-# The Semio Studio connection (arora's `studio-bridge`) for the runner, which
-# then connects to Studio unless the run passes `--no-studio`. It adds nothing
-# to the library.
+# The runner's Semio Studio connection (arora's `studio-bridge`).
 studio = ["arora?/studio-bridge"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
-# The runner's command line; `env` reads the robot from `ROBOT`.
+# `env`: the runner reads the robot from `ROBOT`.
 clap = { version = "4", features = ["derive", "env"], optional = true }
-# 4.3: `Hal::describe_keys`, how the robot opens its inputs.
+# 4.3: `Hal::describe_keys`.
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-types = { path = "../arora-types", version = "3.1" }
-# The bundled ROS 2 message types (typed serde structs + REP-2016 identity),
-# shared with `arora-bridge-ros2`; its `dds`/`zenoh` features supply the type-hash
-# a Zenoh publisher keys on. Core only here — a backend is selected via [features].
+# The ROS 2 message types; its backend is selected through [features].
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2", default-features = false }
-# 17, the current major, whose device reads `behavior-tree` 2.0 graphs. 16:
-# `AroraBuilder::with_studio` and `studio::StudioArgs`, the run's
-# Studio choice, a run of a runner built with Studio connecting unless it
-# passes `--no-studio`; `RunnerArgs::device` and `AroraBuilder::with_device`,
-# the device's name, directory and local bridge port.
+# 17: the current major. 16: `AroraBuilder::with_studio`, `studio::StudioArgs`,
+# `RunnerArgs::device`.
 arora = { path = "../arora", version = "17", optional = true }
 async-trait = "0.1"
 byteorder = "1"
 chrono = "0.4"
 futures = "0.3"
 log = "0.4"
-# The semio-ai ros2-client fork, published as `ros2-client-multi-rmw` (upstream
-# owns `ros2-client` on crates.io); the library is still imported as `ros2_client`.
-# It carries both the DDS backend and a ROS 2-over-Zenoh backend (rmw_zenoh
-# compatible), chosen by this crate's `dds` / `zenoh` features; `jazzy` selects
-# the ROS 2 distro wire format and is always on.
+# The semio-ai fork of ros2-client, with DDS and rmw_zenoh-compatible backends
+# (see [features]); `jazzy` is the ROS 2 distro's wire format.
 ros2-client = { package = "ros2-client-multi-rmw", version = "0.14", default-features = false, features = ["jazzy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -69,6 +55,5 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] 
 # A device over the HAL, for the tests of what it opens to remote writers.
 arora = { path = "../arora", version = "17" }
 rand = "0.10"
-# `time` (tests only): the DDS round-trip tests sleep and time out around
-# discovery; the HAL itself needs no timers.
+# `time`: the DDS round-trip tests time out around discovery.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

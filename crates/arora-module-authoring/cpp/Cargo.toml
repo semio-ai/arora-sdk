@@ -4,8 +4,6 @@ version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 arora-module-core = { path = "../core" }
 arora-registry = { path = "../../arora-registry" }
@@ -13,11 +11,11 @@ arora-types = { path = "../../arora-types", version = "3" }
 arora-vfs = { path = "../../arora-vfs" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-convert_case = "0.11"
+convert_case = "0.12"
 derive_more = { version = "2", features = ["from"] }
 lazy_static = "*"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["serde", "v4"] }

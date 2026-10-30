@@ -8,40 +8,32 @@ description = "RESTful-API HAL for Arora: drives HTTP-controlled robots (hackerb
 [lib]
 name = "arora_hal_restful"
 
-# The device runner: the robot's HTTP API topology comes entirely from a JSON
-# config picked at runtime (CLI arg or CONFIG env var).
+# The device runner; the robot's HTTP API comes from a JSON config picked at run
+# time.
 [[bin]]
 name = "arora-restful"
 path = "src/bin/arora-restful.rs"
 required-features = ["runner"]
 
 [features]
-# The arora-restful binary: pulls the full arora runtime. The library (the HAL
-# itself) stays lean without it. It serves the open local bridge; a runner that
-# connects to Semio Studio is built with `--features runner,studio`.
+# The arora-restful binary, over the full arora runtime.
 runner = ["dep:arora", "dep:anyhow", "dep:clap"]
-# The Semio Studio connection (arora's `studio-bridge`) for the runner, which
-# then connects to Studio unless the run passes `--no-studio`. It adds nothing
-# to the library.
+# The runner's Semio Studio connection (arora's `studio-bridge`).
 studio = ["arora?/studio-bridge"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
-# The runner's command line; `env` reads the configuration file from `CONFIG`.
+# `env`: the runner reads the configuration file from `CONFIG`.
 clap = { version = "4", features = ["derive", "env"], optional = true }
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-types = { path = "../arora-types", version = "3.1" }
-# 17, the current major, whose device reads `behavior-tree` 2.0 graphs. 16:
-# `AroraBuilder::with_studio` and `studio::StudioArgs`, the run's
-# Studio choice, a run of a runner built with Studio connecting unless it
-# passes `--no-studio`; `RunnerArgs::device` and `AroraBuilder::with_device`,
-# the device's name, directory and local bridge port.
+# 17: the current major. 16: `AroraBuilder::with_studio`, `studio::StudioArgs`,
+# `RunnerArgs::device`.
 arora = { path = "../arora", version = "17", optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
-# TLS is pinned to the bundled webpki roots (see `tls`) so HTTPS robots also
-# work on hosts with no populated OS trust store.
+# TLS trusts the bundled webpki roots, for hosts without an OS trust store.
 reqwest = { version = "0.13", features = [
   "json",
   "rustls-no-provider",
@@ -50,12 +42,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-# rt only: the queued-write task serving `try_send` runs on the caller's runtime.
+# `rt`: the queued-write task behind `try_send` runs on the caller's runtime.
 tokio = { version = "1", features = ["rt"] }
 webpki-roots = "1"
 
 [dev-dependencies]
 # A device over the HAL, for the tests of what it opens to remote writers.
 arora = { path = "../arora", version = "17" }
-# `time` (tests only): the try_send test times out around the queued write.
+# `time`: the try_send test times out around the queued write.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

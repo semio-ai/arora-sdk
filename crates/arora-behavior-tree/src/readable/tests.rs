@@ -93,7 +93,7 @@ fn node_names(loaded: &Loaded) -> HashMap<Uuid, String> {
 }
 
 fn yaml<T: serde::de::DeserializeOwned>(text: &str) -> T {
-    serde_yaml::from_str(text).unwrap_or_else(|error| panic!("{error}\n{text}"))
+    yaml_serde::from_str(text).unwrap_or_else(|error| panic!("{error}\n{text}"))
 }
 
 fn json<T: serde::de::DeserializeOwned>(text: &str) -> T {
@@ -172,13 +172,13 @@ fn a_graph_and_a_diff_written_readable_read_back() {
 
     let written = Graph::from_graph(&before.graph, &names);
     assert_eq!(written, yaml::<Graph>(&readable_yaml));
-    let read: Graph = yaml(&serde_yaml::to_string(&written).expect("it serializes"));
+    let read: Graph = yaml(&yaml_serde::to_string(&written).expect("it serializes"));
     assert_eq!(read.resolve(&functions), Ok(before.graph.clone()));
 
     let diff = before.graph.diff(&after.graph);
     let written = GraphDiff::from_diff(&diff, &before.graph, &names);
     assert_eq!(written, yaml::<GraphDiff>(&diff_yaml));
-    let read: GraphDiff = yaml(&serde_yaml::to_string(&written).expect("it serializes"));
+    let read: GraphDiff = yaml(&yaml_serde::to_string(&written).expect("it serializes"));
     assert_eq!(read.resolve(&before.graph, &functions), Ok(diff));
 }
 
@@ -328,7 +328,7 @@ nodes:
     lo: {key: a}
     lo: {key: b}
 ";
-    let error = serde_yaml::from_str::<Graph>(yaml).unwrap_err();
+    let error = yaml_serde::from_str::<Graph>(yaml).unwrap_err();
     assert!(error.to_string().contains("lo"), "{error}");
 }
 

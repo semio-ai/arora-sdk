@@ -21,7 +21,7 @@ pub async fn main() {
 
     // The `arora` scope, where `Status` and `TickId` live.
     let arora_folder = ARORA.record();
-    let arora_folder_yaml = serde_yaml::to_string(&arora_folder).unwrap();
+    let arora_folder_yaml = yaml_serde::to_string(&arora_folder).unwrap();
     registry.add_folder(ARORA.id, arora_folder).await.unwrap();
     let arora_folder_path = format!("{}/{}.yaml", folders_dir_str, ARORA.id);
     write(&arora_folder_path, arora_folder_yaml).unwrap();
@@ -47,7 +47,7 @@ pub async fn main() {
         "{}/{}@{}.yaml",
         enumerations_dir_str, STATUS_ENUMERATION_ID, STATUS_ENUMERATION_VERSION
     );
-    let status_enumeration_yaml = serde_yaml::to_string(&status_enumeration).unwrap();
+    let status_enumeration_yaml = yaml_serde::to_string(&status_enumeration).unwrap();
     write(&status_enumeration_path, status_enumeration_yaml).unwrap();
     println!("cargo:rerun-if-changed={}", status_enumeration_path);
 
@@ -71,7 +71,7 @@ pub async fn main() {
         "{}/{}@{}.yaml",
         structures_dir_str, TICK_ID_STRUCTURE_ID, TICK_ID_STRUCTURE_VERSION
     );
-    let tick_id_structure_yaml = serde_yaml::to_string(&tick_id_structure).unwrap();
+    let tick_id_structure_yaml = yaml_serde::to_string(&tick_id_structure).unwrap();
     write(&tick_id_structure_path, tick_id_structure_yaml).unwrap();
     println!("cargo:rerun-if-changed={}", tick_id_structure_path);
 }

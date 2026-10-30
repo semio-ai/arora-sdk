@@ -400,6 +400,7 @@ enum Smoothing {
 /// last targets otherwise; write the targets out. `command` is built from the
 /// time elapsed in the run, so a phase-encoded skill sees its own clock.
 /// Returns that elapsed time.
+#[allow(clippy::too_many_arguments)]
 fn step(
     runtime: &mut Runtime,
     leaf: Leaf,
@@ -468,6 +469,8 @@ arora_module::artifact!(microduck_policies);
     executable_mime = "application/wasm"
 )]
 pub mod microduck_policies {
+    // An export's parameters are its declared signature.
+    #![allow(clippy::too_many_arguments)]
     use super::*;
 
     /// Walk at a commanded twist with the `alpha_walking` network, standing
@@ -790,12 +793,15 @@ struct HeadClips {
 
 static HEAD_CLIPS: Mutex<HeadClips> = Mutex::new(HeadClips { playing: None });
 
+/// A head clip: its pose `t` seconds in, given the neutral pose.
+type HeadPose = fn(f32, [f32; 4]) -> [f32; 4];
+
 fn play_head_clip(clip: &str, dt_ns: u64, head: &mut Vec<f32>) -> Status {
     // The head command is an offset from the default head pose: zero is the
     // pose the standing network holds by itself.
     let neutral = [0.0f32; 4];
     let seconds = |ns: u64| ns as f32 / 1e9;
-    let (duration_s, pose): (f32, fn(f32, [f32; 4]) -> [f32; 4]) = match clip {
+    let (duration_s, pose): (f32, HeadPose) = match clip {
         "rest" => {
             head.clear();
             head.extend_from_slice(&neutral);

@@ -3,6 +3,8 @@
 use crate::method::InvokeResult;
 use arora_bridge::client::KeyInfo;
 use arora_bridge::client::MethodInfo;
+use arora_bridge::MethodSignature;
+use arora_types::call::{Call, CallResult};
 use arora_types::value::Value;
 use arora_types::Uuid;
 use async_trait::async_trait;
@@ -58,6 +60,23 @@ pub trait Device: Send + Sync {
 
     /// Stop the run `run` names.
     async fn halt(&self, run: Uuid) -> InvokeResult;
+
+    /// The device's callable functions with their full signatures — the
+    /// functions [`methods`](Self::methods) lists, with the ids a call names.
+    /// A device that describes nothing this way answers with none.
+    async fn describe_methods(&self) -> Vec<MethodSignature> {
+        Vec::new()
+    }
+
+    /// Make `call` as it is — by module and function id, its arguments by
+    /// parameter id — and answer with its result. A device that takes no call
+    /// by ids refuses every one.
+    async fn call(&self, call: Call) -> Result<CallResult, String> {
+        Err(format!(
+            "this device takes no call by ids (function {})",
+            call.id
+        ))
+    }
 }
 
 /// The device seam as the server holds it.

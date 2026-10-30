@@ -4,6 +4,14 @@ All notable changes to `arora-module-macros`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.1] - 2026-10-30
+
+### Changed
+
+- Headers are read and written at expansion time with `yaml_serde` 0.10, the
+  maintained continuation of the deprecated `serde_yaml`; the expansion is
+  unchanged.
+
 ## [3.1.0] - 2026-10-23
 
 ### Added

@@ -258,7 +258,7 @@ async fn read_header_from_module_root(module_root: PathBuf) -> Header {
         .join("src")
         .join("arora_generated")
         .join("module.yaml");
-    serde_yaml::from_str(
+    yaml_serde::from_str(
         &read_to_string(header_path.clone())
             .await
             .unwrap_or_else(|_| panic!("header file {} could not be read", header_path.display())),

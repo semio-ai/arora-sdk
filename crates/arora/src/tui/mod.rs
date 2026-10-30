@@ -249,7 +249,8 @@ fn run_ui(
     running: Arc<AtomicBool>,
     restored: Arc<AtomicBool>,
 ) {
-    let mut system = System::new();
+    // Without a process table or our own pid, the indicator shows no CPU.
+    let mut system = System::new().ok();
     let pid = sysinfo::get_current_pid().ok();
     // Backdate so the first pass takes a CPU sample immediately.
     let mut last_cpu_sample = Instant::now()
@@ -276,7 +277,7 @@ fn run_ui(
 
         // Own-process CPU, sampled about once a second.
         if last_cpu_sample.elapsed() >= Duration::from_secs(1) {
-            let cpu = pid.and_then(|pid| {
+            let cpu = system.as_mut().zip(pid).and_then(|(system, pid)| {
                 system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
                 system.process(pid).map(|process| process.cpu_usage())
             });

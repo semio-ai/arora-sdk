@@ -509,7 +509,7 @@ async fn nested_and_array_of_struct_generate_compile_and_round_trip() {
     let mut registry = build_registry().await;
 
     let module_definition: ModuleDefinition =
-        serde_yaml::from_str(&fixture_module_yaml()).expect("fixture module YAML is valid");
+        yaml_serde::from_str(&fixture_module_yaml()).expect("fixture module YAML is valid");
 
     let assets = analyze_module(module_definition, &mut registry)
         .await

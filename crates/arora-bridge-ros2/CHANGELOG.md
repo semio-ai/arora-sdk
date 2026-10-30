@@ -4,7 +4,7 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [11.3.0] - 2026-10-29
+## [11.3.0] - 2026-10-30
 
 ### Changed
 

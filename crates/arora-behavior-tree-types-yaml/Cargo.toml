@@ -16,4 +16,4 @@ arora-registry = { path = "../arora-registry" }
 arora-types = { path = "../arora-types" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
