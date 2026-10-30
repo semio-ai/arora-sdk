@@ -29,10 +29,12 @@
 //! were spawned.
 //!
 //! [`read`](BehaviorInterpreter::read) answers the main behavior alone, with
-//! neither the runner nor a run's node, rooted where it was loaded: the graph
-//! a [`load`](BehaviorInterpreter::load) of it reproduces. Its revision
-//! counts the loads, and the edits that reach the main behavior; an edit that
-//! names only a run's nodes leaves it as it is. Each tick after a change
+//! neither the runner nor a node only a run holds, rooted where it was
+//! loaded: the graph a [`load`](BehaviorInterpreter::load) of it reproduces. A
+//! binding of the main behavior that reads a run's node is answered as it
+//! stands, so the graph loads back beside that run. Its revision counts the
+//! loads, and the edits that change the graph `read` answers; an edit that
+//! changes only a run's nodes leaves it as it is. Each tick after a change
 //! writes it to [`built_in::BEHAVIOR_REVISION`](arora_behavior::built_in::BEHAVIOR_REVISION).
 //!
 //! Everything is ordinary graph data, edited through the same
@@ -188,7 +190,7 @@ pub struct BehaviorTreeInterpreter {
     traces: Traces,
     /// The ticks so far: the tick a trace's report names.
     ticks: u64,
-    /// The main behavior's revision: the loads, and the edits that reached
+    /// The main behavior's revision: the loads, and the edits that changed
     /// it.
     revision: u64,
     /// The revision last written to the store; `None` before the first tick.
@@ -536,6 +538,23 @@ impl BehaviorTreeInterpreter {
         }
         nodes.insert(self.runner);
         nodes
+    }
+
+    /// The main behavior: every node but the scaffold's and those only runs
+    /// hold, in the scaffold's order, which keeps a loaded graph's, rooted at
+    /// the main root.
+    fn main_graph(&self) -> Graph {
+        let not_main = self.not_main();
+        Graph {
+            root: self.main_root,
+            nodes: self
+                .graph
+                .nodes
+                .iter()
+                .filter(|node| !not_main.contains(&node.id))
+                .cloned()
+                .collect(),
+        }
     }
 
     /// Write the revision to its built-in key when it is not the one last
@@ -928,17 +947,11 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         }
 
         diff.remove.retain(|id| *id != self.runner);
-        // Whether the edit reaches the main behavior, which advances its
-        // revision: it roots it, or removes one of its nodes, or names a node
-        // that is the main behavior's once the edit is applied.
-        let removes_main = !diff.remove.is_empty() && {
-            let not_main = self.not_main();
-            diff.remove
-                .iter()
-                .any(|id| !not_main.contains(id) && self.graph.node(id).is_some())
-        };
-        let roots = diff.root.is_some();
-        let named: Vec<Uuid> = changed_nodes(&diff).collect();
+        // The revision advances when the main behavior a read answers
+        // changes: what an edit names, what it unbinds by removing a node,
+        // and which nodes are the main behavior's all count, through the
+        // graph itself.
+        let before = self.main_graph();
         // A fresh main root (or a removed one) re-parents under the runner;
         // a refused edit leaves the main root as it was.
         let previous = self.main_root;
@@ -953,11 +966,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         }
         diff.set.push(self.runner_node());
         self.edit(diff).inspect_err(|_| self.main_root = previous)?;
-        let reaches_main = roots || removes_main || {
-            let not_main = self.not_main();
-            named.iter().any(|id| !not_main.contains(id))
-        };
-        if reaches_main {
+        if self.main_graph() != before {
             self.revision += 1;
         }
         Ok(())
@@ -968,23 +977,22 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // that is not the scaffold's or a run's — leaves the scaffold, the new
         // behavior grafts under the runner. Live task runs are untouched — they
         // belong to their callers, not to the behavior — so the new behavior
-        // may not reuse their nodes.
+        // may not reuse a node only a run holds. A node the main behavior
+        // holds with a run is the main behavior's too: a read answers it, and
+        // its load sets it in place.
         self.prune_finished()?;
         if by_id(&graph).len() != graph.nodes.len() {
             return Err(listed_twice(&graph));
         }
-        let run_nodes = self.run_nodes();
-        if let Some(node) = graph
-            .nodes
-            .iter()
-            .find(|node| node.id == self.runner || run_nodes.contains(&node.id))
-        {
+        let not_main = self.not_main();
+        if let Some(node) = graph.nodes.iter().find(|node| not_main.contains(&node.id)) {
             return Err(behavior_error(format!(
                 "node {} belongs to the runner or a task run: a loaded behavior cannot \
                  replace it",
                 node.id
             )));
         }
+        let run_nodes = self.run_nodes();
         let remove = self
             .graph
             .nodes
@@ -1008,21 +1016,9 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
     }
 
     fn read(&self) -> Result<LoadedBehavior, BehaviorError> {
-        // The main behavior is every node but the scaffold's and the runs',
-        // in the scaffold's order, which keeps a loaded graph's.
-        let not_main = self.not_main();
         Ok(LoadedBehavior {
             revision: self.revision,
-            graph: Graph {
-                root: self.main_root,
-                nodes: self
-                    .graph
-                    .nodes
-                    .iter()
-                    .filter(|node| !not_main.contains(&node.id))
-                    .cloned()
-                    .collect(),
-            },
+            graph: self.main_graph(),
         })
     }
 
