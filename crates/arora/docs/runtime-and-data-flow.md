@@ -173,7 +173,7 @@ applied at the next step like a remote's, with the same checks. It writes
 (`update`), lists keys and methods (`list_keys`, `describe_methods`), calls a
 function (`Caller::call`) or invokes one by name (`invoke`, which takes two
 steps: the signature on one, the call on the next), and starts and halts task
-runs (`spawn`, `spawn_graph`, `halt`). Its futures fail with
+runs and traces (`spawn`, `spawn_graph`, `trace`, `halt`). Its futures fail with
 `CallError::Generic` once the device is gone.
 
 Between steps, an embedder holding the device calls synchronously instead:
@@ -253,7 +253,8 @@ interpreter the step ticks:
 | `EDIT` | `BehaviorInterpreter::apply`: apply a `GraphDiff` to it |
 | `SPAWN` | `BehaviorInterpreter::spawn`: start a task run from a `Call` |
 | `SPAWN_GRAPH` | `BehaviorInterpreter::spawn_graph`: start a task run whose program is a `Graph` |
-| `HALT` | `BehaviorInterpreter::halt`: stop a task run |
+| `TRACE` | `BehaviorInterpreter::trace`: start a trace, a task run reporting what each tick does |
+| `HALT` | `BehaviorInterpreter::halt`: stop a task run or a trace |
 
 A remote's `Call`, a `LocalCaller`, `Arora::call` and a behavior all reach
 them through ordinary dispatch. A call from inside the interpreter's own tick
@@ -267,7 +268,8 @@ method index under the interpreter module, to be spawned as task runs; a
 direct call to one fails, saying to spawn it. A method id that a module
 describes too fails the build.
 
-The device follows each task run started through `SPAWN` or `SPAWN_GRAPH`:
+The device follows each task run started through `SPAWN`, `SPAWN_GRAPH` or
+`TRACE`:
 after each tick it reads the run's status key, and logs when the run started,
 and when it succeeded, failed, was halted or was interrupted by a module
 change.

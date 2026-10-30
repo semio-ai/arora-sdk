@@ -16,6 +16,13 @@ All notable changes to `arora`. The format follows
   the nodes it sets and removes and the ports it binds and unbinds.
 - Requires arora-bridge 6.3, on arora-behavior 10.
 
+### Added
+
+- The interpreter module's `TRACE` function, reaching
+  `BehaviorInterpreter::trace`, and `Caller::trace`. It stays out of the
+  method index, as `LOAD` and `EDIT` do. The device follows and logs a trace
+  as it does a task run.
+
 ## [16.0.1] - 2026-10-29
 
 ### Fixed
