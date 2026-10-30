@@ -165,7 +165,7 @@ mod tests {
     /// key-value of one entry named by its kind, holding the value.
     #[test]
     fn a_watched_value_is_wrapped_by_its_kind() {
-        let Value::KeyValue(report) = encode_report(&report()) else {
+        let Value::KeyValue(encoded) = encode_report(&report()) else {
             panic!("a report is a key-value");
         };
         let field = |kv: &arora_types::keyvalue::KeyValue, name: &str| -> Value {
@@ -174,7 +174,7 @@ mod tests {
                 .clone()
                 .expect("a field holds a value")
         };
-        let Value::KeyValue(values) = field(&report, "values") else {
+        let Value::KeyValue(values) = field(&encoded, "values") else {
             panic!("values is a key-value");
         };
         let Value::KeyValue(node) = field(&values, &Uuid::from_u128(3).to_string()) else {
@@ -184,6 +184,29 @@ mod tests {
             panic!("a value is wrapped");
         };
         assert_eq!(field(&wrapped, "f64"), Value::F64(0.5));
+
+        // The unit value, an unset output, is the string `unit`.
+        let mut unset = report();
+        unset.values = [(
+            Uuid::from_u128(3),
+            [(Uuid::from_u128(4), Value::Unit)].into(),
+        )]
+        .into();
+        let encoded = encode_report(&unset);
+        let Value::KeyValue(unset_report) = &encoded else {
+            panic!("a report is a key-value");
+        };
+        let Value::KeyValue(values) = field(unset_report, "values") else {
+            panic!("values is a key-value");
+        };
+        let Value::KeyValue(node) = field(&values, &Uuid::from_u128(3).to_string()) else {
+            panic!("a node's values are a key-value");
+        };
+        assert_eq!(
+            field(&node, &Uuid::from_u128(4).to_string()),
+            Value::String("unit".to_string())
+        );
+        assert_eq!(decode_report(&encoded).unwrap(), unset);
     }
 
     /// The JSON form a browser reads: names in snake case, ids as strings,
