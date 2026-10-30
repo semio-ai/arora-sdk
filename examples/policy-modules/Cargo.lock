@@ -428,7 +428,8 @@ dependencies = [
 [[package]]
 name = "arora-studio-bridge-client"
 version = "11.3.0"
-source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fhandle-record#6aa7190fed354e26331895ce8a130ccd1304f9e9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d5a2a5d2c5b7c45622cee1163b09edc94b0d3f90fab09dd28906af76a8bf28"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -5365,7 +5366,8 @@ dependencies = [
 [[package]]
 name = "semio-studio-auth"
 version = "1.1.0"
-source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fhandle-record#6aa7190fed354e26331895ce8a130ccd1304f9e9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ede50887ae578bf5d4e17349c908aeed4091132cf2d15280afd69d7d5c84ce07"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5867,7 +5869,8 @@ dependencies = [
 [[package]]
 name = "studio-bridge-msgs"
 version = "7.1.0"
-source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fhandle-record#6aa7190fed354e26331895ce8a130ccd1304f9e9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fc586adeaecd20cd3c5691ab29d1421f101df68f8cdca9ce74b832a84b9f7cd"
 dependencies = [
  "arora-types",
  "chrono",

@@ -42,9 +42,6 @@ arora-types = { path = "../../crates/arora-types", version = "3.10" }
 [patch.crates-io]
 arora-bridge = { path = "../../crates/arora-bridge" }
 arora-types = { path = "../../crates/arora-types" }
-# TEMPORARY, until arora-studio-bridge-client 11.3.0 is on crates.io: its
-# branch, which `arora`'s requirement of 11.3 needs.
-arora-studio-bridge-client = { git = "https://github.com/semio-ai/studio-bridge", branch = "feat/handle-record" }
 
 # The policy module's wasm guest follows the device's profile, so both profiles
 # optimize it and keep debug info, most of a wasm file's size, out of it.

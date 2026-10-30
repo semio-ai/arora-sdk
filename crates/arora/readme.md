@@ -107,8 +107,7 @@ holds lives inside it, so a host can then build and run a fresh device.
 Every part has a builder setter: `with_data_store`, `with_hal`, `with_bridge`
 (repeatable), `with_behavior_interpreter`, the module setters below,
 `with_start_time`, `with_guest_limits`, and, for `run`, `with_step_period`,
-`with_frontend`, `with_device` and, in a `studio-bridge` build,
-`with_studio_handle`.
+`with_frontend` and `with_device`.
 Between steps, an embedder
 reads the store (`Arora::store`), calls a function (`Arora::call`), and
 watches the behavior's failures (`Arora::behavior_error`). `Arora::caller`
@@ -210,11 +209,17 @@ cargo build -p arora --features studio-bridge
 ```
 
 The device runs at once, enrolled with Studio or not. While it is not, its
-Studio bridge contacts nobody, and the run enrolls it: with the enrollment
-token in `STUDIO_ENROLLMENT_TOKEN`, or else by a code the run shows (in the
-terminal UI's prompt line, and in the log), which a person enters in Studio;
-then the bridge connects, and the terminal UI shows the device's id. A refused
-enrollment fails the run. The credential is kept under the device's name in
+Studio bridge contacts nobody, and the device enrolls beside the run, as the
+device client (`arora-studio-bridge-client`) enrolls it: with the enrollment
+token in `STUDIO_ENROLLMENT_TOKEN`, or else by a code a person enters in
+Studio. Under the terminal UI, the run first asks whether to enroll, the
+device's name and its model family, shows the code in the prompt line, then
+the device's Studio record (name and model family) and id in the
+header; headless, the code is logged, and goes to standard error when the
+log shows no info lines. A refused enrollment fails the run, and so does a
+Studio bridge that halts, such as on a credential of another Firebase
+project than the run's: the error names the credentials directory to
+delete. The credential is kept under the device's name in
 Semio's device store, `<data_local_dir>/semio/devices/<name>/`
 (`SEMIO_DEVICE_STORE` replaces the root), apart from its device directory. A
 run that connects given `--device-dir` and no `--device` is refused, since two
@@ -222,16 +227,20 @@ such devices would share the credential of `default`.
 
 The Studio bridge is the runner's to give: a runner built with Studio gets the
 device's `StudioDevice` (`studio::of(device)`), whose `bridge(model)` returns
-the bridge and its handle, gives the bridge with `with_bridge` and the handle
-with `with_studio_handle`, through which the run enrolls the device. The
+the bridge and its handle, gives the bridge with `with_bridge`, and runs the
+device's enrollment beside the run,
+`handle.enroll_when_needed(&*enroller)`, where `enroller` is the front end's
+(`frontend.operator.clone().enroller()`): its end fails the run. The
 library's `run`, `run_with_hal`, `run_with` and an `AroraBuilder` given no
 bridge serve the open local bridge: a Cargo feature is on for every crate a
 build links, so the feature alone does not say that the runner at hand was
 built with Studio. An app embedding a device does as a runner does and keeps
 the handle itself: `studio::in_device_dir(device_dir, name, store)` gives the
 `StudioDevice` on a platform that gives the app its data directory at run
-time; the handle's `status()` says whether the device is enrolled and shows
-the code while it enrolls, and its `enroll` enrolls it when a person asks.
+time; it enrolls the device through `enroll_when_needed` and an `Enroller`
+of its own, or with the handle's `enroll` when a person asks, the handle's
+`status()` saying whether the device is enrolled and `record()` giving its
+Studio record.
 The [`studio` module docs](src/studio/mod.rs) cover enrollment, the
 credential, the model the device reports and every variable.
 

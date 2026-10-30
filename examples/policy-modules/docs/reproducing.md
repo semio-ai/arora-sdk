@@ -168,9 +168,9 @@ Then, for each run:
        --studio-model assets/microduck/studio-model.glb
    ```
 
-   The first run enrolls the device with Studio: the terminal asks for a
-   device name, then shows a code, which you enter in Studio, choosing the
-   device's owner. The device saves its Studio credential, and every later
+   The device runs at once and, the first time, enrolls with Studio while it
+   runs: the terminal asks whether to enroll it and for a device name, then
+   shows a code, which you enter in Studio, choosing the device's owner. The device saves its Studio credential, and every later
    run connects with it. The model family is the GLB's robot name,
    capitalised (`Microduck`), and the hardware version `mujoco`;
    `DEVICE_NAME`, `MODEL_FAMILY` and `HARDWARE_VERSION` override them.

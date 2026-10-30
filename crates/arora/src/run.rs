@@ -72,8 +72,8 @@ use crate::Arora;
 /// for a binary that loads them itself.
 /// In a `studio-bridge` build, the run connects to Semio Studio unless it
 /// passes `--no-studio` (the `studio` field's `StudioArgs::connects`): the
-/// runner then gives the run the device's Studio bridge and its handle, as
-/// `arora::studio` says.
+/// runner then gives the run the device's Studio bridge, and enrolls the
+/// device beside the run, as `arora::studio` says.
 /// The `arora` binary's `main` is the worked example.
 #[cfg(feature = "native")]
 #[derive(Debug, Default, clap::Parser)]
@@ -145,7 +145,7 @@ const MODULE_HELP: &str = "A module directory to load besides the device directo
 /// [`StudioArgs`](crate::studio::StudioArgs), under a feature of its own that
 /// enables arora's `studio-bridge`, and gives the run the device's Studio
 /// bridge unless the run passes `--no-studio`
-/// ([`StudioArgs::connects`](crate::studio::StudioArgs::connects)). The
+/// (`StudioArgs::connects`). The
 /// Studio option is not in this struct because a feature of arora is enabled
 /// for every runner a build links: a runner built without Studio, beside one
 /// built with it, would then take `--no-studio` although it never connects.
@@ -438,31 +438,7 @@ pub(crate) async fn run_builder_with_frontend(
     mut builder: crate::AroraBuilder,
     frontend: Frontend,
 ) -> Result<()> {
-    let Frontend {
-        operator,
-        interactive,
-        on_ready,
-    } = frontend;
-
-    // A run given its Studio bridge's handle follows the bridge through it
-    // for as long as it runs: it enrolls a device that is not enrolled,
-    // described by the model its HAL gives, and shows the codes and the
-    // device's id to the operator under the terminal UI.
-    #[cfg(feature = "studio-bridge")]
-    let studio = match builder.studio_handle.take() {
-        Some(handle) => {
-            let description = match &builder.hal {
-                Some(hal) => hal.describe().await,
-                None => arora_hal::HalDescription::default(),
-            };
-            Some((handle, description))
-        }
-        None => None,
-    };
-    #[cfg(feature = "studio-bridge")]
-    let studio_operator = interactive.then(|| operator.clone());
-    #[cfg(not(feature = "studio-bridge"))]
-    let _ = interactive;
+    let Frontend { operator, on_ready } = frontend;
 
     // Query the bridge's control plane before the device takes ownership of the
     // endpoint: the identity/info the front end shows, and the access-request
@@ -493,27 +469,12 @@ pub(crate) async fn run_builder_with_frontend(
     // synchronous teardown. That is the stop story — see [`AroraBuilder::run`].
     let serving = serve_access_requests(access_requests, operator).fuse();
     futures::pin_mut!(serving);
-    // The Studio bridge's follower ends only with the error failing the run.
-    #[cfg(feature = "studio-bridge")]
-    let studio = async {
-        match &studio {
-            Some((handle, description)) => {
-                crate::studio::follow(handle.clone(), description, studio_operator.as_deref()).await
-            }
-            None => std::future::pending().await,
-        }
-    }
-    .fuse();
-    #[cfg(not(feature = "studio-bridge"))]
-    let studio = std::future::pending::<anyhow::Error>().fuse();
-    futures::pin_mut!(studio);
     info!("running — Ctrl-C to stop");
     let run = arora.run(period).fuse();
     futures::pin_mut!(run);
     loop {
         futures::select_biased! {
             result = run => return result.map_err(|e| anyhow!("runtime error: {e}")),
-            error = studio => return Err(error),
             // The access-request stream ending does not end the device.
             _ = serving => {}
         }

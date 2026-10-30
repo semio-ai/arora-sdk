@@ -9,7 +9,11 @@
 //! `log` crate into the pane. [`Tui`](crate::tui::Tui) is also an
 //! [`Operator`](crate::operator::Operator): it asks the
 //! operator by pushing a `Prompt` and awaiting its reply, so a question raised
-//! anywhere in the runtime appears in the prompt line.
+//! anywhere in the runtime appears in the prompt line. In a `studio-bridge`
+//! build it is its own [`Enroller`](crate::studio::Enroller): it asks whether
+//! to enroll the device with Semio Studio and what describes it, shows each
+//! enrollment code in the prompt line, and the device's Studio record and id
+//! in the header.
 
 mod state;
 mod view;
@@ -37,10 +41,10 @@ use arora_bridge::{AccessDecision, DeviceInfo};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::operator::{
-    AccessRequestSummary, AccessRuling, EnrollmentCode, Frontend, Operator, DEFAULT_ACCESS_GRACE,
+    AccessRequestSummary, AccessRuling, Frontend, Operator, DEFAULT_ACCESS_GRACE,
 };
 use arora_types::data::Subscription;
-use state::{DeviceIdentity, State};
+use state::State;
 
 /// The shared UI state: the render thread, the input handling, the log capture,
 /// and the operator prompts all touch this one instance.
@@ -137,11 +141,7 @@ impl Tui {
 #[async_trait]
 impl Operator for Tui {
     async fn ask_text(&self, label: &str, required: bool) -> Option<String> {
-        let (question, reply) = state::text_prompt(label.to_string(), required);
-        if let Ok(mut state) = self.state.lock() {
-            state.prompts.push_back(question);
-        }
-        reply.await.ok().flatten()
+        ask_text(&self.state, label, required).await
     }
 
     async fn decide_access(&self, request: &AccessRequestSummary) -> AccessRuling {
@@ -178,10 +178,81 @@ impl Operator for Tui {
         }
     }
 
-    fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
+    #[cfg(feature = "studio-bridge")]
+    fn enroller(self: Arc<Self>) -> Arc<dyn crate::studio::Enroller> {
+        Arc::new(Enroller {
+            state: self.state.clone(),
+        })
+    }
+}
+
+/// Asks `label` in the prompt line of the UI showing `state`, and returns
+/// the answer typed there: `None` when skipped, which only an answer not
+/// `required` may be, or when the UI is gone.
+async fn ask_text(state: &SharedState, label: &str, required: bool) -> Option<String> {
+    let (question, reply) = state::text_prompt(label.to_string(), required);
+    if let Ok(mut state) = state.lock() {
+        state.prompts.push_back(question);
+    }
+    reply.await.ok().flatten()
+}
+
+/// The question offering to enroll a device that is not enrolled with Semio
+/// Studio, and its answers: the first enrolls it.
+#[cfg(feature = "studio-bridge")]
+const OFFER_LABEL: &str = "This device is not enrolled with Semio Studio";
+#[cfg(feature = "studio-bridge")]
+const OFFER_OPTIONS: [&str; 2] = ["Enroll it", "Not now"];
+
+/// The prompt for the name of a device that enrolls: left empty, the device
+/// enrolls with a generated name, so it is never nameless.
+#[cfg(feature = "studio-bridge")]
+const NAME_LABEL: &str = "Device name — leave empty for a generated name";
+
+/// The prompt for the model family of a device that enrolls when neither
+/// `MODEL_FAMILY` nor the HAL gives one: left empty, the device enrolls with
+/// no model family.
+#[cfg(feature = "studio-bridge")]
+const MODEL_FAMILY_LABEL: &str = "Model family — optional, leave empty to skip";
+
+/// The terminal UI presenting the device's enrollment with Semio Studio
+/// ([`Tui::enroller`](Operator::enroller)): it asks in the prompt line,
+/// shows each code there while no question waits, and the device's record
+/// and id in the header.
+#[cfg(feature = "studio-bridge")]
+struct Enroller {
+    state: SharedState,
+}
+
+#[cfg(feature = "studio-bridge")]
+#[async_trait]
+impl crate::studio::Enroller for Enroller {
+    /// Waits for the operator's answer, for as long as that takes; a terminal
+    /// UI torn down declines.
+    async fn offer_enrollment(&self) -> bool {
+        let options = OFFER_OPTIONS
+            .iter()
+            .map(|option| option.to_string())
+            .collect();
+        let (question, reply) = state::decision_prompt(OFFER_LABEL.to_string(), options, None);
+        if let Ok(mut state) = self.state.lock() {
+            state.prompts.push_back(question);
+        }
+        matches!(reply.await, Ok(0))
+    }
+
+    async fn ask_name(&self) -> Option<String> {
+        ask_text(&self.state, NAME_LABEL, false).await
+    }
+
+    async fn ask_model_family(&self) -> Option<String> {
+        ask_text(&self.state, MODEL_FAMILY_LABEL, false).await
+    }
+
+    fn show_code(&self, code: Option<&crate::studio::EnrollmentCode>) -> bool {
         match self.state.lock() {
             Ok(mut state) => {
-                state.enrollment_code = code.cloned();
+                state.enrollment_code = code.map(state::EnrollmentCode::from);
                 true
             }
             Err(_) => false,
@@ -191,6 +262,12 @@ impl Operator for Tui {
     fn show_device_id(&self, device_id: &str) {
         if let Ok(mut state) = self.state.lock() {
             state.identity.device_id = Some(device_id.to_string());
+        }
+    }
+
+    fn show_record(&self, record: Option<&DeviceInfo>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.identity.show_record(record);
         }
     }
 }
@@ -225,25 +302,11 @@ fn tui_frontend_with_commands(
         move |device_state: Subscription, info: Option<DeviceInfo>, device_id: Option<String>| {
             if let Ok(mut state) = state.lock() {
                 state.device_state = Some(device_state);
-                state.identity = identity_from(info, device_id);
+                state.identity.show_known(info.as_ref(), device_id);
             }
         },
     );
-    Ok(Frontend {
-        operator,
-        interactive: true,
-        on_ready,
-    })
-}
-
-/// The header identity, from what the bridge knows about the device.
-fn identity_from(info: Option<DeviceInfo>, device_id: Option<String>) -> DeviceIdentity {
-    DeviceIdentity {
-        name: info.as_ref().and_then(|i| i.name.clone()),
-        device_id,
-        model_family: info.as_ref().and_then(|i| i.model_family.clone()),
-        owners: info.map(|i| i.owners).unwrap_or_default(),
-    }
+    Ok(Frontend { operator, on_ready })
 }
 
 /// The render/input thread: drain terminal events into the state, advance
@@ -401,4 +464,133 @@ fn restore_terminal(restored: &AtomicBool) {
     }
     let _ = disable_raw_mode();
     let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+}
+
+#[cfg(all(test, feature = "studio-bridge"))]
+mod tests {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::state::Prompt;
+    use super::*;
+    use crate::studio::Enroller as _;
+
+    fn press(state: &SharedState, code: KeyCode) {
+        state
+            .lock()
+            .unwrap()
+            .handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn typed(state: &SharedState, text: &str) {
+        for c in text.chars() {
+            press(state, KeyCode::Char(c));
+        }
+        press(state, KeyCode::Enter);
+    }
+
+    /// What the prompt line asks: its label or message, and its options.
+    fn asked(state: &SharedState) -> Option<(String, Vec<String>)> {
+        match state.lock().unwrap().prompts.front() {
+            Some(Prompt::Decision {
+                message, options, ..
+            }) => Some((message.clone(), options.clone())),
+            Some(Prompt::Text { label, .. }) => Some((label.clone(), Vec::new())),
+            _ => None,
+        }
+    }
+
+    /// What `question` resolves to once answered, failing the test when it
+    /// is not within ten seconds.
+    async fn answered<T>(question: impl std::future::Future<Output = T>) -> T {
+        tokio::time::timeout(Duration::from_secs(10), question)
+            .await
+            .expect("the answer resolves the question")
+    }
+
+    fn enroller() -> (SharedState, Enroller) {
+        let state = Arc::new(Mutex::new(State::new()));
+        let enroller = Enroller {
+            state: state.clone(),
+        };
+        (state, enroller)
+    }
+
+    /// The offer to enroll waits in the prompt line for the operator's
+    /// answer: the first option enrolls, the second declines.
+    #[tokio::test]
+    async fn the_operator_accepts_or_declines_the_offer_to_enroll() {
+        let (state, enroller) = enroller();
+        let accepted = enroller.offer_enrollment();
+        futures::pin_mut!(accepted);
+        assert!(futures::poll!(&mut accepted).is_pending());
+        assert_eq!(
+            asked(&state),
+            Some((
+                OFFER_LABEL.to_string(),
+                OFFER_OPTIONS.map(str::to_string).to_vec()
+            ))
+        );
+        press(&state, KeyCode::Enter);
+        assert!(answered(accepted).await);
+
+        let declined = enroller.offer_enrollment();
+        futures::pin_mut!(declined);
+        assert!(futures::poll!(&mut declined).is_pending());
+        press(&state, KeyCode::Right);
+        press(&state, KeyCode::Enter);
+        assert!(!answered(declined).await);
+    }
+
+    /// The device's name and model family are asked in the prompt line, and
+    /// are what the operator types there.
+    #[tokio::test]
+    async fn the_operator_names_the_device_and_its_family() {
+        let (state, enroller) = enroller();
+        let name = enroller.ask_name();
+        futures::pin_mut!(name);
+        assert!(futures::poll!(&mut name).is_pending());
+        assert_eq!(asked(&state), Some((NAME_LABEL.to_string(), Vec::new())));
+        typed(&state, "pepper-lab");
+        assert_eq!(answered(name).await.as_deref(), Some("pepper-lab"));
+
+        let family = enroller.ask_model_family();
+        futures::pin_mut!(family);
+        assert!(futures::poll!(&mut family).is_pending());
+        assert_eq!(
+            asked(&state),
+            Some((MODEL_FAMILY_LABEL.to_string(), Vec::new()))
+        );
+        typed(&state, "pepper");
+        assert_eq!(answered(family).await.as_deref(), Some("pepper"));
+    }
+
+    /// A code cleared leaves the prompt line; the device's id and record
+    /// show in the header.
+    #[test]
+    fn a_code_clears_and_the_id_and_the_record_show() {
+        let (state, enroller) = enroller();
+        state.lock().unwrap().enrollment_code = Some(state::EnrollmentCode {
+            code: "BCDF-GHJK".to_string(),
+            approval_url: None,
+        });
+        assert!(enroller.show_code(None));
+        assert_eq!(state.lock().unwrap().enrollment_code, None);
+
+        enroller.show_device_id("device-1");
+        enroller.show_record(Some(&DeviceInfo {
+            name: Some("Robo".to_string()),
+            model_family: Some("NAO".to_string()),
+            owners: vec!["alice".to_string()],
+            ..DeviceInfo::default()
+        }));
+        assert_eq!(
+            state.lock().unwrap().identity,
+            state::DeviceIdentity {
+                name: Some("Robo".to_string()),
+                device_id: Some("device-1".to_string()),
+                model_family: Some("NAO".to_string()),
+                owners: vec!["alice".to_string()],
+            }
+        );
+    }
 }

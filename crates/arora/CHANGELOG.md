@@ -7,71 +7,83 @@ All notable changes to `arora`. The format follows
 ## [18.0.0] - 2026-10-30
 
 A runtime built with Semio Studio carries the device's Studio bridge from its
-start, and the device enrolls while it runs.
+start, and the device enrolls while it runs, as the device client enrolls it.
 
 ### Added
 
 - `studio::of(device)` and `studio::in_device_dir(device_dir, name, store)`:
   the device's Studio side, the device client's `StudioDevice`
-  (`arora-studio-bridge-client` 11.2), its credentials the ones a run as the
+  (`arora-studio-bridge-client` 11.3), its credentials the ones a run as the
   device uses, one an earlier arora kept moving in. Getting it touches local
   files only. Its `bridge(model)` gives the device's Studio bridge, which a
   runtime carries from its start (`AroraBuilder::with_bridge`), and the
   bridge's handle. While the device holds no credential Studio accepts, the
   bridge contacts nobody and keeps the latest value of each key; once the
-  device enrolls, it connects by itself and publishes them. The handle's
-  `status()` says where the bridge stands (not enrolled, enrolling with the
-  code to enter in Studio, connecting, connected as the device's id, failed),
-  and its `enroll` enrolls the device.
+  device enrolls, it connects by itself and publishes them.
 - `studio::reported_model(description)`: the model the device reports to its
   Studio record, each field from its variable, else from the HAL's
   description; `StudioDevice::bridge` takes it.
-- `AroraBuilder::with_studio_handle(handle)`: the run follows the Studio
-  bridge given with `with_bridge` through its handle. While the device is not
-  enrolled, the run enrolls it as arora 16 did before connecting — with the
-  token in `STUDIO_ENROLLMENT_TOKEN`, else by code, named by `DEVICE_NAME`,
-  else by the operator, else generated — and the runtime runs meanwhile. Each
-  code is logged, shown in the terminal UI's prompt line, and goes to
-  standard error when nothing else shows it. A refused enrollment fails the
-  run, and so does Studio refusing the device it has just enrolled.
 - `StudioArgs::connects()`: whether the run serves the device's Studio
   bridge, unless it passes `--no-studio`.
-- `Operator::show_device_id(device_id)`, by default showing nothing: the
-  terminal UI's header shows the device's id once its Studio bridge
-  connects, after the run has started.
-- `studio` re-exports `StudioDevice`, `StudioBridge`, `StudioHandle`,
-  `StudioStatus`, `EnrollWith`, `DeviceDescription`, `PartialDeviceModel` and
-  the client's `Error`: an embedder builds and follows the bridge with no
-  dependency on the client.
+- `Operator::enroller()`, in a `studio-bridge` build: the `Enroller`
+  presenting the device's enrollment through the operator, which a runner
+  hands `StudioHandle::enroll_when_needed`. The terminal UI's asks whether to
+  enroll the device, its name and its model family in the prompt line, shows
+  each code there, then the device's Studio record (name and model
+  family) and id in the header. The default, the headless one's, is the
+  client's `UnattendedEnroller`, which asks nobody and logs each code, to
+  standard error when the log shows no info lines.
+- `studio` re-exports the client's `StudioDevice`, `StudioBridge`,
+  `StudioHandle`, `StudioStatus`, `HaltReason`, `Enroller`,
+  `UnattendedEnroller`, `EnrollmentCode`, `EnrollmentEnded`, `EnrollWith`,
+  `DeviceDescription`, `PartialDeviceModel` and `Error`: an embedder builds
+  the bridge and enrolls the device with no dependency on the client.
 
 ### Changed
 
 - **Breaking:** a run built with Studio no longer waits for its device to
   enroll before it starts: its runtime runs at once, with the device's Studio
-  bridge offline until the device is enrolled. Studio or its bridge out of
-  reach, or a credential of another Firebase project than the run's, no
-  longer fails the run: the device does not enroll, and its bridge logs why
-  and connects again by itself, waiting longer after each failure in a row,
-  up to a minute. A device revoked once it has connected enrolls again.
-- Requires `arora-studio-bridge-client` 11.2.
+  bridge offline until the device is enrolled, and the runner enrolls the
+  device beside the run. How the device enrolls is the client's
+  (`StudioHandle::enroll_when_needed`): by the token in
+  `STUDIO_ENROLLMENT_TOKEN`, else by code once the enroller accepts; again
+  after a wait when declined, when failing for a reason that may pass, and
+  when its bridge finds it not enrolled again. A refused enrollment fails the
+  run, and so does a bridge that halts: a credential of another Firebase
+  project than the run's, the error naming the credentials directory to
+  delete. Studio or its bridge out of reach no longer fails the run: the
+  bridge connects again by itself.
+- A device that enrolls with no name given is named `device-<random>`, the
+  client's generated name.
+- Requires `arora-studio-bridge-client` 11.3.
 
 ### Removed
 
 - **Breaking:** `AroraBuilder::with_studio` and `studio::Choice`, with
   `StudioArgs::choice`. A runner built with Studio gives the run the
-  device's Studio bridge and its handle unless the run passes
-  `--no-studio`; an `AroraBuilder` given no bridge serves the open local
-  bridge, as before. To migrate, replace
-  `builder.with_studio(cli.studio.choice())` with
+  device's Studio bridge and enrolls the device beside it unless the run
+  passes `--no-studio`; an `AroraBuilder` given no bridge serves the open
+  local bridge, as before. To migrate, take the front end's enroller where
+  the front end is built, and replace `builder.with_studio(cli.studio.choice())`
+  and the run with
 
   ```rust
-  let builder = if cli.studio.connects() {
+  // let frontend = arora::standard_frontend();
+  // let enroller = frontend.operator.clone().enroller();
+  if cli.studio.connects() {
       let model = arora::studio::reported_model(&hal.describe().await);
       let (bridge, handle) = arora::studio::of(&device)?.bridge(model);
-      builder.with_bridge(Box::new(bridge)).with_studio_handle(handle)
-  } else {
-      builder
-  };
+      let run = builder
+          .with_bridge(Box::new(bridge))
+          .with_device(device)
+          .with_hal(Box::new(hal))
+          .run();
+      return tokio::select! {
+          ran = run => ran,
+          ended = handle.enroll_when_needed(&*enroller) => Err(ended.into()),
+      };
+  }
+  builder.with_device(device).with_hal(Box::new(hal)).run().await
   ```
 
 - **Breaking:** `studio::connect`, `connect_with_description`,
@@ -81,10 +93,16 @@ start, and the device enrolls while it runs.
   embedder gives its runtime the device's Studio bridge instead
   (`studio::of(device)?.bridge(studio::reported_model(&description))`, or
   `studio::in_device_dir(device_dir, name, store)?` on Android) and keeps the
-  handle: `handle.status()` tells whether the device is enrolled, and
-  `handle.enroll(&DeviceDescription::new(name), how)` enrolls it when a person
-  asks, the code showing in the status. A run given the handle with
-  `with_studio_handle` enrolls the device as `connect_with_operator` did.
+  handle: `handle.enroll_when_needed(&enroller)` enrolls the device, presented
+  by an `Enroller` of the app's, or `handle.enroll(&description, how)` when a
+  person asks, `handle.status()` and `handle.record()` saying where the
+  device stands.
+- **Breaking:** `Operator::show_enrollment_code` and
+  `operator::EnrollmentCode`, which only the enrollment called: the enroller
+  shows the codes (`Enroller::show_code`, the client's `EnrollmentCode`).
+- **Breaking:** `Frontend::interactive`, which only decided whether the
+  enrollment asked the operator: the front end's enroller decides
+  (`Operator::enroller`).
 
 ## [17.0.0] - 2026-10-30
 

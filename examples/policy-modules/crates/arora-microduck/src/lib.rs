@@ -221,26 +221,30 @@ impl Device {
 /// simulator paces itself at real time, the runtime steps at the policies'
 /// period, and the bridge is the open local bridge on
 /// `ws://127.0.0.1:9000`, or under the `studio` feature the device's Semio
-/// Studio bridge when `connects_to_studio` (a device that is not enrolled
-/// enrolls while it runs, named by `DEVICE_NAME` or the operator, its code
-/// shown for a person to approve in Studio).
+/// Studio bridge when `connects_to_studio`: a device that is not enrolled
+/// enrolls while it runs, through the front end's enroller (the terminal UI
+/// asks whether to enroll and the device's name, and shows the code a person
+/// approves it with in Studio).
 pub async fn serve(config: DeviceConfig) -> Result<()> {
+    let frontend = arora::standard_frontend();
+    #[cfg(feature = "studio")]
+    let enroller = frontend.operator.clone().enroller();
     #[cfg(feature = "studio")]
     let studio = config
         .connects_to_studio
         .then(|| arora::studio::reported_model(&description(&config)));
     let (builder, _sim) = assemble(config)?;
+    let builder = builder.with_frontend(frontend).with_step_period(PERIOD);
     #[cfg(feature = "studio")]
-    let builder = match studio {
-        Some(model) => {
-            let (bridge, handle) = arora::studio::of(&arora::Device::from_env()?)?.bridge(model);
-            builder
-                .with_bridge(Box::new(bridge))
-                .with_studio_handle(handle)
-        }
-        None => builder,
-    };
-    builder.with_step_period(PERIOD).run().await
+    if let Some(model) = studio {
+        let (bridge, handle) = arora::studio::of(&arora::Device::from_env()?)?.bridge(model);
+        let run = builder.with_bridge(Box::new(bridge)).run();
+        return tokio::select! {
+            ran = run => ran,
+            ended = handle.enroll_when_needed(&*enroller) => Err(ended.into()),
+        };
+    }
+    builder.run().await
 }
 
 /// The model the device reports to Studio: the family of the model it

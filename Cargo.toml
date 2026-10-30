@@ -96,7 +96,4 @@ debug = 1
 [patch.crates-io]
 arora-types = { path = "crates/arora-types" }
 arora-bridge = { path = "crates/arora-bridge" }
-# TEMPORARY, until arora-studio-bridge-client 11.3.0 is on crates.io: its
-# branch, which `arora`'s requirement of 11.3 needs.
-arora-studio-bridge-client = { git = "https://github.com/semio-ai/studio-bridge", branch = "feat/handle-record" }
 

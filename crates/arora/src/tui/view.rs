@@ -160,25 +160,40 @@ fn prompt(state: &State) -> Paragraph<'_> {
                 Line::from(spans),
             ])
         }
-        None => match &state.enrollment_code {
-            Some(code) => Paragraph::new(vec![
-                // The code leads its line, so a narrow terminal clips the
-                // explanation and never the code.
-                Line::from(vec![
-                    Span::styled(
-                        code.code.clone(),
-                        bold.fg(Color::Cyan).add_modifier(Modifier::REVERSED),
-                    ),
-                    Span::styled(" enrolls this device: enter it in Semio Studio", bold),
-                ]),
-                Line::from(match &code.approval_url {
-                    Some(url) => format!("or open {url}"),
-                    None => "and approve it there".to_string(),
-                }),
-            ]),
-            None => Paragraph::new(""),
-        },
+        None => enrollment_code(state),
     }
+}
+
+/// The prompt line while no question waits: the code enrolling the device
+/// on top, where to approve it below; empty when none is shown.
+#[cfg(feature = "studio-bridge")]
+fn enrollment_code(state: &State) -> Paragraph<'_> {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    match &state.enrollment_code {
+        Some(code) => Paragraph::new(vec![
+            // The code leads its line, so a narrow terminal clips the
+            // explanation and never the code.
+            Line::from(vec![
+                Span::styled(
+                    code.code.clone(),
+                    bold.fg(Color::Cyan).add_modifier(Modifier::REVERSED),
+                ),
+                Span::styled(" enrolls this device: enter it in Semio Studio", bold),
+            ]),
+            Line::from(match &code.approval_url {
+                Some(url) => format!("or open {url}"),
+                None => "and approve it there".to_string(),
+            }),
+        ]),
+        None => Paragraph::new(""),
+    }
+}
+
+/// The prompt line while no question waits, in a build without Studio:
+/// empty.
+#[cfg(not(feature = "studio-bridge"))]
+fn enrollment_code(_state: &State) -> Paragraph<'_> {
+    Paragraph::new("")
 }
 
 /// The shortcuts row (the state folds any one-shot hint into it).
@@ -264,12 +279,40 @@ mod tests {
             .collect()
     }
 
+    /// The header shows the device's Studio record — its name, model family
+    /// and owners — and its id. What the bridge knows as the run starts
+    /// leaves shown what it does not know; a record gone leaves the id.
+    #[test]
+    fn the_header_shows_the_device_s_record_and_id() {
+        let mut state = State::new();
+        state.identity.device_id = Some("device-1".to_string());
+        state.identity.show_record(Some(&arora_bridge::DeviceInfo {
+            name: Some("Robo".to_string()),
+            model_family: Some("NAO".to_string()),
+            owners: vec!["alice".to_string()],
+            ..arora_bridge::DeviceInfo::default()
+        }));
+        state.identity.show_known(None, None);
+        let shown = rendered(&state);
+        assert!(
+            shown.contains("Robo  ·  NAO  ·  id device-1  ·  owners: alice"),
+            "{shown}"
+        );
+
+        state.identity.show_record(None);
+        let shown = rendered(&state);
+        assert!(shown.contains("arora  ·  id device-1"), "{shown}");
+        assert!(!shown.contains("Robo"), "{shown}");
+        assert!(!shown.contains("alice"), "{shown}");
+    }
+
     /// The enrollment code holds the prompt line while no question waits, a
     /// question taking it over.
     #[test]
+    #[cfg(feature = "studio-bridge")]
     fn an_enrollment_code_shows_where_no_question_waits() {
         let mut state = State::new();
-        state.enrollment_code = Some(crate::operator::EnrollmentCode {
+        state.enrollment_code = Some(super::super::state::EnrollmentCode {
             code: "BCDF-GHJK".to_string(),
             approval_url: Some("https://studio.example/approve?code=BCDF-GHJK".to_string()),
         });

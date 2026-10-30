@@ -809,10 +809,6 @@ pub struct AroraBuilder {
     /// The device a runner said the run is.
     #[cfg(feature = "native")]
     device: Option<Device>,
-    /// The handle of the Studio bridge among `bridges`, which the run
-    /// follows.
-    #[cfg(feature = "studio-bridge")]
-    pub(crate) studio_handle: Option<studio::StudioHandle>,
 }
 
 impl AroraBuilder {
@@ -1161,23 +1157,6 @@ impl AroraBuilder {
         self
     }
 
-    /// The handle of the Studio bridge given with
-    /// [`with_bridge`](Self::with_bridge), as
-    /// [`StudioDevice::bridge`](studio::StudioDevice::bridge) returns both:
-    /// [`run`](AroraBuilder::run) follows the bridge through it, for as long
-    /// as it runs. While the device is not enrolled with Semio Studio, the
-    /// run enrolls it, by the token `STUDIO_ENROLLMENT_TOKEN` holds or by a
-    /// code it shows; it shows the device's id once the bridge connects; and
-    /// it fails when the enrollment is refused, as
-    /// [`arora::studio`](studio#enrollment) says. A runner built with Studio
-    /// gives both unless the run passes `--no-studio`
-    /// ([whether a run connects](studio#whether-a-run-connects)).
-    #[cfg(feature = "studio-bridge")]
-    pub fn with_studio_handle(mut self, handle: studio::StudioHandle) -> Self {
-        self.studio_handle = Some(handle);
-        self
-    }
-
     /// Run the assembled device to completion with the standard operator flow:
     /// pick the front end (the injected one, else terminal UI or headless by
     /// terminal detection), serve the open local bridge when no bridge was
@@ -1186,11 +1165,9 @@ impl AroraBuilder {
     ///
     /// The open local bridge serves on the port of the device
     /// [`with_device`](Self::with_device) gives. A runner built with Semio
-    /// Studio gives the device's Studio bridge instead, and its handle
-    /// ([`with_studio_handle`](Self::with_studio_handle)), through which the
-    /// run enrolls a device that is not enrolled while it runs: under the
-    /// terminal UI, the operator names it and is shown the code a person
-    /// approves it with in Studio, then the device's id.
+    /// Studio gives the device's Studio bridge instead, and enrolls a device
+    /// that is not enrolled beside the run, through the front end's enroller,
+    /// as `arora::studio` says.
     ///
     /// **Stopping is dropping**: everything the run holds — the front end (and
     /// its terminal takeover), the device, its bridges and their servers —

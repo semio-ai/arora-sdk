@@ -79,7 +79,7 @@ arora-restful [--module <DIR>]... [--device <NAME>] [--device-dir <PATH>]
 | Feature | Effect |
 |---|---|
 | `runner` | The `arora-restful` binary. The library needs none of it. |
-| `studio` | Opt-in Semio Studio connection for the runner: a run serves the device's Studio bridge unless it passes `--no-studio`. The device runs at once; one that is not enrolled with Studio enrolls while it runs, by the token in `STUDIO_ENROLLMENT_TOKEN` or a code the run shows. |
+| `studio` | Opt-in Semio Studio connection for the runner: a run serves the device's Studio bridge unless it passes `--no-studio`. The device runs at once; one that is not enrolled with Studio enrolls while it runs, by the token in `STUDIO_ENROLLMENT_TOKEN` or a code: the terminal UI asks whether to enroll, the device's name and model family, shows the code in its prompt line, then the device's Studio record and id in its header; headless, the code is logged. A refused enrollment, or a halted Studio bridge (such as a credential of another Firebase project, naming the credentials directory to delete), fails the run. |
 
 As a library, `RestfulHal::new(config)` must be called inside a Tokio runtime
 that outlives the HAL.

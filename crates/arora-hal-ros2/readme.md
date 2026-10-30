@@ -119,7 +119,7 @@ arora-ros2 [--module <DIR>]... [--device <NAME>] [--device-dir <PATH>]
 | `dds` (default) | The DDS middleware backend. |
 | `zenoh` | The `rmw_zenoh`-compatible backend: build with `--no-default-features --features runner,zenoh`. |
 | `runner` | The `arora-ros2` binary. The library needs none of it. |
-| `studio` | Opt-in Semio Studio connection for the runner: a run serves the device's Studio bridge unless it passes `--no-studio`. The device runs at once; one that is not enrolled with Studio enrolls while it runs, by the token in `STUDIO_ENROLLMENT_TOKEN` or a code the run shows. |
+| `studio` | Opt-in Semio Studio connection for the runner: a run serves the device's Studio bridge unless it passes `--no-studio`. The device runs at once; one that is not enrolled with Studio enrolls while it runs, by the token in `STUDIO_ENROLLMENT_TOKEN` or a code: the terminal UI asks whether to enroll, the device's name and model family, shows the code in its prompt line, then the device's Studio record and id in its header; headless, the code is logged. A refused enrollment, or a halted Studio bridge (such as a credential of another Firebase project, naming the credentials directory to delete), fails the run. |
 
 Message types come from [`arora-msgs-ros2`](../arora-msgs-ros2/README.md),
 shared with the ROS 2 bridge.

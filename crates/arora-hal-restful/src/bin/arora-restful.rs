@@ -13,8 +13,9 @@
 //! The device serves the open local bridge. Built with the `studio` feature, it
 //! serves its Semio Studio bridge instead, unless the run passes
 //! `--no-studio`: the device runs at once, and a device that is not enrolled
-//! with Studio enrolls while it runs. Its enrollment and credential are
-//! arora's (`arora::studio`), the credential kept under the device's name.
+//! with Studio enrolls while it runs, as `arora::studio` says: the device
+//! client enrolls it, presented by the run's front end, and the credential is
+//! kept under the device's name.
 //!
 //! `--device`, `--device-dir` and `--bridge-port` (`ARORA_DEVICE`,
 //! `ARORA_DEVICE_DIR`, `ARORA_BRIDGE_PORT`) give the device the run is: its
@@ -69,7 +70,10 @@ async fn main() -> anyhow::Result<()> {
 
     // The front end first: building it installs the log sink, so what the
     // module loading below says is captured like the rest of the run.
-    let builder = Arora::builder().with_frontend(arora::standard_frontend());
+    let frontend = arora::standard_frontend();
+    #[cfg(feature = "studio")]
+    let enroller = frontend.operator.clone().enroller();
+    let builder = Arora::builder().with_frontend(frontend);
     let device = cli.runner.device()?;
     let builder = builder
         .with_module_dirs(device.dir(), &cli.runner.module)
@@ -78,18 +82,23 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to start the RESTful HAL: {e}"))?;
     // Built with `studio`, the run's bridge is the device's Studio bridge,
     // reporting the model the HAL describes, unless the run passes
-    // `--no-studio`.
+    // `--no-studio`; the device enrolls beside the run, through the front
+    // end's enroller, the enrollment's end failing the run.
     #[cfg(feature = "studio")]
-    let builder = if cli.studio.connects() {
+    if cli.studio.connects() {
         use arora_hal::Hal;
         let model = arora::studio::reported_model(&hal.describe().await);
         let (bridge, handle) = arora::studio::of(&device)?.bridge(model);
-        builder
+        let run = builder
             .with_bridge(Box::new(bridge))
-            .with_studio_handle(handle)
-    } else {
-        builder
-    };
+            .with_device(device)
+            .with_hal(Box::new(hal))
+            .run();
+        return tokio::select! {
+            ran = run => ran,
+            ended = handle.enroll_when_needed(&*enroller) => Err(ended.into()),
+        };
+    }
     builder
         .with_device(device)
         .with_hal(Box::new(hal))

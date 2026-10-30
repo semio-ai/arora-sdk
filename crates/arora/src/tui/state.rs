@@ -10,11 +10,11 @@ use futures::channel::oneshot;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 use arora_behavior::built_in;
+use arora_bridge::DeviceInfo;
 use arora_types::data::{Key, Subscription};
 use arora_types::value::Value;
 
 use super::{TuiCommand, TuiCommandEvent};
-use crate::operator::EnrollmentCode;
 
 /// How many log lines the pane remembers.
 pub(crate) const LOG_CAPACITY: usize = 4000;
@@ -22,12 +22,56 @@ pub(crate) const LOG_CAPACITY: usize = 4000;
 const WHEEL_LINES: usize = 3;
 
 /// Who this device is, for the header line.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceIdentity {
     pub name: Option<String>,
     pub device_id: Option<String>,
     pub model_family: Option<String>,
     pub owners: Vec<String>,
+}
+
+impl DeviceIdentity {
+    /// Shows the device's `record` — its name, model family and owners — in
+    /// place of the one shown, `None` showing none.
+    pub fn show_record(&mut self, record: Option<&DeviceInfo>) {
+        self.name = record.and_then(|record| record.name.clone());
+        self.model_family = record.and_then(|record| record.model_family.clone());
+        self.owners = record
+            .map(|record| record.owners.clone())
+            .unwrap_or_default();
+    }
+
+    /// Shows what the bridge knows of the device as the run starts: its
+    /// `record` and `device_id`, each when it knows it. One it does not know
+    /// leaves what is shown, which a Studio bridge connecting as the run
+    /// starts may already have shown.
+    pub fn show_known(&mut self, record: Option<&DeviceInfo>, device_id: Option<String>) {
+        if record.is_some() {
+            self.show_record(record);
+        }
+        if device_id.is_some() {
+            self.device_id = device_id;
+        }
+    }
+}
+
+/// A code enrolling the device with Semio Studio, as the prompt line shows
+/// it: the code, and the Studio page approving it when there is one.
+#[cfg(feature = "studio-bridge")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnrollmentCode {
+    pub code: String,
+    pub approval_url: Option<String>,
+}
+
+#[cfg(feature = "studio-bridge")]
+impl From<&crate::studio::EnrollmentCode> for EnrollmentCode {
+    fn from(code: &crate::studio::EnrollmentCode) -> Self {
+        EnrollmentCode {
+            code: code.code.clone(),
+            approval_url: code.approval_url.clone(),
+        }
+    }
 }
 
 /// One captured log line.
@@ -101,6 +145,7 @@ pub(crate) struct State {
     pub prompts: VecDeque<Prompt>,
     /// The code enrolling the device with Semio Studio, shown in the prompt
     /// line while no prompt waits.
+    #[cfg(feature = "studio-bridge")]
     pub enrollment_code: Option<EnrollmentCode>,
     /// The text being typed for a `Prompt::Text`.
     pub input: String,
@@ -131,6 +176,7 @@ impl State {
             loop_hz: None,
             cpu_percent: None,
             prompts: VecDeque::new(),
+            #[cfg(feature = "studio-bridge")]
             enrollment_code: None,
             input: String::new(),
             hint: None,
@@ -179,7 +225,11 @@ impl State {
     /// Whether the prompt line shows: a prompt waits, or an enrollment code
     /// is shown.
     pub fn prompt_line_shown(&self) -> bool {
-        self.prompts.front().is_some() || self.enrollment_code.is_some()
+        #[cfg(feature = "studio-bridge")]
+        if self.enrollment_code.is_some() {
+            return true;
+        }
+        self.prompts.front().is_some()
     }
 
     fn max_scroll(&self) -> usize {
