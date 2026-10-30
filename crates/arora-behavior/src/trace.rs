@@ -161,6 +161,31 @@ mod tests {
         assert_eq!(decode_report(&encode_report(&empty)).unwrap(), empty);
     }
 
+    /// A watched value travels wrapped as `value_serde` writes a `Value`: a
+    /// key-value of one entry named by its kind, holding the value.
+    #[test]
+    fn a_watched_value_is_wrapped_by_its_kind() {
+        let Value::KeyValue(report) = encode_report(&report()) else {
+            panic!("a report is a key-value");
+        };
+        let field = |kv: &arora_types::keyvalue::KeyValue, name: &str| -> Value {
+            *kv.fields[name]
+                .value
+                .clone()
+                .expect("a field holds a value")
+        };
+        let Value::KeyValue(values) = field(&report, "values") else {
+            panic!("values is a key-value");
+        };
+        let Value::KeyValue(node) = field(&values, &Uuid::from_u128(3).to_string()) else {
+            panic!("a node's values are a key-value");
+        };
+        let Value::KeyValue(wrapped) = field(&node, &Uuid::from_u128(4).to_string()) else {
+            panic!("a value is wrapped");
+        };
+        assert_eq!(field(&wrapped, "f64"), Value::F64(0.5));
+    }
+
     /// The JSON form a browser reads: names in snake case, ids as strings,
     /// empty fields left out.
     #[test]
