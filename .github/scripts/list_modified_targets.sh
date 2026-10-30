@@ -50,8 +50,12 @@ readers() { local r; for r in "${INPUTS[@]}"; do [[ $1 == ${r% *} ]] && echo "${
 
 # Seeds (package ids, one per line) → {build, test}: member names a change to
 # the seeds can reach.
+# The seeds and the lockfile diff are read from files: as arguments they can
+# exceed the kernel's limit on one argument's length.
 reach() {
-  jq -c --arg seeds "$(cat)" '
+  local seeds; seeds=$(mktemp)
+  cat >"$seeds"
+  jq -c --rawfile seeds "$seeds" '
     ($seeds | split("\n") | map(select(. != "")) | map({(.): true}) | add // {}) as $s
     | [.resolve.nodes[] | .id as $from | .deps[]
         | {to: .pkg, from: $from, dev: ([.dep_kinds[].kind] | all(. == "dev"))}] as $e
@@ -62,6 +66,7 @@ reach() {
     | .workspace_members as $m
     | def names($set): [.packages[] | select($set[.id] and (.id as $i | $m | index($i))) | .name] | sort;
     {build: names($build), test: names($test)}' <<<"$meta"
+  rm -f "$seeds"
 }
 id_of() { jq -r --arg n "$1" '.packages[] | select(.name == $n and .source == null) | .id' <<<"$meta"; }
 
@@ -118,7 +123,7 @@ elif [[ -n ${1-} ]]; then
     [[ -z $f ]] && continue
     if [[ $f == Cargo.lock ]]; then
       changed=$(comm -13 <(git show "$base:Cargo.lock" | lock_entries) <(lock_entries <Cargo.lock))
-      seeds+=$(jq -r --arg c "$changed" '($c | split("\n")) as $lines | .packages[]
+      seeds+=$(jq -r --rawfile c <(printf '%s' "$changed") '($c | split("\n")) as $lines | .packages[]
           | select(("name = \"\(.name)\" version = \"\(.version)\"") as $k | any($lines[]; startswith("[[package]] \($k)")))
           | .id' <<<"$meta")$'\n'
       continue
