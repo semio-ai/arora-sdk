@@ -380,7 +380,8 @@ fn set_arg(args: &mut Vec<(Uuid, Value)>, id: Uuid, value: Value) {
 /// args are the `value` param's fields, then the keyed `args` slots — slot
 /// `i` is the parameter whose id is `record_keys[i]` — which win for a
 /// parameter both name. `when` is not passed to the call: a new value of it
-/// makes the same args a new run. The first evaluation only records them.
+/// makes the same args a new run. The first evaluation records them, and
+/// spawns with them when the node's `spawn_on_load` is set.
 fn eval_spawn(
     rt: &mut Context,
     node: &Node,
@@ -420,7 +421,7 @@ fn eval_spawn(
                 args: args.clone(),
                 when,
             }));
-            false
+            node.params.spawn_on_load.unwrap_or(false)
         }
     };
     if changed {

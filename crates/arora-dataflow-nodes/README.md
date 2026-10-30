@@ -111,7 +111,9 @@ at every tick, and its state lives in the call site's `state` cell.
   types (an `F64` field stays `F64`), though every number computes in `f32`.
   A structure with an integer field has no numeric form, as one with a text
   field: rebuilding it between a node's steps would round it. A number on
-  its own, in a record or in a sequence, of any width, is an `F32`. Two
+  its own, in a record or in a sequence, of any width, is an `F32`, and a
+  numeric array there, of any element type (a call's `Vec<u8>` argument), a
+  vector of `f32`, rebuilt as an `ArrayF32`. Two
   operands combine when they have the same form, or when one is a number,
   which applies to every component of the other: a vec4, a quaternion and a
   colour each hold four numbers, and do not combine.

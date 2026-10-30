@@ -187,6 +187,106 @@ fn a_stateful_node_writes_its_state_back() {
     assert!(nodes.state(&Kind::Damp, &params, None).is_none());
 }
 
+/// The runs a spawn node requests over three evaluations of `shapes`, its
+/// one argument, the parameter `SHAPE`: one entry per evaluation, the
+/// arguments of the run it requested, if any.
+fn spawned(spawn_on_load: Option<bool>, shapes: [&str; 3]) -> Vec<Option<Vec<(Uuid, Value)>>> {
+    const FUNCTION: Uuid = Uuid::from_u128(0x7771);
+    const SHAPE: Uuid = Uuid::from_u128(0x7772);
+    let mut nodes = DataflowNodes::new();
+    let params = Params {
+        function: Some(FUNCTION),
+        record_keys: Some(vec![SHAPE.to_string()]),
+        spawn_on_load,
+        ..Default::default()
+    };
+    let mut state = Value::Unit;
+    shapes
+        .into_iter()
+        .map(|shape| {
+            let mut args = encode(&params).expect("the parameters encode");
+            args.push((input_param("args_0"), Value::String(shape.into())));
+            args.push((state_param(), state.clone()));
+            let result = call(&mut nodes, &Kind::Spawn, &args).expect("the call succeeds");
+            state = result
+                .mutated
+                .iter()
+                .find(|field| field.id == state_param())
+                .map(|field| (*field.value).clone())
+                .expect("the state written back");
+            let mut requests = nodes.take_spawns();
+            assert!(requests.len() <= 1, "one run at most per evaluation");
+            requests.pop().map(|request| {
+                assert_eq!(request.function, FUNCTION);
+                request.args
+            })
+        })
+        .collect()
+}
+
+/// A spawn node's first evaluation records its arguments and spawns
+/// nothing; a later one spawns when they change.
+#[test]
+fn a_spawn_node_spawns_on_a_change_of_its_arguments() {
+    let shape = |text: &str| vec![(Uuid::from_u128(0x7772), Value::String(text.into()))];
+    for spawn_on_load in [None, Some(false)] {
+        assert_eq!(
+            spawned(spawn_on_load, ["aa", "aa", "oh"]),
+            [None, None, Some(shape("oh"))]
+        );
+    }
+}
+
+/// With `spawn_on_load`, the first evaluation spawns with the arguments as
+/// loaded too, and later ones spawn on changes as before.
+#[test]
+fn a_spawn_node_on_load_spawns_on_its_first_evaluation_too() {
+    let shape = |text: &str| vec![(Uuid::from_u128(0x7772), Value::String(text.into()))];
+    assert_eq!(
+        spawned(Some(true), ["sil", "sil", "aa"]),
+        [Some(shape("sil")), None, Some(shape("aa"))]
+    );
+}
+
+/// `spawn_on_load` is a node parameter, encoded only when set.
+#[test]
+fn spawn_on_load_encodes_as_a_parameter() {
+    let set = Params {
+        spawn_on_load: Some(true),
+        ..Default::default()
+    };
+    let encoded = encode(&set).expect("the parameters encode");
+    assert!(encoded.contains(&(
+        arora_dataflow_nodes::functions::param_field("spawn_on_load"),
+        Value::Boolean(true)
+    )));
+    assert!(encode(&Params::default())
+        .expect("the parameters encode")
+        .is_empty());
+}
+
+/// An integer array is a vector to the vector nodes: a call's `Vec<u8>`
+/// argument computes as the numbers it holds.
+#[test]
+fn an_integer_array_computes_as_a_vector() {
+    let mut nodes = DataflowNodes::new();
+    let difference = ret(call(
+        &mut nodes,
+        &Kind::Subtract,
+        &[
+            (input_param("lhs"), Value::ArrayU8(vec![4, 26, 12])),
+            (input_param("rhs"), Value::F32(12.0)),
+        ],
+    ));
+    assert_eq!(difference, vocab::vector(vec![-8.0, 14.0, 0.0]));
+    let highest = ret(call(
+        &mut nodes,
+        &Kind::VectorMax,
+        &[(input_param("in"), Value::ArrayI32(vec![3, -1, 7]))],
+    ));
+    assert_eq!(highest, Value::F32(7.0));
+}
+
 /// A URDF node has no state before its first call, though the module keeps
 /// the chain another node of the same configuration built.
 #[cfg(feature = "urdf_ik")]

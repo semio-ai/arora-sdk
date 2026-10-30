@@ -7,6 +7,28 @@ node graph's, published from [vizij-rs](https://github.com/vizij-ai/vizij-rs)
 as `vizij-graph-core`, whose node code this crate continues; the graph
 format continues there, in `vizij-graph-core` 4.
 
+## [3.0.0] - Unreleased
+
+### Added
+
+- `Params::spawn_on_load`, the node parameter `param.spawn_on_load`: a
+  `spawn` node with it set spawns on its first evaluation too, with the
+  arguments it records as loaded, and on every change after, for a graph
+  whose inputs command a state that holds. Absent or false, the first
+  evaluation only records them.
+- A numeric array of any element type (`ArrayF64`, and the integer arrays)
+  flattens as a vector (`eval::value_layout::flatten_numeric`), rebuilt as an
+  `ArrayF32`, so the numeric nodes compute on a call's `Vec<u8>` argument as
+  the numbers it holds. In a structure only an `ArrayF32` flattens, as a
+  structure keeps the field types it declares.
+
+### Changed
+
+- **Breaking:** `Params` has the `spawn_on_load` field. A `Params` built
+  with a struct literal that names every field must name it, or end in
+  `..Default::default()`. Every function of the three modules declares the
+  parameter `param.spawn_on_load`.
+
 ## [2.0.0] - 2026-10-30
 
 ### Changed
