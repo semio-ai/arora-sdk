@@ -32,8 +32,6 @@ authors = ["Semio"]
 [workspace.dependencies]
 anyhow = "1"
 log = "0.4"
-serde = { version = "1", features = ["derive"] }
-uuid = { version = "1", features = ["serde", "v4"] }
 
 # The arora crates this workspace builds on.
 # 16: `studio::StudioArgs` and `AroraBuilder::with_studio`, what a run does
@@ -42,14 +40,11 @@ uuid = { version = "1", features = ["serde", "v4"] }
 # executor registered, which the policy guest, a `wasm-component` module,
 # loads through.
 arora = { path = "../../crates/arora", version = "16" }
-arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
-arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "8.2" }
-arora-bridge = { path = "../../crates/arora-bridge", version = "6" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "9.6" }
 arora-hal = { path = "../../crates/arora-hal", version = "4.3" }
 arora-module = { path = "../../crates/arora-module", version = "2.3" }
-arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "3.1" }
-arora-types = { path = "../../crates/arora-types", version = "3.1" }
-arora-engine = { path = "../../crates/arora-engine", version = "7" }
+arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "3.2" }
+arora-types = { path = "../../crates/arora-types", version = "3.10" }
 
 # Crates published outside this checkout — the Studio client behind the
 # `studio` feature — depend on these two from crates.io; patched to the same

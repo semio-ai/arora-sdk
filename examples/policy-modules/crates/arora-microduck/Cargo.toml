@@ -39,7 +39,3 @@ microduck-policies = { path = "../../modules/microduck-policies", artifact = "cd
 say-piper = { path = "../../modules/say-piper", version = "0.1", optional = true }
 say-silent = { path = "../../../../modules/say-silent", version = "0.1" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-
-[dev-dependencies]
-# The silent voice's log, read by the speech test.
-say-silent = { path = "../../../../modules/say-silent", version = "0.1" }
