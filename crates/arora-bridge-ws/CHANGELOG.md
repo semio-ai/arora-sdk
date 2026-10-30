@@ -4,6 +4,13 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.2.5] - 2026-10-30
+
+### Changed
+
+- The WebSocket server builds on `tokio-tungstenite` 0.30, with the same
+  message and frame size limits.
+
 ## [7.2.4] - 2026-10-12
 
 ### Fixed

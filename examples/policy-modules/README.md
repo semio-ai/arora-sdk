@@ -74,7 +74,7 @@ From this directory:
 
 ```sh
 tools/fetch-assets.sh               # once: the Microduck model and policies, at pinned revisions
-eval "$(tools/setup-mujoco.sh)"     # in each shell: MuJoCo 3.12.0, for the build and the run
+eval "$(tools/setup-mujoco.sh)"     # in each shell: MuJoCo 3.17.0, for the build and the run
 cargo run --release -p arora-microduck -- --tree trees/walk.groot.xml --command 0.3 0 0 --duration 10
 ```
 
@@ -82,9 +82,9 @@ The first build takes several minutes. The run simulates ten seconds of
 walking at 0.3 m/s, as fast as the machine allows, and says what happened:
 
 ```text
-[2026-10-29T10:44:41Z INFO  arora] loaded module 'microduck-policies' (5c0a2e7f-6b3d-4d9a-9a41-2f6c7d1e8b90): 8 function(s)
-[2026-10-29T10:44:41Z INFO  arora] behavior loaded from a Groot tree: 1 node(s), running from the next step
-simulated 10.00 s: travelled 1.167 m to (1.134, -0.272), height 0.120 m (min 0.113), upright
+[2026-10-30T00:33:27Z INFO  arora] loaded module 'microduck-policies' (5c0a2e7f-6b3d-4d9a-9a41-2f6c7d1e8b90): 8 function(s)
+[2026-10-30T00:33:27Z INFO  arora] behavior loaded from a Groot tree: 1 node(s), running from the next step
+simulated 10.00 s: travelled 1.158 m to (1.147, -0.155), height 0.119 m (min 0.114), upright
 ```
 
 `cargo test` runs every crate's tests, the simulated runs of
@@ -211,10 +211,11 @@ write naming it is refused whole.
 
 The runtime ends each call into a wasm module by the step's period. A call
 the machine stalls past it — on a heavily loaded machine — is interrupted,
-and the policy module then runs no more calls until it is reloaded: the duck
-falls and stays down, and the log says the call "overran its budget". Restart
-the device; `--executor native` runs the module in-process, outside that
-bound.
+and the log says the call "overran its budget". The device keeps its policy:
+before the module's next call, the runtime instantiates it afresh, from its
+initial state — the controller's memory empty, the network loaded again on
+first use — and a warning says so. `--executor native` runs the module
+in-process, outside that bound.
 
 ### In Semio Studio (opt-in)
 
@@ -318,8 +319,8 @@ The workspace is self-contained — its own `Cargo.lock`, toolchain and
 `.cargo/config.toml`, outside the SDK's workspace because MuJoCo and an ONNX
 runtime are no concern of the SDK's. Each `arora-*` dependency names both a
 `path` into this checkout and the version it calls into, all published on
-crates.io: `arora` 16, `arora-behavior` 9, `arora-hal` 4.3, `arora-module`
-2.3, `arora-simple-data-store` 3.1, `arora-types` 3.1. To move it into a
+crates.io: `arora` 16, `arora-behavior` 9.6, `arora-hal` 4.3, `arora-module`
+2.3, `arora-simple-data-store` 3.2, `arora-types` 3.10. To move it into a
 repository of its own, delete those `path` keys and the `[patch.crates-io]`
 table, and copy the SDK's [`modules/say-silent`](../../modules/say-silent) in
 (it is not published).

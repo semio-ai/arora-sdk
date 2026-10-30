@@ -28,11 +28,12 @@
 //!   carries each message received on an input topic as a
 //!   [`BridgeOp::Update`](arora_bridge::BridgeOp::Update) command for the Arora
 //!   runtime to apply to its store. The input topics are the keys the device's
-//!   store opens to remote writers (`KeyMeta::editable`), asked of the device at
-//!   startup — an input is stated once, in the store, and not again here. An
-//!   input whose shape has no `std_msgs` scalar takes a JSON `std_msgs/String`
-//!   topic, unless a typed profile endpoint routes onto it: that endpoint is
-//!   then its interface, and it gets no key topic.
+//!   store opens to remote writers (`KeyMeta::editable`), asked of the device
+//!   when the bridge starts and every two seconds after — an input is stated
+//!   once, in the store, and not again here. An input whose shape has no
+//!   `std_msgs` scalar takes a JSON `std_msgs/String` topic, unless a typed
+//!   profile endpoint routes onto it: that endpoint is then its interface, and
+//!   it gets no key topic.
 //!
 //! # Example
 //!

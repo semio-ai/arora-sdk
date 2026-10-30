@@ -1,6 +1,6 @@
 [package]
 name = "arora-module"
-version = "2.3.0"
+version = "2.3.1"
 edition = "2021"
 description = "Write an Arora module in Rust: the declaration macros and the traits they implement."
 license = "Apache-2.0"
@@ -8,26 +8,21 @@ repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
 
 [dependencies]
-# 3: a declaration's `type_records(parent)`, which implements
-# `AroraModule::type_records` (arora-types 3.8).
+# 3.1: a declaration's `type_records(parent)` and `dispatch_buffer`.
 arora-module-macros = { path = "../arora-module-macros", version = "3.1" }
-# 3.8: what the declarations generate reaches `TypeDefinitionFrozen` and the
-# derived types' `register_records`.
+# 3.8: `TypeDefinitionFrozen`, `register_records`.
 arora-types = { path = "../arora-types", version = "3.8" }
-# The artifact entry points the macros emit speak the engine's buffer wire
-# format; a host-linked module never calls into it.
-# 3.1: `well_formed`, which a component's calls check an argument and a
-# result with.
+# The artifact entry points' buffer format. 3.1: `well_formed`.
 arora-buffers = { path = "../arora-buffers", version = "3.1" }
 
 # The `arora:module` world's guest bindings, for a module built as a
 # `wasm32-wasip2` component.
 [target.'cfg(all(target_arch = "wasm32", target_os = "wasi", target_env = "p2"))'.dependencies]
-wit-bindgen = "0.58"
+wit-bindgen = "0.63"
 
 [dev-dependencies]
 # The record round-trip test reads the store's wire form back.
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 arora-behavior = { path = "../arora-behavior", version = "9" }
 arora-engine = { path = "../arora-engine", version = "7" }
 # The compile-fail cases: every error a declaration reports.

@@ -1028,7 +1028,7 @@ fn generate_self_record<'a>(context: &Context<'a>) -> anyhow::Result<Directory> 
     let mut result = Directory::new();
     let modules_dir = result.ensure_directories(&PathBuf::from_str("records/module/")?)?;
     let module_path = format!("{}@{}.yaml", context.module_id, context.module_version);
-    let module_yaml = serde_yaml::to_string(&module).unwrap();
+    let module_yaml = yaml_serde::to_string(&module).unwrap();
     modules_dir.insert(module_path, File::new(module_yaml.as_bytes()))?;
     Ok(result)
 }

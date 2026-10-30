@@ -7,20 +7,24 @@ description = "Example C++ module — a wasm guest built through cargo, cmake an
 publish = false
 build = "build.rs"
 
-# The cargo-side entry point for a C++ wasm guest: the Rust source is empty,
-# and the build script invokes cmake against CMakeLists.txt, which writes the
-# module directory a device loads (see readme.md).
+# A C++ wasm guest: the Rust source is empty, and the build script builds
+# CMakeLists.txt into the module directory a device loads (see readme.md).
 
 [lib]
 path = "src/lib.rs"
+
+# For their C headers' directories (DEP_ARORA_*_INCLUDE), which cargo passes
+# through a regular dependency only.
+[dependencies]
+arora-buffers = { path = "../../../crates/arora-buffers" }
+arora-util = { path = "../../../crates/arora-util" }
 
 [build-dependencies]
 anyhow = "1"
 wasi-sdk = { path = "../../../crates/wasi-sdk" }
 cmake = "0.1"
-# Host bins for code generation (module.yaml -> C++ bindings and the header).
-# arora-module-cli finds the C++ generator beside itself, so the build script
-# stages both into one directory.
+# The generators (module.yaml -> C++). arora-module-cli finds the C++ generator
+# beside itself, so the build script stages both into one directory.
 arora-module-cli = { path = "../../../crates/arora-module-authoring/cli", artifact = "bin" }
 arora-module-cpp = { path = "../../../crates/arora-module-authoring/cpp", artifact = "bin" }
 # wasm32-wasip2 static libraries the C++ links against.

@@ -26,7 +26,7 @@ pub async fn check_and_update_config(
             message: format!("failed to read configuration file {}: {}", config_path, err),
         })?;
         Some(
-            serde_yaml::from_str(&config_str).map_err(|err| RegistryError::Generic {
+            yaml_serde::from_str(&config_str).map_err(|err| RegistryError::Generic {
                 message: format!(
                     "failed to parse configuration file {}: {}",
                     config_path, err
@@ -121,7 +121,7 @@ pub async fn check_and_update_config(
 
     // Update the configuration file.
     if let Some(conf) = config {
-        let config_str = serde_yaml::to_string(&conf).map_err(|err| RegistryError::Generic {
+        let config_str = yaml_serde::to_string(&conf).map_err(|err| RegistryError::Generic {
             message: format!("failed to serialize updated configuration: {}", err),
         })?;
         if let Some(config_path) = &config_path {

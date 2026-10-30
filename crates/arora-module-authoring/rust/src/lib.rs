@@ -257,7 +257,7 @@ pub fn generate_records(
         match ty {
             TypeDefinitionFrozen::Primitive(_) => {}
             TypeDefinitionFrozen::Enumeration(e) => {
-                let yaml = serde_yaml::to_string(e)
+                let yaml = yaml_serde::to_string(e)
                     .map_err(|err| GenerationError::Generic(err.to_string()))?;
                 let file_name = format!("{}@{}.yaml", id, version);
                 vfs.insert_at_path(
@@ -280,7 +280,7 @@ pub fn generate_records(
                 )?;
             }
             TypeDefinitionFrozen::Structure(s) => {
-                let yaml = serde_yaml::to_string(s)
+                let yaml = yaml_serde::to_string(s)
                     .map_err(|err| GenerationError::Generic(err.to_string()))?;
                 let file_name = format!("{}@{}.yaml", id, version);
                 vfs.insert_at_path(

@@ -77,7 +77,7 @@ impl Arora {
     ///
     /// The guest calls a step makes share `period`: natively, a guest call
     /// still running when the period ends is interrupted, its call fails, and
-    /// its module refuses calls until it is reloaded
+    /// its module is instantiated afresh before its next call
     /// ([`arora_engine::limits`]). The device keeps stepping.
     ///
     /// To **stop** a run, drop its future (e.g. lose a `select!` against a
@@ -1326,8 +1326,8 @@ mod tests {
     }
 
     /// A guest call that would loop forever is interrupted when its step's
-    /// period ends, and the device keeps stepping: the module refuses the
-    /// calls of the steps after it.
+    /// period ends, and the device keeps stepping: each later step's call
+    /// runs in the module instantiated afresh, and is interrupted in turn.
     #[cfg(feature = "native")]
     #[tokio::test]
     async fn a_guest_call_overrunning_its_step_is_interrupted_and_the_device_keeps_stepping() {
@@ -1335,7 +1335,7 @@ mod tests {
             uuid::Uuid::from_u128(0xd2_0001),
             uuid::Uuid::from_u128(0xd2_0002),
         );
-        let header: arora_types::module::low::Header = serde_yaml::from_str(&format!(
+        let header: arora_types::module::low::Header = yaml_serde::from_str(&format!(
             r#"
 id: {module}
 name: spinning
@@ -1392,9 +1392,12 @@ exports:
             .and_then(|ms| ms.parse().ok())
             .unwrap_or_else(|| panic!("{overran}"));
         assert!(budget <= 20.0, "{overran}");
-        for refused in &answers[1..] {
-            let refused = refused.as_ref().unwrap_err();
-            assert!(refused.contains("trapped in an earlier call"), "{refused}");
+        for later in &answers[1..] {
+            let later = later.as_ref().unwrap_err();
+            assert!(
+                later.contains("overran its budget") || later.contains("no time was left"),
+                "{later}"
+            );
         }
         drop(answers);
 

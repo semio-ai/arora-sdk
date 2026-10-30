@@ -2,16 +2,20 @@ cmake_minimum_required(VERSION 3.20)
 project(example-cpp CXX)
 
 # Required cache variables, which build.rs passes:
-#   ARORA_MODULE_CLI      host bin that generates C++ bindings from module.yaml
-#                         (with arora-module-cpp beside it)
-#   ARORA_BUFFERS_LIB     wasm32-wasip2 static library (.a) of arora-buffers
-#   ARORA_UTIL_LIB        wasm32-wasip2 static library (.a) of arora-util
-#   ARORA_CPP_SOURCE_DIR  source directory of libs/cpp
-#   ARORA_INCLUDE_DIR     directory holding the generated arora C headers
-#   ARORA_MODULE_DIR      the module directory to write
+#   ARORA_MODULE_CLI           host bin that generates C++ bindings from
+#                              module.yaml (with arora-module-cpp beside it)
+#   ARORA_BUFFERS_LIB          wasm32-wasip2 static library (.a) of arora-buffers
+#   ARORA_UTIL_LIB             wasm32-wasip2 static library (.a) of arora-util
+#   ARORA_BUFFERS_INCLUDE_DIR  directory holding arora/buffers.h, which
+#                              arora-buffers' build script generates
+#   ARORA_UTIL_INCLUDE_DIR     directory holding arora/util.h, which
+#                              arora-util's build script generates
+#   ARORA_CPP_SOURCE_DIR       source directory of libs/cpp
+#   ARORA_MODULE_DIR           the module directory to write
 # CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip2 toolchain file.
 foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB ARORA_UTIL_LIB
-            ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR ARORA_MODULE_DIR)
+            ARORA_BUFFERS_INCLUDE_DIR ARORA_UTIL_INCLUDE_DIR
+            ARORA_CPP_SOURCE_DIR ARORA_MODULE_DIR)
   if(NOT DEFINED ${VAR})
     message(FATAL_ERROR "Required cache variable ${VAR} not set. "
             "Either build through cargo (build.rs) or pass -D${VAR}=... explicitly.")
@@ -27,11 +31,11 @@ add_subdirectory(${ARORA_CPP_SOURCE_DIR} arora-cpp-build)
 
 add_library(arora-buffers STATIC IMPORTED GLOBAL)
 set_property(TARGET arora-buffers PROPERTY IMPORTED_LOCATION ${ARORA_BUFFERS_LIB})
-set_property(TARGET arora-buffers PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
+set_property(TARGET arora-buffers PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_BUFFERS_INCLUDE_DIR})
 
 add_library(arora-util STATIC IMPORTED GLOBAL)
 set_property(TARGET arora-util PROPERTY IMPORTED_LOCATION ${ARORA_UTIL_LIB})
-set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
+set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_UTIL_INCLUDE_DIR})
 
 # module.yaml -> the bindings (include/example-cpp.hpp, source/example-cpp.cpp),
 # the module's record (records/) and its header (header.json).
@@ -61,7 +65,7 @@ add_executable(example-cpp
   ${GENERATED_DIR}/source/example-cpp.cpp
 )
 add_dependencies(example-cpp generate-example-cpp-bindings)
-target_include_directories(example-cpp PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}/include)
+target_include_directories(example-cpp PUBLIC ${GENERATED_DIR}/include)
 target_link_libraries(example-cpp PRIVATE arora-buffers arora-util arora-cpp arora-cpp-component)
 target_compile_options(example-cpp PRIVATE -fPIC -O3 -flto -fno-exceptions)
 target_link_options(example-cpp PRIVATE

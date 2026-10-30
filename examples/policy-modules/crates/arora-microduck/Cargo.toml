@@ -11,12 +11,10 @@ name = "arora-microduck"
 path = "src/main.rs"
 
 [features]
-# Serve the device's Semio Studio bridge instead of the open local bridge (the
-# `arora` crate's Studio connection: enrollment, sign-in, the Zenoh link),
-# unless the run passes --no-studio.
+# Serve through Semio Studio instead of the open local bridge, unless the run
+# passes --no-studio.
 studio = ["arora/studio-bridge"]
-# Speak on board with Piper. libpiper and espeak-ng are GPLv3: a binary built
-# with this feature is GPL-affected, so it is opt-in.
+# Speak on board with Piper. Opt-in: libpiper and espeak-ng are GPLv3.
 piper = ["dep:say-piper"]
 
 [dependencies]
@@ -31,15 +29,9 @@ clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 log.workspace = true
 serde_json = "1"
-# The policy module twice over: its library (the declaration: ids, header,
-# signatures, and the in-process functions) and its wasm32-wasip2 build (the
-# guest the device loads), both from one dependency.
+# Both the library (declaration, in-process functions) and the wasm32-wasip2
+# guest the device loads.
 microduck-policies = { path = "../../modules/microduck-policies", artifact = "cdylib", target = "wasm32-wasip2", lib = true }
-# The voice's providers, host modules only (a speaker is the host's).
 say-piper = { path = "../../modules/say-piper", version = "0.1", optional = true }
 say-silent = { path = "../../../../modules/say-silent", version = "0.1" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-
-[dev-dependencies]
-# The silent voice's log, read by the speech test.
-say-silent = { path = "../../../../modules/say-silent", version = "0.1" }

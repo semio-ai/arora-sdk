@@ -12,10 +12,10 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use arora_hal_mujoco::Clock;
-use clap::Parser;
 use arora_microduck::{
     default_model, serve, tree_path, Command, Device, DeviceConfig, Executor, Speech, StudioModel,
 };
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(about, version)]

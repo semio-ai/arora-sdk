@@ -1,10 +1,5 @@
-# Control policies as Arora modules — a self-contained workspace.
-#
-# It is deliberately not a member of the arora-sdk workspace: it pulls a
-# physics engine (MuJoCo) and an ONNX runtime that the SDK itself has no use
-# for, and it is meant to be forked into its own repository. The arora crates
-# are reached by path while it lives here; each path dependency also names the
-# published version, so moving it out is deleting the `path` keys.
+# Control policies as Arora modules. Not an arora-sdk workspace member: it pulls
+# MuJoCo and an ONNX runtime the SDK has no use for, and is meant to be forked.
 [workspace]
 resolver = "2"
 members = [
@@ -14,8 +9,8 @@ members = [
   "modules/say-piper",
   "crates/arora-microduck",
 ]
-# Piper (say-piper) builds libpiper with cmake and links GPLv3 code: it is
-# built only when asked for (`-p say-piper`, or the device's `piper` feature).
+# say-piper builds libpiper with cmake and links GPLv3 code: built only on
+# request (`-p say-piper`, or the device's `piper` feature).
 default-members = [
   "crates/arora-policy",
   "crates/arora-hal-mujoco",
@@ -32,37 +27,24 @@ authors = ["Semio"]
 [workspace.dependencies]
 anyhow = "1"
 log = "0.4"
-serde = { version = "1", features = ["derive"] }
-uuid = { version = "1", features = ["serde", "v4"] }
 
-# The arora crates this workspace builds on.
-# 17: the device's Studio bridge (`studio::of`, `StudioArgs::connects`) and
-# `AroraBuilder::with_studio_handle`, a device that is not enrolled enrolling
-# while it runs; the component executor registered, which the policy guest, a
-# `wasm-component` module, loads through.
+# `path` while the workspace lives in the SDK checkout, `version` for crates.io:
+# moving it out is deleting the `path` keys.
 arora = { path = "../../crates/arora", version = "17" }
-arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
-arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "8.2" }
-arora-bridge = { path = "../../crates/arora-bridge", version = "6" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "9.6" }
 arora-hal = { path = "../../crates/arora-hal", version = "4.3" }
 arora-module = { path = "../../crates/arora-module", version = "2.3" }
-arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "3.1" }
-arora-types = { path = "../../crates/arora-types", version = "3.1" }
-arora-engine = { path = "../../crates/arora-engine", version = "7" }
+arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "3.2" }
+arora-types = { path = "../../crates/arora-types", version = "3.10" }
 
-# Crates published outside this checkout — the Studio client behind the
-# `studio` feature — depend on these two from crates.io; patched to the same
-# path copies, their `Bridge` and `Value` are the ones the runtime uses.
-# Removed with the `path` keys when the workspace leaves the SDK checkout.
+# The Studio client (`studio` feature) depends on these from crates.io; the patch
+# makes its `Bridge` and `Value` the runtime's. Goes with the `path` keys.
 [patch.crates-io]
 arora-bridge = { path = "../../crates/arora-bridge" }
 arora-types = { path = "../../crates/arora-types" }
 
-# The policy module is built twice: natively (its tests, the in-process
-# device) and as a wasm guest through the device's artifact dependency, which
-# follows the device's own profile. The guest is what ships, so both profiles
-# optimize it and keep debug info out of it (debug info is most of a wasm
-# file's size).
+# The policy module's wasm guest follows the device's profile, so both profiles
+# optimize it and keep debug info, most of a wasm file's size, out of it.
 [profile.release]
 debug = false
 strip = true
@@ -73,9 +55,7 @@ debug = 1
 
 [profile.dev.package."*"]
 opt-level = 2
-# Dependencies' debug info is most of a dev wasm guest's size (the ONNX
-# runtime alone puts it over a hundred megabytes); the workspace's own crates
-# keep theirs.
+# The ONNX runtime's debug info alone puts a dev guest over 100 MB.
 debug = false
 
 [profile.dev.package.microduck-policies]

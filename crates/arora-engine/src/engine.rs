@@ -520,6 +520,27 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// Open the load of `module` on the guest calls under way, as loading a
+    /// module does, and return its deadline: the earlier of
+    /// [`DEFAULT_CALL_BUDGET`](crate::limits::DEFAULT_CALL_BUDGET) from now
+    /// and the deadline of the call under way. A guest the load's initializer
+    /// calls ends by it. Close it with [`end_load`](Self::end_load).
+    #[cfg(all(feature = "wasmtime-host", not(target_arch = "wasm32")))]
+    pub(crate) fn begin_load(&mut self, module: Uuid) -> std::time::Instant {
+        let load = loading(module, self.guest_calls.last());
+        let deadline = load.deadline;
+        self.guest_calls.push(load);
+        deadline
+    }
+
+    /// Close the load [`begin_load`](Self::begin_load) opened.
+    #[cfg(all(feature = "wasmtime-host", not(target_arch = "wasm32")))]
+    pub(crate) fn end_load(&mut self) {
+        self.guest_calls.pop();
+    }
+}
+
 /// A guest call under way, or a guest loading, whose initializer can call
 /// others.
 #[cfg(not(target_arch = "wasm32"))]

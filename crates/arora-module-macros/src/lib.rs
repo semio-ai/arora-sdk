@@ -1729,7 +1729,7 @@ fn expand_from_header(args: &FromHeaderArgs) -> syn::Result<TokenStream2> {
     let path = std::path::Path::new(&manifest_dir).join(args.path.value());
     let yaml = std::fs::read_to_string(&path)
         .map_err(|e| syn::Error::new(span, format!("cannot read {}: {e}", path.display())))?;
-    let header: arora_types::module::low::Header = serde_yaml::from_str(&yaml)
+    let header: arora_types::module::low::Header = yaml_serde::from_str(&yaml)
         .map_err(|e| syn::Error::new(span, format!("not a module header: {e}")))?;
     let path_str = path.display().to_string();
 
@@ -1886,7 +1886,7 @@ mod tests {
             imports: Vec::new(),
             executable_mime: String::new(),
         };
-        serde_yaml::to_string(&header).expect("a header serializes")
+        yaml_serde::to_string(&header).expect("a header serializes")
     }
 
     #[test]

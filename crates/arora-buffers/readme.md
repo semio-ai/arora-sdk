@@ -159,9 +159,13 @@ The reader and writer are a `#[no_mangle] extern "C"` surface
 [`BufferWriter`](src/writer.rs) / [`BufferReader`](src/reader.rs): the
 `arora_buffer_writer_*` and `arora_buffer_reader_*` functions, and
 `arora_buffer_well_formed`. The crate builds as a `staticlib` as well as an
-`rlib`; its build script writes the C header `target/include/arora/buffers.h`,
-naming the tags `ARORA_BUFFER_TYPE_*`. A C++ guest links the `wasm32-wasip2`
-static library, with the C++ helpers of [`libs/cpp`](../../libs/cpp) over it.
+`rlib`; its build script generates the C header `arora/buffers.h`, naming the
+tags `ARORA_BUFFER_TYPE_*`, under its `OUT_DIR`. The crate's `links` key,
+`arora_buffers`, hands the header's directory to the build script of a crate
+depending on it, as `DEP_ARORA_BUFFERS_INCLUDE`. A C++ guest includes the
+header and links the `wasm32-wasip2` static library, with the C++ helpers of
+[`libs/cpp`](../../libs/cpp) over it
+([C++ guests](../../docs/building.md#c-guests)).
 
 ## Modules
 

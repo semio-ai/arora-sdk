@@ -9,6 +9,12 @@ build = "build.rs"
 [lib]
 path = "src/lib.rs"
 
+# For their C headers' directories (DEP_ARORA_*_INCLUDE), which cargo passes
+# through a regular dependency only.
+[dependencies]
+arora-buffers = { path = "../../crates/arora-buffers" }
+arora-util = { path = "../../crates/arora-util" }
+
 [build-dependencies]
 anyhow = "1"
 wasi-sdk = { path = "../../crates/wasi-sdk" }
@@ -17,7 +23,6 @@ arora-module-cli = { path = "../../crates/arora-module-authoring/cli", artifact 
 arora-module-cpp = { path = "../../crates/arora-module-authoring/cpp", artifact = "bin" }
 arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip2" }
 arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip2" }
-# test-cpp publishes its generated `records` dir at a stable workspace
-# path; we depend on its lib so cargo will build it (and therefore run its
-# build.rs) before us. The artifact itself is unused.
+# Orders test-cpp's build script, which writes the records this guest imports,
+# before this one.
 test-cpp = { path = "../test-cpp" }

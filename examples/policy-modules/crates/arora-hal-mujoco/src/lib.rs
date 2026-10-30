@@ -280,7 +280,7 @@ impl MujocoHal {
             HalError::Other(format!("could not load {}: {e}", config.model.display()))
         })?;
         if let Some(timestep) = config.timestep {
-            if !(timestep > 0.0) {
+            if timestep.is_nan() || timestep <= 0.0 {
                 return Err(HalError::Other(format!(
                     "a timestep of {timestep} s is not positive"
                 )));
@@ -303,7 +303,7 @@ impl MujocoHal {
         let keyframe = match &config.keyframe {
             Some(name) => Some(
                 model
-                    .name_to_id(MjtObj::mjOBJ_KEY, name)
+                    .name_to_id(MjtObjBase::mjOBJ_KEY, name)
                     .ok_or_else(|| HalError::NoSuchKey(format!("keyframe {name}")))?,
             ),
             None => None,

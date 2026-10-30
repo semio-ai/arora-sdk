@@ -135,11 +135,26 @@ is what a module registry can hold and every host can run.
   allocator protocol is part of the contract. A guest's error is the
   `err` of `dispatch`; an error buffer in its `ok`, the form Arora Buffers
   give an error, is read as its error too.
-- A component that traps is entered no more. wasmtime refuses to re-enter a
+- An instance a call trapped in is entered no more, and the module is
+  instantiated afresh before its next call. wasmtime refuses to re-enter a
   component instance after a trap, since the trap may have left its state
-  half-written, and the browser executor holds a trapped component to the
-  same rule: every later call fails, naming the trap, until the module is
-  reloaded, which instantiates it afresh.
+  half-written; the browser executor holds its instances to the same rule.
+  The trapped call fails with its trap; the next one runs in a new instance
+  of the module's compiled code, from its initial state, and a warning names
+  the module and the trap. A device whose call overran its step under load
+  keeps its module, which an operator would otherwise have to reload, and no
+  call ever runs in a half-written instance. Instantiating afresh is a load
+  within the call that triggers it, which runs in a step: it ends by the
+  earlier of that call's deadline and the loading budget, and a guest its
+  initializer calls ends by it too, so recovering never stretches a step.
+  Running out of time is the step's limit, not the module's fault: the call
+  is refused as one with no time left, and the next call tries again. A
+  module that fails to instantiate afresh otherwise runs no more calls until
+  it is reloaded, rather than retrying on every call. The browser
+  re-instantiates a module as it loaded it: one staged asynchronously,
+  because the browser refuses to instantiate it synchronously on the main
+  thread, is instantiated afresh asynchronously, its calls refused until the
+  new instance is ready.
 - `wasip2` is Tier 2 in rustc, and WASI SDK 33 links components with
   `wasm-component-ld`. Rust guests export through `arora_module::artifact!`,
   C++ guests through `arora-cpp-component` (see the C++ section below).
@@ -708,6 +723,25 @@ only the meta it stated from an earlier description; so a host narrows or
 closes one of its HAL's inputs by stating that key's meta, before the build or
 after it. The host is the authority on what its device opens; the HAL only says
 what its hardware takes.
+
+### The ROS 2 bridge asks the device again on an interval
+
+What a device describes of itself changes while it runs: its HAL describes
+keys after it starts, a host opens or closes a key, a module loads or unloads.
+The WebSocket bridge asks on every request (`ListKeys`, `DescribeMethods`), so
+it answers from the current description. The ROS 2 bridge cannot: what it
+serves are endpoints on the ROS graph — a subscription per input, a service per
+function, an action per task run — made before any ROS node asks for them. It
+asks the device again every two seconds and brings its endpoints in line with
+the answer, creating what the device gained and ending what it lost.
+
+It asks rather than being told because the `Bridge` contract carries no
+statement that the device's description changed, and the operations every
+bridge already answers are enough to learn it. An ask is two commands on the
+in-process channel, answered at the device's next step, and the bridge
+compares the answer with the last one, so a device whose description holds
+still costs it a comparison per interval. What the device gains waits at most
+an interval and a step to be exposed.
 
 ### A device carries its modules as module directories
 

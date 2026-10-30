@@ -9,37 +9,23 @@ description = "Run an Arora device in the browser: the AroraRuntime wasm-bindgen
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# The whole crate is `wasm32`-only: it builds on `arora`'s browser engine host,
-# which is gated to `wasm32`. So every real dependency is gated to that target.
-# On the host the crate is an empty shim (see `#![cfg(target_arch = "wasm32")]`)
-# with no dependencies — it still participates in a native `cargo build`/`cargo
-# package` (publish verification) without pulling the browser host into a host
-# link.
+# The crate is wasm32-only; on the host it is empty, so a native build or
+# `cargo package` links no browser host.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
 arora-types = { path = "../arora-types", version = "3" }
-# The opinionated runtime (no default features → the browser engine host, a
-# Tokio-free synchronous runtime). A downstream device pulls the seam crates
-# (arora-hal, arora-bridge, …) itself for whatever it composes.
-# 12: the client operations of `LocalCaller` (invoke, spawn, halt,
-# list_keys, describe_methods), and `Arora`/`AroraBuilder` as this crate's
-# surface carries them. 13.1: `AroraBuilder::with_registry`. 13.2:
-# `list_keys` and `Arora::describe_methods`, which the read-only operations
-# answer from without a step. 13.7: the browser's component executor
-# registered, which a `wasm-component` guest loads through. 16: the current
-# major, whose `Arora`/`AroraBuilder` this crate's surface carries.
+# Without default features: the browser engine host and a Tokio-free runtime.
+# 17: the `Arora`/`AroraBuilder` this crate's API carries.
 arora = { path = "../arora", version = "17", default-features = false }
-# 2.1: the records `withRecords` loads, in arora-registry's layout.
+# 2.1: the records layout `withRecords` loads.
 arora-registry = { path = "../arora-registry", version = "2.1" }
-# 6.1: the shapes a client reads keys and methods in, and a run handle's
-# client form (`arora_bridge::client`).
+# 6.1: `arora_bridge::client`.
 arora-bridge = { path = "../arora-bridge", version = "6.1" }
-# The run handle's value-plane encoding, which `client::run_value` reads.
+# The run handle's encoding, which `client::run_value` reads.
 arora-behavior = { path = "../arora-behavior", version = "9" }
 wasm-bindgen = "0.2"
 futures = "0.3"
-# Runtime-free sync primitives only: the receiving end of the device's
-# behavior-error watch.
+# Sync primitives only: the device's behavior-error watch.
 tokio = { version = "1", default-features = false, features = ["sync"] }
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
@@ -56,9 +42,7 @@ wasm-bindgen-test = "0.3"
 arora-hal = { path = "../arora-hal", version = "4.3" }
 # The store a test makes fail, over the simple store.
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.2" }
-serde_yaml = "0.9"
-# test-rust-wasm guest (wasm32-wasip2) the browser test include_bytes!s; cargo
-# exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
-# `lib = true` also brings the crate itself in, for the test's own target: the
-# header the test loads comes from the module's Rust declaration.
+yaml_serde = "0.10"
+# The guest the browser test loads (CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm);
+# `lib = true` also gives the test its declaration, the header it loads with.
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip2", lib = true }

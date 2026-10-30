@@ -9,10 +9,10 @@ description = "Test module built as a WebAssembly Component (wasm32-wasip2) agai
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = "0.58"
+wit-bindgen = "0.63"
 # The error buffer the `error-buffer` function returns.
 arora-buffers = { path = "../../crates/arora-buffers" }
 
 # The WASI 0.2 interfaces the `wasi` function calls directly.
 [target.'cfg(target_os = "wasi")'.dependencies]
-wasip2 = "1"
+wasip2 = "2"

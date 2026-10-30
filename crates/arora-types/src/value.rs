@@ -740,8 +740,8 @@ mod tests {
         },
       ],
     });
-    let yaml = serde_yaml::to_string(&value).unwrap();
-    let back: Value = serde_yaml::from_str(&yaml).unwrap();
+    let yaml = yaml_serde::to_string(&value).unwrap();
+    let back: Value = yaml_serde::from_str(&yaml).unwrap();
     assert_eq!(value, back, "Value did not round-trip through YAML");
   }
 

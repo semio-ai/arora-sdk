@@ -45,12 +45,12 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::num::NonZero;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use arora_behavior::Status;
-use rodio::Sink;
 
 #[allow(
     dead_code,
@@ -173,9 +173,8 @@ struct Player {
     requests: Sender<Request>,
     produced: Receiver<Produced>,
     worker: Option<JoinHandle<()>>,
-    /// The output stream and its handle; the stream must stay alive for the
-    /// queues to play.
-    output: Option<(rodio::OutputStream, rodio::OutputStreamHandle)>,
+    /// The audio output; it must stay alive for the queues to play.
+    output: Option<rodio::MixerDeviceSink>,
     utterances: HashMap<String, Utterance>,
     next_id: u64,
 }
@@ -186,7 +185,7 @@ struct Utterance {
     state: State,
     last_tick: Instant,
     /// Its queue on the audio output: one source per sentence.
-    sink: Option<Sink>,
+    queue: Option<rodio::Player>,
     /// Where each queued sentence starts, in seconds of the utterance.
     starts: Vec<f64>,
     /// Seconds of audio queued so far.
@@ -211,19 +210,19 @@ impl Utterance {
     /// Seconds into the utterance at the playhead: the start of the sentence
     /// playing plus the position within it.
     fn playhead(&self) -> f64 {
-        let Some(sink) = &self.sink else {
+        let Some(queue) = &self.queue else {
             return 0.0;
         };
-        if sink.empty() {
+        if queue.empty() {
             return self.queued;
         }
-        let playing = self.starts.len().saturating_sub(sink.len());
-        self.starts.get(playing).copied().unwrap_or(self.queued) + sink.get_pos().as_secs_f64()
+        let playing = self.starts.len().saturating_sub(queue.len());
+        self.starts.get(playing).copied().unwrap_or(self.queued) + queue.get_pos().as_secs_f64()
     }
 
     fn fail(&mut self) {
-        if let Some(sink) = &self.sink {
-            sink.stop();
+        if let Some(queue) = &self.queue {
+            queue.stop();
         }
         self.state = State::Over(Status::Failure);
     }
@@ -258,12 +257,15 @@ impl Player {
         let _ = self.requests.send(request);
     }
 
-    fn output(&mut self) -> Result<&rodio::OutputStreamHandle, String> {
+    fn output(&mut self) -> Result<&rodio::mixer::Mixer, String> {
         if self.output.is_none() {
-            self.output =
-                Some(rodio::OutputStream::try_default().map_err(|e| format!("audio output: {e}"))?);
+            let mut output = rodio::DeviceSinkBuilder::open_default_sink()
+                .map_err(|e| format!("audio output: {e}"))?;
+            // Closing the output at shutdown is not news on the console.
+            output.log_on_drop(false);
+            self.output = Some(output);
         }
-        Ok(&self.output.as_ref().expect("just opened").1)
+        Ok(self.output.as_ref().expect("just opened").mixer())
     }
 
     /// One tick of `say(text)`: never waits on the worker.
@@ -273,8 +275,8 @@ impl Player {
         self.utterances.retain(|_, u| {
             let wanted = u.last_tick.elapsed() <= IDLE_STOP;
             if !wanted {
-                if let Some(sink) = &u.sink {
-                    sink.stop();
+                if let Some(queue) = &u.queue {
+                    queue.stop();
                 }
             }
             wanted
@@ -294,7 +296,7 @@ impl Player {
         }
         let playhead = u.playhead();
         if u.synthesized {
-            if u.sink.as_ref().is_none_or(Sink::empty) {
+            if u.queue.as_ref().is_none_or(rodio::Player::empty) {
                 u.state = State::Over(Status::Success);
                 return (Status::Success, SILENCE_VISEME);
             }
@@ -324,7 +326,7 @@ impl Player {
             id,
             state: State::Speaking,
             last_tick: Instant::now(),
-            sink: None,
+            queue: None,
             starts: Vec::new(),
             queued: 0.0,
             pending: true,
@@ -333,12 +335,9 @@ impl Player {
             next_cue: 0,
             shape: SILENCE_VISEME,
         };
-        match self
-            .output()
-            .and_then(|handle| Sink::try_new(handle).map_err(|e| format!("audio sink: {e}")))
-        {
-            Ok(sink) => {
-                utterance.sink = Some(sink);
+        match self.output().map(rodio::Player::connect_new) {
+            Ok(queue) => {
+                utterance.queue = Some(queue);
                 self.send(Request::Start {
                     id,
                     text: text.to_string(),
@@ -375,10 +374,11 @@ impl Player {
                         );
                         u.starts.push(u.queued);
                         u.queued += sentence.samples.len() as f64 / rate;
-                        if let Some(sink) = &u.sink {
-                            sink.append(rodio::buffer::SamplesBuffer::new(
-                                1,
-                                sentence.sample_rate,
+                        if let Some(queue) = &u.queue {
+                            queue.append(rodio::buffer::SamplesBuffer::new(
+                                NonZero::<u16>::MIN,
+                                NonZero::new(sentence.sample_rate)
+                                    .expect("a sentence's rate is at least 1"),
                                 sentence.samples,
                             ));
                         }
