@@ -11,8 +11,10 @@ use crate::value::{StructureField, Value};
 #[cfg_attr(feature = "derive", derive(crate::AroraType))]
 #[cfg_attr(feature = "derive", arora(id = "9fe95b4c-08f9-48cf-8c10-99686e7b2afd"))]
 pub struct Call {
-  /// The ID of the module where to find the function ID.
-  /// If absent, look for it locally.
+  /// The ID of the module the function ID belongs to. Dispatch routes on it:
+  /// [`CallBridge::arora_call`] refuses a call that names no module. A call a
+  /// module decodes from its own dispatch carries `None`, the dispatch having
+  /// routed it already.
   #[cfg_attr(feature = "derive", arora(id = "8c4633be-578a-405e-9c58-75c3bbf194be"))]
   #[serde(default)]
   pub module_id: Option<Uuid>,
@@ -139,8 +141,8 @@ mod tests {
   #[test]
   pub fn parse_call_test() {
     // The call format keeps values in their singleton-map YAML form.
-    let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
-      serde_yaml::Deserializer::from_str(CALL_TEST),
+    let call: Call = yaml_serde::with::singleton_map_recursive::deserialize(
+      yaml_serde::Deserializer::from_str(CALL_TEST),
     )
     .unwrap();
     assert_eq!(
@@ -164,8 +166,8 @@ mod tests {
 
   #[test]
   pub fn parse_call_test_2() {
-    let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
-      serde_yaml::Deserializer::from_str(CALL_TEST_2),
+    let call: Call = yaml_serde::with::singleton_map_recursive::deserialize(
+      yaml_serde::Deserializer::from_str(CALL_TEST_2),
     )
     .unwrap();
     assert_eq!(

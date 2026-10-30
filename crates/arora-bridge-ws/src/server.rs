@@ -84,7 +84,8 @@ pub struct AroraWSServer {
     /// Cancel token for the single active client. When cancelled, the client is disconnected.
     active_client: Arc<RwLock<Option<CancellationToken>>>,
     is_running: RwLock<bool>,
-    /// Server-initiated pushes (Bridge::send_data) reach the active client here.
+    /// Server-initiated pushes ([`push`](Self::push), which the bridge's
+    /// `try_send` makes) reach the active client here.
     outbound_tx: broadcast::Sender<Outgoing>,
     /// Cancelled when the serve loop exits — on the external cancel, a bind
     /// failure, or any accept-loop end — so an observer
@@ -138,8 +139,8 @@ impl AroraWSServer {
     }
 
     /// Set the device behind this server: where `list_keys` goes for the keys it
-    /// holds, and `list_methods` / `invoke` for every method the registry does
-    /// not own itself. [`WsBridge`](crate::bridge::WsBridge) sets it to the
+    /// holds, and `list_methods` / `invoke` for the methods it has.
+    /// [`WsBridge`](crate::bridge::WsBridge) sets it to the
     /// device it bridges, so an embedder wiring the bridge discovers the device
     /// without declaring any of it here.
     pub async fn set_device(&self, device: DeviceHandler) {
@@ -346,13 +347,11 @@ async fn handle_connection(
 ) {
     info!("New WebSocket connection from: {}", addr);
 
-    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-        // The largest legitimate message is a few KiB; cap far below the
-        // 64 MiB tungstenite default so a client cannot force huge allocations.
-        max_message_size: Some(1 << 20),
-        max_frame_size: Some(256 << 10),
-        ..Default::default()
-    };
+    // The largest legitimate message is a few KiB; cap far below the 64 MiB
+    // tungstenite default so a client cannot force huge allocations.
+    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(1 << 20))
+        .max_frame_size(Some(256 << 10));
     let ws_stream = match tokio_tungstenite::accept_async_with_config(stream, Some(ws_config)).await
     {
         Ok(ws) => ws,
@@ -401,7 +400,7 @@ async fn handle_connection(
                                 break;
                             }
                         };
-                        if let Err(e) = write.send(Message::Text(response_text)).await {
+                        if let Err(e) = write.send(Message::text(response_text)).await {
                             error!("Failed to send response: {}", e);
                             break;
                         }
@@ -455,7 +454,7 @@ async fn handle_connection(
                                 continue;
                             }
                         };
-                        if let Err(e) = write.send(Message::Text(text)).await {
+                        if let Err(e) = write.send(Message::text(text)).await {
                             error!("Failed to push message: {}", e);
                             break;
                         }

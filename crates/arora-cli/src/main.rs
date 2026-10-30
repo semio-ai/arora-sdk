@@ -119,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
         args.registry_url.to_owned()
     } else if let Some(config_path) = &args.config {
         let config = read_to_string(config_path)?;
-        let config = serde_yaml::from_str::<Config>(&config)?;
+        let config = yaml_serde::from_str::<Config>(&config)?;
         config.url
     } else {
         None
@@ -179,7 +179,7 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
     for i in 0..args.header.len() {
         // Read the header.
         let header_path = &args.header[i];
-        let header: Header = serde_yaml::from_str(
+        let header: Header = yaml_serde::from_str(
             &read_to_string(header_path)
                 .unwrap_or_else(|_| panic!("header file {} could not be read", header_path)),
         )
@@ -218,8 +218,8 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
     if let Some(call_yaml) = &args.call {
         // Values keep their singleton-map YAML form (`bool: true`, `i32: 113`)
         // — the stable shape of the --call format.
-        let call: Call = serde_yaml::with::singleton_map_recursive::deserialize(
-            serde_yaml::Deserializer::from_str(call_yaml),
+        let call: Call = yaml_serde::with::singleton_map_recursive::deserialize(
+            yaml_serde::Deserializer::from_str(call_yaml),
         )?;
         let function_id = call.id;
         let module_id = if let Some(module_id) = &call.module_id {
@@ -245,8 +245,8 @@ async fn main_with_registry<R: ReadableRegistry + EditableRegistry + Resolver>(
                 })
             })?;
             let mut out = Vec::new();
-            let mut serializer = serde_yaml::Serializer::new(&mut out);
-            serde_yaml::with::singleton_map_recursive::serialize(&result, &mut serializer)?;
+            let mut serializer = yaml_serde::Serializer::new(&mut out);
+            yaml_serde::with::singleton_map_recursive::serialize(&result, &mut serializer)?;
             drop(serializer);
             println!("{}", String::from_utf8(out)?);
         }

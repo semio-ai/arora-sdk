@@ -9,35 +9,25 @@ description = "End-to-end tests that exercise built modules via arora-cli"
 [lib]
 path = "src/lib.rs"
 
-# The integration tests spawn `arora-cli` against artifacts that the rest
-# of the workspace produces at known paths under <workspace>/target. We
-# use bindeps on arora-cli (a bin artifact) to ensure it's always built,
-# but intentionally do NOT declare bindeps on the cdylib modules (polly,
-# etc) as those produce duplicate compilation units and cargo "output
-# filename collision" warnings (cargo#6313). The build.rs detects arora-cli
-# via CARGO_BIN_FILE_ARORA_CLI from bindeps, with fallback to the target
-# directory in case it's pre-built.
+# arora-cli and the Rust guests are artifact build-dependencies whose paths
+# build.rs hands the tests. The C++ guests are dev-dependencies whose build
+# scripts write their module directories under target/<profile>/modules.
 
 [dev-dependencies]
 anyhow = "1"
 test-cpp = { path = "../modules/test-cpp" }
 test-cpp-2 = { path = "../modules/test-cpp-2" }
-# The example C++ module, built here so that its module directory exists for
-# the tests that load it.
 example-cpp = { path = "../examples/modules/cpp" }
 
-# Component-model executor tests (tests/component.rs) drive the engine
-# in-process rather than through arora-cli.
 arora-engine = { path = "../crates/arora-engine" }
 arora-buffers = { path = "../crates/arora-buffers" }
 arora-types = { path = "../crates/arora-types", version = "3" }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 uuid = "1"
-# The declared guest, host-side: its header is what the engine loads it with,
-# and its type records what arora-cli freezes that header against.
+# The declared guest, host-side: its header and type records.
 test-rust-wasm = { path = "../modules/test-rust-wasm" }
 arora-animation-module = { path = "../modules/animation", version = "2", features = ["module-dir"] }
-# The behavior-tree node guest's status and tick ids, as its calls carry them.
+# The status and tick ids the behavior-tree node guest's calls carry.
 arora-behavior = { path = "../crates/arora-behavior" }
 arora-behavior-tree-types = { path = "../crates/arora-behavior-tree-types" }
 serde_json = "1"
@@ -53,9 +43,7 @@ arora-animation-module = { path = "../modules/animation", artifact = "cdylib", t
 arora-cli = { path = "../crates/arora-cli", artifact = "bin" }
 test-rust-wasm = { path = "../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip2" }
 test-rust-component = { path = "../modules/test-rust-component", artifact = "cdylib", target = "wasm32-wasip2" }
-# The test-only behavior-tree node module. Nothing in the default build depends
-# on it now that the basic control nodes are native in arora-behavior-tree, so
-# building it here (its build.rs emits the crate's `arora_generated` bindings)
-# keeps `cargo fmt --check`/clippy happy and the artifact available to tests.
+# Nothing else in the default build depends on this guest; building it here
+# generates its `arora_generated` bindings, which `cargo fmt --check` needs.
 test-behavior-tree-nodes = { path = "../modules/test-behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip2" }
 

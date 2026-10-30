@@ -263,8 +263,8 @@ Measured on an Apple M1 laptop:
 
 | | |
 |---|---|
-| showcase tree, 0.3 m/s, 12 simulated s (release, wasm guest) | 1.37 m travelled, upright, 5.2 s of wall time including the wasm compile |
-| walk tree, 0.3 m/s, 10 simulated s | 1.17 m travelled, upright |
+| showcase tree, 0.3 m/s, 12 simulated s (release, wasm guest) | 1.34 m travelled, upright, 5.2 s of wall time including the wasm compile |
+| walk tree, 0.3 m/s, 10 simulated s | 1.16 m travelled, upright |
 | served, commanded 0.3 m/s over the local bridge (dev build) | 0.89 m in 8 s; the bridge answers after about 12 s of wasm compile |
 | wasm policy guest | 22 MB in the release build (thin LTO, stripped), the ONNX runtime and seven networks inside |
 | lockstep speed with the policy in wasm | 6 simulated s in 0.2 s (about 30× real time) |

@@ -11,10 +11,12 @@
 //! store.
 //!
 //! A background task owns the ROS 2 [`Node`](ros2_client::Node): it spins the
-//! middleware, drives the input subscriptions, and creates publishers on
-//! demand, and the async lives entirely inside it. The bridge reaches it two
-//! ways. Inbound, the command channel's receiver *is* the stream the runtime
-//! polls, so nothing buffers in between. Outbound, [`try_send`](Bridge::try_send)
+//! middleware, drives the input subscriptions, creates publishers on demand,
+//! and asks the device every [`DISCOVERY_INTERVAL`] for its inputs and
+//! functions, serving what it gained and ending what it lost ([`Exposed`]).
+//! The async lives entirely inside it. The bridge reaches it two ways.
+//! Inbound, the command channel's receiver *is* the stream the runtime polls,
+//! so nothing buffers in between. Outbound, [`try_send`](Bridge::try_send)
 //! merges into a latest-value-per-key map the task drains — see [`Outbound`].
 
 use std::collections::{HashMap, HashSet};
@@ -30,9 +32,10 @@ use arora_bridge::{
 use arora_msgs_ros2::Ros2Registry;
 use arora_types::data::{KeyMeta, StateChange};
 use arora_types::value::{Type, Value};
+use arora_types::Uuid;
 use async_trait::async_trait;
 use futures::channel::{mpsc as fmpsc, oneshot};
-use futures::stream::FuturesUnordered;
+use futures::stream::{FuturesUnordered, SelectAll};
 use futures::{Stream, StreamExt};
 use log::{debug, info, warn};
 use ros2_client::{Context, ContextOptions, Node, NodeName, NodeOptions};
@@ -109,8 +112,8 @@ pub struct TypedInput {
 /// `domain_id`, and the typed conversions a profile adds. The keys themselves
 /// need no declaration here: each key the device's store opens to remote
 /// writers (`KeyMeta::editable`) is subscribed as an input topic typed from its
-/// meta, and [`send_data`](Bridge::send_data) creates a publisher from each
-/// changed value's type on first use.
+/// meta, and each changed key [`try_send`](Bridge::try_send) hands the bridge
+/// is published on a publisher created from its value's type on first use.
 #[derive(Debug, Clone)]
 pub struct Ros2BridgeConfig {
     pub namespace: String,
@@ -126,14 +129,13 @@ pub struct Ros2BridgeConfig {
     /// `/{namespace}/keys/{path}` convention (see [`profile::Include`]).
     pub includes: Vec<profile::Include>,
     /// Skill endpoints: profile-declared ROS 2 actions bound to the device's
-    /// task-run methods (see [`profile::ActionBinding`]). Each is checked at
-    /// startup against the described methods and refused loudly when the
-    /// contract does not hold.
+    /// task-run methods (see [`profile::ActionBinding`]). Each is checked
+    /// against the described methods at start and whenever they change, and
+    /// refused loudly while the contract does not hold.
     pub action_bindings: Vec<profile::ActionBinding>,
     /// Skills on topics: profile-declared topics whose every message spawns a
     /// device task-run method, the latest message winning (see
-    /// [`profile::TopicSkillBinding`]). Checked at startup like the action
-    /// bindings.
+    /// [`profile::TopicSkillBinding`]). Checked like the action bindings.
     pub topic_skill_bindings: Vec<profile::TopicSkillBinding>,
 }
 
@@ -281,10 +283,13 @@ struct TypedOutputs {
     publishers: Vec<Option<TypedKeyPublisher>>,
     /// Bindings that changed since the last publish.
     dirty: Vec<bool>,
-    /// Bindings given up on — a topic this bridge subscribes to, an unknown
-    /// message type, a publisher that could not be created — each reported
-    /// once.
+    /// Bindings given up on — an unknown message type, a publisher that
+    /// could not be created — each reported once.
     refused: Vec<bool>,
+    /// Bindings held back because this bridge subscribes to their topic.
+    /// Their message is still composed from every change of their keys, so
+    /// that once the topic is freed they publish what the keys hold now.
+    echo: Vec<bool>,
 }
 
 impl TypedOutputs {
@@ -306,6 +311,7 @@ impl TypedOutputs {
             publishers: (0..count).map(|_| None).collect(),
             dirty: vec![false; count],
             refused: vec![false; count],
+            echo: vec![false; count],
         }
     }
 
@@ -361,8 +367,8 @@ impl TypedOutputs {
     }
 
     /// Publish every message that changed, creating its publisher on first
-    /// use. A binding whose topic this bridge also subscribes to is refused:
-    /// echoing it back would feed the device its own commands.
+    /// use. A binding whose topic this bridge also subscribes to is held
+    /// back: echoing it back would feed the device its own commands.
     async fn publish_dirty(
         &mut self,
         node: &mut Node,
@@ -371,10 +377,9 @@ impl TypedOutputs {
         subscribed: &HashMap<String, String>,
     ) {
         for index in 0..self.bindings.len() {
-            if !self.dirty[index] || self.refused[index] {
+            if !self.dirty[index] || self.refused[index] || self.echo[index] {
                 continue;
             }
-            self.dirty[index] = false;
             let binding = &self.bindings[index];
             if self.publishers[index].is_none() {
                 let topic = binding
@@ -382,12 +387,14 @@ impl TypedOutputs {
                     .clone()
                     .unwrap_or_else(|| topic_name(namespace, &binding.path));
                 if subscribed.contains_key(&topic) {
+                    // Still dirty: what the keys compose meanwhile publishes
+                    // once the topic is freed.
                     warn!(
                         "Ros2Bridge does not publish '{}': its topic '{topic}' is one this bridge \
                          subscribes to, and echoing it back would feed the device its own commands",
                         binding.path
                     );
-                    self.refused[index] = true;
+                    self.echo[index] = true;
                     continue;
                 }
                 match setup_typed_key_publisher(
@@ -408,10 +415,43 @@ impl TypedOutputs {
                     }
                 }
             }
+            self.dirty[index] = false;
             if let (Some(publisher), Some(message)) =
                 (&self.publishers[index], &self.messages[index])
             {
                 publisher.publish(message).await;
+            }
+        }
+    }
+
+    /// The topic a binding publishes on: its own, or the key topic of its
+    /// path.
+    fn topic(&self, index: usize, namespace: &str) -> String {
+        let binding = &self.bindings[index];
+        binding
+            .topic
+            .clone()
+            .unwrap_or_else(|| topic_name(namespace, &binding.path))
+    }
+
+    /// Follow a change of the topics this bridge subscribes to: a binding
+    /// publishing on a topic it now subscribes to is held back, as one is
+    /// when its publisher would be created; a binding held back for a topic
+    /// it no longer subscribes to publishes the message its keys composed
+    /// meanwhile at the next publish.
+    fn follow_subscriptions(&mut self, namespace: &str, resubscribed: &Resubscribed) {
+        for index in 0..self.bindings.len() {
+            let topic = self.topic(index, namespace);
+            if self.publishers[index].is_some() && resubscribed.subscribed.contains_key(&topic) {
+                warn!(
+                    "Ros2Bridge stops publishing '{}': this bridge now subscribes to its topic \
+                     '{topic}', and echoing it back would feed the device its own commands",
+                    self.bindings[index].path
+                );
+                self.publishers[index] = None;
+                self.echo[index] = true;
+            } else if self.echo[index] && resubscribed.freed.contains(&topic) {
+                self.echo[index] = false;
             }
         }
     }
@@ -638,136 +678,26 @@ async fn run_node(
     // and action planes.
     let registry = Arc::new(arora_msgs_ros2::registry());
 
-    // Every input topic yields state changes we turn into `Update` commands,
-    // each tagged with its topic for the refusal log.
-    let mut sub_streams: Vec<TopicChangeStream> = Vec::new();
-    // Every topic this bridge subscribes to. Publishing on one would hand the
-    // device its own command back: the sample re-enters as an inbound update,
-    // is written to the store, comes out again on the next step, and circulates
-    // for as long as the graph is up — reviving stale values whenever a real
-    // writer and the echo cross. (DDS delivers a participant's own writes to
-    // its own readers, and the Zenoh backend declares its subscribers with no
-    // origin filter, so neither middleware saves us from it.) Each topic maps to
-    // the key (or, for a profile endpoint, the binding) it takes input for.
-    let mut subscribed: HashMap<String, String> = HashMap::new();
-    // Typed input keys subscribe as a registered ROS message, decoded against
-    // its runtime type into a single-key change — how a device key receives a
-    // real ROS4HRI message.
-    for input in &typed_inputs {
-        let topic = input
-            .topic
-            .clone()
-            .unwrap_or_else(|| topic_name(&namespace, &input.path));
-        subscribed.insert(topic.clone(), input.path.clone());
-        match setup_typed_key_subscriber(
-            &mut node,
-            &topic,
-            &input.ros_type,
-            input.path.clone(),
-            input.routes.clone(),
-            registry.clone(),
-            input.qos.unwrap_or(Qos::default_for(profile::Flow::In)),
-        ) {
-            Ok(stream) => sub_streams.push(from_topic(topic, stream)),
-            Err(e) => warn!(
-                "Ros2Bridge could not subscribe to typed key '{}': {e}",
-                input.path
-            ),
-        }
-    }
-    // The device's inputs: every key its store opens to remote writers, each on
-    // `/{namespace}/keys/{path}` as the `std_msgs` type of its shape. Asked of
-    // the device rather than configured here, so an input is stated once — in
-    // the store — and every bridge exposes the same set. A typed profile topic
-    // may feed the same key; both are inputs of it, unless the key's shape has
-    // no `std_msgs` scalar and the typed topic is its only real interface. The
-    // subscription delivers to the key itself: a topic maps back to its key
-    // through this table, never by reversing the escape.
-    let inputs = device_inputs(&cmd_tx).await;
-    for (path, value_type, topic) in input_topics(&namespace, inputs, &typed_inputs) {
-        subscribed.insert(topic.clone(), path.clone());
-        let qos = Qos::default_for(profile::Flow::In);
-        match setup_key_subscriber(&mut node, &namespace, &path, &value_type, qos) {
-            Ok(stream) => sub_streams.push(from_topic(topic, stream)),
-            Err(e) => warn!("Ros2Bridge could not subscribe to input '{path}': {e}"),
-        }
-    }
-    let mut inbound = futures::stream::select_all(sub_streams);
-
-    // Expose every ROS-representable module method as a service under
-    // `/{namespace}/methods/{name}` — and every *task-run* method (one
-    // returning the behavior-tree `Status`) as an action under
-    // `/{namespace}/actions/{name}`. Discovered from the runtime — like
-    // outbound topics, a device's methods are its own surface, so nothing is
-    // declared. Profile-declared skill endpoints join the same action plane,
-    // checked against the discovered signatures.
-    let (discovered, discovered_actions, topic_skills) = discover(
-        &cmd_tx,
-        &namespace,
-        &registry,
-        &action_bindings,
-        &topic_skill_bindings,
-    )
-    .await;
-    let mut service_streams: Vec<Pin<Box<dyn Stream<Item = ()> + Send>>> = Vec::new();
-    for service in discovered {
-        if let Some(stream) = service_stream(&mut node, service, registry.clone(), cmd_tx.clone()) {
-            service_streams.push(stream);
-        }
-    }
-    let mut service_requests = futures::stream::select_all(service_streams);
-
-    // One task per action, each owning its endpoints and goal book; the node
-    // task forwards every outbound state change so the tasks can watch their
-    // runs' status/feedback/result keys.
-    let mut action_change_txs: Vec<tmpsc::UnboundedSender<StateChange>> = Vec::new();
-    for action in discovered_actions {
-        match create_raw_action_server(&mut node, &action, &registry) {
-            Ok(server) => {
-                let (change_tx, change_rx) = tmpsc::unbounded_channel();
-                action_change_txs.push(change_tx);
-                tokio::spawn(actions::action_task(
-                    server,
-                    action,
-                    registry.clone(),
-                    cmd_tx.clone(),
-                    change_rx,
-                ));
-            }
-            Err(e) => warn!("Ros2Bridge could not create action '{}': {e}", action.name),
-        }
-    }
-
-    // One task per topic skill, owning its subscription and the run its
-    // latest message spawned; it watches that run's status key on the same
-    // forwarded state changes as the action tasks.
-    for skill in topic_skills {
-        let qos = skill.qos.unwrap_or(Qos::default_for(profile::Flow::In));
-        match setup_typed_message_subscriber(
-            &mut node,
-            &skill.topic,
-            &skill.ros_type,
-            registry.clone(),
-            qos,
-        ) {
-            Ok(messages) => {
-                subscribed.insert(skill.topic.clone(), skill.topic.clone());
-                let (change_tx, change_rx) = tmpsc::unbounded_channel();
-                action_change_txs.push(change_tx);
-                tokio::spawn(topic_skills::topic_skill_task(
-                    skill,
-                    registry.clone(),
-                    cmd_tx.clone(),
-                    messages,
-                    change_rx,
-                ));
-            }
-            Err(e) => warn!(
-                "Ros2Bridge could not subscribe to the skill topic '{}': {e}",
-                skill.topic
-            ),
-        }
-    }
+    // What the bridge subscribes and serves: the typed inputs the config
+    // declares, then what the device describes when the bridge starts — its
+    // inputs as topics, its functions as services and actions, the profile's
+    // skills bound to them. Asked of the device rather than configured here,
+    // so an input or a function is stated once, on the device, and every
+    // bridge exposes the same set.
+    let mut exposed = Exposed::new(
+        &mut node,
+        namespace.clone(),
+        registry.clone(),
+        typed_inputs,
+        action_bindings,
+        topic_skill_bindings,
+        cmd_tx.clone(),
+    );
+    exposed.expose(&mut node, Described::ask(&cmd_tx).await);
+    // The device as it describes itself afterwards, every interval: what it
+    // gained or lost since is exposed when its description arrives, without
+    // holding up the planes the loop drives meanwhile.
+    let mut rediscoveries = Box::pin(rediscover(cmd_tx.clone()).fuse());
 
     // Publishers are created lazily from the first value written to each key.
     let mut publishers: HashMap<String, KeyPublisher> = HashMap::new();
@@ -804,11 +734,9 @@ async fn run_node(
                 if change.is_empty() {
                     continue;
                 }
-                // The action tasks watch their runs' keys on the same outbound
-                // state the topics mirror.
-                for tx in &action_change_txs {
-                    let _ = tx.send(change.clone());
-                }
+                // The action and topic-skill tasks watch their runs' keys on
+                // the same outbound state the topics mirror.
+                exposed.watch(&change);
                 publish_change(
                     &mut node,
                     &namespace,
@@ -816,7 +744,7 @@ async fn run_node(
                     &mut typed_outputs,
                     &includes,
                     &registry,
-                    &subscribed,
+                    &exposed.subscribed,
                     &mut topic_owners,
                     &mut refused,
                     &mut oversized,
@@ -824,7 +752,7 @@ async fn run_node(
                 )
                 .await;
             }
-            Some((topic, change)) = inbound.next() => {
+            Some((topic, change)) = exposed.inbound.next() => {
                 let keys = written_keys(&change);
                 let (reply_tx, reply_rx) = oneshot::channel();
                 if cmd_tx
@@ -848,13 +776,630 @@ async fn run_node(
             // A method service received a request; it is decoded, dispatched as a
             // `Call`, and answered inside its own stream — nothing to do here but
             // keep driving the services.
-            Some(()) = service_requests.next() => {}
+            Some(()) = exposed.service_requests.next() => {}
+            Some(described) = rediscoveries.next() => {
+                let resubscribed = exposed.expose(&mut node, described);
+                if !resubscribed.is_empty() {
+                    follow_subscriptions(
+                        &namespace,
+                        &includes,
+                        &resubscribed,
+                        &mut publishers,
+                        &mut typed_outputs,
+                        &mut topic_owners,
+                        &mut refused,
+                    );
+                }
+            }
         }
     }
 
     if let Some(task) = spinner_task {
         task.abort();
     }
+}
+
+/// How often the bridge asks the device again for its inputs and functions.
+/// What the device gains in between — a key it opens to remote writers, a key
+/// its HAL describes, a module it loads — gets its topic, service or action
+/// when the answer arrives, and what it loses — a key it closes, a module it
+/// unloads — loses its endpoint then. Each ask is two commands on the
+/// in-process channel, which the runtime answers at its next step, and an
+/// answer equal to the last one changes nothing.
+const DISCOVERY_INTERVAL: Duration = Duration::from_secs(2);
+
+/// What the device describes of itself at one ask: the keys it opens to remote
+/// writers, each with the shape its meta states, and the signature of every
+/// function it can call, both as the device lists them. A part is `None` when
+/// the device did not answer it, which leaves what the bridge exposes of that
+/// part as it is.
+struct Described {
+    inputs: Option<Vec<(String, Option<Type>)>>,
+    methods: Option<Vec<MethodSignature>>,
+}
+
+impl Described {
+    /// Ask the device for both parts at once.
+    async fn ask(cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>) -> Self {
+        let (inputs, methods) = futures::join!(device_inputs(cmd_tx), device_methods(cmd_tx));
+        Self { inputs, methods }
+    }
+}
+
+/// The device described every [`DISCOVERY_INTERVAL`], for as long as its
+/// command stream is open.
+fn rediscover(
+    cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
+) -> impl Stream<Item = Described> + Send {
+    futures::stream::unfold(cmd_tx, |cmd_tx| async move {
+        tokio::time::sleep(DISCOVERY_INTERVAL).await;
+        if cmd_tx.is_closed() {
+            return None;
+        }
+        let described = Described::ask(&cmd_tx).await;
+        Some((described, cmd_tx))
+    })
+}
+
+/// The keys the device opens to remote writers, each with the shape its meta
+/// states: the inputs this bridge subscribes. `None` when the device does not
+/// answer.
+async fn device_inputs(
+    cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
+) -> Option<Vec<(String, Option<Type>)>> {
+    let keys: Vec<(String, KeyMeta)> = ask_device(
+        cmd_tx,
+        BridgeOp::ListKeys { prefix: None },
+        "list the device's keys",
+    )
+    .await?;
+    Some(
+        keys.into_iter()
+            .filter(|(_, meta)| meta.editable)
+            .map(|(path, meta)| (path, meta.ty))
+            .collect(),
+    )
+}
+
+/// The signature of every function the device can call. `None` when the
+/// device does not answer.
+async fn device_methods(
+    cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
+) -> Option<Vec<MethodSignature>> {
+    ask_device(
+        cmd_tx,
+        BridgeOp::DescribeMethods { prefix: None },
+        "describe the device's methods",
+    )
+    .await
+}
+
+/// The device's answer to `op`, decoded. `None` when the device does not
+/// answer — it stopped — or answers with an error or with something that does
+/// not decode, both logged as failing to `what`.
+async fn ask_device<T: serde::de::DeserializeOwned>(
+    cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
+    op: BridgeOp,
+    what: &str,
+) -> Option<T> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    cmd_tx
+        .unbounded_send(BridgeCommand::new(op, reply_tx))
+        .ok()?;
+    match reply_rx.await {
+        Ok(Ok(result)) => match arora_types::value_serde::from_value(result.ret) {
+            Ok(answer) => Some(answer),
+            Err(e) => {
+                warn!("Ros2Bridge could not {what}: the answer does not decode: {e}");
+                None
+            }
+        },
+        Ok(Err(e)) => {
+            warn!("Ros2Bridge could not {what}: {e}");
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+/// A method service's stream of requests, each answered inside it.
+type ServiceRequests = Pin<Box<dyn Stream<Item = ()> + Send>>;
+
+/// Endpoints by name, each with the source it was made from — a device
+/// function's signature, an input's key and shape — and its handle: what
+/// reaches it, and whose drop ends it.
+struct Served<S, H> {
+    endpoints: HashMap<String, (S, H)>,
+}
+
+/// How [`Served::update`] brings the endpoints in line with what is wanted.
+struct Diff<S, H, T> {
+    /// Wanted and not served: to create.
+    create: Vec<(String, S, T)>,
+    /// Wanted and served from an equal source: left serving.
+    kept: Vec<(String, T)>,
+    /// Served and not wanted from the same source: removed, their handles
+    /// handed back to be dropped or retired.
+    ended: Vec<(String, H)>,
+}
+
+impl<S: PartialEq, H> Served<S, H> {
+    fn new() -> Self {
+        Self {
+            endpoints: HashMap::new(),
+        }
+    }
+
+    /// Remove every endpoint `wanted` does not name with the same source, and
+    /// say what to create. One name made from an equal source is the same
+    /// endpoint, so it is left as it is.
+    fn update<T>(&mut self, wanted: Vec<(String, S, T)>) -> Diff<S, H, T> {
+        let sources: HashMap<&str, &S> = wanted
+            .iter()
+            .map(|(name, source, _)| (name.as_str(), source))
+            .collect();
+        let gone: Vec<String> = self
+            .endpoints
+            .iter()
+            .filter(|(name, (source, _))| {
+                !sources
+                    .get(name.as_str())
+                    .is_some_and(|wanted| **wanted == *source)
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        let ended = gone
+            .into_iter()
+            .filter_map(|name| {
+                let (_, handle) = self.endpoints.remove(&name)?;
+                Some((name, handle))
+            })
+            .collect();
+        let mut diff = Diff {
+            create: Vec::new(),
+            kept: Vec::new(),
+            ended,
+        };
+        for (name, source, made) in wanted {
+            if self.endpoints.contains_key(&name) {
+                diff.kept.push((name, made));
+            } else {
+                diff.create.push((name, source, made));
+            }
+        }
+        diff
+    }
+
+    fn insert(&mut self, name: String, source: S, handle: H) {
+        self.endpoints.insert(name, (source, handle));
+    }
+}
+
+/// A skill task — an action's or a topic skill's — and the channel that
+/// reaches it ([`actions::Watch`]). Dropping the channel retires the task: it
+/// finishes the goal or message it is handling, takes no other, and ends.
+struct SkillTask<T> {
+    watch: tmpsc::UnboundedSender<actions::Watch<T>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+/// How the topics this bridge subscribes to changed: what it now subscribes
+/// to, each with the key (or binding) it takes input for, and what it no
+/// longer does.
+#[derive(Default)]
+struct Resubscribed {
+    subscribed: HashMap<String, String>,
+    freed: HashSet<String>,
+}
+
+impl Resubscribed {
+    fn is_empty(&self) -> bool {
+        self.subscribed.is_empty() && self.freed.is_empty()
+    }
+}
+
+/// What this bridge subscribes and serves of the device: the typed inputs its
+/// config declares, and, kept in step with each [`Described`] by
+/// [`expose`](Self::expose), the device's inputs as topics, its functions as
+/// services and actions, and the profile's skills bound to them.
+struct Exposed {
+    namespace: String,
+    registry: Arc<Ros2Registry>,
+    typed_inputs: Vec<TypedInput>,
+    action_bindings: Vec<profile::ActionBinding>,
+    topic_skill_bindings: Vec<profile::TopicSkillBinding>,
+    cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
+    /// Every input topic's changes, each tagged with its topic for the
+    /// refusal log: the typed inputs' and the device inputs'.
+    inbound: SelectAll<TopicChangeStream>,
+    /// Every method service's requests.
+    service_requests: SelectAll<ServiceRequests>,
+    /// The topic each typed input subscribes on, with its path.
+    typed_topics: HashMap<String, String>,
+    /// The device inputs subscribed, by topic, each with the key and shape
+    /// it decodes to.
+    inputs: Served<(String, Type), oneshot::Sender<()>>,
+    /// The method services, by name.
+    services: Served<MethodSignature, oneshot::Sender<()>>,
+    /// The actions, discovered and bound, by name, and the topic skills, by
+    /// topic: each a task, sent every outbound state change and its
+    /// resolution whenever the device's functions change. A task serves its
+    /// name for as long as the device has the function, across reloads.
+    actions: Served<(), SkillTask<actions::MethodAction>>,
+    topic_skills: Served<(), SkillTask<topic_skills::TopicSkill>>,
+    /// The tasks of actions and topic skills the device no longer has, by
+    /// name, until they end. A name the device has again is served anew only
+    /// once its retired task has ended, so two tasks never serve one name.
+    retiring: HashMap<String, tokio::task::JoinHandle<()>>,
+    /// The inputs and the functions as the device last described them, and
+    /// whether the functions are to be exposed again at the next ask: an
+    /// endpoint waits on its retired task.
+    inputs_described: Vec<(String, Option<Type>)>,
+    methods_described: Vec<MethodSignature>,
+    methods_pending: bool,
+    /// Every topic this bridge subscribes to. Publishing on one would hand the
+    /// device its own command back: the sample re-enters as an inbound update,
+    /// is written to the store, comes out again on the next step, and
+    /// circulates for as long as the graph is up — reviving stale values
+    /// whenever a real writer and the echo cross. (DDS delivers a
+    /// participant's own writes to its own readers, and the Zenoh backend
+    /// declares its subscribers with no origin filter, so neither middleware
+    /// saves us from it.) Each topic maps to the key (or, for a profile
+    /// endpoint, the binding) it takes input for.
+    subscribed: HashMap<String, String>,
+}
+
+impl Exposed {
+    /// Subscribe the typed inputs, which take each message on their topic as
+    /// a registered ROS message, decoded against its runtime type into a
+    /// single-key change — how a device key receives a real ROS4HRI message.
+    /// Nothing of the device is exposed until [`expose`](Self::expose).
+    fn new(
+        node: &mut Node,
+        namespace: String,
+        registry: Arc<Ros2Registry>,
+        typed_inputs: Vec<TypedInput>,
+        action_bindings: Vec<profile::ActionBinding>,
+        topic_skill_bindings: Vec<profile::TopicSkillBinding>,
+        cmd_tx: fmpsc::UnboundedSender<BridgeCommand>,
+    ) -> Self {
+        let mut inbound = SelectAll::new();
+        let mut typed_topics = HashMap::new();
+        for input in &typed_inputs {
+            let topic = input
+                .topic
+                .clone()
+                .unwrap_or_else(|| topic_name(&namespace, &input.path));
+            typed_topics.insert(topic.clone(), input.path.clone());
+            match setup_typed_key_subscriber(
+                node,
+                &topic,
+                &input.ros_type,
+                input.path.clone(),
+                input.routes.clone(),
+                registry.clone(),
+                input.qos.unwrap_or(Qos::default_for(profile::Flow::In)),
+            ) {
+                Ok(stream) => inbound.push(from_topic(topic, stream)),
+                Err(e) => warn!(
+                    "Ros2Bridge could not subscribe to typed key '{}': {e}",
+                    input.path
+                ),
+            }
+        }
+        Self {
+            subscribed: typed_topics.clone(),
+            namespace,
+            registry,
+            typed_inputs,
+            action_bindings,
+            topic_skill_bindings,
+            cmd_tx,
+            inbound,
+            service_requests: SelectAll::new(),
+            typed_topics,
+            inputs: Served::new(),
+            services: Served::new(),
+            actions: Served::new(),
+            topic_skills: Served::new(),
+            retiring: HashMap::new(),
+            inputs_described: Vec::new(),
+            methods_described: Vec::new(),
+            methods_pending: false,
+        }
+    }
+
+    /// Bring what is served in line with what the device describes: create
+    /// the endpoints of what it gained, end those of what it lost, and leave
+    /// the rest as they are. A part the device did not answer, or answered as
+    /// it last did with nothing left to expose, is left as it is. Returns how
+    /// the topics this bridge subscribes to changed.
+    fn expose(&mut self, node: &mut Node, described: Described) -> Resubscribed {
+        if let Some(inputs) = described
+            .inputs
+            .filter(|inputs| *inputs != self.inputs_described)
+        {
+            self.expose_inputs(node, &inputs);
+            self.inputs_described = inputs;
+        }
+        if let Some(methods) = described
+            .methods
+            .filter(|methods| self.methods_pending || *methods != self.methods_described)
+        {
+            self.methods_pending = false;
+            self.expose_methods(node, &methods);
+            self.methods_described = methods;
+        }
+        self.resubscribe()
+    }
+
+    /// The device's inputs: every key its store opens to remote writers, each
+    /// on `/{namespace}/keys/{path}` as the `std_msgs` type of its shape. A
+    /// typed profile topic may feed the same key; both are inputs of it,
+    /// unless the key's shape has no `std_msgs` scalar and the typed topic is
+    /// its only real interface. The subscription delivers to the key itself:
+    /// a topic maps back to its key through [`inputs`](Self::inputs), never
+    /// by reversing the escape. An input the store states no shape for cannot
+    /// have a typed topic, and is reported rather than guessed.
+    fn expose_inputs(&mut self, node: &mut Node, described: &[(String, Option<Type>)]) {
+        let inputs = described
+            .iter()
+            .filter_map(|(path, value_type)| match value_type {
+                Some(value_type) => Some((path.clone(), value_type.clone())),
+                None => {
+                    warn!("Ros2Bridge: '{path}' is an input with no shape in its meta; no topic");
+                    None
+                }
+            })
+            .collect();
+        let wanted = input_topics(&self.namespace, inputs, &self.typed_inputs)
+            .into_iter()
+            .map(|(path, value_type, topic)| (topic, (path, value_type), ()))
+            .collect();
+        for (topic, (path, value_type), ()) in self.inputs.update(wanted).create {
+            let qos = Qos::default_for(profile::Flow::In);
+            match setup_key_subscriber(node, &self.namespace, &path, &value_type, qos) {
+                Ok(stream) => {
+                    let (stop, stopped) = oneshot::channel();
+                    self.inbound.push(Box::pin(
+                        from_topic(topic.clone(), stream).take_until(stopped),
+                    ));
+                    self.inputs.insert(topic, (path, value_type), stop);
+                }
+                Err(e) => warn!("Ros2Bridge could not subscribe to input '{path}': {e}"),
+            }
+        }
+    }
+
+    /// Every ROS-representable function as a service under
+    /// `/{namespace}/methods/{name}`, and every *task-run* function (one
+    /// returning the behavior-tree `Status`) as an action under
+    /// `/{namespace}/actions/{name}`: like outbound topics, a device's
+    /// functions are its own surface, so nothing is declared. The profile's
+    /// skill endpoints join the action plane, and its topic skills ride their
+    /// topics, each checked against the described signatures.
+    ///
+    /// One task per action owns its endpoints and goal book, and one per
+    /// topic skill its subscription and the run its latest message spawned;
+    /// the node task sends each every outbound state change, so it can watch
+    /// its runs' status, feedback and result keys. A service is made anew
+    /// when its function's signature changes, its request and response types
+    /// with it; an action's or a topic skill's endpoints do not depend on the
+    /// signature, so its task is sent the new resolution instead.
+    fn expose_methods(&mut self, node: &mut Node, signatures: &[MethodSignature]) {
+        let (services, actions, topic_skills) = resolve_methods(
+            &self.namespace,
+            signatures,
+            &self.registry,
+            &self.action_bindings,
+            &self.topic_skill_bindings,
+        );
+        // Each service made from a function, with that function's signature.
+        let by_id: HashMap<(Uuid, Uuid), &MethodSignature> = signatures
+            .iter()
+            .map(|signature| ((signature.module_id, signature.id), signature))
+            .collect();
+        let wanted = services
+            .into_iter()
+            .filter_map(|service| {
+                let signature = by_id.get(&(service.module_id?, service.function_id))?;
+                Some((service.name.clone(), (*signature).clone(), service))
+            })
+            .collect();
+        for (name, signature, service) in self.services.update(wanted).create {
+            let Some(requests) =
+                service_stream(node, service, self.registry.clone(), self.cmd_tx.clone())
+            else {
+                continue;
+            };
+            let (stop, stopped) = oneshot::channel();
+            self.service_requests
+                .push(Box::pin(requests.take_until(stopped)));
+            self.services.insert(name, signature, stop);
+        }
+
+        self.retiring.retain(|_, task| !task.is_finished());
+
+        let wanted = actions
+            .into_iter()
+            .map(|action| (action.name.clone(), (), action))
+            .collect();
+        let diff = self.actions.update(wanted);
+        for (name, action) in diff.kept {
+            if let Some(((), served)) = self.actions.endpoints.get(&name) {
+                let _ = served.watch.send(actions::Watch::Resolved(action));
+            }
+        }
+        for (name, ended) in diff.ended {
+            self.retiring.insert(name, ended.task);
+        }
+        for (name, (), action) in diff.create {
+            if self.retiring.contains_key(&name) {
+                self.methods_pending = true;
+                continue;
+            }
+            match create_raw_action_server(node, &action, &self.registry) {
+                Ok(server) => {
+                    let (watch, watched) = tmpsc::unbounded_channel();
+                    let task = tokio::spawn(actions::action_task(
+                        server,
+                        action,
+                        self.registry.clone(),
+                        self.cmd_tx.clone(),
+                        watched,
+                    ));
+                    self.actions.insert(name, (), SkillTask { watch, task });
+                }
+                Err(e) => warn!("Ros2Bridge could not create action '{name}': {e}"),
+            }
+        }
+
+        let wanted = topic_skills
+            .into_iter()
+            .map(|skill| (skill.topic.clone(), (), skill))
+            .collect();
+        let diff = self.topic_skills.update(wanted);
+        for (topic, skill) in diff.kept {
+            if let Some(((), served)) = self.topic_skills.endpoints.get(&topic) {
+                let _ = served.watch.send(actions::Watch::Resolved(skill));
+            }
+        }
+        for (topic, ended) in diff.ended {
+            self.retiring.insert(topic, ended.task);
+        }
+        for (topic, (), skill) in diff.create {
+            if self.retiring.contains_key(&topic) {
+                self.methods_pending = true;
+                continue;
+            }
+            let qos = skill.qos.unwrap_or(Qos::default_for(profile::Flow::In));
+            match setup_typed_message_subscriber(
+                node,
+                &skill.topic,
+                &skill.ros_type,
+                self.registry.clone(),
+                qos,
+            ) {
+                Ok(messages) => {
+                    let (watch, watched) = tmpsc::unbounded_channel();
+                    let task = tokio::spawn(topic_skills::topic_skill_task(
+                        skill,
+                        self.registry.clone(),
+                        self.cmd_tx.clone(),
+                        messages,
+                        watched,
+                    ));
+                    self.topic_skills
+                        .insert(topic, (), SkillTask { watch, task });
+                }
+                Err(e) => warn!("Ros2Bridge could not subscribe to the skill topic '{topic}': {e}"),
+            }
+        }
+    }
+
+    /// Send an outbound state change to the actions' and the topic skills'
+    /// tasks, which watch their runs' keys on it.
+    fn watch(&self, change: &StateChange) {
+        for ((), served) in self.actions.endpoints.values() {
+            let _ = served.watch.send(actions::Watch::Change(change.clone()));
+        }
+        for ((), served) in self.topic_skills.endpoints.values() {
+            let _ = served.watch.send(actions::Watch::Change(change.clone()));
+        }
+    }
+
+    /// Recompute [`subscribed`](Self::subscribed) from the typed inputs, the
+    /// device inputs and the topic skills, and say how it changed.
+    fn resubscribe(&mut self) -> Resubscribed {
+        let mut subscribed = self.typed_topics.clone();
+        for (topic, ((path, _), _)) in &self.inputs.endpoints {
+            subscribed.insert(topic.clone(), path.clone());
+        }
+        for topic in self.topic_skills.endpoints.keys() {
+            subscribed.insert(topic.clone(), topic.clone());
+        }
+        let freed = self
+            .subscribed
+            .keys()
+            .filter(|topic| !subscribed.contains_key(*topic))
+            .cloned()
+            .collect();
+        let newly = subscribed
+            .iter()
+            .filter(|(topic, _)| !self.subscribed.contains_key(*topic))
+            .map(|(topic, input)| (topic.clone(), input.clone()))
+            .collect();
+        self.subscribed = subscribed;
+        Resubscribed {
+            subscribed: newly,
+            freed,
+        }
+    }
+}
+
+/// Follow a change of the topics this bridge subscribes to on the outbound
+/// plane: a key published on a topic the bridge now subscribes to stops, as
+/// one is refused that topic when its publisher is created, and a key refused
+/// for a topic the bridge no longer subscribes to is decided again at its
+/// next change. The typed outputs follow it the same way.
+fn follow_subscriptions(
+    namespace: &str,
+    includes: &[profile::Include],
+    resubscribed: &Resubscribed,
+    publishers: &mut HashMap<String, KeyPublisher>,
+    typed_outputs: &mut TypedOutputs,
+    topic_owners: &mut HashMap<String, String>,
+    refused: &mut HashSet<String>,
+) {
+    for (topic, input) in &resubscribed.subscribed {
+        if let Some(owner) = topic_owners.remove(topic) {
+            warn!(
+                "Ros2Bridge stops publishing key '{owner}': {}",
+                subscribed_topic_reason(&owner, topic, input)
+            );
+            publishers.remove(&owner);
+            refused.insert(owner);
+        }
+    }
+    if !resubscribed.freed.is_empty() {
+        refused.retain(|key| {
+            !resubscribed
+                .freed
+                .contains(&scalar_topic(namespace, includes, key).0)
+        });
+    }
+    typed_outputs.follow_subscriptions(namespace, resubscribed);
+}
+
+/// Why `key` is not published on `topic`, which this bridge subscribes to for
+/// `input`.
+fn subscribed_topic_reason(key: &str, topic: &str, input: &str) -> String {
+    if input == key {
+        format!(
+            "its topic '{topic}' is one this bridge subscribes to, and echoing it back would \
+             feed the device its own commands"
+        )
+    } else {
+        format!(
+            "it escapes to the topic '{topic}' of input '{input}', and publishing there would \
+             write this key's values into that one"
+        )
+    }
+}
+
+/// The topic `key` publishes on in the scalar plane, with the delivery
+/// profile an include gives it: an include's rewrite (first match wins) puts
+/// the key on its absolute profile topic instead of the namespace convention.
+fn scalar_topic(
+    namespace: &str,
+    includes: &[profile::Include],
+    key: &str,
+) -> (String, Option<Qos>) {
+    includes
+        .iter()
+        .filter(|include| include.flow == profile::Flow::Out)
+        .find_map(|include| Some((include.rewrite(key)?, include.qos)))
+        .unwrap_or_else(|| (topic_name(namespace, key), None))
 }
 
 /// The topic each device input subscribes on, by [`topic_name`].
@@ -978,64 +1523,16 @@ impl Refusals {
     }
 }
 
-/// Ask the runtime for every callable method's signature and resolve both
-/// planes: the ROS 2-representable methods to services, and the task-run
-/// (behavior-tree-`Status`-returning) methods to actions — the profile's
-/// skill bindings joining the latter, each checked against the described
-/// signatures. Methods whose types aren't representable on their plane, and
-/// bindings whose contract does not hold, are logged and skipped (never
-/// silently dropped). Empty if the runtime never answers (e.g. it stopped) —
-/// the bridge then serves no methods.
-/// The keys the device opened to remote writers, each with the shape it holds —
-/// the topics this bridge subscribes. An input the store states no shape for
-/// cannot have a typed topic, and is reported rather than guessed. Empty if the
-/// device never answers (it stopped): the bridge then takes no input.
-async fn device_inputs(cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>) -> Vec<(String, Type)> {
-    let (reply_tx, reply_rx) = oneshot::channel();
-    if cmd_tx
-        .unbounded_send(BridgeCommand::new(
-            BridgeOp::ListKeys { prefix: None },
-            reply_tx,
-        ))
-        .is_err()
-    {
-        return Vec::new();
-    }
-    let keys: Vec<(String, KeyMeta)> = match reply_rx.await {
-        Ok(Ok(result)) => arora_types::value_serde::from_value(result.ret).unwrap_or_else(|e| {
-            warn!("Ros2Bridge could not decode the device's keys: {e}");
-            Vec::new()
-        }),
-        Ok(Err(e)) => {
-            warn!("Ros2Bridge could not list the device's keys: {e}");
-            Vec::new()
-        }
-        Err(_) => Vec::new(),
-    };
-    keys.into_iter()
-        .filter(|(_, meta)| meta.editable)
-        .filter_map(|(path, meta)| match meta.ty {
-            Some(value_type) => Some((path, value_type)),
-            None => {
-                warn!("Ros2Bridge: '{path}' is an input with no shape in its meta; no topic");
-                None
-            }
-        })
-        .collect()
-}
-
-/// Ask the runtime for every callable method's signature and resolve both
-/// planes: the ROS 2-representable methods to services, and the task-run
-/// (behavior-tree-`Status`-returning) methods to actions — the profile's
-/// skill bindings joining the latter, each checked against the described
-/// signatures, and its topic skills resolved the same way. Methods whose
-/// types aren't representable on their plane, and bindings whose contract
-/// does not hold, are logged and skipped (never silently dropped). Empty if
-/// the runtime never answers (e.g. it stopped) — the bridge then serves no
-/// methods.
-async fn discover(
-    cmd_tx: &fmpsc::UnboundedSender<BridgeCommand>,
+/// Resolve the device's functions on both planes: the ROS 2-representable
+/// ones to services, and the task-run (behavior-tree-`Status`-returning) ones
+/// to actions — the profile's skill bindings joining the latter, each checked
+/// against `signatures`, and its topic skills resolved the same way.
+/// Functions whose types aren't representable on their plane, and bindings
+/// whose contract does not hold, are logged and skipped (never silently
+/// dropped).
+fn resolve_methods(
     namespace: &str,
+    signatures: &[MethodSignature],
     registry: &Ros2Registry,
     action_bindings: &[profile::ActionBinding],
     topic_skill_bindings: &[profile::TopicSkillBinding],
@@ -1044,49 +1541,26 @@ async fn discover(
     Vec<actions::MethodAction>,
     Vec<topic_skills::TopicSkill>,
 ) {
-    let (reply_tx, reply_rx) = oneshot::channel();
-    if cmd_tx
-        .unbounded_send(BridgeCommand::new(
-            BridgeOp::DescribeMethods { prefix: None },
-            reply_tx,
-        ))
-        .is_err()
-    {
-        return (Vec::new(), Vec::new(), Vec::new());
-    }
-    let signatures: Vec<MethodSignature> = match reply_rx.await {
-        Ok(Ok(result)) => arora_types::value_serde::from_value(result.ret).unwrap_or_else(|e| {
-            warn!("Ros2Bridge could not decode method signatures: {e}");
-            Vec::new()
-        }),
-        Ok(Err(e)) => {
-            warn!("Ros2Bridge describe-methods failed: {e}");
-            Vec::new()
-        }
-        Err(_) => Vec::new(),
-    };
-    let (resolved, skipped) = services::resolve(namespace, &signatures, registry);
+    let (resolved, skipped) = services::resolve(namespace, signatures, registry);
     if !skipped.is_empty() {
         warn!(
             "Ros2Bridge skips methods whose types are not ROS 2-representable: {}",
             skipped.join(", ")
         );
     }
-    let (mut resolved_actions, skipped_actions) =
-        actions::resolve(namespace, &signatures, registry);
+    let (mut resolved_actions, skipped_actions) = actions::resolve(namespace, signatures, registry);
     if !skipped_actions.is_empty() {
         warn!(
             "Ros2Bridge skips task-run methods whose goal types are not ROS 2-representable: {}",
             skipped_actions.join(", ")
         );
     }
-    let (bound_actions, refused) = actions::resolve_bound(action_bindings, &signatures, registry);
+    let (bound_actions, refused) = actions::resolve_bound(action_bindings, signatures, registry);
     for error in refused {
         warn!("Ros2Bridge refuses a {error}");
     }
     resolved_actions.extend(bound_actions);
-    let (topic_skills, refused) =
-        topic_skills::resolve(topic_skill_bindings, &signatures, registry);
+    let (topic_skills, refused) = topic_skills::resolve(topic_skill_bindings, signatures, registry);
     for error in refused {
         warn!("Ros2Bridge refuses a {error}");
     }
@@ -1416,33 +1890,13 @@ async fn publish_change(
         }
 
         if !publishers.contains_key(&key.path) {
-            // An include's rewrite (first match wins) puts the key on its
-            // absolute profile topic instead of the namespace convention, and
-            // its delivery profile with it.
-            let matched = includes
-                .iter()
-                .filter(|include| include.flow == profile::Flow::Out)
-                .find_map(|include| Some((include.rewrite(&key.path)?, include.qos)));
-            let (topic, qos) = match matched {
-                Some((topic, qos)) => (topic, qos),
-                None => (topic_name(namespace, &key.path), None),
-            };
+            let (topic, qos) = scalar_topic(namespace, includes, &key.path);
             if let Some(input) = subscribed.get(&topic) {
-                if *input == key.path {
-                    warn!(
-                        "Ros2Bridge does not publish key '{}': its topic '{topic}' is one this \
-                         bridge subscribes to, and echoing it back would feed the device its own \
-                         commands",
-                        key.path
-                    );
-                } else {
-                    warn!(
-                        "Ros2Bridge does not publish key '{}': it escapes to the topic '{topic}' \
-                         of input '{input}', and publishing there would write this key's values \
-                         into that one",
-                        key.path
-                    );
-                }
+                warn!(
+                    "Ros2Bridge does not publish key '{}': {}",
+                    key.path,
+                    subscribed_topic_reason(&key.path, &topic, input)
+                );
                 refused.insert(key.path.clone());
                 continue;
             }
@@ -1567,6 +2021,82 @@ mod tests {
             )
             .expect("a refusal an interval later is logged");
         assert!(next.ends_with("(499 more since the last report)"), "{next}");
+    }
+
+    /// An endpoint named again from an equal source is kept; one named from
+    /// another source, or no longer named, is removed and its handle handed
+    /// back, its drop ending it; what is named and not served is to be
+    /// created — a function the device reloaded with another signature among
+    /// them.
+    #[test]
+    fn served_endpoints_follow_what_the_device_describes() {
+        let mut served: Served<u32, oneshot::Sender<()>> = Served::new();
+        let mut ends = HashMap::new();
+        for (name, source) in [("kept", 1), ("reloaded", 2), ("unloaded", 3)] {
+            let (stop, stopped) = oneshot::channel();
+            served.insert(name.to_string(), source, stop);
+            ends.insert(name, stopped);
+        }
+
+        let diff = served.update(vec![
+            ("kept".to_string(), 1, 'k'),
+            ("reloaded".to_string(), 20, 'r'),
+            ("loaded".to_string(), 4, 'l'),
+        ]);
+        let mut created = diff.create;
+        created.sort();
+        assert_eq!(
+            created,
+            [
+                ("loaded".to_string(), 4, 'l'),
+                ("reloaded".to_string(), 20, 'r')
+            ]
+        );
+        assert_eq!(diff.kept, [("kept".to_string(), 'k')]);
+        let mut ended: Vec<String> = diff.ended.into_iter().map(|(name, _)| name).collect();
+        ended.sort();
+        assert_eq!(ended, ["reloaded", "unloaded"]);
+        let serving: Vec<&String> = served.endpoints.keys().collect();
+        assert_eq!(serving, ["kept"]);
+        for (name, ended) in [("kept", false), ("reloaded", true), ("unloaded", true)] {
+            let stopped = ends.get_mut(name).unwrap();
+            assert_eq!(
+                stopped.try_recv() == Err(oneshot::Canceled),
+                ended,
+                "{name}"
+            );
+        }
+    }
+
+    /// A key published on a topic the bridge comes to subscribe to stops
+    /// publishing there, and a key refused for a topic the bridge no longer
+    /// subscribes to is decided again at its next change; a key refused for
+    /// another topic stays refused.
+    #[test]
+    fn the_outbound_plane_follows_the_topics_the_bridge_subscribes_to() {
+        let jaw = topic_name("robot", "rig/jaw");
+        let mouth = topic_name("robot", "face/mouth");
+        let mut topic_owners = HashMap::from([(jaw.clone(), "rig/jaw".to_string())]);
+        let mut refused = HashSet::from(["face/mouth".to_string(), "rig/brow".to_string()]);
+        let resubscribed = Resubscribed {
+            subscribed: HashMap::from([(jaw, "rig/jaw".to_string())]),
+            freed: HashSet::from([mouth]),
+        };
+
+        follow_subscriptions(
+            "robot",
+            &[],
+            &resubscribed,
+            &mut HashMap::new(),
+            &mut TypedOutputs::new(Vec::new()),
+            &mut topic_owners,
+            &mut refused,
+        );
+        assert!(topic_owners.is_empty(), "{topic_owners:?}");
+        assert_eq!(
+            refused,
+            HashSet::from(["rig/jaw".to_string(), "rig/brow".to_string()])
+        );
     }
 
     /// A change's keys are named sorted, each once, set or unset.
@@ -1897,6 +2427,64 @@ mod tests {
         fn message_of(outputs: &TypedOutputs) -> &Value {
             outputs.messages[0].as_ref().unwrap()
         }
+    }
+
+    /// A message held back because the bridge subscribes to its topic is
+    /// still composed from its keys: once the topic is freed, it publishes
+    /// the frame written meanwhile with the target written after, not the
+    /// frame from before it was held back.
+    #[test]
+    fn a_held_back_typed_output_publishes_what_its_keys_hold_once_freed() {
+        let registry = arora_msgs_ros2::registry();
+        let mut outputs = TypedOutputs::new(vec![TypedOutput {
+            path: "/gaze".into(),
+            ros_type: "geometry_msgs/PointStamped".into(),
+            topic: Some("/gaze".into()),
+            routes: vec![
+                profile::FieldRoute {
+                    field: "point".into(),
+                    key: "gaze/target".into(),
+                },
+                profile::FieldRoute {
+                    field: "header.frame_id".into(),
+                    key: "gaze/frame".into(),
+                },
+            ],
+            qos: None,
+        }]);
+        assert!(outputs.feed("gaze/frame", &Value::String("head".into()), &registry));
+
+        // Held back, as `publish_dirty` holds a binding whose topic is
+        // subscribed; the frame changes meanwhile.
+        outputs.echo[0] = true;
+        assert!(outputs.feed("gaze/frame", &Value::String("face".into()), &registry));
+
+        outputs.follow_subscriptions(
+            "robot",
+            &Resubscribed {
+                subscribed: HashMap::new(),
+                freed: HashSet::from(["/gaze".to_string()]),
+            },
+        );
+        assert!(!outputs.echo[0], "the freed topic publishes again");
+        assert!(outputs.feed(
+            "gaze/target",
+            &Value::ArrayF32(vec![1.0, 2.0, 3.0]),
+            &registry
+        ));
+        assert!(outputs.dirty[0]);
+        let message = outputs.messages[0].as_ref().expect("a message");
+        let ty = registry
+            .get_by_name("geometry_msgs/PointStamped")
+            .expect("registered");
+        assert_eq!(
+            extract_route(message, ty, registry.types(), "header.frame_id").unwrap(),
+            Value::String("face".into())
+        );
+        assert_eq!(
+            extract_route(message, ty, registry.types(), "point").unwrap(),
+            Value::ArrayF32(vec![1.0, 2.0, 3.0])
+        );
     }
 
     /// The seam keeps state, not history: a key written twice before the node

@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal"
-version = "4.3.0"
+version = "4.3.1"
 edition = "2021"
 description = "Arora Hardware Abstraction Layer (HAL) trait, with a fake implementation."
 license = "Apache-2.0"
@@ -14,10 +14,10 @@ futures-channel = "0.3"
 futures-core = "0.3"
 # The empty key-description feed of a HAL that describes no key.
 futures-util = { version = "0.3", default-features = false }
-# The models' JSON shape, for a client that hands them on (a browser).
+# The models' JSON shape, for a client that hands them on.
 serde = { version = "1", features = ["derive"] }
 # A model's content hash: the SHA-256 Semio Studio addresses content by.
-sha2 = "0.10"
+sha2 = "0.11"
 
 [dev-dependencies]
 futures = "0.3"

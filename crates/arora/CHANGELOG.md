@@ -4,6 +4,29 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [16.0.2] - 2026-10-30
+
+### Changed
+
+- The terminal UI builds on `ratatui` 0.30, `sysinfo` 0.40 and `env_filter` 2;
+  the device directory is found with `dirs` 7; on wasm32 the run loop sleeps on
+  `gloo-timers` 0.4. The indicators show no CPU figure on a host whose process
+  table cannot be read.
+
+## [16.0.1] - 2026-10-29
+
+### Fixed
+
+- The runtime's own keys are closed to remote writers whatever wider prefix
+  the host opens: `AroraBuilder::build` states the `arora` subtree
+  (`arora_behavior::built_in`) closed in the device's store, so neither
+  `arora --open` nor a host opening the empty prefix lets a remote write the
+  device's clock (`arora/time`, `arora/dt`) or its task runs' keys
+  (`arora/tasks/…`). A host opens one of those keys by stating that key's own
+  meta, before the build or after it. Over a `NamespacedStore`, the statement
+  covers the device's own subtree alone. A store that refuses the statement
+  fails the build.
+
 ## [16.0.0] - 2026-10-23
 
 ### Added

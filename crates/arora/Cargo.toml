@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "16.0.0"
+version = "16.0.2"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -12,96 +12,69 @@ path = "src/lib.rs"
 [[bin]]
 name = "arora"
 path = "src/main.rs"
-# The binary is the headless device runner: the open local bridge, or Semio
-# Studio in a build with the opt-in studio-bridge feature. On wasm, build
-# the library with --no-default-features.
+# The device runner. On wasm32, build the library with --no-default-features.
 required-features = ["native"]
 
-# A worked example of a device-specific arora (custom HAL handed to
-# arora::run_with). Native-only, like the binary.
+# A device-specific runner over its own HAL. Native-only, like the binary.
 [[example]]
 name = "device"
 required-features = ["native"]
 
 [features]
 default = ["native", "tui"]
-# Native build: the wasmtime + dynamic-library engine hosts, the operator flow,
-# and the binary. Build for wasm32 with --no-default-features (the browser host
-# is selected by target cfg). Platform divergence inside the always-available
-# runtime (`step`/`run`) is expressed by target cfg, not by this feature.
+# The native engine hosts (wasmtime, dynamic libraries), the local bridge, the
+# operator flow and the binary. The wasm32 build leaves it off: the browser host
+# is selected by target cfg.
 native = [
     "dep:arora-bridge-ws",
     "dep:env_logger",
-    # The operator interface (`arora::operator`) is an async trait.
     "dep:async-trait",
-    # The helper CLI (`DeviceCli`) a device binary parses; the library itself
-    # never reads argv.
     "dep:clap",
-    # The device directory (`arora::device_dir`) and the module directories a
-    # device loads from it (`arora::module_dir`, `header.json` + artifact).
     "dep:dirs",
     "dep:serde_json",
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
-# The Semio Studio connection: the studio-bridge Zenoh connector plus the
-# headless device runner (enrollment, token storage, app-data dir, logging)
-# that connects the device to Studio. Opt-in: a plain arora runtime (e.g.
-# Vizij hosting a local bridge) does not talk to the Semio store at all. The
-# binary built with it connects unless the run passes --no-studio.
+# The Semio Studio connection (`arora::studio`): enrollment, credentials and the
+# Zenoh connector. Opt-in; a binary built with it connects unless run with
+# --no-studio.
 studio-bridge = [
     "native",
     "dep:arora-studio-bridge-client",
     "dep:rustls",
 ]
-# The terminal operator UI (`arora::tui`): device header, scrollable log pane,
-# live indicators, and the prompt line the operator answers questions on. The
-# binary uses it when it detects an interactive terminal; embedders who bring
-# their own UI can build with default-features = false + "native".
+# The terminal operator UI (`arora::tui`), used by the binary on an interactive
+# terminal. An embedder with its own UI builds with default-features = false and
+# "native".
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.1" }
 arora-behavior = { path = "../arora-behavior", version = "9.4" }
-# 3.8: `PrimitiveKind::from_id`, to check a module record against its header.
+# 3.8: `PrimitiveKind::from_id`.
 arora-types = { path = "../arora-types", version = "3.8" }
-# 2.1: a device's records, looked up by exact id and version
-# (`LocalRegistry::module_at`, `missing_dependencies`), and the module
-# directories' `records/` loaded into them.
+# 2.1: `LocalRegistry::module_at`, `missing_dependencies`.
 arora-registry = { path = "../arora-registry", version = "2.1" }
 arora-bridge-ws = { path = "../arora-bridge-ws", version = "7", optional = true }
 anyhow = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
-# Portable instant for the run loop's dt/Hz measurements: `performance.now()`
-# on wasm32-unknown-unknown, a zero-cost re-export of `std::time` elsewhere.
+# The run loop's clock: `performance.now()` in the browser, `std::time` elsewhere.
 web-time = "1"
-# The three interfaces the runtime loop wires around the shared state.
-# 4.3: `Hal::describe_keys`, the HAL's key descriptions.
+# 4.3: `Hal::describe_keys`.
 arora-hal = { path = "../arora-hal", version = "4.3" }
-# 6.1: `client`, the by-name and run conventions `LocalCaller` speaks.
+# 6.1: `client`, the conventions `LocalCaller` speaks.
 arora-bridge = { path = "../arora-bridge", version = "6.1" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 futures = "0.3"
-# Only the runtime-free sync primitives here (the behavior-error watch); the
-# fat, executor-bearing tokio stays native-only below.
+# Sync primitives only: the runtime-bearing tokio is native-only (below).
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# The Semio Studio connection (opt-in, feature `studio-bridge`): the studio-bridge
-# Zenoh connector, published as `arora-studio-bridge-client` (it also provides the Firebase config types the
-# headless runner needs, under `firestore_support::options`). Native-only
-# (zenoh/firestore) and optional, so the wasm build of the library stays lean.
-# arora bundles it so a device-specific binary only has to provide its own HAL.
-# 11 enrolls the device with Studio (`studio::enroll`, by code or enrollment
-# token), signs in only a device its credentials hold enrolled
-# (`Error::NotEnrolled` otherwise), and reports only the device's model to its
-# Studio record; it keeps the device's Studio credentials
-# (`credentials::DeviceCredentials`), with the certificate a TLS bridge knows
-# the device by.
+# The Semio Studio connector (feature `studio-bridge`). 11: enrollment
+# (`studio::enroll`) and the device's credentials (`DeviceCredentials`).
 arora-studio-bridge-client = { version = "11", optional = true }
-# Headless device-runner deps (native-only, optional). `dirs` finds the per-user
-# directory the device directory defaults to; `serde_json` reads a module
-# directory's `header.json`.
-dirs = { version = "6", optional = true }
+# The per-user directory the device directory defaults to.
+dirs = { version = "7", optional = true }
+# A module directory's `header.json`.
 serde_json = { version = "1", optional = true }
 clap = { version = "4", features = ["derive", "env"], optional = true }
 env_logger = { version = "0.11", optional = true }
@@ -109,54 +82,43 @@ log = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 # The operator interface (`arora::operator`) is an async trait.
 async-trait = { version = "0.1", optional = true }
-# Terminal operator UI (the "tui" feature).
-ratatui = { version = "0.29", optional = true }
-# Own-process CPU usage for the TUI's indicators panel.
-sysinfo = { version = "0.33", default-features = false, features = ["system"], optional = true }
-# RUST_LOG-style filtering for the TUI's in-pane log capture.
-env_filter = { version = "0.1", optional = true }
+ratatui = { version = "0.30", optional = true }
+# The terminal UI's own-process CPU indicator.
+sysinfo = { version = "0.40", default-features = false, features = ["system"], optional = true }
+# RUST_LOG filtering of the terminal UI's log pane.
+env_filter = { version = "2", optional = true }
 
-# The async runtime for everything native: the run loop's metronome (`time`),
-# the binary's `#[tokio::main]` and spawned servers (`rt-multi-thread`,
-# `macros`). Target-gated rather than feature-gated — on wasm32 the metronome
-# sleeps on a JS timer instead (below), and the embedder brings the executor.
+# The native async runtime: the run loop's metronome, `#[tokio::main]`, spawned
+# servers. On wasm32 the metronome sleeps on a JS timer and the embedder brings
+# the executor.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
-# The run loop's metronome sleep on wasm32: a `setTimeout`-backed future.
+# The run loop's metronome on wasm32: a `setTimeout`-backed sleep.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 
 [dev-dependencies]
 async-trait = "0.1"
-# `time` + `test-util` (tests only): the operator tests pause time
-# (`start_paused`) to elapse the access grace instantly. The runtime-loop tests
-# are fully synchronous (the I/O seams are non-blocking), so they need no timers.
+# `test-util`: the operator tests pause time to elapse the access grace.
 tokio = { version = "1", features = ["time", "test-util"] }
-# Parse the test module's low-level header YAML in the with_module load test.
-serde_yaml = "0.9"
-# The test-rust-wasm guest (built for wasm32-wasip2 as a cdylib artifact
-# dependency: a component): its `.wasm` bytes back the guest-loading tests.
-# Cargo exposes the bytes as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
-# `lib = true` also brings the crate in for the test's own target: the header
-# the engine loads it with comes from the module's Rust declaration. Built
-# automatically by `cargo test` (the target is pinned in rust-toolchain.toml).
+yaml_serde = "0.10"
+# The guest the loading tests run (CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm);
+# `lib = true` also gives the tests its declaration, the header it loads with.
 test-rust-wasm = { path = "../../modules/test-rust-wasm", artifact = "cdylib", target = "wasm32-wasip2", lib = true }
 
 # The reload tests lay out their guests' result buffers.
 arora-buffers = { path = "../arora-buffers", version = "3" }
 
-# The local bridge tests' WebSocket client, speaking JSON. Native only: the
-# client needs sockets, and the bridge it reaches is the native build's.
+# The local bridge tests' WebSocket client.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 serde_json = "1"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 
-# The reload measurement reads instructions retired and memory held from the
-# kernel (`proc_pid_rusage`).
+# The reload measurement reads the kernel's `proc_pid_rusage`.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 libc = "0.2"
 
-# The metronome tests also run in a browser, where the cadence rides a JS timer.
+# The metronome tests also run in a browser.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"

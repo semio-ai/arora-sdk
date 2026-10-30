@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         args.registry_url.to_owned()
     } else if let Some(config_path) = &args.config {
         let config = read_to_string(config_path)?;
-        let config = serde_yaml::from_str::<Config>(&config)?;
+        let config = yaml_serde::from_str::<Config>(&config)?;
         config.url
     } else {
         None

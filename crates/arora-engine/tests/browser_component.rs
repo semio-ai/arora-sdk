@@ -87,7 +87,7 @@ fn header_with(executor: &str, functions: &[(&str, &str)]) -> Header {
             )
         })
         .collect();
-    serde_yaml::from_str(&format!(
+    yaml_serde::from_str(&format!(
         r#"
 id: {MODULE_ID}
 name: test-rust-component
@@ -670,25 +670,78 @@ fn a_component_s_error_buffer_is_its_error_in_browser() {
     );
 }
 
-/// After a trap a component runs no call, saying why, until it is reloaded,
-/// as natively.
+/// A call that traps fails with its trap; the component, instantiated
+/// afresh, serves the next call, without a reload, as natively.
 #[wasm_bindgen_test]
-fn a_component_that_traps_refuses_calls_until_it_is_reloaded_in_browser() {
+fn a_component_that_traps_is_instantiated_afresh_for_its_next_call_in_browser() {
     console_error_panic_hook::set_once();
     let compiled = CompiledModule::new(header(), COMPONENT).expect("compile the component");
     let (mut engine, _) = engine();
     engine.load_compiled_module(&compiled).expect("load");
 
+    for _ in 0..2 {
+        let trap = dispatch(&mut engine, TRAP_FN, &[]).unwrap_err();
+        assert!(trap.contains("dispatch trapped"), "{trap}");
+        assert_eq!(
+            &*dispatch(&mut engine, ECHO_FN, b"after").expect("echo"),
+            b"after"
+        );
+    }
+}
+
+/// A component prepared asynchronously, which the browser may refuse to
+/// instantiate synchronously, is instantiated afresh asynchronously after a
+/// trap: its calls are refused, saying so, until the new instance is ready,
+/// then served.
+#[wasm_bindgen_test]
+async fn a_prepared_component_that_traps_is_instantiated_afresh_asynchronously_in_browser() {
+    console_error_panic_hook::set_once();
+    let (mut engine, loader) = engine();
+    loader
+        .prepare(id(MODULE_ID), COMPONENT.to_vec())
+        .await
+        .expect("async prepare");
+    load_module_from_parts(&mut engine, header(), Box::new([])).expect("load");
+
     let trap = dispatch(&mut engine, TRAP_FN, &[]).unwrap_err();
     assert!(trap.contains("dispatch trapped"), "{trap}");
     let refused = dispatch(&mut engine, ECHO_FN, b"after").unwrap_err();
-    assert!(refused.contains("trapped in an earlier call"), "{refused}");
-
-    engine.reload_module(&compiled).expect("reload");
-    assert_eq!(
-        &*dispatch(&mut engine, ECHO_FN, b"after").expect("echo"),
-        b"after"
+    assert!(
+        refused.contains("being instantiated afresh asynchronously"),
+        "{refused}"
     );
+    for _ in 0..100 {
+        next_task().await;
+        match dispatch(&mut engine, ECHO_FN, b"after") {
+            Ok(echoed) => {
+                assert_eq!(&*echoed, b"after");
+                return;
+            }
+            Err(refused) => assert!(
+                refused.contains("being instantiated afresh asynchronously"),
+                "{refused}"
+            ),
+        }
+    }
+    panic!("the component was not instantiated afresh");
+}
+
+/// Resolve once the browser has run its next task: a `setTimeout` of 0.
+async fn next_task() {
+    use wasm_bindgen::JsCast;
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        let set_timeout: js_sys::Function =
+            js_sys::Reflect::get(&js_sys::global(), &"setTimeout".into())
+                .expect("setTimeout")
+                .dyn_into()
+                .expect("setTimeout is a function");
+        set_timeout
+            .call2(&wasm_bindgen::JsValue::NULL, &resolve, &0.into())
+            .expect("setTimeout");
+    });
+    wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .expect("the timeout resolves");
 }
 
 /// A guest calls a function of a module — here its own — through

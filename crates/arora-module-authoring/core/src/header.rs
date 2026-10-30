@@ -108,7 +108,7 @@ pub fn generate_header_file(
         executable_mime: "".to_string(),
     };
     let mut result = Directory::new();
-    let header_file = File::new(serde_yaml::to_string(&header).unwrap().as_bytes());
+    let header_file = File::new(yaml_serde::to_string(&header).unwrap().as_bytes());
     result
         .insert("module.yaml", Entry::File(header_file))
         .map_err(ModuleDeclarationError::VfsError)?;
@@ -125,7 +125,7 @@ pub async fn module_frozen_from_header_file<P: AsRef<Path>, R: ReadableRegistry 
     header_path: P,
     registry: &mut R,
 ) -> Result<(Uuid, Version, ModuleAndImports), ModuleDeclarationError> {
-    let header: Header = serde_yaml::from_str(
+    let header: Header = yaml_serde::from_str(
         &read_to_string(header_path.as_ref()).map_err(ModuleDeclarationError::IoError)?,
     )
     .map_err(|e| {

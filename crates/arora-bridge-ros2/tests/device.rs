@@ -9,7 +9,9 @@
 //! (`common.target_trajectory`) and a string input (`text`), the input shapes
 //! that have no `std_msgs` number. The bridge asks the device for its keys and
 //! subscribes each input on `/{namespace}/keys/{escaped path}`; the peer
-//! publishes there and hears the position on its own topic.
+//! publishes there and hears the position on its own topic. A joint the HAL
+//! describes while the bridge runs gets its topics when the bridge next asks
+//! the device.
 //!
 //! What each part does alone is tested at its own level: which keys a device
 //! lists and which writes it refuses in `arora`, the topic each key form
@@ -17,6 +19,8 @@
 //! `tests.rs`.
 //!
 //! The peer joins the bridge's graph the way [`peer`] states for each backend.
+//! On Zenoh it points the bridge's session at itself through the environment,
+//! so the tests run one at a time.
 
 mod peer;
 
@@ -32,6 +36,7 @@ use arora_types::data::{DataStore, Key, KeyMeta};
 use arora_types::keyvalue::KeyValue;
 use peer::Peer;
 use rand::RngExt;
+use serial_test::serial;
 use tokio::task::JoinHandle;
 
 /// Run the device until `done` holds of it, or `within` elapses; whether it
@@ -64,6 +69,7 @@ fn read(arora: &Arora, key: &str) -> Option<Value> {
 /// measured position on the position's topic. A key-value input takes the JSON of its value on a
 /// `std_msgs/String` topic, and a string input the string itself.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 #[cfg_attr(
     all(feature = "dds", target_os = "macos"),
     ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
@@ -174,5 +180,64 @@ async fn a_device_s_described_inputs_are_ros_topics_that_move_it() {
         "the key-value and string inputs do not land: {:?}, {:?}",
         read(&arora, "common.target_trajectory"),
         read(&arora, "text"),
+    );
+}
+
+/// A joint the HAL describes after the bridge started gets its input topics
+/// at the bridge's next ask of the device, and a target published there moves
+/// the device, as one on a joint described at start does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
+#[cfg_attr(
+    all(feature = "dds", target_os = "macos"),
+    ignore = "DDS multicast SPDP discovery is unreliable on macOS loopback (rustdds 0.11 \
+              has no unicast-peer/interface config); runs on Linux CI. To run locally, \
+              ensure an active multicast-capable interface and use `--ignored`."
+)]
+async fn a_joint_the_hal_describes_after_the_bridge_started_is_a_ros_topic_that_moves_it() {
+    let _ = env_logger::try_init();
+    let domain_id = rand::rng().random_range(1..=200);
+    let namespace = format!("gained_{domain_id}_{}", std::process::id());
+    let topic = |path: &str| topic_name(&namespace, path);
+
+    let mut peer = Peer::join(domain_id);
+
+    let hal = FakeHal::new();
+    hal.add_joints(["hip_yaw"]);
+    let bridge = Ros2Bridge::new(Ros2BridgeConfig::new(&namespace, domain_id)).await;
+    let mut arora = Arora::builder()
+        .with_hal(Box::new(hal.clone()))
+        .with_bridge(Box::new(bridge))
+        .build()
+        .expect("build the device");
+
+    // A target on the joint the device started with moves it, so the bridge
+    // has asked the device and subscribed what it described then.
+    let targets = peer.feed(&topic("hip_yaw/target.position"), |n| msg_types::Float64 {
+        data: f64::from(n + 1),
+    });
+    let moved = run_until(&mut arora, Duration::from_secs(30), |arora| {
+        read(arora, "hip_yaw.position").is_some()
+    })
+    .await;
+    targets.abort();
+    assert!(
+        moved,
+        "a target on the joint described at start does not move it"
+    );
+
+    hal.add_joints(["knee"]);
+    let targets = peer.feed(&topic("knee/target.position"), |_| msg_types::Float64 {
+        data: 0.5,
+    });
+    let moved = run_until(&mut arora, Duration::from_secs(30), |arora| {
+        read(arora, "knee.position") == Some(Value::F64(0.5))
+    })
+    .await;
+    targets.abort();
+    assert!(
+        moved,
+        "a target on the joint described after the bridge started does not move it: store {:?}",
+        read(&arora, "knee.position"),
     );
 }

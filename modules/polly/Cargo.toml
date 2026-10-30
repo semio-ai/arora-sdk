@@ -5,8 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [lib]
-# `rlib` beside the `cdylib` so the module's own tests reach its declaration
-# (its header, its ids) — the artifact the executor loads is the cdylib.
+# The cdylib is the artifact; the rlib gives the tests the declaration.
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
@@ -29,9 +28,9 @@ arora-behavior-tree = { path = "../../crates/arora-behavior-tree" }
 arora-module-core = { path = "../../crates/arora-module-authoring/core" }
 arora-registry = { path = "../../crates/arora-registry" }
 arora-types = { path = "../../crates/arora-types", version = "3" }
-convert_case = "0.11"
+convert_case = "0.12"
 rand = "0.10"
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 test-behavior-tree-nodes = { path = "../../modules/test-behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip2" }

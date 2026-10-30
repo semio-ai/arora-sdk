@@ -344,17 +344,17 @@ libqi and is unrelated to simulation.
 
 ## Tooling verified on this machine
 
-- **`mujoco-rs` 6.1.0** (MuJoCo 3.12.0, MIT/Apache-2.0) builds and runs on
+- **`mujoco-rs` 7.0.0** (MuJoCo 3.17.0, MIT/Apache-2.0) builds and runs on
   Apple Silicon. Its automatic MuJoCo download is Linux/Windows only; on
   macOS the framework from the official DMG is extracted by hand
   (`tools/setup-mujoco.sh`). The build needs `MUJOCO_DYNAMIC_LINK_DIR`
   pointing at a directory holding `libmujoco.dylib`; the resulting binary
-  looks for `libmujoco.3.12.0.dylib` through `DYLD_LIBRARY_PATH` (a symlink
+  looks for `libmujoco.3.17.0.dylib` through `DYLD_LIBRARY_PATH` (a symlink
   under that name is what makes the loader find the framework's library).
-  The bindings mirror exactly one MuJoCo release: the `libmujoco.3.14.0.dylib`
-  a pip wheel ships does not match. The viewer and offscreen renderer need a
+  The bindings mirror exactly one MuJoCo release: the `libmujoco` of another
+  release, such as the one a pip wheel ships, does not match. The viewer and offscreen renderer need a
   patched `glutin` on macOS; physics needs nothing.
-- **`tract-onnx` 0.23.8** compiles to `wasm32-wasip1` on the SDK's pinned
+- **`tract-onnx` 0.23.9** compiles to `wasm32-wasip1` on the SDK's pinned
   nightly with default features off; a probe module with the loader alone is
   14 MB of wasm before size optimization. Its operator table covers the
   policies above (Gemm, Elu, Tanh, Sigmoid, Split, Sub, Div, Mul, Concat,

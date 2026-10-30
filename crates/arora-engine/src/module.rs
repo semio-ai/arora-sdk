@@ -39,7 +39,12 @@ pub enum DispatchError {
 /// in the Arora Buffers format (`BufferWriter::add_error`): after the size
 /// prefix, the error type, then the message's length and bytes. `None` for any
 /// other buffer. A message that runs past the buffer is cut where the buffer
-/// ends.
+/// ends. Only the executors read it, so it exists only where one is built.
+#[cfg(any(
+    target_arch = "wasm32",
+    feature = "wasmtime-host",
+    feature = "native-host"
+))]
 pub(crate) fn guest_error(buffer: &[u8]) -> Option<String> {
     use arora_buffers::{BUFFER_SIZE_SIZE, TYPE_ERROR};
     if buffer.get(BUFFER_SIZE_SIZE) != Some(&TYPE_ERROR) {

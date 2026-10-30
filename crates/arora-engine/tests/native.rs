@@ -7,7 +7,7 @@ use arora_engine::call::CallBridge;
 use arora_engine::compiled::CompiledModule;
 use arora_engine::engine::{Engine, EngineBuilder};
 use arora_engine::executor::native::NativeExecutor;
-use arora_types::call::Call;
+use arora_types::call::{Call, CallError};
 use arora_types::module::low::{Executor, ModuleDefinition};
 use arora_types::value::{Structure, StructureField, Value};
 use std::pin::Pin;
@@ -79,6 +79,38 @@ fn call_returns_the_guest_result() {
         })
         .expect("call");
     assert_eq!(result.ret, Value::String("x".repeat(200)));
+}
+
+/// A declared module answers a call missing a required argument with an error
+/// buffer: the call fails with the guest's error, and the host goes on.
+#[test]
+fn a_native_error_buffer_fails_the_call() {
+    use arora_engine::module::DispatchError;
+
+    let (mut engine, module_id) = engine_with_guest();
+    let arg = arora_buffers::serde_uuid::serialize(&Value::Structure(Structure {
+        id: TEXT,
+        fields: vec![],
+    }));
+    let error = engine.dispatch(&module_id, &TEXT, &arg).unwrap_err();
+    assert!(
+        matches!(&error, DispatchError::Guest { message }
+            if message.contains("missing parameter `length` of `text`")),
+        "unexpected error: {error:?}"
+    );
+
+    let error = engine
+        .arora_call(Call {
+            module_id: Some(module_id),
+            id: TEXT,
+            args: vec![],
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&error, CallError::Guest { message }
+            if message.contains("missing parameter `length` of `text`")),
+        "unexpected error: {error:?}"
+    );
 }
 
 /// A compiled module for an executor that loads its executable as it is (here

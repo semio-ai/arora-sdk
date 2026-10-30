@@ -1,7 +1,6 @@
 // demo.js — multi-tree behavior-tree demo for the Arora browser engine.
 
 import init, { BehaviorTreeRunner } from "./pkg/arora_web.js";
-import jsyaml from "https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/+esm";
 
 // ── UUIDs ─────────────────────────────────────────────────────────────────────
 
@@ -465,7 +464,7 @@ function setStatus(status) {
 // ── Runner state ──────────────────────────────────────────────────────────────
 
 let runner = null;
-let modules = null; // { btHeaderYaml, btWasm, testHeaderYaml, testWasm }
+let modules = null; // { btHeader, btWasm, testHeader, testWasm }: header.json text, guest bytes
 let currentTree = null;
 let nodeMap = null;
 let nodeStatuses = new Map();
@@ -476,11 +475,10 @@ async function loadModules(r) {
   // Two-step load: prepareModule compiles + instantiates asynchronously
   // (Chrome rejects both above 8 MB on the main thread), then
   // loadPreparedModule completes the load synchronously.
-  const btHeader = JSON.stringify(jsyaml.load(modules.btHeaderYaml));
-  const testHeader = JSON.stringify(jsyaml.load(modules.testHeaderYaml));
-  await r.prepareModule(btHeader, new Uint8Array(modules.btWasm));
+  const { btHeader, btWasm, testHeader, testWasm } = modules;
+  await r.prepareModule(btHeader, new Uint8Array(btWasm));
   r.loadPreparedModule(btHeader);
-  await r.prepareModule(testHeader, new Uint8Array(modules.testWasm));
+  await r.prepareModule(testHeader, new Uint8Array(testWasm));
   r.loadPreparedModule(testHeader);
 }
 
@@ -585,14 +583,26 @@ async function main() {
   log("initializing arora-web wasm…");
   await init();
 
+  // The module directories serve.sh stages: each module's header.json and guest.
   log("fetching modules…");
-  const [btHeaderYaml, btWasm, testHeaderYaml, testWasm] = await Promise.all([
-    fetch("./modules/test-behavior-tree-nodes/module.yaml").then((r) => r.text()),
-    fetch("./modules/test-behavior-tree-nodes/test_behavior_tree_nodes.wasm").then((r) => r.arrayBuffer()),
-    fetch("./modules/test-rust-wasm/module.yaml").then((r) => r.text()),
-    fetch("./modules/test-rust-wasm/test_rust_wasm.wasm").then((r) => r.arrayBuffer()),
-  ]);
-  modules = { btHeaderYaml, btWasm, testHeaderYaml, testWasm };
+  const fetchOk = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
+    return response;
+  };
+  let btHeader, btWasm, testHeader, testWasm;
+  try {
+    [btHeader, btWasm, testHeader, testWasm] = await Promise.all([
+      fetchOk("./modules/test-behavior-tree-nodes/header.json").then((r) => r.text()),
+      fetchOk("./modules/test-behavior-tree-nodes/test_behavior_tree_nodes.wasm").then((r) => r.arrayBuffer()),
+      fetchOk("./modules/test-rust-wasm/header.json").then((r) => r.text()),
+      fetchOk("./modules/test-rust-wasm/test_rust_wasm.wasm").then((r) => r.arrayBuffer()),
+    ]);
+  } catch (e) {
+    log(`ERROR: ${e}`);
+    throw e;
+  }
+  modules = { btHeader, btWasm, testHeader, testWasm };
   log("modules loaded");
 
   // Populate tree dropdown

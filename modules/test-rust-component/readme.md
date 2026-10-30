@@ -20,6 +20,12 @@ Each function takes and returns raw bytes:
 | `spin` | `5d0c4a3e-7b21-4f6e-9a8d-2c41b6e0f3a1` | loops until the host interrupts it |
 | `grow` | `9e7b1c52-0d3a-4b8f-8e61-f4a2c9d7b053` | tries to reserve 64 MiB and returns `[1]` if it could, `[0]` if not |
 
+Instantiating it runs `functions`, which first calls `spin` of the module
+`6f3a9c2e-1b84-4d07-a5e2-8c9d0b7f4e16` through `host.dispatch`, ignoring the
+result: with no module loaded under that id the call fails at once, and a
+test that loads one there makes the guest's instantiation call a guest that
+loops.
+
 It builds only for `wasm32-wasip2`; the tests that load it
 (`arora-engine`'s browser tests and the integration tests' `component.rs`)
 build it as an artifact dependency:

@@ -8,12 +8,11 @@ repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
 keywords = ["arora", "animation", "keyframe", "robotics"]
 categories = ["science::robotics", "wasm"]
-# The conformance fixtures are the reference results the tests hold the crate
-# to; a published crate does not need them to build.
+# The tests' reference results; not needed to build.
 exclude = ["fixtures/"]
 
 [dependencies]
-# The clip's document form (a stored animation) is JSON.
+# A stored animation's JSON form.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

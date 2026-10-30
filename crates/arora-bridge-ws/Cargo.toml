@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ws"
-version = "7.2.4"
+version = "7.2.5"
 edition = "2021"
 description = "The open local bridge for Arora: a WebSocket server implementing arora-bridge, for editors and apps on trusted local links."
 license = "Apache-2.0"
@@ -8,8 +8,7 @@ repository = "https://github.com/semio-ai/arora-sdk"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "3.2" }
-# 6.1: the client conventions (`arora_bridge::client`) — calling by name,
-# spawning and halting runs — and the key and method shapes clients read.
+# 6.1: `arora_bridge::client`.
 arora-bridge = { path = "../arora-bridge", version = "6.1" }
 async-trait = "0.1"
 futures = "0.3"
@@ -18,10 +17,9 @@ log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 tokio-util = "0.7"
 
 [dev-dependencies]
-# The interpreter module's ABI and run handle, which the wire tests' fake
-# runtime answers a spawn with.
+# The run handle the wire tests' fake runtime answers a spawn with.
 arora-behavior = { path = "../arora-behavior", version = "9" }

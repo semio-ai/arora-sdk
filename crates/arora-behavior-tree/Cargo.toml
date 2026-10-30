@@ -1,6 +1,6 @@
 [package]
 name = "arora-behavior-tree"
-version = "9.7.0"
+version = "9.7.1"
 edition = "2021"
 description = "The Arora behavior tree: Groot-compatible trees ticking Arora modules."
 license = "Apache-2.0"
@@ -28,21 +28,20 @@ arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "
 lazy_static = "1"
 # The text language's lexer.
 logos = "0.16"
-quick-xml = "0.40"
+quick-xml = "0.42"
 regex = "1"
 semver = "1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-# 0.9 switches the YAML enum representation from single-key maps to `!Tag`,
-# which existing tree/module YAML files don't use. Stay on 0.8.
-serde_yaml = "0.9"
+# Writes an enum as a `!Tag`; tree files write an expression as a single-key
+# map, which `schema::Node` keeps with `singleton_map_recursive`.
+yaml_serde = "0.10"
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 derive_more = "2"
 
 [dev-dependencies]
 anyhow = "1"
-# Only for tests: exercise a `{var}` cell resolved to a real store Slot. The
-# library itself stays storage-agnostic (it depends only on the `Slot` trait).
+# A `{var}` cell resolved to a real store slot.
 arora-simple-data-store = { path = "../arora-simple-data-store" }
-# Only for tests: the text language over a real module's function index.
+# The text language over a real module's function index.
 arora-dataflow-nodes = { path = "../arora-dataflow-nodes", default-features = false }

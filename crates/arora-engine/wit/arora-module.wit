@@ -2,13 +2,12 @@
 ///
 /// Component guests implement `dispatch` (routing by function id) and may
 /// call back into the engine through the imported `host` interface. Data
-/// still crosses the boundary as Arora Buffers (`list<u8>`); the canonical
-/// ABI replaces the legacy malloc/free + raw-linear-memory exchange used by
-/// core-module guests.
+/// crosses the boundary as Arora Buffers (`list<u8>`) through the canonical
+/// ABI: a guest exposes no allocator protocol of its own, only the canonical
+/// ABI's `cabi_realloc`, with which a host lowers the lists it passes.
 ///
-/// Designed for WASIp2 today; under WASIp3 the same functions become
-/// `async` (and buffers can graduate to `stream<u8>`) without changing
-/// their shape.
+/// The world targets WASIp2. Its functions keep their shape under WASIp3,
+/// where they can become `async` and buffers `stream<u8>`.
 package arora:module@0.2.0;
 
 interface types {

@@ -4,6 +4,13 @@ All notable changes to `arora-registry`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] - 2026-10-30
+
+### Changed
+
+- Records are read and written with `yaml_serde` 0.10, the maintained
+  continuation of the deprecated `serde_yaml`; the files are unchanged.
+
 ## [2.1.0] - 2026-10-18
 
 ### Added

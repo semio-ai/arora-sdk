@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-rust"
-version = "4.1.0"
+version = "5.0.0"
 edition = "2021"
 description = "Rust source generation for Arora modules (types and bindings from type records)."
 license = "Apache-2.0"
@@ -8,23 +8,22 @@ readme = "readme.md"
 include = ["/src", "/tests", "/LICENSE"]
 
 [dependencies]
-arora-module-core = { path = "../core", version = "3" }
+arora-module-core = { path = "../core", version = "4" }
 arora-registry = { path = "../../arora-registry", version = "2" }
 arora-types = { path = "../../arora-types", version = "3" }
 arora-vfs = { path = "../../arora-vfs", version = "0.1" }
 anyhow = "1"
 async-recursion = "1"
 clap = { version = "4", features = ["derive"] }
-convert_case = "0.11"
+convert_case = "0.12"
 derive_more = "2"
-itertools = "0.14"
 lazy_static = "1"
 proc-macro2 = "1"
 quote = "1"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "io-std"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
@@ -32,9 +31,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 arora-behavior = { path = "../../arora-behavior", version = "9.4" }
 indexmap = "2"
 
-# Declared explicitly because the `include` field above disables target
-# auto-discovery for the `tests/` directory unless it is both listed in
-# `include` and declared as a target.
+# `include` turns off test auto-discovery: each test is declared.
 [[test]]
 name = "nested_structs"
 path = "tests/nested_structs.rs"

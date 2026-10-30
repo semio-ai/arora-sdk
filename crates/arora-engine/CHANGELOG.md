@@ -4,6 +4,48 @@ All notable changes to `arora-engine`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.1.0] - 2026-10-29
+
+### Changed
+
+- A component whose call trapped or was interrupted at its deadline recovers
+  without a reload, natively and in the browser: the call fails with its
+  trap, and before the module's next call the executor instantiates the
+  component afresh from its compiled code, logging a warning that names the
+  module and the trap; that call runs from the module's initial state. The
+  instance the trap left half written is released as soon as no call runs in
+  it, before the new one is made, and never entered again. The new instance
+  takes the memory cap the engine holds for the module then
+  (`Engine::set_guest_limits`), as a reload does. A module that fails to
+  instantiate afresh runs no more calls until it is reloaded.
+  - Natively, instantiating afresh is a load within the call that triggers
+    it: it, and a guest its initializer calls, end by the earlier of that
+    call's deadline and `DEFAULT_CALL_BUDGET`. Running out of that time is
+    not a failure: the call fails as one with no time left, and the module
+    instantiates afresh at its next call. A call whose deadline a successful
+    instantiation used up is not made either; the new instance serves the
+    next call.
+  - In the browser, a module staged by `SharedLoader::prepare` instantiates
+    afresh asynchronously, as it loaded: its calls fail, saying it is being
+    instantiated afresh, until the new instance is ready.
+
+## [7.0.2] - 2026-10-29
+
+### Changed
+
+- No build script, and no `cbindgen` build-dependency: the crate exposes no C
+  ABI, and a build no longer writes a header for one, `arora.h`, to
+  `target/include/arora/` outside the package.
+
+## [7.0.1] - 2026-10-29
+
+### Fixed
+
+- A native module's error buffer — a declared module's answer to a call
+  missing a required argument — fails the call with the guest's error,
+  `DispatchError::Guest`, as a component's does, instead of panicking the
+  host.
+
 ## [7.0.0] - 2026-10-23
 
 ### Removed

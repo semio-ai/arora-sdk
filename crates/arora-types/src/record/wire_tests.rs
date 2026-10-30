@@ -50,19 +50,19 @@ parent: 00000000-0000-0000-0000-000001000000
 
 #[test]
 fn frozen_structure_wire_round_trips() {
-  let structure: Structure = serde_yaml::from_str(TICK_ID_STRUCTURE_YAML).unwrap();
+  let structure: Structure = yaml_serde::from_str(TICK_ID_STRUCTURE_YAML).unwrap();
   assert_eq!(structure.name, "TickId");
   let field = structure.field_named("callable_id").unwrap();
   assert_eq!(field.ty, FrozenTy::from(PrimitiveKind::U64));
 
-  let reserialized = serde_yaml::to_string(&structure).unwrap();
-  let reparsed: Structure = serde_yaml::from_str(&reserialized).unwrap();
+  let reserialized = yaml_serde::to_string(&structure).unwrap();
+  let reparsed: Structure = yaml_serde::from_str(&reserialized).unwrap();
   assert_eq!(reparsed, structure);
 }
 
 #[test]
 fn frozen_enumeration_wire_round_trips() {
-  let enumeration: Enumeration = serde_yaml::from_str(STATUS_ENUMERATION_YAML).unwrap();
+  let enumeration: Enumeration = yaml_serde::from_str(STATUS_ENUMERATION_YAML).unwrap();
   assert_eq!(enumeration.name, "Status");
   assert_eq!(enumeration.variants.len(), 3);
   // IndexMap preserves the wire order of variants.
@@ -76,24 +76,24 @@ fn frozen_enumeration_wire_round_trips() {
     assert_eq!(variant.ty, FrozenTy::from(PrimitiveKind::Unit));
   }
 
-  let reserialized = serde_yaml::to_string(&enumeration).unwrap();
-  let reparsed: Enumeration = serde_yaml::from_str(&reserialized).unwrap();
+  let reserialized = yaml_serde::to_string(&enumeration).unwrap();
+  let reparsed: Enumeration = yaml_serde::from_str(&reserialized).unwrap();
   assert_eq!(reparsed, enumeration);
 }
 
 #[test]
 fn folder_wire_round_trips() {
-  let folder: Folder = serde_yaml::from_str(FOLDER_YAML).unwrap();
+  let folder: Folder = yaml_serde::from_str(FOLDER_YAML).unwrap();
   assert_eq!(folder.name, "behavior_tree");
 
-  let reserialized = serde_yaml::to_string(&folder).unwrap();
-  let reparsed: Folder = serde_yaml::from_str(&reserialized).unwrap();
+  let reserialized = yaml_serde::to_string(&folder).unwrap();
+  let reparsed: Folder = yaml_serde::from_str(&reserialized).unwrap();
   assert_eq!(reparsed, folder);
 }
 
 #[test]
 fn frozen_ty_serializes_with_adjacent_type_value_tags() {
-  let yaml = serde_yaml::to_string(&FrozenTy::from(PrimitiveKind::U64)).unwrap();
+  let yaml = yaml_serde::to_string(&FrozenTy::from(PrimitiveKind::U64)).unwrap();
   // The exact adjacent tagging semio-record uses: `type` + `value`.
   assert!(yaml.contains("type: primitive"), "got: {yaml}");
   assert!(yaml.contains("kind: u64"), "got: {yaml}");
@@ -115,8 +115,8 @@ fn function_return_type_wire_name_matches_in_both_forms() {
     parameter_ordering: Vec::new(),
     return_ty: FrozenTy::from(PrimitiveKind::Unit),
   };
-  let unfrozen_yaml = serde_yaml::to_string(&unfrozen).unwrap();
-  let frozen_yaml = serde_yaml::to_string(&frozen).unwrap();
+  let unfrozen_yaml = yaml_serde::to_string(&unfrozen).unwrap();
+  let frozen_yaml = yaml_serde::to_string(&frozen).unwrap();
   assert!(
     unfrozen_yaml.contains("returnType:"),
     "got: {unfrozen_yaml}"

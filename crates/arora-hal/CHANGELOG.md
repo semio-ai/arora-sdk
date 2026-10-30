@@ -4,6 +4,13 @@ All notable changes to `arora-hal`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.3.1] - 2026-10-30
+
+### Changed
+
+- `model::content_hash` computes the SHA-256 with `sha2` 0.11; the hash is
+  unchanged.
+
 ## [4.3.0] - 2026-10-12
 
 ### Added

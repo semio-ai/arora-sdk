@@ -4,6 +4,16 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [9.7.1] - 2026-10-30
+
+### Changed
+
+- Groot XML is read with `quick-xml` 0.42, which checks a tag or attribute
+  name is UTF-8 as it reads it: a tree with a name that is not fails with the
+  reader's parsing error.
+- Tree files are read with `yaml_serde` 0.10, the maintained continuation of
+  the deprecated `serde_yaml`; the format is unchanged.
+
 ## [9.7.0] - 2026-10-28
 
 ### Added

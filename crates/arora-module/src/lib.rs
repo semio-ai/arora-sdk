@@ -82,8 +82,7 @@ pub mod __rt {
     ///
     /// The buffer stays valid until the next call, which frees it, so a guest
     /// holds one result however many calls it makes. Code reads a result
-    /// before it calls again: on a core module, the engine writes each result
-    /// into a buffer the guest's arora-buffers pool hands out again.
+    /// before it calls again.
     pub fn keep_result(result: Result<Vec<u8>, String>) -> usize {
         use std::cell::RefCell;
         thread_local! {
@@ -104,11 +103,10 @@ pub mod __rt {
         address
     }
 
-    /// The engine calls a core module imports (`env.arora_dispatch`,
-    /// `env.arora_dispatch_indirect`), made through the `host` interface, for
-    /// code written against the core-module ABI — arora-module-rust's — built
-    /// as a component. Each takes the addresses of size-prefixed buffers and
-    /// returns that of the one [`keep_result`] holds.
+    /// The engine calls `arora_dispatch` and `arora_dispatch_indirect`, with
+    /// the signatures arora-module-rust's generated code calls them by, made
+    /// through the `host` interface. Each takes the addresses of size-prefixed
+    /// buffers and returns that of the one [`keep_result`] holds.
     #[cfg(all(target_arch = "wasm32", target_os = "wasi", target_env = "p2"))]
     pub mod engine {
         use super::keep_result;
@@ -155,8 +153,8 @@ pub mod __rt {
         ///
         /// # Safety
         ///
-        /// None beyond the core-module ABI's: the function is `unsafe` as the
-        /// import it stands for is.
+        /// None: the function is `unsafe` to match the signature
+        /// arora-module-rust's generated code calls it by.
         pub unsafe extern "C" fn arora_dispatch_indirect(callable_id: u64) -> usize {
             keep_result(host::dispatch_indirect(callable_id))
         }
@@ -172,8 +170,8 @@ pub mod __rt {
 /// `arora:module` world: `functions` lists the functions these modules
 /// export, and `dispatch` routes a call to the function its method id names,
 /// in whichever of them exports it.
-/// Built otherwise, it expands to nothing: a core module or a shared library
-/// exports each function under its own name.
+/// Built otherwise, it expands to nothing: a shared library exports each
+/// function under its own name.
 #[macro_export]
 macro_rules! artifact {
     ($($($segment:ident)::+),+ $(,)?) => {

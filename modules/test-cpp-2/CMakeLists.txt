@@ -3,17 +3,17 @@ project(test-cpp-2 CXX)
 
 # Required cache vars (normally passed by the wrapping build.rs):
 #   ARORA_MODULE_CLI            host bin (with arora-module-cpp sibling)
-#   records dir for arora-behavior-tree-types-yaml
 #   ARORA_BUFFERS_LIB           wasm32-wasip2 static lib (.a) of arora-buffers
 #   ARORA_UTIL_LIB              wasm32-wasip2 static lib (.a) of arora-util
 #   ARORA_CPP_SOURCE_DIR        source dir of libs/cpp
-#   ARORA_INCLUDE_DIR           target/include (generated arora C headers)
+#   ARORA_BUFFERS_INCLUDE_DIR   directory holding arora/buffers.h
+#   ARORA_UTIL_INCLUDE_DIR      directory holding arora/util.h
 #   TEST_CPP_RECORDS            test-cpp's published records dir
 #   LOCAL_RECORDS               this module's records/ dir
 #   ARORA_MODULE_DIR            the module directory to write (see below)
 # CMAKE_TOOLCHAIN_FILE must be the WASI SDK's wasm32-wasip2 toolchain file.
-foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB
-            ARORA_UTIL_LIB ARORA_CPP_SOURCE_DIR ARORA_INCLUDE_DIR
+foreach(VAR ARORA_MODULE_CLI ARORA_BUFFERS_LIB ARORA_UTIL_LIB
+            ARORA_BUFFERS_INCLUDE_DIR ARORA_UTIL_INCLUDE_DIR ARORA_CPP_SOURCE_DIR
             TEST_CPP_RECORDS LOCAL_RECORDS ARORA_MODULE_DIR)
   if(NOT DEFINED ${VAR})
     message(FATAL_ERROR "Required cache variable ${VAR} not set. "
@@ -28,11 +28,11 @@ add_subdirectory(${ARORA_CPP_SOURCE_DIR} arora-cpp-build)
 
 add_library(arora-buffers STATIC IMPORTED GLOBAL)
 set_property(TARGET arora-buffers PROPERTY IMPORTED_LOCATION ${ARORA_BUFFERS_LIB})
-set_property(TARGET arora-buffers PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
+set_property(TARGET arora-buffers PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_BUFFERS_INCLUDE_DIR})
 
 add_library(arora-util STATIC IMPORTED GLOBAL)
 set_property(TARGET arora-util PROPERTY IMPORTED_LOCATION ${ARORA_UTIL_LIB})
-set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_INCLUDE_DIR})
+set_property(TARGET arora-util PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${ARORA_UTIL_INCLUDE_DIR})
 
 set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/arora)
 # The records are written afresh: the generator adds files and removes none,
@@ -64,7 +64,7 @@ add_executable(test-cpp-2
   ${GENERATED_DIR}/source/types/TestStructure1.cpp
 )
 add_dependencies(test-cpp-2 generate-test-cpp-2-wrapper)
-target_include_directories(test-cpp-2 PUBLIC ${ARORA_INCLUDE_DIR} ${GENERATED_DIR}/include)
+target_include_directories(test-cpp-2 PUBLIC ${GENERATED_DIR}/include)
 target_link_libraries(test-cpp-2 PRIVATE arora-buffers arora-util arora-cpp arora-cpp-component)
 target_compile_options(test-cpp-2 PRIVATE -fPIC -O3 -flto -fno-exceptions)
 target_link_options(test-cpp-2 PRIVATE

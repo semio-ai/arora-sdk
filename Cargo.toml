@@ -89,7 +89,6 @@ default-members = [
   "tests",
 ]
 
-
 [profile.release]
 lto = "thin"
 debug = 1
@@ -100,11 +99,8 @@ inherits = "release"
 debug = 0
 strip = "symbols"
 
-# `arora` depends on the published `arora-studio-bridge-client` (the studio-bridge
-# Zenoh connector) from crates.io, which in turn pulls `arora-types` and
-# `arora-bridge` from crates.io. Redirect both to this workspace's own crates so
-# the graph shares a single copy instead of duplicating them (which would fail to
-# type-check — e.g. two distinct `Bridge` traits).
+# arora-studio-bridge-client (crates.io) depends on arora-types and arora-bridge;
+# patching them to these crates keeps one copy of each, so their traits match.
 [patch.crates-io]
 arora-types = { path = "crates/arora-types" }
 arora-bridge = { path = "crates/arora-bridge" }
