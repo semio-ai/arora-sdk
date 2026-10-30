@@ -91,9 +91,11 @@ The feedback key holds the report as a structured value, converted with
 `values` by port id within it), and a status or an activity as its name in a
 string. A watched value is wrapped as `value_serde` writes any `Value`: a
 key-value of one entry, named by the value's kind as its JSON form names it
-(`f64`, `str`, …), holding the value itself. `trace::decode_report` unwraps it
-back to the value the node output, so a client holding arora-behavior (a Rust
-program, a wasm page) reads the report whole. A bridge relays the key in the
+(`f64`, `str`, …), holding the value itself. The unit value, which an unset
+output reads as, has nothing to hold and travels as the string `unit`.
+`trace::decode_report` unwraps either back to the value the node output, so a
+client holding arora-behavior (a Rust program, a wasm page) reads the report
+whole. A bridge relays the key in the
 value vocabulary like any other key.
 
 A decoded `TraceReport` serializes to JSON as a page uses it:
