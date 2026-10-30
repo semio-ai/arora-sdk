@@ -31,9 +31,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 arora-behavior = { path = "../../arora-behavior", version = "9.4" }
 indexmap = "2"
 
-# Declared explicitly because the `include` field above disables target
-# auto-discovery for the `tests/` directory unless it is both listed in
-# `include` and declared as a target.
+# `include` turns off test auto-discovery: each test is declared.
 [[test]]
 name = "nested_structs"
 path = "tests/nested_structs.rs"

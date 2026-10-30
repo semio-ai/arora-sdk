@@ -5,11 +5,8 @@ edition = "2021"
 description = "Local type-record registry for Arora: stores, tags and freezes type records."
 license = "Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-# 3.8: `TypeDefinitionFrozen`, and the records a declared module and its
-# derived types produce (`AroraModule::type_records`).
+# 3.8: `TypeDefinitionFrozen`, `AroraModule::type_records`.
 arora-types = { path = "../arora-types", version = "3.8" }
 async-trait = "0.1"
 derive_more = "2"
@@ -19,5 +16,5 @@ uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
-# A module declared in Rust, whose records `add_declared_module` adds.
+# `add_declared_module` adds a Rust-declared module's records.
 arora-module = { path = "../arora-module", version = "2.2" }

@@ -5,8 +5,6 @@ edition = "2021"
 description = "Module analysis and resolution for Arora module authoring."
 license = "Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 arora-registry = { path = "../../arora-registry", version = "2" }
 arora-types = { path = "../../arora-types", version = "3" }

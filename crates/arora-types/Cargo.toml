@@ -4,31 +4,22 @@ version = "3.10.0"
 edition = "2021"
 description = "The vocabulary every part of Arora shares: values, types, calls, records and the data-store interface."
 license = "Apache-2.0"
-# arora-types lives in the arora-engine workspace since the multi-repo
-# consolidation; the old standalone arora-types repo is gone.
 repository = "https://github.com/semio-ai/arora-sdk"
 homepage = "https://github.com/semio-ai/arora-sdk"
 documentation = "https://docs.rs/arora-types"
 keywords = ["arora", "robotics", "types"]
 categories = ["data-structures"]
-# The README file is lowercase; name it explicitly so cargo bundles it into the
-# published crate on case-sensitive filesystems (CI) where it isn't auto-detected.
+# Cargo does not detect a lowercase readme on case-sensitive filesystems.
 readme = "readme.md"
 
 [lib]
-# rlib only. The wasm/JS bindings (src/wasm_value.rs, wasm32-gated) reach JS
-# through a dependent cdylib (e.g. arora-web) — wasm-bindgen pulls a dependency's
-# exports into the final cdylib — so arora-types itself need not be a cdylib. As
-# an in-workspace member its (host-empty) cdylib was built under two feature
-# contexts (normal + behavior-tree's build.rs host artifacts), colliding on the
-# unhashed libarora_types output and duplicating arora-types/uuid (E0308). A
-# standalone arora-types wasm package, if ever needed, can build the cdylib via
-# `cargo rustc --crate-type cdylib`.
+# rlib only: the wasm bindings reach JS through a dependent cdylib (arora-web),
+# and a cdylib here would collide on its unhashed output when built for two
+# feature sets.
 crate-type = ["rlib"]
 
 [features]
-# `derive` pulls in `#[derive(AroraType)]` (arora-types-derive). On by default;
-# turn it off (default-features = false) to drop the proc-macro dependency.
+# `#[derive(AroraType)]`; turn it off to drop the proc-macro dependency.
 default = ["derive"]
 derive = ["dep:arora-types-derive"]
 
@@ -40,8 +31,7 @@ semver = { version = "1", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 lazy_static = "1"
 indexmap = { version = "2", features = ["serde"] }
-# 2: the derive implements `AroraType::record` and `register_records`, which
-# this crate declares from 3.8.
+# 2: the derive implements `AroraType::record` and `register_records`.
 arora-types-derive = { path = "../arora-types-derive", version = "2", optional = true }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]

@@ -11,9 +11,8 @@ categories = ["science::robotics", "game-engines"]
 
 [dependencies]
 arora-geometry = { path = "../arora-geometry", version = "1" }
-# Declares the behavior `Status` enumeration (type + variant ids) a task run
-# speaks — the cross-interpreter run-status contract — and the function
-# descriptions a function index holds.
+# The behavior `Status` a task run speaks, and the function descriptions a
+# function index holds.
 arora-behavior = { path = "../arora-behavior", version = "9.4" }
 arora-types = { path = "../arora-types", version = "3.9" }
 hashbrown = { version = "0.17", features = ["serde"] }

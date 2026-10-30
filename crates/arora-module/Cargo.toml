@@ -8,16 +8,11 @@ repository = "https://github.com/semio-ai/arora-sdk"
 readme = "readme.md"
 
 [dependencies]
-# 3: a declaration's `type_records(parent)`, which implements
-# `AroraModule::type_records` (arora-types 3.8).
+# 3.1: a declaration's `type_records(parent)` and `dispatch_buffer`.
 arora-module-macros = { path = "../arora-module-macros", version = "3.1" }
-# 3.8: what the declarations generate reaches `TypeDefinitionFrozen` and the
-# derived types' `register_records`.
+# 3.8: `TypeDefinitionFrozen`, `register_records`.
 arora-types = { path = "../arora-types", version = "3.8" }
-# The artifact entry points the macros emit speak the engine's buffer wire
-# format; a host-linked module never calls into it.
-# 3.1: `well_formed`, which a component's calls check an argument and a
-# result with.
+# The artifact entry points' buffer format. 3.1: `well_formed`.
 arora-buffers = { path = "../arora-buffers", version = "3.1" }
 
 # The `arora:module` world's guest bindings, for a module built as a

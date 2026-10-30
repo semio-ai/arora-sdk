@@ -8,8 +8,7 @@ repository = "https://github.com/semio-ai/arora-sdk"
 
 [dependencies]
 arora-types = { path = "../arora-types", version = "3.2" }
-# 6.1: the client conventions (`arora_bridge::client`) — calling by name,
-# spawning and halting runs — and the key and method shapes clients read.
+# 6.1: `arora_bridge::client`.
 arora-bridge = { path = "../arora-bridge", version = "6.1" }
 async-trait = "0.1"
 futures = "0.3"
@@ -22,6 +21,5 @@ tokio-tungstenite = "0.30"
 tokio-util = "0.7"
 
 [dev-dependencies]
-# The interpreter module's ABI and run handle, which the wire tests' fake
-# runtime answers a spawn with.
+# The run handle the wire tests' fake runtime answers a spawn with.
 arora-behavior = { path = "../arora-behavior", version = "9" }

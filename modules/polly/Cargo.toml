@@ -5,8 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [lib]
-# `rlib` beside the `cdylib` so the module's own tests reach its declaration
-# (its header, its ids) — the artifact the executor loads is the cdylib.
+# The cdylib is the artifact; the rlib gives the tests the declaration.
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

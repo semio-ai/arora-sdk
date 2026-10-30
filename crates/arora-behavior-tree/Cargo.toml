@@ -41,8 +41,7 @@ derive_more = "2"
 
 [dev-dependencies]
 anyhow = "1"
-# Only for tests: exercise a `{var}` cell resolved to a real store Slot. The
-# library itself stays storage-agnostic (it depends only on the `Slot` trait).
+# A `{var}` cell resolved to a real store slot.
 arora-simple-data-store = { path = "../arora-simple-data-store" }
-# Only for tests: the text language over a real module's function index.
+# The text language over a real module's function index.
 arora-dataflow-nodes = { path = "../arora-dataflow-nodes", default-features = false }
