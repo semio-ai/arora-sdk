@@ -185,10 +185,18 @@ reads record what they did, and each trace reports what changed
 An edit re-lowers the graph at the next tick, and every node the edit left in
 place keeps its state.
 
+`read` answers the main behavior alone — neither the runner nor a run's
+nodes, rooted where it was loaded — so that loading it reproduces it, with
+its revision: one more at each `load`, and at each `apply` that reaches the
+main behavior. An edit naming only a run's nodes, a spawn, a halt and a tick
+leave the revision as it is. The tick after a change writes it to
+`arora/behavior/revision`, and each trace's next report carries it.
+
 The interpreter reads the graph type `behavior-tree`
-([`GRAPH_TYPE_NAME`](src/behavior.rs)) up to version 1.3: 1.0 has the control
-nodes, the status leaves, the task-run nodes and module function leaves; 1.1
-adds `Equal` and `Unpack`; 1.2 adds `Scatter`; 1.3 adds detached nodes.
+([`GRAPH_TYPE_NAME`](src/behavior.rs)) at version 2.0
+(`GRAPH_TYPE_VERSION`): the control nodes, the status leaves, the data nodes
+`Equal`, `Unpack` and `Scatter`, the task-run nodes, module function leaves,
+and detached nodes.
 [`docs/nodes.md`](docs/nodes.md) describes the scaffold, each native node,
 how a node reaches the store and the modules, and detached nodes.
 
