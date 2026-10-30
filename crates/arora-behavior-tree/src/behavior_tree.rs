@@ -1876,20 +1876,19 @@ fn call_expression(
 }
 
 /// Whether `function` is one of the interpreter module's own functions
-/// (`load`, `edit`, `spawn`, `spawn_graph`, `halt`). They act on the
+/// (`load`, `edit`, `spawn`, `spawn_graph`, `trace`, `halt`). They act on the
 /// interpreter, which a tree cannot call while it is being ticked, so a tree
 /// names none of them.
 pub(crate) fn is_interpreter_function(function: &ModuleFunction) -> bool {
-    use arora_behavior::interpreter_module::{EDIT, HALT, ID, LOAD, SPAWN, SPAWN_GRAPH};
-    function.module_id == ID
-        && [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function.function_id)
+    function.module_id == arora_behavior::interpreter_module::ID
+        && is_interpreter_function_id(function.function_id)
 }
 
 /// Whether `function` is the id of one of the interpreter module's own
 /// functions; see [`is_interpreter_function`].
 pub(crate) fn is_interpreter_function_id(function: Uuid) -> bool {
-    use arora_behavior::interpreter_module::{EDIT, HALT, LOAD, SPAWN, SPAWN_GRAPH};
-    [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function)
+    use arora_behavior::interpreter_module::{EDIT, HALT, LOAD, SPAWN, SPAWN_GRAPH, TRACE};
+    [LOAD, EDIT, SPAWN, SPAWN_GRAPH, TRACE, HALT].contains(&function)
 }
 
 // Call expressions.

@@ -190,11 +190,19 @@ impl Traces {
         Some(trace.handle.status)
     }
 
-    /// Forget what the nodes `tree` no longer has returned: a node set again
-    /// under their id starts with no return.
+    /// Forget what a node returned when `tree` no longer has it, or keeps
+    /// its return in a cell: a node set again under its id starts with no
+    /// return, and a detached one reads its own.
     pub(crate) fn keep_returns_of(&mut self, tree: &BehaviorTree) {
-        self.returns
-            .retain(|node, _| tree.node_index.contains_key(node));
+        self.returns.retain(|node, _| {
+            tree.node_index.contains_key(node)
+                && !tree
+                    .node_arg_variables
+                    .contains_key(&crate::schema::NodeParameterId {
+                        node: *node,
+                        parameter: crate::schema::_RET_PARAM_ID,
+                    })
+        });
     }
 
     /// The nodes in `restarted` start afresh: each trace that has reported
