@@ -302,11 +302,6 @@ impl Detached {
         }
     }
 
-    /// Whether `id` is one of the detached nodes.
-    pub(crate) fn contains(&self, id: Uuid) -> bool {
-        self.ids.contains_key(&id)
-    }
-
     /// Observe the detached nodes among `ids` from the next lowering on:
     /// bring them up to date at every tick, after the sinks.
     pub(crate) fn observe(&self, ids: impl IntoIterator<Item = Uuid>) {

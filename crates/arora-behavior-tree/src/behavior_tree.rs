@@ -134,19 +134,18 @@ impl BehaviorTree {
             .and_then(VariableCell::get)
     }
 
-    /// The outputs of node `id` as they stand, by port: its return value
-    /// under [`_RET_PARAM_ID`] when it keeps one, and each parameter it
-    /// writes — a mutable parameter of its function in `functions`, or one a
-    /// native node writes. A detached node's are those of its last call. An
-    /// output that holds nothing is left out.
-    pub(crate) fn outputs_of(&self, id: Uuid, functions: &FunctionIndex) -> Vec<(Uuid, Value)> {
-        if self.detached.contains(id) {
-            return self
-                .detached
-                .outputs(id)
-                .map(|outputs| outputs.into_iter().collect())
-                .unwrap_or_default();
-        }
+    /// The outputs of node `id` as they stand, by port, from the cells that
+    /// hold them: its return value under [`_RET_PARAM_ID`], and each
+    /// parameter it writes — a mutable parameter of its function in
+    /// `functions`, or one a native node writes. A return no cell keeps is
+    /// `returned`, the value the node last returned. An output that holds
+    /// nothing is left out.
+    pub(crate) fn outputs_of(
+        &self,
+        id: Uuid,
+        functions: &FunctionIndex,
+        returned: Option<&Value>,
+    ) -> Vec<(Uuid, Value)> {
         let Some(node) = self.node_index.get(&id) else {
             return Vec::new();
         };
@@ -162,10 +161,18 @@ impl BehaviorTree {
                     .collect()
             },
         );
-        std::iter::once(_RET_PARAM_ID)
+        let has_return_cell = self.node_arg_variables.contains_key(&NodeParameterId {
+            node: id,
+            parameter: _RET_PARAM_ID,
+        });
+        let mut outputs: Vec<(Uuid, Value)> = std::iter::once(_RET_PARAM_ID)
             .chain(written)
             .filter_map(|port| Some((port, self.argument_value(id, port)?)))
-            .collect()
+            .collect();
+        if let (false, Some(returned)) = (has_return_cell, returned) {
+            outputs.push((_RET_PARAM_ID, returned.clone()));
+        }
+        outputs
     }
 
     /// Set the cell of `node`'s argument `parameter` to `value`, as a write
@@ -881,6 +888,7 @@ fn tick(
     outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
     node: Rc<Node>,
+    record: &trace::TickRecord,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
     let trace_line = |status: Status| {
@@ -1071,6 +1079,10 @@ fn tick(
         write_back(var, result.ret.clone(), function.return_ty.is_option());
         Status::Success
     } else {
+        // A value no binding keeps: a trace watching the node reads it here.
+        if record.is_on() && record.watches(node.id) {
+            record.returned(node.id, &result.ret);
+        }
         result.ret.try_into().unwrap_or(Status::Success)
     };
     trace_line(status);
@@ -1183,6 +1195,7 @@ impl Tickable for TickFunction {
             self.outputs.as_ref(),
             &self.children,
             self.node.clone(),
+            &self.record,
             self.trace,
         );
         if self.record.is_on() {

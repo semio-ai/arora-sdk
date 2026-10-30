@@ -73,8 +73,9 @@ All notable changes to `arora-behavior-tree`. The format follows
   records the status it returns as it ticks, and each detached node whether
   it called or answered from its cache, while a trace runs; each trace
   reports what changed since its last report, at its own pace, and the
-  watched nodes' outputs, read from their cells. A trace survives an edit
-  and names the nodes it restarted. `halt` ends one. With no trace running,
+  watched nodes' outputs, read from their cells, and a watched node's
+  return value that no binding keeps. A trace survives an edit and names
+  the nodes it restarted; one whose report cannot be written starts over. `halt` ends one. With no trace running,
   a tick tests one flag per node.
 - The `trace` bench: what a trace costs a tick, in instructions.
 

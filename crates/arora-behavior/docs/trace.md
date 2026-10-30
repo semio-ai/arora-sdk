@@ -52,6 +52,7 @@ A report is a `TraceReport`, written as a structured value
 | field | holds |
 |---|---|
 | `tick` | the interpreter's tick the report was written at, counted from its first tick |
+| `since` | the tick of the trace's previous report; absent in its first |
 | `status` | node id → its new status, for each node whose status changed |
 | `activity` | node id → its new activity, for each detached node whose activity changed |
 | `values` | node id → port id → its new value, for each output of a watched node that changed |
@@ -67,9 +68,10 @@ Every field but `tick` is left out when it is empty.
   it called its function), `cached` (it was read and answered from its last
   call) or `idle` (nothing read it).
 - **A value** is an output of a watched node: its return value, under the id
-  of `_ret` (`5f726574-0000-4000-8000-000000000000`), and each parameter it
-  writes, under the parameter's id. An output that became unset reads as the
-  unit value.
+  of `_ret` (`5f726574-0000-4000-8000-000000000000`), whether or not a binding
+  keeps it, and each parameter it writes, under the parameter's id. A status
+  is no value: the node's status reports it. An output that became unset reads
+  as the unit value.
 - **A restarted node** is one an edit set or rebound: it starts afresh, and
   the report states its status, activity and values anew, even when they equal
   what was reported before.
@@ -121,12 +123,16 @@ A decoded `TraceReport` serializes to JSON as a page uses it:
    other node as it was, and clears what it shows for each `restarted` node
    before applying the report. A report whose `tick` is more than one past the
    previous one means the ticks between changed nothing, or that the trace is
-   paced.
+   paced. A report whose `since` is not the `tick` of the last report the
+   editor read follows one it missed: the editor halts the trace and starts a
+   new one, whose first report gives the whole picture.
 3. When the user stops, the editor calls the handle's `stop`. The status key
    going `Failure` confirms the trace ended.
 
 A client that reconnects starts a new trace: the first report gives it the
-whole picture, with no history to replay.
+whole picture, with no history to replay. A report that the interpreter
+fails to write leaves the trace to start over: its next report is a first
+one, with no `since`, stating everything.
 
 ## Cost
 

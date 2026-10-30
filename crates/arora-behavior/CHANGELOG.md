@@ -45,9 +45,9 @@ All notable changes to `arora-behavior`. The format follows
   reporting what the behavior does. It answers a `TaskHandle` laid out as a
   spawn's, and `halt` ends it. The default refuses. The `trace` module holds
   `TraceOptions` (the nodes whose values to report, the least time between
-  reports), `TraceReport` (the tick, and the statuses, detached activities
-  and watched values that changed since the last report, and the nodes an
-  edit restarted), `NodeStatus`, `Activity`, and `encode_report` /
+  reports), `TraceReport` (the tick and the tick of the previous report, the
+  statuses, detached activities and watched values that changed since then,
+  and the nodes an edit restarted), `NodeStatus`, `Activity`, and `encode_report` /
   `decode_report`. [`docs/trace.md`](docs/trace.md) describes the report.
 - `interpreter_module::TRACE` and `TRACE_ARG`, with `encode_trace` and
   `decode_trace`; `decode_spawn_result` reads the handle `TRACE` answers.

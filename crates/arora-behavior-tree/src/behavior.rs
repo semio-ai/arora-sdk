@@ -782,7 +782,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                     self.traces.restart(&restarted);
                 }
             }
-            lowered.tree().record.set_on(!self.traces.is_empty());
+            self.traces.arm(&lowered.tree().record);
             self.fresh.clear();
             self.lowered = Some(lowered);
             self.dirty = false;
@@ -1060,7 +1060,7 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         };
         self.traces.start(handle.clone(), options);
         if let Some(lowered) = &self.lowered {
-            lowered.tree().record.set_on(true);
+            self.traces.arm(&lowered.tree().record);
         }
         Ok(handle)
     }
@@ -1069,10 +1069,8 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // A trace ends at once; its terminal status is written on the next
         // tick, as a halted run's is.
         if let Some(status) = self.traces.halt(task) {
-            if self.traces.is_empty() {
-                if let Some(lowered) = &self.lowered {
-                    lowered.tree().record.set_on(false);
-                }
+            if let Some(lowered) = &self.lowered {
+                self.traces.arm(&lowered.tree().record);
             }
             self.halted.push(status);
             return Ok(());
