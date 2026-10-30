@@ -9,14 +9,15 @@
 //! ends it as it ends any run. The crate's `docs/trace.md` describes the
 //! report and how an editor reads it.
 //!
-//! The report travels as a structured [`Value`], converted with
-//! [`arora_types::value_serde`] ([`encode_report`], [`decode_report`]); its
-//! serde form is its JSON form, so a browser reads the same field names.
+//! The report travels as a structured [`Value`] of flat arrays
+//! ([`encode_report`], [`decode_report`]): a key-value whose fields are named,
+//! each list of changes a few parallel arrays, a status or an activity a byte
+//! ([`NodeStatus::code`], [`Activity::code`]), and a watched value as itself.
 
-use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
+use arora_types::keyvalue::{KeyValue, KeyValueField};
 use arora_types::value::Value;
-use arora_types::value_serde;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -25,8 +26,8 @@ use uuid::Uuid;
 #[serde(deny_unknown_fields)]
 pub struct TraceOptions {
     /// The nodes whose output values the reports carry: their return value,
-    /// kept by a binding or not, and the parameters they write. Empty, the reports carry statuses and
-    /// detached activity only.
+    /// kept by a binding or not, and the parameters they write. Empty, the
+    /// reports carry statuses and detached activity only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Uuid>,
     /// The least time between two reports, in nanoseconds on the device's
@@ -50,6 +51,31 @@ pub enum NodeStatus {
     Running,
     /// The tick did not reach the node.
     NotReached,
+}
+
+impl NodeStatus {
+    /// The byte a report carries the status as: 0 success, 1 failure,
+    /// 2 running, 3 not reached.
+    pub fn code(self) -> u8 {
+        match self {
+            NodeStatus::Success => 0,
+            NodeStatus::Failure => 1,
+            NodeStatus::Running => 2,
+            NodeStatus::NotReached => 3,
+        }
+    }
+
+    /// The status a report's byte stands for.
+    pub fn from_code(code: u8) -> Option<Self> {
+        [
+            NodeStatus::Success,
+            NodeStatus::Failure,
+            NodeStatus::Running,
+            NodeStatus::NotReached,
+        ]
+        .get(usize::from(code))
+        .copied()
+    }
 }
 
 impl From<crate::Status> for NodeStatus {
@@ -76,12 +102,43 @@ pub enum Activity {
     Idle,
 }
 
+impl Activity {
+    /// The byte a report carries the activity as: 0 called, 1 cached,
+    /// 2 idle.
+    pub fn code(self) -> u8 {
+        match self {
+            Activity::Called => 0,
+            Activity::Cached => 1,
+            Activity::Idle => 2,
+        }
+    }
+
+    /// The activity a report's byte stands for.
+    pub fn from_code(code: u8) -> Option<Self> {
+        [Activity::Called, Activity::Cached, Activity::Idle]
+            .get(usize::from(code))
+            .copied()
+    }
+}
+
+/// An output of a watched node, in a [`TraceReport`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PortValue {
+    /// The node.
+    pub node: Uuid,
+    /// The port: `_ret`'s id for the return value, a parameter's for a
+    /// parameter the node writes.
+    pub port: Uuid,
+    /// Its new value; [`Value::Unit`] for an output that became unset.
+    pub value: Value,
+}
+
 /// One report of a trace: what changed since the trace's previous report.
 ///
-/// Each field lists only what changed; an empty field is left out of the
-/// serialized form. A trace's first report states every node the tick
-/// reached, every detached node it read, and every watched value that is
-/// set.
+/// Each list holds only what changed, ordered by node (then port); an empty
+/// one is left out of the encoded form. A trace's first report states every
+/// node the tick reached, every detached node it read, and every watched
+/// value that is set.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TraceReport {
     /// The interpreter's tick the report was written at, counted from its
@@ -93,16 +150,14 @@ pub struct TraceReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<u64>,
     /// The nodes whose status changed, with their new status.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub status: BTreeMap<Uuid, NodeStatus>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub status: Vec<(Uuid, NodeStatus)>,
     /// The detached nodes whose activity changed, with their new activity.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub activity: BTreeMap<Uuid, Activity>,
-    /// The watched nodes' outputs that changed, by node then by port: the
-    /// return value under `_ret`'s id, a parameter the node writes under its
-    /// own. An output that became unset reads [`Value::Unit`].
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub values: BTreeMap<Uuid, BTreeMap<Uuid, Value>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub activity: Vec<(Uuid, Activity)>,
+    /// The watched nodes' outputs that changed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<PortValue>,
     /// The nodes an edit restarted since the previous report: each starts
     /// afresh, and this report states its status and values anew.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -119,14 +174,172 @@ impl TraceReport {
     }
 }
 
-/// The [`Value`] a trace writes to its feedback key.
+/// The names of the encoded report's fields, in [`fields`]' order.
+const NAMES: [&str; 10] = [
+    "tick",
+    "since",
+    "status_nodes",
+    "status",
+    "activity_nodes",
+    "activity",
+    "value_nodes",
+    "value_ports",
+    "values",
+    "restarted",
+];
+
+/// The encoded report's id and its fields' ids: the hashes of their names,
+/// as [`arora_types::value_serde`] names a key-value and its entries.
+fn fields() -> &'static (Uuid, [Uuid; 10]) {
+    static IDS: OnceLock<(Uuid, [Uuid; 10])> = OnceLock::new();
+    IDS.get_or_init(|| {
+        (
+            arora_types::gen_uuid_from_str("TraceReport"),
+            NAMES.map(arora_types::gen_uuid_from_str),
+        )
+    })
+}
+
+/// A list of ids, as a report carries it: an array of uuid values.
+fn ids(ids: impl Iterator<Item = Uuid>) -> Value {
+    Value::ArrayValue(ids.map(Value::Uuid).collect())
+}
+
+/// The [`Value`] a trace writes to its feedback key: a key-value of the
+/// fields the crate's `docs/trace.md` lists, each list of changes as
+/// parallel arrays.
 pub fn encode_report(report: &TraceReport) -> Value {
-    value_serde::to_value(report).expect("a TraceReport converts to a Value")
+    let (id, field_ids) = fields();
+    let mut encoded = KeyValue {
+        id: *id,
+        fields: Default::default(),
+    };
+    let mut set = |at: usize, value: Value| {
+        encoded.fields.insert(
+            NAMES[at].to_string(),
+            KeyValueField {
+                id: field_ids[at],
+                name: NAMES[at].to_string(),
+                value: Some(Box::new(value)),
+            },
+        );
+    };
+    set(0, Value::U64(report.tick));
+    if let Some(since) = report.since {
+        set(1, Value::U64(since));
+    }
+    if !report.status.is_empty() {
+        set(2, ids(report.status.iter().map(|(node, _)| *node)));
+        set(
+            3,
+            Value::ArrayU8(report.status.iter().map(|(_, s)| s.code()).collect()),
+        );
+    }
+    if !report.activity.is_empty() {
+        set(4, ids(report.activity.iter().map(|(node, _)| *node)));
+        set(
+            5,
+            Value::ArrayU8(report.activity.iter().map(|(_, a)| a.code()).collect()),
+        );
+    }
+    if !report.values.is_empty() {
+        set(6, ids(report.values.iter().map(|value| value.node)));
+        set(7, ids(report.values.iter().map(|value| value.port)));
+        set(
+            8,
+            Value::ArrayValue(report.values.iter().map(|v| v.value.clone()).collect()),
+        );
+    }
+    if !report.restarted.is_empty() {
+        set(9, ids(report.restarted.iter().copied()));
+    }
+    Value::KeyValue(encoded)
 }
 
 /// Read a [`TraceReport`] out of a trace's feedback key.
 pub fn decode_report(value: &Value) -> Result<TraceReport, String> {
-    value_serde::from_value(value.clone()).map_err(|e| format!("malformed TraceReport: {e}"))
+    let Value::KeyValue(encoded) = value else {
+        return Err(format!("a trace report is a key-value, not {value}"));
+    };
+    let field = |at: usize| -> Option<&Value> {
+        encoded
+            .fields
+            .get(NAMES[at])
+            .and_then(|field| field.value.as_deref())
+    };
+    let u64_at = |at: usize| match field(at) {
+        Some(Value::U64(n)) => Ok(Some(*n)),
+        None => Ok(None),
+        Some(other) => Err(format!("{}: a u64, not {other}", NAMES[at])),
+    };
+    let ids_at = |at: usize| -> Result<Vec<Uuid>, String> {
+        match field(at) {
+            None => Ok(Vec::new()),
+            Some(Value::ArrayValue(values)) => values
+                .iter()
+                .map(|value| match value {
+                    Value::Uuid(id) => Ok(*id),
+                    other => Err(format!("{}: a uuid, not {other}", NAMES[at])),
+                })
+                .collect(),
+            Some(other) => Err(format!("{}: an array of uuids, not {other}", NAMES[at])),
+        }
+    };
+    let bytes_at = |at: usize| -> Result<Vec<u8>, String> {
+        match field(at) {
+            None => Ok(Vec::new()),
+            Some(Value::ArrayU8(bytes)) => Ok(bytes.clone()),
+            Some(other) => Err(format!("{}: an array of u8, not {other}", NAMES[at])),
+        }
+    };
+    let paired = |nodes: usize, codes: usize| -> Result<Vec<(Uuid, u8)>, String> {
+        let (nodes_of, codes_of) = (ids_at(nodes)?, bytes_at(codes)?);
+        if nodes_of.len() != codes_of.len() {
+            return Err(format!(
+                "{} and {} differ in length",
+                NAMES[nodes], NAMES[codes]
+            ));
+        }
+        Ok(nodes_of.into_iter().zip(codes_of).collect())
+    };
+    let status = paired(2, 3)?
+        .into_iter()
+        .map(|(node, code)| {
+            NodeStatus::from_code(code)
+                .map(|status| (node, status))
+                .ok_or_else(|| format!("status: no status {code}"))
+        })
+        .collect::<Result<_, _>>()?;
+    let activity = paired(4, 5)?
+        .into_iter()
+        .map(|(node, code)| {
+            Activity::from_code(code)
+                .map(|activity| (node, activity))
+                .ok_or_else(|| format!("activity: no activity {code}"))
+        })
+        .collect::<Result<_, _>>()?;
+    let (nodes, ports) = (ids_at(6)?, ids_at(7)?);
+    let values = match field(8) {
+        None => Vec::new(),
+        Some(Value::ArrayValue(values)) => values.clone(),
+        Some(other) => return Err(format!("values: an array, not {other}")),
+    };
+    if nodes.len() != values.len() || ports.len() != values.len() {
+        return Err("value_nodes, value_ports and values differ in length".to_string());
+    }
+    Ok(TraceReport {
+        tick: u64_at(0)?.ok_or("tick: missing")?,
+        since: u64_at(1)?,
+        status,
+        activity,
+        values: nodes
+            .into_iter()
+            .zip(ports)
+            .zip(values)
+            .map(|((node, port), value)| PortValue { node, port, value })
+            .collect(),
+        restarted: ids_at(9)?,
+    })
 }
 
 #[cfg(test)]
@@ -137,17 +350,23 @@ mod tests {
         TraceReport {
             tick: 7,
             since: Some(5),
-            status: [
+            status: vec![
                 (Uuid::from_u128(1), NodeStatus::Running),
                 (Uuid::from_u128(2), NodeStatus::NotReached),
-            ]
-            .into(),
-            activity: [(Uuid::from_u128(3), Activity::Cached)].into(),
-            values: [(
-                Uuid::from_u128(3),
-                [(Uuid::from_u128(4), Value::F64(0.5))].into(),
-            )]
-            .into(),
+            ],
+            activity: vec![(Uuid::from_u128(3), Activity::Cached)],
+            values: vec![
+                PortValue {
+                    node: Uuid::from_u128(3),
+                    port: Uuid::from_u128(4),
+                    value: Value::F64(0.5),
+                },
+                PortValue {
+                    node: Uuid::from_u128(3),
+                    port: Uuid::from_u128(5),
+                    value: Value::Unit,
+                },
+            ],
             restarted: vec![Uuid::from_u128(1)],
         }
     }
@@ -161,80 +380,59 @@ mod tests {
         assert_eq!(decode_report(&encode_report(&empty)).unwrap(), empty);
     }
 
-    /// A watched value travels wrapped as `value_serde` writes a `Value`: a
-    /// key-value of one entry named by its kind, holding the value.
+    /// The form a WebSocket client reads: the value vocabulary's JSON of a
+    /// key-value of flat arrays, a watched value as itself.
     #[test]
-    fn a_watched_value_is_wrapped_by_its_kind() {
-        let Value::KeyValue(encoded) = encode_report(&report()) else {
-            panic!("a report is a key-value");
-        };
-        let field = |kv: &arora_types::keyvalue::KeyValue, name: &str| -> Value {
-            *kv.fields[name]
-                .value
-                .clone()
-                .expect("a field holds a value")
-        };
-        let Value::KeyValue(values) = field(&encoded, "values") else {
-            panic!("values is a key-value");
-        };
-        let Value::KeyValue(node) = field(&values, &Uuid::from_u128(3).to_string()) else {
-            panic!("a node's values are a key-value");
-        };
-        let Value::KeyValue(wrapped) = field(&node, &Uuid::from_u128(4).to_string()) else {
-            panic!("a value is wrapped");
-        };
-        assert_eq!(field(&wrapped, "f64"), Value::F64(0.5));
-
-        // The unit value, an unset output, is the string `unit`.
-        let mut unset = report();
-        unset.values = [(
-            Uuid::from_u128(3),
-            [(Uuid::from_u128(4), Value::Unit)].into(),
-        )]
-        .into();
-        let encoded = encode_report(&unset);
-        let Value::KeyValue(unset_report) = &encoded else {
-            panic!("a report is a key-value");
-        };
-        let Value::KeyValue(values) = field(unset_report, "values") else {
-            panic!("values is a key-value");
-        };
-        let Value::KeyValue(node) = field(&values, &Uuid::from_u128(3).to_string()) else {
-            panic!("a node's values are a key-value");
-        };
+    fn a_report_reaches_a_client_as_flat_arrays() {
+        let json = serde_json::to_value(encode_report(&TraceReport {
+            restarted: Vec::new(),
+            since: None,
+            ..report()
+        }))
+        .unwrap();
+        let fields = &json["keyvalue"]["fields"];
+        let field = |name: &str| fields[name]["value"].clone();
+        assert_eq!(field("tick"), serde_json::json!({"u64": 7}));
         assert_eq!(
-            field(&node, &Uuid::from_u128(4).to_string()),
-            Value::String("unit".to_string())
+            field("status_nodes"),
+            serde_json::json!({"values": [
+                {"uuid": "00000000-0000-0000-0000-000000000001"},
+                {"uuid": "00000000-0000-0000-0000-000000000002"},
+            ]})
         );
-        assert_eq!(decode_report(&encoded).unwrap(), unset);
+        assert_eq!(field("status"), serde_json::json!({"u8s": [2, 3]}));
+        assert_eq!(field("activity"), serde_json::json!({"u8s": [1]}));
+        assert_eq!(
+            field("values"),
+            serde_json::json!({"values": [{"f64": 0.5}, "unit"]})
+        );
+        assert!(fields.get("since").is_none() && fields.get("restarted").is_none());
     }
 
-    /// The JSON form a browser reads: names in snake case, ids as strings,
-    /// empty fields left out.
     #[test]
-    fn a_report_reads_as_json() {
-        let json = serde_json::to_value(TraceReport {
-            restarted: Vec::new(),
-            ..report()
-        })
-        .unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "tick": 7,
-                "since": 5,
-                "status": {
-                    "00000000-0000-0000-0000-000000000001": "running",
-                    "00000000-0000-0000-0000-000000000002": "not_reached",
-                },
-                "activity": {"00000000-0000-0000-0000-000000000003": "cached"},
-                "values": {
-                    "00000000-0000-0000-0000-000000000003": {
-                        "00000000-0000-0000-0000-000000000004": {"f64": 0.5},
-                    },
-                },
-            })
-        );
+    fn codes_round_trip() {
+        for status in [
+            NodeStatus::Success,
+            NodeStatus::Failure,
+            NodeStatus::Running,
+            NodeStatus::NotReached,
+        ] {
+            assert_eq!(NodeStatus::from_code(status.code()), Some(status));
+        }
+        for activity in [Activity::Called, Activity::Cached, Activity::Idle] {
+            assert_eq!(Activity::from_code(activity.code()), Some(activity));
+        }
+        assert_eq!(NodeStatus::from_code(4), None);
+    }
+
+    #[test]
+    fn a_malformed_report_is_refused() {
+        let Value::KeyValue(mut encoded) = encode_report(&report()) else {
+            unreachable!("a report is a key-value");
+        };
+        encoded.fields.remove("status");
+        assert!(decode_report(&Value::KeyValue(encoded)).is_err());
+        assert!(decode_report(&Value::U64(7)).is_err());
     }
 
     #[test]

@@ -56,7 +56,7 @@ pub use status::{
     STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID, STATUS_SUCCESS_VARIANT_ID,
 };
 pub use task::{RunPolicy, TaskHandle, TaskId};
-pub use trace::{Activity, NodeStatus, TraceOptions, TraceReport};
+pub use trace::{Activity, NodeStatus, PortValue, TraceOptions, TraceReport};
 
 /// Whether an interpreter wants to be ticked again — and, when it does not, how
 /// it ended.

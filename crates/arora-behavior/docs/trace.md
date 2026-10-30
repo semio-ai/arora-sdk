@@ -47,18 +47,17 @@ At the end of each tick, a trace whose report is due writes one to its
 feedback key if something it follows changed since its previous report. Its
 first report is written at the first tick after it starts, whatever it holds.
 A report is a `TraceReport`, written as a structured value
-(`trace::encode_report`, read back with `trace::decode_report`):
+(`trace::encode_report`, read back with `trace::decode_report`). Each list
+holds only what changed, ordered by node id, then port id:
 
 | field | holds |
 |---|---|
 | `tick` | the interpreter's tick the report was written at, counted from its first tick |
 | `since` | the tick of the trace's previous report; absent in its first |
-| `status` | node id → its new status, for each node whose status changed |
-| `activity` | node id → its new activity, for each detached node whose activity changed |
-| `values` | node id → port id → its new value, for each output of a watched node that changed |
+| `status` | `(node, status)` for each node whose status changed |
+| `activity` | `(node, activity)` for each detached node whose activity changed |
+| `values` | `(node, port, value)` for each output of a watched node that changed |
 | `restarted` | the nodes an edit restarted since the previous report |
-
-Every field but `tick` is left out when it is empty.
 
 - **A status** is `success`, `failure` or `running`, what the node returned
   when the tick reached it, or `not_reached`: the tick did not tick it. A node
@@ -83,41 +82,58 @@ not reached, and a detached node it does not name is idle. Between two reports
 of a paced trace, the next report states each node as it stands then: a node
 that changed and changed back is not reported.
 
-### Reading it
+### On the wire
 
-The feedback key holds the report as a structured value, converted with
-`arora_types::value_serde`: a key-value whose fields carry the names above,
-`status`, `activity` and `values` each a key-value keyed by node id (and
-`values` by port id within it), and a status or an activity as its name in a
-string. A watched value is wrapped as `value_serde` writes any `Value`: a
-key-value of one entry, named by the value's kind as its JSON form names it
-(`f64`, `str`, …), holding the value itself. The unit value, which an unset
-output reads as, has nothing to hold and travels as the string `unit`.
-`trace::decode_report` unwraps either back to the value the node output, so a
-client holding arora-behavior (a Rust program, a wasm page) reads the report
-whole. A bridge relays the key in the
-value vocabulary like any other key.
+The feedback key holds the report as a key-value of flat arrays: every list
+of changes is parallel arrays, a status or an activity is a byte, and a
+watched value is itself. A field whose list is empty is left out, and so is
+`since` in a first report.
 
-A decoded `TraceReport` serializes to JSON as a page uses it:
+| field | value | holds |
+|---|---|---|
+| `tick` | `u64` | the tick |
+| `since` | `u64` | the previous report's tick |
+| `status_nodes`, `status` | uuids, `u8`s | each node and its status: 0 success, 1 failure, 2 running, 3 not reached |
+| `activity_nodes`, `activity` | uuids, `u8`s | each detached node and its activity: 0 called, 1 cached, 2 idle |
+| `value_nodes`, `value_ports`, `values` | uuids, uuids, values | each output: its node, its port, its value (an unset output is the unit value) |
+| `restarted` | uuids | the nodes an edit restarted |
+
+The arrays of a list have one entry per change, in the same order; a list
+of uuids is an array of uuid values. A bridge relays the key in the value
+vocabulary like any other key, so a WebSocket client receives it in
+`values_changed` under the feedback key's path:
 
 ```json
 {
-  "tick": 42,
-  "status": {
-    "0195e1f2-0000-7000-8000-000000000001": "running",
-    "0195e1f2-0000-7000-8000-000000000002": "success",
-    "0195e1f2-0000-7000-8000-000000000003": "not_reached"
-  },
-  "activity": {
-    "0195e1f2-0000-7000-8000-000000000004": "cached"
-  },
-  "values": {
-    "0195e1f2-0000-7000-8000-000000000004": {
-      "5f726574-0000-4000-8000-000000000000": {"f64": 0.25}
+  "keyvalue": {
+    "id": "0d9746f9-51c1-44b9-934a-8c2fed68e37c",
+    "fields": {
+      "tick": {"id": "…", "name": "tick", "value": {"u64": 42}},
+      "since": {"id": "…", "name": "since", "value": {"u64": 40}},
+      "status_nodes": {"id": "…", "name": "status_nodes", "value": {"values": [
+        {"uuid": "0195e1f2-0000-7000-8000-000000000001"},
+        {"uuid": "0195e1f2-0000-7000-8000-000000000003"}
+      ]}},
+      "status": {"id": "…", "name": "status", "value": {"u8s": [2, 3]}},
+      "activity_nodes": {"id": "…", "name": "activity_nodes", "value": {"values": [
+        {"uuid": "0195e1f2-0000-7000-8000-000000000004"}
+      ]}},
+      "activity": {"id": "…", "name": "activity", "value": {"u8s": [1]}},
+      "value_nodes": {"id": "…", "name": "value_nodes", "value": {"values": [
+        {"uuid": "0195e1f2-0000-7000-8000-000000000004"}
+      ]}},
+      "value_ports": {"id": "…", "name": "value_ports", "value": {"values": [
+        {"uuid": "5f726574-0000-4000-8000-000000000000"}
+      ]}},
+      "values": {"id": "…", "name": "values", "value": {"values": [{"f64": 0.25}]}}
     }
   }
 }
 ```
+
+A client reads each field by name, `fields.<name>.value`, and zips the arrays
+of a list. A client holding arora-behavior (a Rust program, a wasm page)
+reads the whole report with `trace::decode_report`.
 
 ## How an editor uses it
 

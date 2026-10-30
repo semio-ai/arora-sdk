@@ -3384,9 +3384,10 @@ mod caller_tests {
         arora.step(Duration::from_millis(10)).expect("step");
         let spawned = report(&arora).expect("a report");
         assert!(spawned.tick > first.tick);
-        assert_eq!(
-            spawned.status.get(&graph.root.unwrap()),
-            Some(&arora_behavior::NodeStatus::Running),
+        assert!(
+            spawned
+                .status
+                .contains(&(graph.root.unwrap(), arora_behavior::NodeStatus::Running)),
             "{spawned:?}"
         );
 
