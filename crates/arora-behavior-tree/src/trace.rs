@@ -114,6 +114,8 @@ struct Trace {
     restarted: Vec<Uuid>,
     /// The tick of its last report.
     last_tick: Option<u64>,
+    /// The behavior's revision as last reported.
+    revision: Option<u64>,
 }
 
 /// The interpreter's running traces, and what the previous tick did.
@@ -154,6 +156,7 @@ impl Traces {
             activity_changed: IdSet::default(),
             restarted: Vec::new(),
             last_tick: None,
+            revision: None,
         });
     }
 
@@ -225,11 +228,13 @@ impl Traces {
     }
 
     /// Take what tick `tick` did from `record`, and write each trace's report
-    /// when it is due and states a change. `tree` holds the watched nodes'
-    /// outputs, `functions` says which parameters a node writes.
+    /// when it is due and states a change, `revision` included. `tree` holds
+    /// the watched nodes' outputs, `functions` says which parameters a node
+    /// writes.
     pub(crate) fn report(
         &mut self,
         tick: u64,
+        revision: u64,
         record: &TickRecord,
         tree: Option<&BehaviorTree>,
         functions: &FunctionIndex,
@@ -272,7 +277,9 @@ impl Traces {
                 continue;
             }
             let first = !trace.started;
-            let report = trace.report(tick, &statuses, &activity, tree, functions, &self.returns);
+            let mut report =
+                trace.report(tick, &statuses, &activity, tree, functions, &self.returns);
+            report.revision = (trace.revision != Some(revision)).then_some(revision);
             if !first && report.is_empty() {
                 continue;
             }
@@ -286,6 +293,7 @@ impl Traces {
             trace.started = true;
             trace.reported_at = now;
             trace.last_tick = Some(tick);
+            trace.revision = Some(revision);
         }
         self.spare = (
             std::mem::replace(&mut self.statuses, statuses),
@@ -326,6 +334,7 @@ impl Trace {
         self.started = false;
         self.reported_at = None;
         self.last_tick = None;
+        self.revision = None;
         self.status.clear();
         self.activity.clear();
         self.values.clear();

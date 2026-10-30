@@ -4137,7 +4137,8 @@ mod tree_locals {
     }
 
     /// The intermediate array passes through `.x`, which no store change
-    /// carries.
+    /// carries: the behavior's own changes are its outputs, beside the
+    /// interpreter's built-in keys.
     #[test]
     fn a_dot_variable_never_creates_a_store_key() {
         let store = SimpleDataStore::new();
@@ -4150,7 +4151,13 @@ mod tree_locals {
         );
         let mut changed = Vec::new();
         while let Some(change) = changes.try_recv() {
-            changed.extend(change.set.keys().map(|key| key.path.clone()));
+            changed.extend(
+                change
+                    .set
+                    .keys()
+                    .map(|key| key.path.clone())
+                    .filter(|path| !arora_behavior::built_in::is_built_in(path)),
+            );
         }
         changed.sort();
         assert_eq!(changed, vec!["a".to_string(), "b".to_string()]);

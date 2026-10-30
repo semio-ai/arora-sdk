@@ -26,21 +26,21 @@ use crate::call_expression_tests::{
 use crate::nodes::SEQ_FUNCTION_ID;
 use crate::schema::_RET_PARAM_ID;
 
-const ROOT: Uuid = Uuid::from_u128(0x100);
-const GATE: Uuid = Uuid::from_u128(0x101);
-const SUM: Uuid = Uuid::from_u128(0x102);
-const NEAR: Uuid = Uuid::from_u128(0x103);
-const DOUBLE: Uuid = Uuid::from_u128(0x104);
+pub(crate) const ROOT: Uuid = Uuid::from_u128(0x100);
+pub(crate) const GATE: Uuid = Uuid::from_u128(0x101);
+pub(crate) const SUM: Uuid = Uuid::from_u128(0x102);
+pub(crate) const NEAR: Uuid = Uuid::from_u128(0x103);
+pub(crate) const DOUBLE: Uuid = Uuid::from_u128(0x104);
 
-fn value(value: f64) -> Source {
+pub(crate) fn value(value: f64) -> Source {
     Source::Value(Value::F64(value))
 }
 
-fn key(key: &str) -> Source {
+pub(crate) fn key(key: &str) -> Source {
     Source::Key(key.to_string())
 }
 
-fn behavior() -> Graph {
+pub(crate) fn behavior() -> Graph {
     let node = |id, function, bind: Vec<(Uuid, Source)>| Node {
         id,
         function,
@@ -84,19 +84,19 @@ fn behavior() -> Graph {
 }
 
 /// A device in miniature: the interpreter, its store and its engine.
-struct Device {
-    interpreter: BehaviorTreeInterpreter,
-    store: SimpleDataStore,
+pub(crate) struct Device {
+    pub(crate) interpreter: BehaviorTreeInterpreter,
+    pub(crate) store: SimpleDataStore,
     engine: Engine,
     functions: arora_behavior::FunctionIndex,
 }
 
 impl Device {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::running(behavior())
     }
 
-    fn running(graph: Graph) -> Self {
+    pub(crate) fn running(graph: Graph) -> Self {
         let mut interpreter = BehaviorTreeInterpreter::new();
         interpreter.load(graph).expect("the behavior loads");
         let device = Self {
@@ -116,7 +116,7 @@ impl Device {
             .expect("the store writes");
     }
 
-    fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) {
         let mut ctx = BehaviorContext {
             store: &self.store,
             call_bridge: &mut self.engine,
@@ -125,7 +125,7 @@ impl Device {
         self.interpreter.tick(&mut ctx).expect("the tick succeeds");
     }
 
-    fn read(&self, key: &Key) -> Option<Value> {
+    pub(crate) fn read(&self, key: &Key) -> Option<Value> {
         self.store.read(std::slice::from_ref(key)).remove(0)
     }
 
@@ -137,7 +137,7 @@ impl Device {
 
     /// The report `trace` wrote at tick `tick`; `None` when it wrote none
     /// then.
-    fn report_at(&self, trace: &TaskHandle, tick: u64) -> Option<TraceReport> {
+    pub(crate) fn report_at(&self, trace: &TaskHandle, tick: u64) -> Option<TraceReport> {
         self.report(trace).filter(|report| report.tick == tick)
     }
 
@@ -521,6 +521,64 @@ fn a_trace_survives_an_edit_and_reports_the_restarted_nodes() {
     device.tick();
     assert_eq!(device.report_at(&trace, 6), None);
     assert_eq!(device.status(&trace), Some(Status::Running));
+}
+
+/// A report carries the behavior's revision in the first report and in the
+/// one after each change, and in no other: a load or an edit, by this client
+/// or another, reaches a tracing client once.
+#[test]
+fn a_trace_reports_each_revision_once() {
+    let mut device = Device::new();
+    let trace = device.interpreter.trace(TraceOptions::default()).unwrap();
+    device.tick();
+    assert_eq!(device.report_at(&trace, 1).unwrap().revision, Some(1));
+    device.tick();
+    let second = device.report_at(&trace, 2).expect("an activity change");
+    assert_eq!(second.revision, None, "unchanged");
+
+    // An edit: the next report carries the new revision, the one after does
+    // not.
+    device
+        .interpreter
+        .apply(GraphDiff {
+            bind: vec![Binding {
+                node: GATE,
+                port: BELOW_LIMIT,
+                source: value(0.7),
+            }],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    device.tick();
+    assert_eq!(device.report_at(&trace, 3).unwrap().revision, Some(2));
+    device.set("gate", 1.0);
+    device.tick();
+    assert_eq!(device.report_at(&trace, 4).unwrap().revision, None);
+
+    // An edit that changes no status, activity or value is reported for its
+    // revision alone; a load likewise.
+    device
+        .interpreter
+        .apply(GraphDiff {
+            set: vec![Node {
+                id: Uuid::from_u128(0x105),
+                function: MUL,
+                bind: [(MUL_A, key("in")), (MUL_B, value(3.0))].into(),
+                children: None,
+            }],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    device.tick();
+    let edited = device.report_at(&trace, 5).expect("the revision alone");
+    assert_eq!(edited.revision, Some(3));
+    device.tick();
+    assert_eq!(device.report_at(&trace, 6), None, "nothing changed");
+
+    // A second trace states the current revision in its first report.
+    let late = device.interpreter.trace(TraceOptions::default()).unwrap();
+    device.tick();
+    assert_eq!(device.report_at(&late, 7).unwrap().revision, Some(3));
 }
 
 /// A watched node's outputs are what its cells hold, and its return value
