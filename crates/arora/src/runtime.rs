@@ -1335,7 +1335,7 @@ mod tests {
             uuid::Uuid::from_u128(0xd2_0001),
             uuid::Uuid::from_u128(0xd2_0002),
         );
-        let header: arora_types::module::low::Header = serde_yaml::from_str(&format!(
+        let header: arora_types::module::low::Header = yaml_serde::from_str(&format!(
             r#"
 id: {module}
 name: spinning

@@ -30,7 +30,7 @@ pub struct Node {
     ///
     /// Expressions keep their singleton-map YAML form (`value: ...`), the
     /// stable on-disk representation of tree files.
-    #[serde(default, with = "serde_yaml::with::singleton_map_recursive")]
+    #[serde(default, with = "yaml_serde::with::singleton_map_recursive")]
     pub arguments: HashMap<Uuid, Expression>,
 
     /// Child nodes, if any.
@@ -122,7 +122,7 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
             function: Uuid::from_str("af2bd9fa-14f6-4388-b68b-e50c8443960e")?,
             ..Default::default()
         };
-        let actual: Node = serde_yaml::from_str(node_yaml)?;
+        let actual: Node = yaml_serde::from_str(node_yaml)?;
         assert!(actual == expected);
         Ok(())
     }
@@ -172,7 +172,7 @@ function: af2bd9fa-14f6-4388-b68b-e50c8443960e
             },
         ];
 
-        let actual: Vec<Node> = serde_yaml::from_str(node_yaml)?;
+        let actual: Vec<Node> = yaml_serde::from_str(node_yaml)?;
         assert!(actual == expected);
         Ok(())
     }

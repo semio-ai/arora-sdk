@@ -254,7 +254,7 @@ fn vizij_s_published_records_and_the_module_directory_s_load_into_one_registry()
     module_dir::write(&arora, None).expect("the module directory is written");
     let files = |dir: &Path| ModuleFiles {
         dir: dir.to_path_buf(),
-        header: serde_yaml::from_str(
+        header: yaml_serde::from_str(
             &std::fs::read_to_string(dir.join("header.json")).expect("the header reads"),
         )
         .expect("the header parses"),

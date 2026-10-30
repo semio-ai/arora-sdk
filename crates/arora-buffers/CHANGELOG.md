@@ -4,6 +4,13 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.3.1] - 2026-10-30
+
+### Changed
+
+- The library depends on no YAML crate: only its tests read YAML, with
+  `yaml_serde` 0.10. The wire format is unchanged.
+
 ## [3.3.0] - 2026-10-29
 
 ### Changed

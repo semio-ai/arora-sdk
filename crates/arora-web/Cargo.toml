@@ -56,7 +56,7 @@ wasm-bindgen-test = "0.3"
 arora-hal = { path = "../arora-hal", version = "4.3" }
 # The store a test makes fail, over the simple store.
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.2" }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 # test-rust-wasm guest (wasm32-wasip2) the browser test include_bytes!s; cargo
 # exposes its path as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.
 # `lib = true` also brings the crate itself in, for the test's own target: the

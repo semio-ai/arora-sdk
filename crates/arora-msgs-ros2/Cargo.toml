@@ -46,4 +46,4 @@ quote = "1"
 proc-macro2 = "1"
 
 [dev-dependencies]
-serde_yaml = "0.9"
+yaml_serde = "0.10"

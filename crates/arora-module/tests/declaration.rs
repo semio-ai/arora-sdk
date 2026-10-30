@@ -203,9 +203,9 @@ fn the_declaration_is_also_the_store_record() {
     );
 
     // The record round-trips through the store's wire form.
-    let yaml = serde_yaml::to_string(&record).expect("a record serializes");
+    let yaml = yaml_serde::to_string(&record).expect("a record serializes");
     let read: arora_types::record::module::frozen::Module =
-        serde_yaml::from_str(&yaml).expect("a record reads back");
+        yaml_serde::from_str(&yaml).expect("a record reads back");
     assert_eq!(read.exports.len(), record.exports.len());
 }
 

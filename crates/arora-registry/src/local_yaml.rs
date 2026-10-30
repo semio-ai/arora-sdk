@@ -35,7 +35,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
     for_each_yaml_record(&path.join("folder"), &mut |id, _, yaml: String| {
         folders.push((
             id,
-            serde_yaml::from_str::<FolderPublic>(yaml.as_str()).map_err(|err| {
+            yaml_serde::from_str::<FolderPublic>(yaml.as_str()).map_err(|err| {
                 RegistryError::ParsingError {
                     message: format!(
                         "YAML folder description in {} is invalid: {}",
@@ -62,7 +62,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
                         path.display()
                     ),
                 })?,
-                serde_yaml::from_str::<EnumerationFrozen>(yaml.as_str()).map_err(|err| {
+                yaml_serde::from_str::<EnumerationFrozen>(yaml.as_str()).map_err(|err| {
                     RegistryError::ParsingError {
                         message: format!(
                             "YAML enumeration description in {} is invalid: {}",
@@ -92,7 +92,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
                         path.display()
                     ),
                 })?,
-                serde_yaml::from_str::<StructureFrozen>(yaml.as_str()).map_err(|err| {
+                yaml_serde::from_str::<StructureFrozen>(yaml.as_str()).map_err(|err| {
                     RegistryError::ParsingError {
                         message: format!(
                             "YAML structure description in {} is invalid: {}",
@@ -122,7 +122,7 @@ pub async fn load_records_from_yaml_dir<P: AsRef<Path>>(
                         path.display()
                     ),
                 })?,
-                serde_yaml::from_str::<ModuleFrozen>(yaml.as_str()).map_err(|err| {
+                yaml_serde::from_str::<ModuleFrozen>(yaml.as_str()).map_err(|err| {
                     RegistryError::ParsingError {
                         message: format!(
                             "YAML module description in {} is invalid: {}",
@@ -266,7 +266,7 @@ pub fn records_as_yaml(
     registry: &LocalRegistry,
 ) -> Result<Vec<(RecordKind, String, String)>, RegistryError> {
     use crate::local::FrozenRegistryReference as Held;
-    let yaml = |what: &str, result: Result<String, serde_yaml::Error>| {
+    let yaml = |what: &str, result: Result<String, yaml_serde::Error>| {
         result.map_err(|err| RegistryError::generic(&format!("{what} does not serialize: {err}")))
     };
     let mut records = Vec::new();
@@ -276,26 +276,26 @@ pub fn records_as_yaml(
             Held::Folder { record, .. } => (
                 RecordKind::Folder,
                 id.to_string(),
-                yaml("a folder", serde_yaml::to_string(record.as_ref()))?,
+                yaml("a folder", yaml_serde::to_string(record.as_ref()))?,
             ),
             Held::Enumeration { record, .. } => (
                 RecordKind::Enumeration,
                 stem,
-                yaml("an enumeration", serde_yaml::to_string(record.as_ref()))?,
+                yaml("an enumeration", yaml_serde::to_string(record.as_ref()))?,
             ),
             Held::Structure { record, .. } => (
                 RecordKind::Structure,
                 stem,
-                yaml("a structure", serde_yaml::to_string(record.as_ref()))?,
+                yaml("a structure", yaml_serde::to_string(record.as_ref()))?,
             ),
             Held::Module { record, .. } => (
                 RecordKind::Module,
                 stem,
                 yaml(
                     "a module",
-                    serde_yaml::to_value(record.as_ref())
+                    yaml_serde::to_value(record.as_ref())
                         .map(sort_id_keyed_mappings)
-                        .and_then(|value| serde_yaml::to_string(&value)),
+                        .and_then(|value| yaml_serde::to_string(&value)),
                 )?,
             ),
             _ => continue,
@@ -310,8 +310,8 @@ pub fn records_as_yaml(
 /// parameters ordered by its `parameterOrdering` — write the same YAML each
 /// time. Not for a structure's fields or an enumeration's variants, whose
 /// order is their declared one.
-fn sort_id_keyed_mappings(value: serde_yaml::Value) -> serde_yaml::Value {
-    use serde_yaml::{Mapping, Value};
+fn sort_id_keyed_mappings(value: yaml_serde::Value) -> yaml_serde::Value {
+    use yaml_serde::{Mapping, Value};
     match value {
         Value::Mapping(mapping) => {
             let mut entries: Vec<(Value, Value)> = mapping
@@ -402,7 +402,7 @@ where
         }
     }
 
-    let parse_err = |what: &str, err: serde_yaml::Error| RegistryError::ParsingError {
+    let parse_err = |what: &str, err: yaml_serde::Error| RegistryError::ParsingError {
         message: format!("YAML {what} description is invalid: {err}"),
     };
     let need_version = || RegistryError::ParsingError {
@@ -412,21 +412,21 @@ where
     let folders = folders
         .into_iter()
         .map(|(id, yaml)| {
-            serde_yaml::from_str::<FolderPublic>(&yaml)
+            yaml_serde::from_str::<FolderPublic>(&yaml)
                 .map(|folder| (id, folder))
                 .map_err(|e| parse_err("folder", e))
         })
         .collect::<Result<Vec<_>, _>>()?;
     add_folders(folders, registry).await?;
     for (id, tag, yaml) in enumerations {
-        let enumeration = serde_yaml::from_str::<EnumerationFrozen>(&yaml)
+        let enumeration = yaml_serde::from_str::<EnumerationFrozen>(&yaml)
             .map_err(|e| parse_err("enumeration", e))?;
         registry
             .add_enumeration(id, tag.ok_or_else(need_version)?, enumeration)
             .await?;
     }
     for (id, tag, yaml) in structures {
-        let structure = serde_yaml::from_str::<StructureFrozen>(&yaml)
+        let structure = yaml_serde::from_str::<StructureFrozen>(&yaml)
             .map_err(|e| parse_err("structure", e))?;
         registry
             .add_structure(id, tag.ok_or_else(need_version)?, structure)
@@ -434,7 +434,7 @@ where
     }
     for (id, tag, yaml) in modules {
         let module =
-            serde_yaml::from_str::<ModuleFrozen>(&yaml).map_err(|e| parse_err("module", e))?;
+            yaml_serde::from_str::<ModuleFrozen>(&yaml).map_err(|e| parse_err("module", e))?;
         registry
             .add_module(id, tag.ok_or_else(need_version)?, module)
             .await?;

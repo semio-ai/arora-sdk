@@ -29,7 +29,7 @@ example-cpp = { path = "../examples/modules/cpp" }
 arora-engine = { path = "../crates/arora-engine" }
 arora-buffers = { path = "../crates/arora-buffers" }
 arora-types = { path = "../crates/arora-types", version = "3" }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 uuid = "1"
 # The declared guest, host-side: its header is what the engine loads it with,
 # and its type records what arora-cli freezes that header against.

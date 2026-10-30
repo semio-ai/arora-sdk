@@ -41,7 +41,7 @@ fn call_test_rust_wasm_from_engine() {
     });
     std::fs::write(
         &module_yaml,
-        serde_yaml::to_string(&header).expect("the declared header serializes"),
+        yaml_serde::to_string(&header).expect("the declared header serializes"),
     )
     .expect("writing the header");
     // arora-cli freezes the header against its registry, so it is given the

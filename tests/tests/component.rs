@@ -104,7 +104,7 @@ executable_mime: ""
 exports:
 {exports}"#
     );
-    serde_yaml::from_str(&yaml).expect("parse test header")
+    yaml_serde::from_str(&yaml).expect("parse test header")
 }
 
 fn guest_bytes() -> Box<[u8]> {

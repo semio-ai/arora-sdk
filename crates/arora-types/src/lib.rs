@@ -84,7 +84,7 @@ mod tests {
   fn parse_uuid() {
     let uuid_string = "b41899c3-66dc-40d4-ab61-d1ccf5231c88";
     let expected = Uuid::from_str(uuid_string).unwrap();
-    let actual: Uuid = serde_yaml::from_str(uuid_string).unwrap();
+    let actual: Uuid = yaml_serde::from_str(uuid_string).unwrap();
     assert!(actual == expected);
   }
 
@@ -97,7 +97,7 @@ name: test
 ret:
   kind: scalar
   id: i32";
-    let symbol: ExportSymbol = serde_yaml::from_str(function_string).unwrap();
+    let symbol: ExportSymbol = yaml_serde::from_str(function_string).unwrap();
     match symbol {
       ExportSymbol::Function(function) => assert!(function.name == "test"),
     }
@@ -123,7 +123,7 @@ parameters:
 ret:
   kind: scalar
   id: i32";
-    let symbol: ExportSymbol = serde_yaml::from_str(function_string).unwrap();
+    let symbol: ExportSymbol = yaml_serde::from_str(function_string).unwrap();
     match symbol {
       ExportSymbol::Function(function) => assert!(function.name == "test"),
     }
@@ -165,7 +165,7 @@ imports: []
 dependencies: []
 executable_mime: application/wasm";
 
-    let header: ModuleDefinition = serde_yaml::from_str(module_string).unwrap();
+    let header: ModuleDefinition = yaml_serde::from_str(module_string).unwrap();
     assert!(header.name == "test-cpp-2");
   }
 }
