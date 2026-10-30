@@ -12,13 +12,13 @@ is in [`arora`'s runtime page](../../arora/docs/runtime-and-data-flow.md).
 flowchart LR
   editor["Editor or client<br/>(Semio Studio, Vizij Workspace, a remote)"]
   subgraph device["Arora device: one step loop"]
-    module["Interpreter module<br/>LOAD · EDIT · SPAWN · SPAWN_GRAPH · HALT"]
+    module["Interpreter module<br/>LOAD · EDIT · SPAWN · SPAWN_GRAPH · TRACE · HALT"]
     interp["BehaviorInterpreter"]
     store[("Data store")]
     engine["Engine<br/>(modules)"]
   end
   editor -- "Graph / GraphDiff / Call, as an ordinary call" --> module
-  module -- "load / apply / spawn / spawn_graph / halt" --> interp
+  module -- "load / apply / spawn / spawn_graph / trace / halt" --> interp
   interp -- "tick: read inputs and arora/time, write outputs" --> store
   interp -- "call module functions" --> engine
 ```
@@ -41,6 +41,7 @@ default to refusing, so an interpreter implements what it supports.
 | `apply(GraphDiff)` | on `EDIT` | refuses |
 | `spawn(Call, RunPolicy)` | on `SPAWN` | refuses |
 | `spawn_graph(&GraphType, Graph, RunPolicy)` | on `SPAWN_GRAPH` | refuses |
+| `trace(TraceOptions)` | on `TRACE` | refuses |
 | `halt(TaskId)` | on `HALT` | refuses |
 | `described_methods()` | once, when the device is built | describes none |
 
@@ -226,6 +227,12 @@ ordinary calls. The `arora` runtime follows each run it started, logs when it
 starts and ends, and halts the runs calling a module that is reloaded or
 unloaded.
 
+`trace(options)` starts a task run of another kind: a trace, which reports
+what each tick does on its feedback key until it is halted
+([`trace.md`](trace.md)). It answers a `TaskHandle` laid out as a spawn's,
+under the interpreter module's `TRACE` function, and the device follows and
+logs it like a run.
+
 Methods the interpreter implements itself (`described_methods`) join the
 device's method index under `interpreter_module::ID`; a client spawns one
 like any task run, and a direct call to it fails.
@@ -257,6 +264,7 @@ succeeds; a failing behavior never stops the device.
 | the graph model, `GraphDiff`, `GraphType` | [`src/graph.rs`](../src/graph.rs) |
 | the interpreter module's ids and calls | [`src/interpreter_module.rs`](../src/interpreter_module.rs) |
 | task runs: `TaskHandle`, `TaskId`, `RunPolicy` | [`src/task.rs`](../src/task.rs) |
+| traces: `TraceOptions`, `TraceReport` | [`src/trace.rs`](../src/trace.rs) |
 | the run status `Status` | [`src/status.rs`](../src/status.rs) |
 | the built-in keys | [`src/built_in.rs`](../src/built_in.rs) |
 | the step that ticks the interpreter, the interpreter module's registration | [`arora/src/runtime.rs`](../../arora/src/runtime.rs), [`arora/src/lib.rs`](../../arora/src/lib.rs) |
