@@ -115,13 +115,17 @@
 //!
 //! Then the bridge connects by itself, and the operator is shown the device's
 //! id ([`Operator::show_device_id`]). A person refusing the code, or Studio
-//! refusing the token, fails the run, and so does Studio refusing the device
-//! it has just enrolled. Studio failing otherwise — Studio or the bridge out
-//! of reach, a credential of another Firebase project than the run's — says
-//! nothing of the device's enrollment: the device does not enroll again, and
-//! its bridge logs why and connects again by itself, waiting longer after
-//! each failure in a row, up to a minute. A device Studio refuses later in
-//! the run, once revoked, enrolls again.
+//! refusing the token, fails the run. An enrollment that fails for a reason
+//! that may pass — Studio or the network out of reach — is logged, and the
+//! device enrolls again after a wait; so does a device its bridge finds not
+//! enrolled once an enrollment ended, whether it was refused right after
+//! enrolling or revoked later in the run. The wait doubles with each
+//! enrollment in a row, from two seconds up to a minute, and starts over
+//! once the bridge connects. Studio failing otherwise — Studio or the bridge
+//! out of reach, a credential of another Firebase project than the run's —
+//! says nothing of the device's enrollment: the device does not enroll
+//! again, and its bridge logs why and connects again by itself, waiting
+//! longer after each failure in a row, up to a minute.
 //!
 //! A device can also be enrolled before it runs, with Semio's own client:
 //! `semio device enroll NAME` saves the credential under its name in the same
@@ -223,7 +227,7 @@ mod credentials;
 use std::future::Future;
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use arora_hal::HalDescription;
 use arora_studio_bridge_client::credentials::DeviceCredentials;
 use arora_studio_bridge_client::firestore_support::options::{
@@ -376,17 +380,62 @@ pub(crate) async fn follow(
         || enroll(handle, description, operator),
         operator,
         &mut std::io::stderr(),
+        ENROLLMENT_RETRY,
     )
     .await
 }
 
+/// How long a run waits before enrolling its device again: after an
+/// enrollment that failed for a reason that may pass, or after an enrollment
+/// its bridge then finds refused. The first wait, doubled after each one in
+/// a row up to the last, and back to the first once the bridge connects.
+#[derive(Clone, Copy)]
+struct Retry {
+    first: std::time::Duration,
+    last: std::time::Duration,
+}
+
+/// The waits of [`Retry`] a run uses: the bridge's own, between connections.
+const ENROLLMENT_RETRY: Retry = Retry {
+    first: std::time::Duration::from_secs(2),
+    last: std::time::Duration::from_secs(60),
+};
+
+impl Retry {
+    /// The wait after `previous`, or the first one when there was none.
+    fn after(self, previous: Option<std::time::Duration>) -> std::time::Duration {
+        previous.map_or(self.first, |previous| (previous * 2).min(self.last))
+    }
+}
+
+/// Whether enrolling again may succeed where `error` failed: Studio or the
+/// network failed, or the bridge's status moved on while the enrollment
+/// started. A person refusing the code, Studio refusing the token or
+/// answering what the protocol does not define, and a credential of another
+/// Firebase project are refusals, which enrolling again would only repeat.
+fn may_pass(error: &anyhow::Error) -> bool {
+    match error.downcast_ref::<Error>() {
+        Some(Error::EnrollmentDenied) => false,
+        Some(Error::Studio(error)) => error.is_transient(),
+        _ => true,
+    }
+}
+
 /// [`follow`], over the bridge's `status` as it changes, enrolling the device
-/// with `enroll`. A code nothing else shows goes to `console`.
+/// with `enroll` and waiting as `retry` says before enrolling it again. A
+/// code nothing else shows goes to `console`.
+///
+/// Each enrollment that ends — enrolled, or failed for a reason that may
+/// pass — is followed by a wait, after which a bridge that still finds the
+/// device not enrolled enrolls it again. Whether the bridge connected in
+/// between does not decide it: its status keeps only its latest value, so a
+/// connection can come and go unseen.
 async fn follow_status<Enrolled>(
     mut status: watch::Receiver<StudioStatus>,
     mut enroll: impl FnMut() -> Enrolled,
     operator: Option<&dyn Operator>,
     console: &mut (dyn std::io::Write + Send),
+    retry: Retry,
 ) -> anyhow::Error
 where
     Enrolled: Future<Output = Result<String>>,
@@ -397,25 +446,20 @@ where
     };
     let enrollment = Fuse::terminated();
     futures::pin_mut!(enrollment);
-    // The device enrolled in this run, and its bridge has not connected
-    // since: Studio refusing it now refuses the device it has just enrolled.
-    let mut just_enrolled = false;
+    let pause = Fuse::<tokio::time::Sleep>::terminated();
+    futures::pin_mut!(pause);
+    // The last wait, since the bridge was last seen connected.
+    let mut waited = None;
     let mut followed = true;
     loop {
         let current = status.borrow_and_update().clone();
         match &current {
-            StudioStatus::NotEnrolled if enrollment.is_terminated() => {
-                if just_enrolled {
-                    return anyhow!(
-                        "Semio Studio refuses the device it has just enrolled: its bridge finds \
-                         it not enrolled"
-                    );
-                }
+            StudioStatus::NotEnrolled if enrollment.is_terminated() && pause.is_terminated() => {
                 info!("Studio: this device is not enrolled with Semio Studio; enrolling it");
                 enrollment.set(enroll().fuse());
             }
             StudioStatus::Connected { device_id } => {
-                just_enrolled = false;
+                waited = None;
                 info!("Studio: connected to Semio Studio as device {device_id}");
                 if let Some(operator) = operator {
                     operator.show_device_id(device_id);
@@ -429,15 +473,27 @@ where
         // status says next follows the enrollment.
         tokio::select! {
             biased;
-            enrolled = &mut enrollment, if !enrollment.is_terminated() => match enrolled {
-                Ok(_) => just_enrolled = true,
-                Err(error) => return error,
-            },
+            enrolled = &mut enrollment, if !enrollment.is_terminated() => {
+                let wait = retry.after(waited);
+                match enrolled {
+                    Ok(_) => {}
+                    Err(error) if !may_pass(&error) => return error,
+                    Err(error) => log::warn!(
+                        "Studio: enrolling the device failed ({error:#}); trying again in {} s \
+                         if it is still not enrolled",
+                        wait.as_secs_f32()
+                    ),
+                }
+                waited = Some(wait);
+                pause.set(tokio::time::sleep(wait).fuse());
+            }
+            () = &mut pause, if !pause.is_terminated() => {}
             changed = status.changed(), if followed => {
                 // The bridge was dropped: its status changes no more.
                 followed = changed.is_ok();
             }
-            () = std::future::pending(), if !followed && enrollment.is_terminated() => {}
+            () = std::future::pending(),
+                if !followed && enrollment.is_terminated() && pause.is_terminated() => {}
         }
     }
 }
@@ -810,6 +866,12 @@ mod tests {
     /// How long a test waits for what it expects before it fails.
     const WAIT: Duration = Duration::from_secs(10);
 
+    /// Waits short enough for a test to see an enrollment start again.
+    const TEST_RETRY: Retry = Retry {
+        first: Duration::from_millis(20),
+        last: Duration::from_millis(80),
+    };
+
     /// A Studio bridge's status as a test drives it, and a run following it
     /// whose enrollments the test answers, one at a time.
     struct Followed {
@@ -857,7 +919,7 @@ mod tests {
                     let operator = interactive.then_some(&*operator as &dyn Operator);
                     format!(
                         "{:#}",
-                        follow_status(receiver, enroll, operator, &mut console).await
+                        follow_status(receiver, enroll, operator, &mut console, TEST_RETRY).await
                     )
                 }
             });
@@ -988,16 +1050,52 @@ mod tests {
         assert!(error.contains("refused"), "{error}");
     }
 
+    /// The bridge connecting and then finding the device not enrolled,
+    /// before the run sees it connected, enrolls the device again: the run
+    /// does not need to have seen the connection.
     #[tokio::test]
-    async fn a_device_studio_refuses_once_enrolled_fails_the_run() {
+    async fn a_device_its_bridge_finds_not_enrolled_after_enrolling_enrolls_again() {
         let mut run = Followed::start(StudioStatus::NotEnrolled, false);
         let enrollment = run.enrollment().await;
         enrollment.send(Ok("device-1".to_string())).unwrap();
-        settle().await;
         run.status.send_replace(StudioStatus::Connecting);
+        run.status.send_replace(connected("device-1"));
         run.status.send_replace(StudioStatus::NotEnrolled);
+        let _again = run.enrollment().await;
+        assert!(!run.ended.is_finished());
+    }
+
+    /// An enrollment that fails for a reason that may pass is tried again,
+    /// the run going on meanwhile; one Studio refuses ends the run.
+    #[tokio::test]
+    async fn an_enrollment_failing_for_a_reason_that_may_pass_is_tried_again() {
+        let mut run = Followed::start(StudioStatus::NotEnrolled, false);
+        let enrollment = run.enrollment().await;
+        let unreachable = arora_studio_bridge_client::auth::Error::Callable {
+            name: "redeemEnrollmentToken".to_string(),
+            status: arora_studio_bridge_client::auth::Status::Unavailable,
+            message: "Studio is down".to_string(),
+            details: None,
+        };
+        assert!(unreachable.is_transient());
+        enrollment
+            .send(Err(anyhow::Error::new(Error::Studio(unreachable))
+                .context("failed to enroll the device with Semio Studio")))
+            .unwrap();
+        let enrollment = run.enrollment().await;
+        assert!(!run.ended.is_finished());
+        let refused = arora_studio_bridge_client::auth::Error::Callable {
+            name: "redeemEnrollmentToken".to_string(),
+            status: arora_studio_bridge_client::auth::Status::PermissionDenied,
+            message: "the enrollment token is spent".to_string(),
+            details: None,
+        };
+        assert!(!refused.is_transient());
+        enrollment
+            .send(Err(anyhow::Error::new(Error::Studio(refused))))
+            .unwrap();
         let error = run.ended().await;
-        assert!(error.contains("just enrolled"), "{error}");
+        assert!(error.contains("spent"), "{error}");
     }
 
     #[tokio::test]
