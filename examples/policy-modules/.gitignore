@@ -4,3 +4,5 @@
 /target/
 # Runs write their recordings here.
 /recordings/
+# Python bytecode the tools leave behind.
+__pycache__/
