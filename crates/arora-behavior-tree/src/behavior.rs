@@ -807,25 +807,24 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             None => Ok(()),
         };
 
-        // What the tick did, to the traces: a failed tick's too.
-        if !self.traces.is_empty() {
-            if let Some(lowered) = &self.lowered {
-                self.traces
-                    .report(
-                        self.ticks,
-                        &lowered.tree().record,
-                        Some(lowered.tree()),
-                        &self.functions,
-                        ctx.store,
-                    )
-                    .map_err(behavior_error)?;
-            }
-        }
+        // What the tick did, to the traces: a failed tick's too. A report
+        // that is not written fails the tick once the runs are swept.
+        let reported = match &self.lowered {
+            Some(lowered) if !self.traces.is_empty() => self.traces.report(
+                self.ticks,
+                &lowered.tree().record,
+                Some(lowered.tree()),
+                &self.functions,
+                ctx.store,
+            ),
+            _ => Ok(()),
+        };
         ticked?;
 
         // Runs that reached a terminal status this tick latch and await
         // pruning; their ids stop resolving (halting them is now a no-op).
         self.sweep_terminal_runs(ctx.store);
+        reported.map_err(behavior_error)?;
 
         Ok(BehaviorStatus::Running)
     }
