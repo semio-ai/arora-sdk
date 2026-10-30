@@ -12,7 +12,8 @@
 //! tick reached before and not now, the detached nodes whose activity changed
 //! — and hands that to each trace, which reports it at its own pace. The work
 //! follows the nodes the tick reached and what changed, not the size of the
-//! tree; a watched node's outputs are read only at a report.
+//! tree; a watched node's outputs are read only at a report. A watched node
+//! records the value it returns when no binding keeps it.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -36,6 +37,11 @@ pub(crate) struct TickRecord {
     statuses: RefCell<Vec<(Uuid, Status)>>,
     /// The detached nodes the tick read, with what each did.
     activity: RefCell<Vec<(Uuid, Activity)>>,
+    /// The nodes a trace watches.
+    watched: RefCell<IdSet<Uuid>>,
+    /// The watched nodes that returned a value no binding keeps, with that
+    /// value.
+    returns: RefCell<Vec<(Uuid, Value)>>,
 }
 
 impl TickRecord {
@@ -51,6 +57,20 @@ impl TickRecord {
         if !on {
             self.statuses.borrow_mut().clear();
             self.activity.borrow_mut().clear();
+            self.returns.borrow_mut().clear();
+        }
+    }
+
+    /// Whether a trace watches node `node`.
+    pub(crate) fn watches(&self, node: Uuid) -> bool {
+        self.watched.borrow().contains(&node)
+    }
+
+    /// Watched node `node` returned `value`, which no binding keeps. A status
+    /// is no value: the node's status reports it.
+    pub(crate) fn returned(&self, node: Uuid, value: &Value) {
+        if Status::try_from(value.clone()).is_err() {
+            self.returns.borrow_mut().push((node, value.clone()));
         }
     }
 
@@ -86,6 +106,8 @@ struct Trace {
     activity_changed: IdSet<Uuid>,
     /// The nodes an edit restarted since the last report.
     restarted: Vec<Uuid>,
+    /// The tick of its last report.
+    last_tick: Option<u64>,
 }
 
 /// The interpreter's running traces, and what the previous tick did.
@@ -102,6 +124,8 @@ pub(crate) struct Traces {
     /// The nodes whose status, and the detached nodes whose activity,
     /// changed at this tick.
     delta: (Vec<Uuid>, Vec<Uuid>),
+    /// What each watched node last returned that no binding keeps.
+    returns: IdMap<Uuid, Value>,
 }
 
 impl Traces {
@@ -123,7 +147,21 @@ impl Traces {
             status_changed: IdSet::default(),
             activity_changed: IdSet::default(),
             restarted: Vec::new(),
+            last_tick: None,
         });
+    }
+
+    /// Set `record` to record while a trace runs, the watched nodes' returns
+    /// included.
+    pub(crate) fn arm(&self, record: &TickRecord) {
+        record.set_on(!self.traces.is_empty());
+        let mut watched = record.watched.borrow_mut();
+        watched.clear();
+        watched.extend(
+            self.traces
+                .iter()
+                .flat_map(|trace| trace.options.values.iter().copied()),
+        );
     }
 
     /// End the trace `task` names, answering its status key; `None` when no
@@ -138,6 +176,7 @@ impl Traces {
         if self.traces.is_empty() {
             self.statuses.clear();
             self.activity.clear();
+            self.returns.clear();
         }
         Some(trace.handle.status)
     }
@@ -146,6 +185,9 @@ impl Traces {
     /// forgets what it reported of them, and its next report names them and
     /// states them anew.
     pub(crate) fn restart(&mut self, restarted: &[Uuid]) {
+        for node in restarted {
+            self.returns.remove(node);
+        }
         for trace in self.traces.iter_mut().filter(|trace| trace.started) {
             for node in restarted {
                 trace.status.remove(node);
@@ -174,6 +216,7 @@ impl Traces {
         statuses.extend(record.statuses.borrow_mut().drain(..));
         activity.clear();
         activity.extend(record.activity.borrow_mut().drain(..));
+        self.returns.extend(record.returns.borrow_mut().drain(..));
         let (mut status_delta, mut activity_delta) = std::mem::take(&mut self.delta);
         changes(&self.statuses, &statuses, &mut status_delta);
         changes(&self.activity, &activity, &mut activity_delta);
@@ -183,6 +226,7 @@ impl Traces {
             .any(|trace| trace.options.min_interval_ns.is_some())
             .then(|| device_time(store))
             .flatten();
+        let mut failure = None;
         for trace in &mut self.traces {
             if trace.started {
                 trace.status_changed.extend(&status_delta);
@@ -198,38 +242,72 @@ impl Traces {
             if !due {
                 continue;
             }
-            let report = trace.report(tick, &statuses, &activity, tree, functions);
-            if !trace.started {
-                trace.started = true;
-                store
-                    .write(StateChange::set(
-                        trace.handle.status.clone(),
-                        Status::Running.into(),
-                    ))
-                    .map_err(|e| {
-                        format!("{}: writing a trace's status: {e}", trace.handle.status)
-                    })?;
-            } else if report.is_empty() {
+            let first = !trace.started;
+            let report = trace.report(tick, &statuses, &activity, tree, functions, &self.returns);
+            if !first && report.is_empty() {
                 continue;
             }
-            trace.reported_at = now;
-            for key in &trace.handle.feedback {
-                store
-                    .write(StateChange::set(key.clone(), encode_report(&report)))
-                    .map_err(|e| format!("{key}: writing a trace's report: {e}"))?;
+            // A report that is not written leaves the trace to start over: its
+            // next report states everything, as a first one does.
+            if let Err(error) = trace.publish(&report, first, store) {
+                trace.start_over();
+                failure.get_or_insert(error);
+                continue;
             }
+            trace.started = true;
+            trace.reported_at = now;
+            trace.last_tick = Some(tick);
         }
         self.spare = (
             std::mem::replace(&mut self.statuses, statuses),
             std::mem::replace(&mut self.activity, activity),
         );
         self.delta = (status_delta, activity_delta);
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
 }
 
 impl Trace {
+    /// Write `report` to the feedback keys, and the trace's status first
+    /// when it is the `first`.
+    fn publish(
+        &self,
+        report: &TraceReport,
+        first: bool,
+        store: &dyn DataStore,
+    ) -> Result<(), String> {
+        if first {
+            store
+                .write(StateChange::set(
+                    self.handle.status.clone(),
+                    Status::Running.into(),
+                ))
+                .map_err(|e| format!("{}: writing a trace's status: {e}", self.handle.status))?;
+        }
+        for key in &self.handle.feedback {
+            store
+                .write(StateChange::set(key.clone(), encode_report(report)))
+                .map_err(|e| format!("{key}: writing a trace's report: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Forget everything reported: the next report is a first one.
+    fn start_over(&mut self) {
+        self.started = false;
+        self.reported_at = None;
+        self.last_tick = None;
+        self.status.clear();
+        self.activity.clear();
+        self.values.clear();
+        self.status_changed.clear();
+        self.activity_changed.clear();
+        self.restarted.clear();
+    }
+
     /// The report of what changed since the last one, which it becomes.
+    /// `returns` holds what the watched nodes last returned that no binding
+    /// keeps.
     fn report(
         &mut self,
         tick: u64,
@@ -237,9 +315,11 @@ impl Trace {
         activity: &IdMap<Uuid, Activity>,
         tree: Option<&BehaviorTree>,
         functions: &FunctionIndex,
+        returns: &IdMap<Uuid, Value>,
     ) -> TraceReport {
         let mut report = TraceReport {
             tick,
+            since: self.last_tick,
             restarted: std::mem::take(&mut self.restarted),
             ..TraceReport::default()
         };
@@ -261,7 +341,7 @@ impl Trace {
             for node in &self.options.values {
                 let reported = self.values.entry(*node).or_default();
                 let mut changed = BTreeMap::new();
-                let outputs = tree.outputs_of(*node, functions);
+                let outputs = tree.outputs_of(*node, functions, returns.get(node));
                 for (port, value) in &outputs {
                     if reported.get(port) != Some(value) {
                         reported.insert(*port, value.clone());

@@ -24,8 +24,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TraceOptions {
-    /// The nodes whose output values the reports carry: their return value
-    /// and the parameters they write. Empty, the reports carry statuses and
+    /// The nodes whose output values the reports carry: their return value,
+    /// kept by a binding or not, and the parameters they write. Empty, the reports carry statuses and
     /// detached activity only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Uuid>,
@@ -87,6 +87,11 @@ pub struct TraceReport {
     /// The interpreter's tick the report was written at, counted from its
     /// first tick.
     pub tick: u64,
+    /// The tick of the trace's previous report; `None` in its first. A
+    /// reader whose last report is of another tick missed one, and starts a
+    /// new trace for the whole picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
     /// The nodes whose status changed, with their new status.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub status: BTreeMap<Uuid, NodeStatus>,
@@ -131,6 +136,7 @@ mod tests {
     fn report() -> TraceReport {
         TraceReport {
             tick: 7,
+            since: Some(5),
             status: [
                 (Uuid::from_u128(1), NodeStatus::Running),
                 (Uuid::from_u128(2), NodeStatus::NotReached),
@@ -168,6 +174,7 @@ mod tests {
             json,
             serde_json::json!({
                 "tick": 7,
+                "since": 5,
                 "status": {
                     "00000000-0000-0000-0000-000000000001": "running",
                     "00000000-0000-0000-0000-000000000002": "not_reached",

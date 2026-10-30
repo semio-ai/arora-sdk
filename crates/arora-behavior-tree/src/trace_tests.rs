@@ -20,7 +20,8 @@ use uuid::Uuid;
 
 use crate::behavior::BehaviorTreeInterpreter;
 use crate::call_expression_tests::{
-    index, Engine, ADD, ADD_A, ADD_B, BELOW, BELOW_LIMIT, BELOW_X, MUL, MUL_A, MUL_B,
+    index, Engine, ADD, ADD_A, ADD_B, BELOW, BELOW_LIMIT, BELOW_X, MUL, MUL_A, MUL_B, SMOOTH,
+    SMOOTH_ALPHA, SMOOTH_STATE, SMOOTH_X,
 };
 use crate::nodes::SEQ_FUNCTION_ID;
 use crate::schema::_RET_PARAM_ID;
@@ -92,8 +93,12 @@ struct Device {
 
 impl Device {
     fn new() -> Self {
+        Self::running(behavior())
+    }
+
+    fn running(graph: Graph) -> Self {
         let mut interpreter = BehaviorTreeInterpreter::new();
-        interpreter.load(behavior()).expect("the behavior loads");
+        interpreter.load(graph).expect("the behavior loads");
         let device = Self {
             interpreter,
             store: SimpleDataStore::new(),
@@ -176,6 +181,7 @@ fn a_trace_reports_the_first_tick_then_transitions() {
     device.tick();
     assert_eq!(device.status(&trace), Some(Status::Running));
     let first = device.report_at(&trace, 1).expect("a first report");
+    assert_eq!(first.since, None, "a first report follows none");
     assert_eq!(
         statuses(&first),
         BTreeMap::from([
@@ -197,6 +203,7 @@ fn a_trace_reports_the_first_tick_then_transitions() {
     device.tick();
     let second = device.report_at(&trace, 2).expect("an activity change");
     assert!(second.status.is_empty(), "{second:?}");
+    assert_eq!(second.since, Some(1));
 
     // A tick that changes nothing writes nothing.
     device.tick();
@@ -206,6 +213,7 @@ fn a_trace_reports_the_first_tick_then_transitions() {
     device.set("gate", 1.0);
     device.tick();
     let closed = device.report_at(&trace, 4).expect("a report of the change");
+    assert_eq!(closed.since, Some(2), "tick 3 changed nothing");
     assert_eq!(
         statuses(&closed),
         BTreeMap::from([
@@ -484,4 +492,78 @@ fn a_trace_survives_an_edit_and_reports_the_restarted_nodes() {
     device.tick();
     assert_eq!(device.report_at(&trace, 6), None);
     assert_eq!(device.status(&trace), Some(Status::Running));
+}
+
+/// A watched node's outputs are what its cells hold, and its return value
+/// when no binding keeps it: here an attached `add` whose return is bound to
+/// nothing, and a detached `smooth` whose state is a parameter it writes.
+#[test]
+fn a_trace_reports_unbound_returns_and_written_parameters() {
+    const SMOOTHED: Uuid = Uuid::from_u128(0x105);
+    let graph = Graph {
+        root: Some(ROOT),
+        nodes: vec![
+            Node {
+                id: ROOT,
+                function: SEQ_FUNCTION_ID,
+                children: Some(vec![SUM]),
+                ..Node::default()
+            },
+            Node {
+                id: SUM,
+                function: ADD,
+                bind: [(ADD_A, key("in")), (ADD_B, value(1.0))].into(),
+                children: None,
+            },
+            Node {
+                id: SMOOTHED,
+                function: SMOOTH,
+                bind: [
+                    (SMOOTH_X, key("in")),
+                    (SMOOTH_ALPHA, value(0.5)),
+                    (SMOOTH_STATE, value(0.0)),
+                    (_RET_PARAM_ID, key("smoothed")),
+                ]
+                .into(),
+                children: None,
+            },
+        ],
+    };
+    let mut device = Device::running(graph);
+    let trace = device
+        .interpreter
+        .trace(TraceOptions {
+            values: vec![SUM, SMOOTHED],
+            min_interval_ns: None,
+        })
+        .unwrap();
+    device.tick();
+    let first = device.report_at(&trace, 1).unwrap();
+    assert_eq!(
+        first.values,
+        BTreeMap::from([
+            (SUM, BTreeMap::from([(_RET_PARAM_ID, Value::F64(11.0))])),
+            (
+                SMOOTHED,
+                BTreeMap::from([
+                    (_RET_PARAM_ID, Value::F64(5.0)),
+                    (SMOOTH_STATE, Value::F64(5.0)),
+                ])
+            ),
+        ])
+    );
+    assert_eq!(first.status.get(&SUM), Some(&NodeStatus::Success));
+
+    // The state settles toward the input; the sum holds.
+    device.tick();
+    assert_eq!(
+        device.report_at(&trace, 2).unwrap().values,
+        BTreeMap::from([(
+            SMOOTHED,
+            BTreeMap::from([
+                (_RET_PARAM_ID, Value::F64(7.5)),
+                (SMOOTH_STATE, Value::F64(7.5)),
+            ])
+        )])
+    );
 }
