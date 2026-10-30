@@ -700,6 +700,26 @@ read. A minor version adds to a format, so an interpreter reading `1.1` runs a
 a field of `Graph`, so a host can route a call on it without decoding the
 graph.
 
+**A trace is a task run.** `trace` answers the `TaskHandle` a spawn answers,
+and `halt` ends it. A client that already follows runs follows a trace with
+no new vocabulary: a status key that goes terminal, a feedback key, a stop
+call, and the device logs it as it logs any run. Several clients each start
+their own, with their own options, and a lost client's trace ends with the
+same halt as a lost run. A stream of its own, or a key the interpreter writes
+whenever a flag is set, would need a lifecycle of its own beside the runs'.
+
+**A trace reports changes, recorded where the tick makes them.** Each node
+records the status it returns as it ticks, and each detached node whether it
+called or answered from its cache as it is read; the interpreter compares the
+tick's record with the previous tick's and gives each trace what changed. A
+report carries only what changed since that trace's last one, so an editor
+keeps its view and a settled behavior writes nothing. A snapshot of every
+node at every tick would cost the size of the graph whether or not anything
+moved, and walking the lowered tree after the tick would visit it a second
+time. Values are the exception: an output is read from its cell at a report,
+for the watched nodes only, since a value that a node writes is already
+where it can be read.
+
 ### The HAL is a module
 
 The device's HAL answers remotes through the same module-call path as the
