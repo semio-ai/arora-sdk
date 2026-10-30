@@ -46,6 +46,7 @@ impl BehaviorInterpreter for Idle {
 runtime then drops; an `Err` is transient: the runtime raises it and ticks the
 interpreter again next step. The other methods default to refusing: `load`
 replaces the behavior with a `Graph`, `apply` edits it with a `GraphDiff`,
+`read` answers it with its revision,
 `spawn`, `spawn_graph` and `halt` host task runs, `trace` reports what the
 ticks do, and `described_methods` lists the methods the interpreter
 implements itself. The trait is not `Send`: a
@@ -58,7 +59,7 @@ first ([built-in keys](#built-in-keys)).
 
 The runtime registers its interpreter as a module under
 `interpreter_module::ID`, whose functions are the interpreter's entry points:
-`LOAD`, `EDIT`, `SPAWN`, `SPAWN_GRAPH`, `TRACE` and `HALT`. A remote client, an
+`LOAD`, `EDIT`, `READ`, `SPAWN`, `SPAWN_GRAPH`, `TRACE` and `HALT`. A remote client, an
 in-process caller or a behavior loads a behavior with an ordinary call:
 
 ```rust,ignore
@@ -68,6 +69,25 @@ device.call(load)?; // an arora::Arora; a bridge's Call reaches it the same way
 
 `interpreter_module` holds every id and an `encode_*` / `decode_*` pair per
 function.
+
+## Reading the behavior
+
+`read` answers the main behavior as a `LoadedBehavior`: the `Graph` that a
+`load` of it reproduces — none of the interpreter's own structure and none of
+a task run's nodes, rooted as loaded or as the last edit set it,
+`Graph::empty()` when nothing is loaded — and its `revision`. A client reaches
+it through `READ`, a call with no argument (`interpreter_module::encode_read`);
+`decode_read_result` reads the answer, a key-value of a `u64` `revision` and
+the `graph` in the form `LOAD` takes.
+
+The revision starts at 0 and counts the changes of the main behavior: one more
+at each `load`, and at each `apply` that reaches the main behavior. A refused
+edit, a task run spawned, edited or halted, and a tick leave it as it is. The
+interpreter writes it to `arora/behavior/revision` (`built_in::BEHAVIOR_REVISION`)
+at its first tick and at the tick after each change, and its traces carry it
+in the report after a change. A behavior editor that attaches to a device
+reads the behavior, follows the key or a trace, and reads again when the
+revision is not the one it read: another client changed the behavior.
 
 ## Task runs
 
@@ -96,7 +116,8 @@ starts one under `TraceOptions` (the nodes whose values to report, the least
 time between reports) and answers its `TaskHandle`. At the end of each tick
 that changed something, its feedback key holds a `TraceReport`: the tick, the
 nodes whose status changed, the detached nodes whose activity changed, and
-the watched nodes' outputs that changed. `halt` ends it. A behavior editor
+the watched nodes' outputs that changed, and the behavior's revision after a
+change. `halt` ends it. A behavior editor
 starts one when playback starts and halts it when playback stops;
 [`docs/trace.md`](docs/trace.md) describes the report and its cost.
 
@@ -117,31 +138,33 @@ and spawns it like any task run.
 ## Built-in keys
 
 Before it ticks the interpreter, the runtime writes the step's clock to the
-store under two keys:
+store under two keys, and an interpreter that answers `read` keeps the
+behavior's revision under a third:
 
 | key | value | meaning |
 |---|---|---|
 | `arora/time` | `U64` | nanoseconds on the device's timeline, from the time it starts at (zero unless its builder sets one) |
 | `arora/dt` | `U64` | nanoseconds elapsed since the previous step |
+| `arora/behavior/revision` | `U64` | the main behavior's revision, written once per change ([reading the behavior](#reading-the-behavior)) |
 
 A behavior that paces itself reads them like any other key. They live under
 the reserved `arora/` namespace (`built_in::PREFIX`, `built_in::is_built_in`),
 which belongs to the runtime and its interpreter — the behavior tree keeps its
 task runs' keys there too — so a behavior writes no key of its own under it.
-The clock keys travel outbound with every other change: a remote derives the
-device's step rate from them, or filters them out.
+The keys travel outbound with every other change: a remote derives the
+device's step rate from the clock, or filters the keys out.
 
 ## Reference
 
 | module | contents |
 |---|---|
-| crate root | `BehaviorInterpreter`, `BehaviorContext`, `BehaviorStatus`, `BehaviorError`, `FunctionIndex`, `ModuleFunction` |
+| crate root | `BehaviorInterpreter`, `BehaviorContext`, `BehaviorStatus`, `BehaviorError`, `LoadedBehavior`, `FunctionIndex`, `ModuleFunction` |
 | [`graph`](src/graph.rs) | `Graph`, `Node`, `Source`, `Port`, `GraphDiff`, `Binding`, `GraphType`: references by id, the form an interpreter takes ([which form to use](../arora-behavior-tree/docs/text.md#which-form-to-use)) |
 | [`interpreter_module`](src/interpreter_module.rs) | the interpreter module's ids and its calls' encoders and decoders |
 | [`task`](src/task.rs) | `TaskHandle`, `TaskId`, `RunPolicy` |
 | [`trace`](src/trace.rs) | `TraceOptions`, `TraceReport`, `NodeStatus`, `Activity`, the report's encoder and decoder |
 | [`status`](src/status.rs) | `Status`, its record's ids and version, `declare_status_enumeration` |
-| [`built_in`](src/built_in.rs) | `PREFIX`, `TIME`, `DT`, `is_built_in` |
+| [`built_in`](src/built_in.rs) | `PREFIX`, `TIME`, `DT`, `BEHAVIOR_REVISION`, `is_built_in` |
 
 [`docs/interpreter-workflow.md`](docs/interpreter-workflow.md) walks an
 interpreter's life — loading, ticking, editing, task runs — against the
