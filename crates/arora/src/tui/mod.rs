@@ -188,12 +188,10 @@ impl Operator for Tui {
 
 /// Asks `label` in the prompt line of the UI showing `state`, and returns
 /// the answer typed there: `None` when skipped, which only an answer not
-/// `required` may be, or when the UI is gone.
+/// `required` may be, or once the UI has stopped.
 async fn ask_text(state: &SharedState, label: &str, required: bool) -> Option<String> {
-    let (question, reply) = state::text_prompt(label.to_string(), required);
-    if let Ok(mut state) = state.lock() {
-        state.prompts.push_back(question);
-    }
+    let question = state::text_prompt(label.to_string(), required);
+    let reply = state.lock().ok()?.ask(question)?;
     reply.await.ok().flatten()
 }
 
@@ -228,17 +226,22 @@ struct Enroller {
 #[async_trait]
 impl crate::studio::Enroller for Enroller {
     /// Waits for the operator's answer, for as long as that takes; a terminal
-    /// UI torn down declines.
+    /// UI that has stopped declines.
     async fn offer_enrollment(&self) -> bool {
         let options = OFFER_OPTIONS
             .iter()
             .map(|option| option.to_string())
             .collect();
-        let (question, reply) = state::decision_prompt(OFFER_LABEL.to_string(), options, None);
-        if let Ok(mut state) = self.state.lock() {
-            state.prompts.push_back(question);
+        let question = state::decision_prompt(OFFER_LABEL.to_string(), options, None);
+        let reply = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|mut state| state.ask(question));
+        match reply {
+            Some(reply) => matches!(reply.await, Ok(0)),
+            None => false,
         }
-        matches!(reply.await, Ok(0))
     }
 
     async fn ask_name(&self) -> Option<String> {
@@ -249,13 +252,14 @@ impl crate::studio::Enroller for Enroller {
         ask_text(&self.state, MODEL_FAMILY_LABEL, false).await
     }
 
+    /// Shows nothing once the UI has stopped.
     fn show_code(&self, code: Option<&crate::studio::EnrollmentCode>) -> bool {
         match self.state.lock() {
-            Ok(mut state) => {
+            Ok(mut state) if !state.stopped => {
                 state.enrollment_code = code.map(state::EnrollmentCode::from);
                 true
             }
-            Err(_) => false,
+            _ => false,
         }
     }
 
@@ -274,6 +278,12 @@ impl crate::studio::Enroller for Enroller {
 
 impl Drop for Tui {
     fn drop(&mut self) {
+        // An enroller outliving the UI asks nothing more, and its questions
+        // waiting get no answer.
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
         self.running.store(false, Ordering::SeqCst);
         if let Some(handle) = self.ui.lock().ok().and_then(|mut ui| ui.take()) {
             let _ = handle.join();
@@ -562,6 +572,24 @@ mod tests {
         );
         typed(&state, "pepper");
         assert_eq!(answered(family).await.as_deref(), Some("pepper"));
+    }
+
+    /// Once the UI has stopped, a question waiting gets no answer and a new
+    /// one is not asked: the offer is declined, the name not given, and a
+    /// code not shown.
+    #[tokio::test]
+    async fn a_stopped_ui_asks_nothing_and_shows_no_code() {
+        let (state, enroller) = enroller();
+        let waiting = enroller.offer_enrollment();
+        futures::pin_mut!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+        state.lock().unwrap().stop();
+        assert!(!answered(waiting).await);
+
+        assert!(!answered(enroller.offer_enrollment()).await);
+        assert_eq!(answered(enroller.ask_name()).await, None);
+        assert!(state.lock().unwrap().prompts.is_empty());
+        assert!(!enroller.show_code(None));
     }
 
     /// A code cleared leaves the prompt line; the device's id and record

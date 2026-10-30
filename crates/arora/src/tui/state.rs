@@ -163,6 +163,9 @@ pub(crate) struct State {
     pub commands: Vec<TuiCommand>,
     /// Where fired commands go; `None` for the plain device UI.
     pub command_tx: Option<UnboundedSender<TuiCommandEvent>>,
+    /// Whether the UI has stopped: it asks nothing any more, and shows
+    /// nothing.
+    pub stopped: bool,
 }
 
 impl State {
@@ -184,6 +187,7 @@ impl State {
             mouse_capture: true,
             commands: Vec::new(),
             command_tx: None,
+            stopped: false,
         }
     }
 
@@ -220,6 +224,26 @@ impl State {
         } else if self.scroll_from_bottom > 0 {
             self.scroll_from_bottom = (self.scroll_from_bottom + 1).min(self.max_scroll());
         }
+    }
+
+    /// Puts `question` in the prompt line, and returns where its answer
+    /// comes; `None` once the UI has stopped, which asks nothing.
+    pub(crate) fn ask<T>(
+        &mut self,
+        (question, reply): (Prompt, oneshot::Receiver<T>),
+    ) -> Option<oneshot::Receiver<T>> {
+        if self.stopped {
+            return None;
+        }
+        self.prompts.push_back(question);
+        Some(reply)
+    }
+
+    /// Stops the UI: the questions waiting are dropped, whoever asked them
+    /// getting no answer, and no question is asked any more.
+    pub fn stop(&mut self) {
+        self.stopped = true;
+        self.prompts.clear();
     }
 
     /// Whether the prompt line shows: a prompt waits, or an enrollment code
