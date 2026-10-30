@@ -251,13 +251,24 @@ interpreter the step ticks:
 |---|---|
 | `LOAD` | `BehaviorInterpreter::load`: replace the behavior with a whole `Graph` |
 | `EDIT` | `BehaviorInterpreter::apply`: apply a `GraphDiff` to it |
+| `READ` | `BehaviorInterpreter::read`: answer the behavior as a `Graph` `LOAD` takes, and its revision |
 | `SPAWN` | `BehaviorInterpreter::spawn`: start a task run from a `Call` |
 | `SPAWN_GRAPH` | `BehaviorInterpreter::spawn_graph`: start a task run whose program is a `Graph` |
 | `TRACE` | `BehaviorInterpreter::trace`: start a trace, a task run reporting what each tick does |
 | `HALT` | `BehaviorInterpreter::halt`: stop a task run or a trace |
 
 A remote's `Call`, a `LocalCaller`, `Arora::call` and a behavior all reach
-them through ordinary dispatch. A call from inside the interpreter's own tick
+them through ordinary dispatch. `LOAD`, `EDIT`, `READ` and `TRACE` act on the
+main behavior and are reached by id: the method index does not describe
+them. `SPAWN`, `SPAWN_GRAPH` and `HALT` are described, under the names
+`spawn`, `spawn_graph` and `halt`.
+
+A client that shows the behavior — an editor attached to a running device —
+calls `READ` (`LocalCaller::read_behavior`) and follows the key
+`arora/behavior/revision`, which the interpreter writes at the tick after each
+load or edit of the behavior: when it differs from the revision the client
+read, another client changed the behavior, and the client reads it again. A
+trace's report carries the same revision after a change. A call from inside the interpreter's own tick
 fails with "the behavior is being ticked; call between steps": the step holds
 the interpreter for the length of the tick. `Arora::load_groot` and
 `AroraBuilder::with_groot` lower a Groot tree against the method index and
@@ -339,7 +350,10 @@ step's `dt`, both `U64` nanoseconds
 ([`arora_behavior::built_in`](../../arora-behavior/src/built_in.rs)). They are
 written first so that everything in the step reads this step's time, and they
 travel outbound like any other change: a remote derives the device's step
-rate from them, or filters them out with `built_in::is_built_in`. The clock
+rate from them, or filters them out with `built_in::is_built_in`. The
+interpreter writes a third, `arora/behavior/revision`, when the behavior
+changes. All three are closed to remote writers, as is every key under
+`arora/`. The clock
 starts at zero, or at `with_start_time`: devices started at the same time and
 stepped with the same `dt`s read the same `arora/time`.
 
