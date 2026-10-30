@@ -280,7 +280,7 @@ impl MujocoHal {
             HalError::Other(format!("could not load {}: {e}", config.model.display()))
         })?;
         if let Some(timestep) = config.timestep {
-            if !(timestep > 0.0) {
+            if timestep.is_nan() || timestep <= 0.0 {
                 return Err(HalError::Other(format!(
                     "a timestep of {timestep} s is not positive"
                 )));
