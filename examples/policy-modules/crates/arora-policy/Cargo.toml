@@ -7,8 +7,8 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-# Pure Rust, so it builds for wasm32-wasip2 unchanged; default features off
-# keeps the multithreaded and file-system paths out of the guest.
+# Default features off keep the multithreaded and file-system paths out of the
+# wasm guest.
 tract-onnx = { version = "0.23", default-features = false }
 
 [dev-dependencies]
