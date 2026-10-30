@@ -699,16 +699,22 @@ impl BehaviorTreeInterpreter {
         self.edit(diff)
     }
 
-    /// Write the terminal status of the runs halted since the last tick:
+    /// Write the terminal status of the runs and traces halted since the
+    /// last tick:
     /// halted runs end [`Status::Failure`] — the observer that issued the halt
     /// is the one reporting a cancel.
     fn write_halts(&mut self, store: &dyn DataStore) -> Result<(), BehaviorError> {
-        for key in std::mem::take(&mut self.halted) {
+        // A status not written stays to write at the next tick, with those
+        // after it.
+        for (at, key) in self.halted.iter().enumerate() {
             let failure: Value = Status::Failure.into();
-            store
-                .write(StateChange::set(key.clone(), failure))
-                .map_err(|e| behavior_error(format!("{key}: writing halt status: {e}")))?;
+            if let Err(e) = store.write(StateChange::set(key.clone(), failure)) {
+                let error = behavior_error(format!("{key}: writing halt status: {e}"));
+                self.halted.drain(..at);
+                return Err(error);
+            }
         }
+        self.halted.clear();
         Ok(())
     }
 
