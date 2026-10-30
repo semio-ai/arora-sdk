@@ -1,6 +1,6 @@
 [package]
 name = "arora-hal-restful"
-version = "5.1.0"
+version = "6.0.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "RESTful-API HAL for Arora: drives HTTP-controlled robots (hackerbot) as Arora devices"
@@ -27,9 +27,9 @@ anyhow = { version = "1", optional = true }
 clap = { version = "4", features = ["derive", "env"], optional = true }
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-types = { path = "../arora-types", version = "3.1" }
-# 17: `studio::of`, `StudioArgs::connects`, `AroraBuilder::with_studio_handle`,
+# 18: `studio::of`, `StudioArgs::connects`, `Operator::enroller`,
 # `RunnerArgs::device`.
-arora = { path = "../arora", version = "17", optional = true }
+arora = { path = "../arora", version = "18", optional = true }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
@@ -48,6 +48,6 @@ webpki-roots = "1"
 
 [dev-dependencies]
 # A device over the HAL, for the tests of what it opens to remote writers.
-arora = { path = "../arora", version = "17" }
+arora = { path = "../arora", version = "18" }
 # `time`: the try_send test times out around the queued write.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

@@ -60,7 +60,7 @@ pub enum Expression {
     /// Reference to another parameter.
     NodeArgument(NodeParameterId),
     /// Read a `Key` sub-path of another expression's value on read (the shared
-    /// model's `LinkSource::Select`). Composes over any source.
+    /// model's `Source::Select`). Composes over any source.
     Select {
         /// The expression whose value is projected.
         source: Box<Expression>,

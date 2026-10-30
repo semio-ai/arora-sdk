@@ -15,15 +15,15 @@
 //!
 //! ```text
 //! raw: mul(a: {sensor/distance}, b: 100f64)
-//! cm: clamp(x: @raw, lo: 0f64)
-//! level: {face/level} = add(a: @cm, b: 1f64)
+//! cm: clamp(x: @raw._ret, lo: 0f64)
+//! level: {face/level} = add(a: @cm._ret, b: 1f64)
 //! ```
 //!
 //! # What reads a detached node
 //!
 //! Nothing marks a read. A node reads a detached node when one of its
 //! arguments reads a tree-local cell the detached node writes: its return
-//! value, as `@node` ([`Expression::NodeArgument`] on `_ret`) or through the
+//! value, as `@node._ret` ([`Expression::NodeArgument`] on `_ret`) or through the
 //! variable `_ret` is bound to, or one of its mutable parameters, as
 //! `@node.parameter` or through its variable. Lowering finds the writer of
 //! every such cell, and gives each node the detached nodes it reads. A
@@ -34,7 +34,7 @@
 //! written.
 //!
 //! A store key is not such a cell. A port bound to a store key keeps a
-//! tree-local cell of its own, which `@node` reads, and publishes to the key
+//! tree-local cell of its own, which `@node._ret` reads, and publishes to the key
 //! after the tree ticks. The key itself is read as the store holds it, so a
 //! value fed back through a key, or passed from one graph to another through a
 //! key, reaches its reader at the next tick. Feedback goes only through a key:
@@ -75,7 +75,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use arora_behavior::FunctionIndex;
+use arora_behavior::{Activity, FunctionIndex};
 use arora_types::call::{CallBridge, CallError};
 use arora_types::value::Value;
 use uuid::Uuid;
@@ -130,6 +130,8 @@ pub(crate) struct Detached {
     observed: RefCell<HashSet<Uuid>>,
     /// The stack a node is brought up to date with, kept between ticks.
     stack: RefCell<Vec<(usize, usize)>>,
+    /// Where each node records what it did, while a trace runs.
+    record: Rc<crate::trace::TickRecord>,
 }
 
 #[derive(Default)]
@@ -265,6 +267,7 @@ impl Detached {
     pub(crate) fn new(
         nodes: Vec<Rc<Node>>,
         bindings: crate::id_hash::IdMap<NodeParameterId, VariableCell>,
+        record: Rc<crate::trace::TickRecord>,
     ) -> Self {
         let caches = RefCell::new(vec![Cache::default(); nodes.len()]);
         Self {
@@ -280,10 +283,12 @@ impl Detached {
             tick: Cell::new(1),
             observed: RefCell::default(),
             stack: RefCell::default(),
+            record,
         }
     }
 
-    pub(crate) fn empty() -> Self {
+    /// No detached node, recording to `record`.
+    pub(crate) fn empty(record: Rc<crate::trace::TickRecord>) -> Self {
         Self {
             nodes: Vec::new(),
             ids: crate::id_hash::IdMap::default(),
@@ -293,6 +298,7 @@ impl Detached {
             tick: Cell::new(1),
             observed: RefCell::default(),
             stack: RefCell::default(),
+            record,
         }
     }
 
@@ -1024,6 +1030,7 @@ impl Detached {
                 if lowered.rewrites[at] {
                     self.rewrite(at, outputs);
                 }
+                self.recorded(at, Activity::Cached);
                 return Ok(());
             }
         }
@@ -1049,6 +1056,7 @@ impl Detached {
             if lowered.rewrites[at] {
                 self.rewrite(at, outputs);
             }
+            self.recorded(at, Activity::Cached);
             return Ok(());
         }
         let module_id = lowered.modules[at].ok_or(BehaviorTreeError::CallError(
@@ -1063,6 +1071,7 @@ impl Detached {
             .collect();
         // A call counts whether or not it succeeds.
         self.caches.borrow_mut()[at].calls += 1;
+        self.recorded(at, Activity::Called);
         let result = caller
             .arora_call_borrowed(Some(module_id), node.function, &args)
             .map_err(BehaviorTreeError::CallError)?;
@@ -1097,6 +1106,14 @@ impl Detached {
         caches[at].arguments = Some(values);
         caches[at].outputs = results;
         Ok(())
+    }
+
+    /// Record that the node at `at` did `activity` this tick, while a trace
+    /// runs.
+    fn recorded(&self, at: usize, activity: Activity) {
+        if self.record.is_on() {
+            self.record.activity(self.nodes[at].id, activity);
+        }
     }
 
     /// Write back the cached outputs of the node at `at`, whose cells a

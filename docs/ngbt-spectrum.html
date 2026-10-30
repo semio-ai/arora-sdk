@@ -478,11 +478,11 @@ function fmt(v) {
 function argText(node, show) {
   return (OP_SIG[node.op] || []).filter((p) => node.a && p in node.a).map((p) => `${p}: ${show(node.a[p], p)}`).join(", ");
 }
-// #396 reads a detached node through its port, @node, and a store key, the
+// #396 reads a detached node through its port, @node._ret, and a store key, the
 // clock or a literal as itself: they are no nodes of the graph.
 function detachedRef(model, x) {
   const n = model.nodes[x];
-  return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `@${x}`;
+  return n.op === "input" ? `{${n.key}}` : n.op === "time" ? "{arora/time}" : n.op === "const" ? fmt(n.value) : `@${x}._ret`;
 }
 // #396: a graph alone, an example whose whole tree is one block, is detached
 // nodes whose outputs are bound to store keys, its sinks, beside a tree that
@@ -1037,7 +1037,7 @@ const DESIGNS = [
     id: "compute", tab: "NG in BT detached", sub: "#396 · chosen · on demand, cached", name: "Graph nodes detached from the tree",
     pr: "https://github.com/semio-ai/arora-sdk/pull/396", prText: "semio-ai/arora-sdk#396",
     doc: "https://github.com/semio-ai/arora-sdk/blob/6d43f555411362b38f418d34a8f4dc295a670f41/docs/proposal-behavior-languages.md", color: "--p-compute",
-    lede: "A graph node is written like a tree node, with inputs and outputs; the tree just does not hold it. Detached, it runs when a node that reads its output, as @node, is about to tick: once per tick, and only when its argument values changed.",
+    lede: "A graph node is written like a tree node, with inputs and outputs; the tree just does not hold it. Detached, it runs when a node that reads its output, as @node._ret, is about to tick: once per tick, and only when its argument values changed.",
     rules: ["The first read of a node in a tick brings it up to date; later reads reuse it, so the second write in Order sees the first one's cached value.", "A settled graph makes no calls. A changed input runs only the nodes downstream of it.", "An output bound to a store key makes a sink, written at every tick after the tree ticks. A graph alone, as in Smile mapping and Breathing, is sinks beside a tree that does nothing.", "Detached nodes have no lifecycle: a branch's damping keeps its state while the branch is not ticked."],
     make: (m) => new ComputeEngine(m),
     stored(model) {
@@ -1386,7 +1386,7 @@ function treeRows(R) {
   const readPort = (name, x) => ({ name, ...{
     shape: { src: `feeder:${x}`, text: `{.${x}}` },
     interp: { src: `feeder:${x}`, text: `{behavior/${x}}`, via: "store" },
-    compute: isCompute(x) ? { src: `c:${x}`, text: `@${x}` } : { text: source(x) },
+    compute: isCompute(x) ? { src: `c:${x}`, text: `@${x}._ret` } : { text: source(x) },
     leaves: E.leaves?.includes(x) ? { src: `l:${x}`, text: `{.#${x}}` } : { text: source(x) },
     calls: { text: exprShow(model)(x) },
   }[designId] });
@@ -1417,7 +1417,7 @@ function treeRows(R) {
     const sinks = sinksOf(model), bound = (id) => sinks.has(id) ? `{${sinks.get(id)}} = ` : "";
     rows.push({ section: "Detached nodes", textOnly: true });
     model.order.filter(isCompute).forEach((id) => row(0, `${id}: ${bound(id)}${model.nodes[id].op}(…)`, "data", id, "data", `${id}: ${bound(id)}${model.nodes[id].op}`, "",
-      { ports: portsOf(id, (x) => isCompute(x) ? `c:${x}` : null, (x) => isCompute(x) ? `@${x}` : source(x)), out: `c:${id}`, float: true }));
+      { ports: portsOf(id, (x) => isCompute(x) ? `c:${x}` : null, (x) => isCompute(x) ? `@${x}._ret` : source(x)), out: `c:${id}`, float: true }));
     rows.push({ section: "", textOnly: true });
   }
   if (designId === "leaves") {

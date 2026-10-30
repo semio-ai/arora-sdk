@@ -16,9 +16,9 @@
 //!
 //! What a client discovers travels the same channel: [`DevicePlane`] lists the
 //! device's keys and describes its methods on demand, and calls a method by
-//! name, so a client reaches the device itself without anything being
-//! registered on the server ahead of time — including what a module loaded
-//! mid-run brought with it.
+//! name or a function by ids, so a client reaches the device itself without
+//! anything being registered on the server ahead of time — including what a
+//! module loaded mid-run brought with it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,6 +28,7 @@ use arora_bridge::{
     Bridge, BridgeCommand, BridgeOp, BridgeResult, DeviceInfo, Inbound, InboundStream,
     MethodSignature,
 };
+use arora_types::call::{Call, CallResult};
 use arora_types::data::{Key, KeyMeta, StateChange};
 use arora_types::value::Value;
 use arora_types::Uuid;
@@ -43,8 +44,8 @@ use crate::server::AroraWSServer;
 /// The WebSocket server as an Arora [`Bridge`].
 ///
 /// The server keeps nothing of the device's own: a write goes to the runtime,
-/// which accepts or refuses it, and `list_keys`, `list_methods` and `invoke`
-/// ask the device when a client asks.
+/// which accepts or refuses it, and `list_keys`, `list_methods`,
+/// `describe_methods`, `invoke` and `call` ask the device when a client asks.
 pub struct WsBridge {
     server: Arc<AroraWSServer>,
     /// The inbound command receiver, moved out (once) by [`take_inbound`].
@@ -103,8 +104,8 @@ impl WsBridge {
             }))
             .await;
 
-        // The device plane: what `list_keys`, `list_methods` and `invoke`
-        // reach.
+        // The device plane: what `list_keys`, `list_methods`,
+        // `describe_methods`, `invoke` and `call` reach.
         // It holds a sender, not the bridge, so it lives on the server while the
         // device owns the bridge.
         server
@@ -122,23 +123,27 @@ impl WsBridge {
 
 /// The device over the runtime's inbound commands: it lists the keys the device
 /// holds and describes its methods on demand — so what a module loaded mid-run
-/// brought is there at once — and turns an `invoke` into the call the
-/// described signature defines.
+/// brought is there at once — turns an `invoke` into the call the described
+/// signature defines, and hands a `call` to the runtime as it came.
 struct DevicePlane {
     commands: mpsc::UnboundedSender<BridgeCommand>,
 }
 
 impl DevicePlane {
     /// Put `op` to the runtime and await its answer.
-    async fn ask(&self, op: BridgeOp) -> Result<Value, String> {
+    async fn answer(&self, op: BridgeOp) -> Result<CallResult, String> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.commands
             .unbounded_send(BridgeCommand::new(op, reply_tx))
             .map_err(|_| "the device is gone".to_string())?;
-        match reply_rx.await {
-            Ok(result) => result.map(|result| result.ret),
-            Err(_) => Err("the device dropped the request".to_string()),
-        }
+        reply_rx
+            .await
+            .unwrap_or_else(|_| Err("the device dropped the request".to_string()))
+    }
+
+    /// Put `op` to the runtime and await the value it returns.
+    async fn ask(&self, op: BridgeOp) -> Result<Value, String> {
+        self.answer(op).await.map(|result| result.ret)
     }
 
     /// The device's methods with their full signatures. Empty when the device
@@ -226,6 +231,17 @@ impl Device for DevicePlane {
             Ok(_) => InvokeResult::ok(),
             Err(message) => InvokeResult::err(message),
         }
+    }
+
+    async fn describe_methods(&self) -> Vec<MethodSignature> {
+        self.signatures().await
+    }
+
+    /// The call reaches the runtime as the `BridgeOp::Call` every bridge and
+    /// the in-process caller send: a task-shaped function is called, not
+    /// spawned — starting a run is a call to the interpreter module's `spawn`.
+    async fn call(&self, call: Call) -> Result<CallResult, String> {
+        self.answer(BridgeOp::Call(call)).await
     }
 }
 

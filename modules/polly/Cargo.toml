@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow = "*"
-arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "10" }
 arora-module = { path = "../../crates/arora-module", version = "2" }
 aws-config = "1"
 aws-sdk-polly = "1"

@@ -46,7 +46,9 @@ in their JSON form: `{"f64": 0.5}`, `{"str": "hi"}`, `{"bool": true}`,
 | `{"type": "write_values", "values": {"face/mouth": {"f64": 0.5}}}` | `write_values_resp` | Writes the keys, all or none. |
 | `{"type": "subscribe", "keys": ["face/mouth"]}` | `subscribe_resp` | Chooses the keys this connection is pushed; `null` or absent means every key. |
 | `{"type": "list_methods"}` | `list_methods_resp` | The device's callable methods, with their parameters. |
+| `{"type": "describe_methods", "path": "dou"}` | `describe_methods_resp` | The same methods (all, or those whose name starts with `path`), each with its full signature and the ids a call names. |
 | `{"type": "invoke", "method": "say", "args": {"text": {"str": "hi"}}, "request_id": "r1"}` | `invoke_resp` | Calls a method by name. |
+| `{"type": "call", "module_id": "…", "id": "…", "args": […], "request_id": "r3"}` | `call_resp` | Calls a function by ids. |
 | `{"type": "halt", "run": "<run id>", "request_id": "r2"}` | `halt_resp` | Stops a run. |
 
 Unsolicited, the server pushes `{"type": "values_changed", "values": {…}}`
@@ -103,6 +105,69 @@ with its handle, by name:
 A client follows the run on its `status` key (subscribe to it) and stops it
 with `{"type": "halt", "run": "0195e1f2-…"}`.
 
+## Signatures and calls by ids
+
+`describe_methods` and `call` let a client that holds no Rust code drive the
+device as an in-process caller (`arora::LocalCaller`) does: resolve a behavior
+against the device's functions, then load it.
+
+`describe_methods_resp` lists each method as `arora_bridge::MethodSignature`
+serializes it: the exporting module's id, the function's id, its name, and its
+frozen function record — parameters by id, their order, the return type:
+
+```json
+{"type": "describe_methods_resp", "methods": [
+  {"module_id": "…", "id": "…", "name": "double",
+   "function": {
+     "parameters": {"<x id>": {"name": "x", "mutable": false,
+                               "type": {"type": "primitive", "value": {"kind": "f64"}}}},
+     "parameterOrdering": ["<x id>"],
+     "returnType": {"type": "primitive", "value": {"kind": "f64"}}}}
+]}
+```
+
+It lists what the device's method index describes, as `list_methods` does:
+its modules' described functions and its behavior interpreter's task-run
+functions (`spawn`, `spawn_graph`, `halt`). The interpreter's `load` and `edit`
+are not described; a client calls them by their fixed ids
+(`arora_behavior::interpreter_module::{ID, LOAD, EDIT}`).
+
+`call` carries an `arora_types::call::Call` — `module_id`, `id`, and `args`,
+each argument a parameter id and a value — beside the message's own fields:
+
+```json
+{"type": "call", "module_id": "…", "id": "…",
+ "args": [{"id": "<x id>", "value": {"f64": 3.0}}], "request_id": "r3"}
+```
+
+The answer carries the `CallResult` — the return value and the mutated
+parameters — or the device's reason for refusing it:
+
+```json
+{"type": "call_resp", "success": true, "request_id": "r3", "ret": {"f64": 6.0}, "mutated": []}
+{"type": "call_resp", "success": false, "request_id": "r3", "message": "call failed: …"}
+```
+
+A call is made as it is sent: nothing binds names, and a task-shaped function
+is called once, not started as a run. To start a run, call the interpreter's
+`spawn` with the call to run; its `ret` is the run's handle, and `halt` stops it.
+
+## Who may do what
+
+The bridge is unauthenticated, so the server binds the loopback interface
+unless its embedder opens another: whoever reaches the port is trusted as a
+local app.
+
+- **A write** reaches only the keys the device opened (`editable` in their
+  meta) with values of their declared type, and is refused whole otherwise.
+  The device checks it as it checks every bridge's write.
+- **A call**, by name (`invoke`) or by ids (`call`), reaches any function the
+  device dispatches — its modules' and its behavior interpreter's, described or
+  not — exactly as a call from the in-process caller or from any other bridge
+  does. The bridge adds no rule of its own. A call is not a write: a behavior
+  it loads or a run it starts writes keys as the device's own behavior, not as
+  a remote writer.
+
 ## Serving a device
 
 The `arora` crate attaches this bridge when a device is given no other, and
@@ -129,7 +194,8 @@ endpoint disconnecting.
 
 Underneath, the server dispatches to handlers an embedder can set directly —
 `set_write_values_handler`, `set_read_values_handler`, and `set_device` with a
-`Device` (keys, methods, invoke, halt) — which is what `WsBridge` sets.
+`Device` (keys, methods, invoke, halt, signatures, calls by ids) — which is
+what `WsBridge` sets.
 
 ## Reference
 

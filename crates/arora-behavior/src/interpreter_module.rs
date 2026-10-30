@@ -17,15 +17,18 @@
 //!   start a task run whose program is a [`Graph`] of a [`GraphType`], under
 //!   a [`RunPolicy`], returning a [`TaskHandle`] — the live run's own, when
 //!   one already has the graph's root, which then runs the graph;
+//! - [`TRACE`] → [`BehaviorInterpreter::trace`](crate::BehaviorInterpreter::trace):
+//!   start a trace of the running behavior under [`TraceOptions`], returning
+//!   a [`TaskHandle`];
 //! - [`HALT`] → [`BehaviorInterpreter::halt`](crate::BehaviorInterpreter::halt):
-//!   stop the run named by a [`TaskId`].
+//!   stop the run named by a [`TaskId`], a trace included.
 //!
 //! A primitive argument travels as its own [`Value`] — a task id as a uuid, a
 //! graph type and version as strings. A compound payload (a graph, a diff, a
-//! call, a policy) is converted generically through
-//! [`arora_types::value_serde`], and the [`TaskHandle`] that [`SPAWN`] and
-//! [`SPAWN_GRAPH`] answer with returns the same way. A
-//! `Call{module_id: ID, id: LOAD|EDIT|SPAWN|SPAWN_GRAPH|HALT}` — a remote's
+//! call, a policy, trace options) is converted generically through
+//! [`arora_types::value_serde`], and the [`TaskHandle`] that [`SPAWN`],
+//! [`SPAWN_GRAPH`] and [`TRACE`] answer with returns the same way. A
+//! `Call{module_id: ID, id: LOAD|EDIT|SPAWN|SPAWN_GRAPH|TRACE|HALT}` — a remote's
 //! `BridgeOp::Call`, or a behavior's own call bridge — reaches the interpreter
 //! through the engine's normal dispatch, like any module function.
 
@@ -38,6 +41,7 @@ use uuid::{uuid, Uuid};
 
 use crate::graph::{Graph, GraphDiff, GraphType};
 use crate::task::{RunPolicy, TaskHandle, TaskId};
+use crate::trace::TraceOptions;
 
 /// Module id under which the runtime registers the behavior interpreter on
 /// the engine. Self-identifying like the vizij type ids: the ASCII bytes of
@@ -96,6 +100,14 @@ pub const SPAWN_GRAPH_GRAPH_ARG: Uuid = uuid!("61726f72-6100-0000-0000-000000000
 
 /// Argument id of [`SPAWN_GRAPH`]'s `policy`: the [`RunPolicy`].
 pub const SPAWN_GRAPH_POLICY_ARG: Uuid = uuid!("61726f72-6100-0000-0000-00000000000f");
+
+/// Function id of **trace**: start a trace of the running behavior under
+/// [`TraceOptions`], returning a [`TaskHandle`].
+pub const TRACE: Uuid = uuid!("61726f72-6100-0000-0000-000000000010");
+
+/// Argument id of [`TRACE`]'s one argument: the [`TraceOptions`], as a
+/// structured [`Value`].
+pub const TRACE_ARG: Uuid = uuid!("61726f72-6100-0000-0000-000000000011");
 
 /// Build the [`Call`] that applies `diff` to the running behavior.
 pub fn encode_edit(diff: &GraphDiff) -> Call {
@@ -203,6 +215,17 @@ pub fn decode_spawn_graph(call: &Call) -> Result<(GraphType, Graph, RunPolicy), 
     Ok((GraphType { name, version }, graph, policy))
 }
 
+/// Build the [`Call`] that starts a trace of the running behavior under
+/// `options`.
+pub fn encode_trace(options: &TraceOptions) -> Call {
+    encode(TRACE, TRACE_ARG, options)
+}
+
+/// Read the [`TraceOptions`] out of a [`TRACE`] call.
+pub fn decode_trace(call: &Call) -> Result<TraceOptions, String> {
+    decode(call, TRACE, TRACE_ARG, "TraceOptions")
+}
+
 /// Build the [`Call`] that halts the run named by `task`. The task id travels
 /// as a uuid ([`Value::Uuid`]), the type `halt`'s parameter is described with.
 pub fn encode_halt(task: TaskId) -> Call {
@@ -222,14 +245,14 @@ pub fn decode_halt(call: &Call) -> Result<TaskId, String> {
     decode(call, HALT, HALT_ARG, "TaskId")
 }
 
-/// Convert the [`TaskHandle`] that [`SPAWN`] or [`SPAWN_GRAPH`] returns to a
-/// [`Value`], to travel back as the call's return.
+/// Convert the [`TaskHandle`] that [`SPAWN`], [`SPAWN_GRAPH`] or [`TRACE`]
+/// returns to a [`Value`], to travel back as the call's return.
 pub fn encode_spawn_result(handle: &TaskHandle) -> Value {
     value_serde::to_value(handle).expect("a TaskHandle converts to a Value")
 }
 
-/// Read the [`TaskHandle`] out of a [`SPAWN`] or [`SPAWN_GRAPH`] call's
-/// return [`Value`].
+/// Read the [`TaskHandle`] out of a [`SPAWN`], [`SPAWN_GRAPH`] or [`TRACE`]
+/// call's return [`Value`].
 pub fn decode_spawn_result(value: &Value) -> Result<TaskHandle, String> {
     value_serde::from_value(value.clone()).map_err(|e| format!("malformed TaskHandle: {e}"))
 }
@@ -281,8 +304,17 @@ mod tests {
     #[test]
     fn edit_call_round_trips_the_diff() {
         let diff = GraphDiff {
-            remove_nodes: vec![Uuid::from_u128(7)],
-            set_root: Some(Uuid::from_u128(9)),
+            remove: vec![Uuid::from_u128(7)],
+            bind: vec![crate::graph::Binding {
+                node: Uuid::from_u128(8),
+                port: Uuid::from_u128(1),
+                source: crate::graph::Source::Value(Value::Option(Some(Box::new(Value::F64(1.5))))),
+            }],
+            unbind: vec![crate::graph::Port::new(
+                Uuid::from_u128(8),
+                Uuid::from_u128(2),
+            )],
+            root: Some(Uuid::from_u128(9)),
             ..Default::default()
         };
         let call = encode_edit(&diff);
@@ -323,14 +355,19 @@ mod tests {
     fn spawn_graph_call_round_trips_the_type_graph_and_policy() {
         let mut graph = Graph::empty();
         graph.root = Some(Uuid::from_u128(3));
-        graph.nodes.insert(
-            Uuid::from_u128(3),
-            crate::graph::Node {
-                id: Uuid::from_u128(3),
-                function: Uuid::from_u128(4),
-                ..Default::default()
-            },
-        );
+        graph.nodes.push(crate::graph::Node {
+            id: Uuid::from_u128(3),
+            function: Uuid::from_u128(4),
+            bind: [(
+                Uuid::from_u128(5),
+                crate::graph::Source::Select {
+                    source: Box::new(crate::graph::Source::Key(".step".to_string())),
+                    path: arora_types::data::Key::new(".field"),
+                },
+            )]
+            .into(),
+            ..Default::default()
+        });
         let graph_type = GraphType {
             name: "behavior-tree".to_string(),
             version: semver::Version::new(1, 0, 0),
@@ -370,6 +407,30 @@ mod tests {
     }
 
     #[test]
+    fn trace_call_round_trips_the_options() {
+        for options in [
+            TraceOptions::default(),
+            TraceOptions {
+                values: vec![Uuid::from_u128(3), Uuid::from_u128(4)],
+                min_interval_ns: Some(33_000_000),
+            },
+        ] {
+            let call = encode_trace(&options);
+            assert_eq!(call.module_id, Some(ID));
+            assert_eq!(call.id, TRACE);
+            assert_eq!(decode_trace(&call).unwrap(), options);
+        }
+
+        // Refused: another function id, options of another shape.
+        let mut wrong = encode_trace(&TraceOptions::default());
+        wrong.id = SPAWN;
+        assert!(decode_trace(&wrong).is_err());
+        let mut malformed = encode_trace(&TraceOptions::default());
+        *malformed.args[0].value = Value::String("every tick".to_string());
+        assert!(decode_trace(&malformed).is_err());
+    }
+
+    #[test]
     fn halt_call_round_trips_the_task_id() {
         let task = TaskId(Uuid::from_u128(5));
         let call = encode_halt(task);
@@ -402,6 +463,35 @@ mod tests {
         };
         let value = encode_spawn_result(&handle);
         assert_eq!(decode_spawn_result(&value).unwrap(), handle);
+    }
+
+    /// A diff or a graph of another shape, such as the variables-and-links
+    /// form of arora-behavior 9, is refused rather than read as an empty
+    /// edit.
+    #[test]
+    fn a_payload_of_another_shape_is_refused() {
+        let old_edit: Value = value_serde::to_value(&serde_json::json!({
+            "add_nodes": [],
+            "remove_nodes": ["00000000-0000-0000-0000-000000000007"],
+            "add_links": [],
+            "set_root": "00000000-0000-0000-0000-000000000009",
+        }))
+        .unwrap();
+        let mut call = encode_edit(&GraphDiff::default());
+        *call.args[0].value = old_edit;
+        assert!(decode_edit(&call).is_err(), "an edit of another shape");
+
+        let old_node: Value = value_serde::to_value(&serde_json::json!({
+            "nodes": [{
+                "id": "00000000-0000-0000-0000-000000000003",
+                "function": "00000000-0000-0000-0000-000000000004",
+                "inputs": [],
+            }],
+        }))
+        .unwrap();
+        let mut call = encode_load(&Graph::empty());
+        *call.args[0].value = old_node;
+        assert!(decode_load(&call).is_err(), "a node of another shape");
     }
 
     #[test]

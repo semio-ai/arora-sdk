@@ -19,8 +19,8 @@
 //! in Rust is possible, but it is a corner case — the promoted path is to author
 //! a behavior in an editor and let an interpreter run it.
 //!
-//! An authored behavior is a [`graph::Graph`] — nodes bound to functions, with
-//! typed I/Os and links — and interpreters are edited by
+//! An authored behavior is a [`graph::Graph`] — nodes bound to functions, each
+//! holding its ports' bindings — and interpreters are edited by
 //! [`apply`](BehaviorInterpreter::apply)ing a [`graph::GraphDiff`]. Loading a
 //! behavior is applying a diff onto an empty graph. See [`graph`] for the model.
 //!
@@ -48,6 +48,7 @@ pub mod graph;
 pub mod interpreter_module;
 pub mod status;
 pub mod task;
+pub mod trace;
 
 pub use graph::{Graph, GraphDiff, GraphType};
 pub use status::{
@@ -55,6 +56,7 @@ pub use status::{
     STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID, STATUS_SUCCESS_VARIANT_ID,
 };
 pub use task::{RunPolicy, TaskHandle, TaskId};
+pub use trace::{Activity, NodeStatus, PortValue, TraceOptions, TraceReport};
 
 /// Whether an interpreter wants to be ticked again — and, when it does not, how
 /// it ended.
@@ -162,8 +164,8 @@ pub trait BehaviorInterpreter {
     fn tick(&mut self, ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError>;
 
     /// Edit the running behavior by applying a [`GraphDiff`](graph::GraphDiff):
-    /// add/remove nodes and links, set/override predetermined keys. **Loading** a
-    /// behavior is applying a diff onto an empty graph.
+    /// set or remove whole nodes, bind or unbind single ports, set the root.
+    /// **Loading** a behavior is applying a diff onto an empty graph.
     ///
     /// The default rejects edition — override it in interpreters that carry an
     /// editable [`graph::Graph`] (the behavior tree does). A hand-coded,
@@ -224,8 +226,9 @@ pub trait BehaviorInterpreter {
     ///
     /// The run's nodes are part of the interpreter's graph: an
     /// [`apply`](Self::apply) reaches them by id, so a client edits a live run
-    /// (relinks a literal, replaces a node) without respawning it, and a
-    /// [`load`](Self::load) of the main behavior leaves them in place.
+    /// (binds a port to another value, replaces a node) without respawning
+    /// it, and a [`load`](Self::load) of the main behavior leaves them in
+    /// place.
     ///
     /// A run is known by its graph's root, which the client chooses. Spawning
     /// a graph whose root a live run has starts no second run: that run takes
@@ -250,10 +253,38 @@ pub trait BehaviorInterpreter {
         })
     }
 
+    /// Start a trace of the running behavior under `options`, returning the
+    /// [`TaskHandle`] a spawned run answers: a trace is a task run, followed
+    /// and stopped like one. Its keys live under
+    /// `arora/tasks/<interpreter module>/<trace function>/<run>/`
+    /// ([`interpreter_module::ID`], [`interpreter_module::TRACE`]).
+    ///
+    /// While the trace runs, its status key holds
+    /// [`Status::Running`], and at the end of each tick that changed
+    /// something it follows, its feedback key holds a
+    /// [`TraceReport`](trace::TraceReport): the tick, the nodes whose status
+    /// changed, the detached nodes whose activity changed, and the watched
+    /// nodes' outputs that changed. The first report states everything the
+    /// tick reached. [`halt`](Self::halt) ends a trace: its status key goes
+    /// [`Status::Failure`] at the next tick, as a halted run's does, and its
+    /// keys change no more. Several traces may run at once, each with its own
+    /// options; a trace survives [`apply`](Self::apply) and
+    /// [`load`](Self::load).
+    ///
+    /// The default rejects tracing — override it in interpreters that can
+    /// report what their ticks do.
+    fn trace(&mut self, options: trace::TraceOptions) -> Result<TaskHandle, BehaviorError> {
+        let _ = options;
+        Err(BehaviorError {
+            message: "this interpreter does not support tracing".to_string(),
+        })
+    }
+
     /// Halt the run identified by `task` (idempotent): a clean stop that may run
     /// compensation, not a hard kill. On reaching a terminal state the run is
     /// dropped and its status key reflects the outcome. It stops a run started
-    /// by [`spawn`](Self::spawn) or by [`spawn_graph`](Self::spawn_graph).
+    /// by [`spawn`](Self::spawn), by [`spawn_graph`](Self::spawn_graph) or by
+    /// [`trace`](Self::trace).
     ///
     /// The default rejects halting — override it alongside [`spawn`](Self::spawn).
     fn halt(&mut self, task: TaskId) -> Result<(), BehaviorError> {
@@ -282,7 +313,7 @@ mod tests {
     use super::*;
 
     /// A minimal interpreter that only ticks, so it keeps the default `spawn`,
-    /// `spawn_graph` and `halt` — the ones under test.
+    /// `spawn_graph`, `trace` and `halt` — the ones under test.
     struct Idle;
     impl BehaviorInterpreter for Idle {
         fn tick(&mut self, _ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
@@ -315,5 +346,11 @@ mod tests {
             )
             .is_err());
         assert!(idle.halt(TaskId(uuid::Uuid::nil())).is_err());
+    }
+
+    #[test]
+    fn tracing_rejects_by_default() {
+        let refused = Idle.trace(TraceOptions::default()).unwrap_err();
+        assert!(refused.message.contains("tracing"), "{}", refused.message);
     }
 }

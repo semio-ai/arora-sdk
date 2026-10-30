@@ -30,8 +30,8 @@ log = "0.4"
 
 # `path` while the workspace lives in the SDK checkout, `version` for crates.io:
 # moving it out is deleting the `path` keys.
-arora = { path = "../../crates/arora", version = "17" }
-arora-behavior = { path = "../../crates/arora-behavior", version = "9.6" }
+arora = { path = "../../crates/arora", version = "18" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "10" }
 arora-hal = { path = "../../crates/arora-hal", version = "4.3" }
 arora-module = { path = "../../crates/arora-module", version = "2.3" }
 arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "3.2" }
@@ -42,6 +42,9 @@ arora-types = { path = "../../crates/arora-types", version = "3.10" }
 [patch.crates-io]
 arora-bridge = { path = "../../crates/arora-bridge" }
 arora-types = { path = "../../crates/arora-types" }
+# TEMPORARY, until arora-studio-bridge-client 11.3.0 is on crates.io: its
+# branch, which `arora`'s requirement of 11.3 needs.
+arora-studio-bridge-client = { git = "https://github.com/semio-ai/studio-bridge", branch = "feat/handle-record" }
 
 # The policy module's wasm guest follows the device's profile, so both profiles
 # optimize it and keep debug info, most of a wasm file's size, out of it.

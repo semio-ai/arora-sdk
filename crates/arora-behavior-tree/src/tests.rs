@@ -18,6 +18,46 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use uuid::Uuid;
 
+/// A binding of `at` to `source`, as a diff sets it.
+pub(crate) fn binding(
+    at: arora_behavior::graph::Port,
+    source: arora_behavior::graph::Source,
+) -> arora_behavior::graph::Binding {
+    arora_behavior::graph::Binding {
+        node: at.node,
+        port: at.port,
+        source,
+    }
+}
+
+/// The node `id` of `graph`, to change it in place.
+pub(crate) fn node_mut(
+    graph: &mut arora_behavior::graph::Graph,
+    id: Uuid,
+) -> &mut arora_behavior::graph::Node {
+    graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == id)
+        .unwrap_or_else(|| panic!("node {id} is in the graph"))
+}
+
+/// Bind each of `bindings` on its node of `graph`.
+pub(crate) fn bind_all(
+    graph: &mut arora_behavior::graph::Graph,
+    bindings: impl IntoIterator<Item = arora_behavior::graph::Binding>,
+) {
+    for binding in bindings {
+        graph
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == binding.node)
+            .unwrap_or_else(|| panic!("node {} is in the graph", binding.node))
+            .bind
+            .insert(binding.port, binding.source);
+    }
+}
+
 #[test]
 pub fn load_parse_error() -> Result<()> {
     let tree_yaml = "I'm singing in the rain...";
@@ -497,6 +537,8 @@ fn a_fresh_interpreter_accepts_edits_and_idles_while_empty() {
 /// stand-in for a real action-behavior whose status decorator publishes its
 /// outcome to the run's status key.
 mod task_runs {
+    #[allow(unused_imports)]
+    use super::{bind_all, binding, node_mut};
     use super::{LeafStatuses, LeafTicks, TestBridge};
     use crate::behavior::{graph_type, BehaviorTreeInterpreter};
     use crate::nodes;
@@ -668,23 +710,20 @@ mod task_runs {
         let main_node = Uuid::from_u128(0x111);
         let mut main = Graph::empty();
         main.root = Some(main_node);
-        main.nodes.insert(
-            main_node,
-            GraphNode {
-                id: main_node,
-                function: crate::nodes::RUN_CALL_FUNCTION_ID,
-                inputs: vec![arora_behavior::graph::Io::new(
-                    crate::nodes::RUN_CALL_PARAM_ID,
-                )],
-                ..GraphNode::default()
-            },
+        main.nodes.push(GraphNode {
+            id: main_node,
+            function: crate::nodes::RUN_CALL_FUNCTION_ID,
+            ..GraphNode::default()
+        });
+        bind_all(
+            &mut main,
+            vec![binding(
+                arora_behavior::graph::Port::new(main_node, crate::nodes::RUN_CALL_PARAM_ID),
+                arora_behavior::graph::Source::Value(
+                    arora_types::value_serde::to_value(&call_to(0xB0, main_leaf)).unwrap(),
+                ),
+            )],
         );
-        main.links.push(arora_behavior::graph::Link::new(
-            arora_behavior::graph::Port::new(main_node, crate::nodes::RUN_CALL_PARAM_ID),
-            arora_behavior::graph::LinkSource::Literal(
-                arora_types::value_serde::to_value(&call_to(0xB0, main_leaf)).unwrap(),
-            ),
-        ));
         interp.load(main).expect("the behavior loads");
         interp
             .spawn(call_to(0xB0, run_leaf), RunPolicy::Concurrent)
@@ -715,9 +754,10 @@ mod task_runs {
     }
 
     /// The scaffold is introspectable the behavior tree's way: a spawned run is
-    /// two graph nodes under the runner (a run-status decorator, its status key
-    /// predetermined, over a run-call leaf carrying the call as literal data) —
-    /// and a halted run's fragment is pruned again.
+    /// two graph nodes under the runner (a run-status decorator, its status
+    /// output bound to the run's status key, over a run-call leaf whose call
+    /// port is bound to the call) — and a halted run's fragment is pruned
+    /// again.
     #[test]
     fn a_spawned_run_is_visible_in_the_graph_until_halted() {
         let leaf = Uuid::from_u128(0xE5);
@@ -731,23 +771,27 @@ mod task_runs {
         let graph = interp.graph();
         let decorator = graph
             .nodes
-            .values()
+            .iter()
             .find(|n| n.function == crate::nodes::RUN_STATUS_FUNCTION_ID)
             .expect("the run's status decorator is in the graph");
         assert_eq!(
-            decorator.outputs[0].predetermined_key.as_deref(),
-            Some(handle.status.path.as_str()),
-            "the decorator's status output is predetermined to the run's key"
+            decorator.bind.get(&crate::nodes::RUN_STATUS_OUT_PARAM_ID),
+            Some(&arora_behavior::graph::Source::Key(
+                handle.status.path.clone()
+            )),
+            "the decorator's status output is bound to the run's key"
         );
         let call_node = decorator.children.as_ref().unwrap()[0];
         assert_eq!(
-            graph.nodes[&call_node].function,
+            graph.node(&call_node).unwrap().function,
             crate::nodes::RUN_CALL_FUNCTION_ID,
             "the decorator wraps the run-call leaf"
         );
         let root = graph.root.expect("the runner roots the scaffold");
         assert!(
-            graph.nodes[&root]
+            graph
+                .node(&root)
+                .unwrap()
                 .children
                 .as_ref()
                 .unwrap()
@@ -831,40 +875,33 @@ mod task_runs {
     /// leaf invoking `leaf` and a `Run`. Its nodes are `ids` (parallel, call
     /// node, run node).
     fn stepping_graph(ids: [u128; 3], leaf: Uuid) -> arora_behavior::graph::Graph {
-        use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
         let [parallel, call_node, run] = ids.map(Uuid::from_u128);
         let mut graph = Graph::empty();
         graph.root = Some(parallel);
-        graph.nodes.insert(
-            parallel,
-            GraphNode {
-                id: parallel,
-                function: nodes::PARALLEL_FUNCTION_ID,
-                children: Some(vec![call_node, run]),
-                ..GraphNode::default()
-            },
+        graph.nodes.push(GraphNode {
+            id: parallel,
+            function: nodes::PARALLEL_FUNCTION_ID,
+            children: Some(vec![call_node, run]),
+            ..GraphNode::default()
+        });
+        graph.nodes.push(GraphNode {
+            id: call_node,
+            function: nodes::RUN_CALL_FUNCTION_ID,
+            ..GraphNode::default()
+        });
+        graph.nodes.push(GraphNode {
+            id: run,
+            function: nodes::RUN_FUNCTION_ID,
+            ..GraphNode::default()
+        });
+        bind_all(
+            &mut graph,
+            vec![binding(
+                Port::new(call_node, nodes::RUN_CALL_PARAM_ID),
+                Source::Value(arora_types::value_serde::to_value(&call_to(0xB0, leaf)).unwrap()),
+            )],
         );
-        graph.nodes.insert(
-            call_node,
-            GraphNode {
-                id: call_node,
-                function: nodes::RUN_CALL_FUNCTION_ID,
-                inputs: vec![Io::new(nodes::RUN_CALL_PARAM_ID)],
-                ..GraphNode::default()
-            },
-        );
-        graph.nodes.insert(
-            run,
-            GraphNode {
-                id: run,
-                function: nodes::RUN_FUNCTION_ID,
-                ..GraphNode::default()
-            },
-        );
-        graph.links.push(Link::new(
-            Port::new(call_node, nodes::RUN_CALL_PARAM_ID),
-            LinkSource::Literal(arora_types::value_serde::to_value(&call_to(0xB0, leaf)).unwrap()),
-        ));
         graph
     }
 
@@ -872,23 +909,22 @@ mod task_runs {
     /// with no module, and the run ticks it.
     #[test]
     fn a_spawned_graph_may_call_a_core_string_node() {
-        use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
         let node = Uuid::from_u128(0x30);
         let mut graph = Graph::empty();
         graph.root = Some(node);
-        graph.nodes.insert(
-            node,
-            GraphNode {
-                id: node,
-                function: nodes::IS_STR_SET_FUNCTION_ID,
-                inputs: vec![Io::new(nodes::IS_STR_SET_VALUE_PARAM_ID)],
-                ..GraphNode::default()
-            },
+        graph.nodes.push(GraphNode {
+            id: node,
+            function: nodes::IS_STR_SET_FUNCTION_ID,
+            ..GraphNode::default()
+        });
+        bind_all(
+            &mut graph,
+            vec![binding(
+                Port::new(node, nodes::IS_STR_SET_VALUE_PARAM_ID),
+                Source::Value(Value::String("set".to_string())),
+            )],
         );
-        graph.links.push(Link::new(
-            Port::new(node, nodes::IS_STR_SET_VALUE_PARAM_ID),
-            LinkSource::Literal(Value::String("set".to_string())),
-        ));
         let mut interp = BehaviorTreeInterpreter::new();
         let handle = interp
             .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
@@ -910,53 +946,49 @@ mod task_runs {
         );
     }
 
-    /// A graph whose leaf `below(x: @cm, limit: 30)` reads a detached chain,
-    /// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw, lo: 0)`,
-    /// beside a sink `{out} = mul(a: @cm, b: 2)`: the nodes `ids`, in that
+    /// A graph whose leaf `below(x: @cm._ret, limit: 30)` reads a detached chain,
+    /// `raw: mul(a: {sensor/distance}, b: 100)`, `cm: clamp(x: @raw._ret, lo: 0)`,
+    /// beside a sink `{out} = mul(a: @cm._ret, b: 2)`: the nodes `ids`, in that
     /// order.
     fn detached_graph(ids: [u128; 4]) -> arora_behavior::graph::Graph {
         use crate::call_expression_tests::{
             BELOW, BELOW_LIMIT, BELOW_X, CLAMP, CLAMP_LO, CLAMP_X, MUL, MUL_A, MUL_B,
         };
         use crate::schema::_RET_PARAM_ID;
-        use arora_behavior::graph::{Graph, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
 
         let [leaf, raw, cm, sink] = ids.map(Uuid::from_u128);
-        let (distance, out) = (Uuid::from_u128(0x6D), Uuid::from_u128(0x6E));
+        let key = |key: &str| Source::Key(key.to_string());
         let mut graph = Graph::empty();
         graph.root = Some(leaf);
         for (id, function) in [(leaf, BELOW), (raw, MUL), (cm, CLAMP), (sink, MUL)] {
-            graph.nodes.insert(
+            graph.nodes.push(GraphNode {
                 id,
-                GraphNode {
-                    id,
-                    function,
-                    ..GraphNode::default()
-                },
-            );
+                function,
+                ..GraphNode::default()
+            });
         }
-        let read = |node| LinkSource::Port(Port::new(node, _RET_PARAM_ID));
-        let number = |value| LinkSource::Literal(Value::F64(value));
-        graph.links = vec![
-            Link::new(Port::new(leaf, BELOW_X), read(cm)),
-            Link::new(Port::new(leaf, BELOW_LIMIT), number(30.0)),
-            Link::new(Port::new(raw, MUL_A), LinkSource::Variable(distance)),
-            Link::new(Port::new(raw, MUL_B), number(100.0)),
-            Link::new(Port::new(cm, CLAMP_X), read(raw)),
-            Link::new(Port::new(cm, CLAMP_LO), number(0.0)),
-            Link::new(Port::new(sink, MUL_A), read(cm)),
-            Link::new(Port::new(sink, MUL_B), number(2.0)),
-            Link::new(Port::new(sink, _RET_PARAM_ID), LinkSource::Variable(out)),
-        ];
-        graph.variables = HashMap::from([
-            (distance, "sensor/distance".to_string()),
-            (out, "out".to_string()),
-        ]);
+        let read = |node| Source::Port(Port::new(node, _RET_PARAM_ID));
+        let number = |value| Source::Value(Value::F64(value));
+        bind_all(
+            &mut graph,
+            vec![
+                binding(Port::new(leaf, BELOW_X), read(cm)),
+                binding(Port::new(leaf, BELOW_LIMIT), number(30.0)),
+                binding(Port::new(raw, MUL_A), key("sensor/distance")),
+                binding(Port::new(raw, MUL_B), number(100.0)),
+                binding(Port::new(cm, CLAMP_X), read(raw)),
+                binding(Port::new(cm, CLAMP_LO), number(0.0)),
+                binding(Port::new(sink, MUL_A), read(cm)),
+                binding(Port::new(sink, MUL_B), number(2.0)),
+                binding(Port::new(sink, _RET_PARAM_ID), key("out")),
+            ],
+        );
         graph
     }
 
     /// A spawned graph may list nodes no node holds, which run detached, as
-    /// in any `behavior-tree 1.3` graph: here a chain the run's leaf reads,
+    /// in any `behavior-tree` graph: here a chain the run's leaf reads,
     /// and a sink writing a store key. They belong to the run: spawned
     /// again, the run takes the graph over; halted, they leave with it.
     #[test]
@@ -1009,7 +1041,7 @@ mod task_runs {
         interp.halt(next.id).unwrap();
         for id in [leaf, raw, cm, sink] {
             assert!(
-                !interp.graph().nodes.contains_key(&id),
+                !interp.graph().node(&id).is_some(),
                 "node {id} left with the run"
             );
         }
@@ -1024,7 +1056,7 @@ mod task_runs {
             index, Engine, BELOW, BELOW_LIMIT, BELOW_X, MUL, MUL_A, MUL_B,
         };
         use crate::schema::_RET_PARAM_ID;
-        use arora_behavior::graph::{Graph, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
         use arora_types::data::{DataStore, StateChange};
 
         let store = SimpleDataStore::new();
@@ -1055,33 +1087,30 @@ mod task_runs {
         let mut cycle = Graph::empty();
         cycle.root = Some(leaf);
         for (id, function) in [(leaf, BELOW), (a, MUL), (b, MUL)] {
-            cycle.nodes.insert(
+            cycle.nodes.push(GraphNode {
                 id,
-                GraphNode {
-                    id,
-                    function,
-                    ..GraphNode::default()
-                },
-            );
+                function,
+                ..GraphNode::default()
+            });
         }
-        let read = |node| LinkSource::Port(Port::new(node, _RET_PARAM_ID));
-        let two = LinkSource::Literal(Value::F64(2.0));
-        cycle.links = vec![
-            Link::new(Port::new(leaf, BELOW_X), read(a)),
-            Link::new(Port::new(leaf, BELOW_LIMIT), two.clone()),
-            Link::new(Port::new(a, MUL_A), read(b)),
-            Link::new(Port::new(a, MUL_B), two.clone()),
-            Link::new(Port::new(b, MUL_A), read(a)),
-            Link::new(Port::new(b, MUL_B), two),
-        ];
+        let read = |node| Source::Port(Port::new(node, _RET_PARAM_ID));
+        let two = Source::Value(Value::F64(2.0));
+        bind_all(
+            &mut cycle,
+            vec![
+                binding(Port::new(leaf, BELOW_X), read(a)),
+                binding(Port::new(leaf, BELOW_LIMIT), two.clone()),
+                binding(Port::new(a, MUL_A), read(b)),
+                binding(Port::new(a, MUL_B), two.clone()),
+                binding(Port::new(b, MUL_A), read(a)),
+                binding(Port::new(b, MUL_B), two),
+            ],
+        );
         let refused = interp.spawn_graph(&graph_type(), cycle, RunPolicy::Concurrent);
         let error = refused.expect_err("a cycle of detached nodes is refused at spawn");
         assert!(error.message.contains("cycle"), "{}", error.message);
         for id in [leaf, a, b] {
-            assert!(
-                !interp.graph().nodes.contains_key(&id),
-                "nothing of it stays"
-            );
+            assert!(!interp.graph().node(&id).is_some(), "nothing of it stays");
         }
         tick(&mut interp).expect("the device ticks on");
         let success: Value = Status::Success.into();
@@ -1190,7 +1219,7 @@ mod task_runs {
     /// leaves the run in place, and halting prunes the node the edit added.
     #[test]
     fn an_edit_reaches_a_spawned_behavior_and_a_load_keeps_it() {
-        use arora_behavior::graph::{Graph, GraphDiff, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{Graph, GraphDiff, Node as GraphNode, Port, Source};
 
         let a = Uuid::from_u128(0xA1);
         let b = Uuid::from_u128(0xB1);
@@ -1221,11 +1250,9 @@ mod task_runs {
         // Relink the run-call leaf's literal: the run now calls `b`.
         interp
             .apply(GraphDiff {
-                add_links: vec![Link::new(
+                bind: vec![binding(
                     Port::new(call_node, nodes::RUN_CALL_PARAM_ID),
-                    LinkSource::Literal(
-                        arora_types::value_serde::to_value(&call_to(0xB0, b)).unwrap(),
-                    ),
+                    Source::Value(arora_types::value_serde::to_value(&call_to(0xB0, b)).unwrap()),
                 )],
                 ..GraphDiff::default()
             })
@@ -1238,7 +1265,7 @@ mod task_runs {
         let added = Uuid::from_u128(0x23);
         interp
             .apply(GraphDiff {
-                add_nodes: vec![
+                set: vec![
                     GraphNode {
                         id: parallel,
                         function: nodes::PARALLEL_FUNCTION_ID,
@@ -1259,14 +1286,11 @@ mod task_runs {
         let main_node = Uuid::from_u128(0x30);
         let mut main = Graph::empty();
         main.root = Some(main_node);
-        main.nodes.insert(
-            main_node,
-            GraphNode {
-                id: main_node,
-                function: nodes::SUCCEED_FUNCTION_ID,
-                ..GraphNode::default()
-            },
-        );
+        main.nodes.push(GraphNode {
+            id: main_node,
+            function: nodes::SUCCEED_FUNCTION_ID,
+            ..GraphNode::default()
+        });
         interp.load(main).expect("the main behavior loads");
         interp.tick(&mut ctx).unwrap();
         assert_eq!(
@@ -1275,19 +1299,16 @@ mod task_runs {
             "the run survived the load"
         );
         for id in [parallel, call_node, run, added, main_node] {
-            assert!(
-                interp.graph().nodes.contains_key(&id),
-                "{id} is in the graph"
-            );
+            assert!(interp.graph().node(&id).is_some(), "{id} is in the graph");
         }
 
         // A second load replaces the main behavior only.
         interp
             .load(Graph::empty())
             .expect("an empty main behavior loads");
-        assert!(!interp.graph().nodes.contains_key(&main_node));
+        assert!(!interp.graph().node(&main_node).is_some());
         assert!(
-            interp.graph().nodes.contains_key(&added),
+            interp.graph().node(&added).is_some(),
             "the run's nodes stay"
         );
 
@@ -1298,7 +1319,12 @@ mod task_runs {
             interp.graph().nodes.len(),
             1,
             "only the runner remains: {:?}",
-            interp.graph().nodes.keys().collect::<Vec<_>>()
+            interp
+                .graph()
+                .nodes
+                .iter()
+                .map(|node| node.id)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1307,7 +1333,7 @@ mod task_runs {
     /// how a run leaves.
     #[test]
     fn runs_tick_in_spawn_order_and_keep_their_decorators() {
-        use arora_behavior::graph::{GraphDiff, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{GraphDiff, Node as GraphNode, Port, Source};
 
         let leaf = Uuid::from_u128(0xC1);
         let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Success);
@@ -1328,19 +1354,17 @@ mod task_runs {
             let decorator = interp
                 .graph()
                 .nodes
-                .values()
+                .iter()
                 .find(|node| {
-                    node.outputs
-                        .first()
-                        .and_then(|io| io.predetermined_key.as_deref())
-                        == Some(handle.status.path.as_str())
+                    node.bind.get(&nodes::RUN_STATUS_OUT_PARAM_ID)
+                        == Some(&Source::Key(handle.status.path.clone()))
                 })
                 .expect("the run's decorator")
                 .id;
             decorators.push(decorator);
             let root = interp.graph().root.unwrap();
             assert_eq!(
-                interp.graph().nodes[&root].children.as_deref(),
+                interp.graph().node(&root).unwrap().children.as_deref(),
                 Some(decorators.as_slice()),
                 "after {} spawns the runner holds the runs in spawn order",
                 n + 1
@@ -1349,11 +1373,11 @@ mod task_runs {
 
         let refused = [
             GraphDiff {
-                remove_nodes: vec![decorators[1]],
+                remove: vec![decorators[1]],
                 ..GraphDiff::default()
             },
             GraphDiff {
-                add_nodes: vec![GraphNode {
+                set: vec![GraphNode {
                     id: decorators[1],
                     function: nodes::SUCCEED_FUNCTION_ID,
                     ..GraphNode::default()
@@ -1361,14 +1385,14 @@ mod task_runs {
                 ..GraphDiff::default()
             },
             GraphDiff {
-                add_links: vec![Link::new(
+                bind: vec![binding(
                     Port::new(decorators[1], nodes::RUN_STATUS_LATCH_PARAM_ID),
-                    LinkSource::Literal(Status::Success.into()),
+                    Source::Value(Status::Success.into()),
                 )],
                 ..GraphDiff::default()
             },
             GraphDiff {
-                remove_nodes: vec![Uuid::from_u128(0x50)],
+                remove: vec![Uuid::from_u128(0x50)],
                 ..GraphDiff::default()
             },
         ];
@@ -1381,7 +1405,7 @@ mod task_runs {
             call_bridge: &mut bridge,
         };
         interp.tick(&mut ctx).expect("the scaffold still lowers");
-        assert!(interp.graph().nodes.contains_key(&decorators[1]));
+        assert!(interp.graph().node(&decorators[1]).is_some());
     }
 
     /// A run is the subtree under its decorator, whatever order the edits came
@@ -1407,7 +1431,7 @@ mod task_runs {
         let loose = Uuid::from_u128(0x93);
         interp
             .apply(GraphDiff {
-                add_nodes: vec![GraphNode {
+                set: vec![GraphNode {
                     id: loose,
                     function: nodes::RUN_FUNCTION_ID,
                     ..GraphNode::default()
@@ -1417,7 +1441,7 @@ mod task_runs {
             .unwrap();
         interp
             .apply(GraphDiff {
-                add_nodes: vec![GraphNode {
+                set: vec![GraphNode {
                     id: parallel,
                     function: nodes::PARALLEL_FUNCTION_ID,
                     children: Some(vec![call_node, run, loose]),
@@ -1435,10 +1459,7 @@ mod task_runs {
         interp
             .tick(&mut ctx)
             .expect("the run still lowers after the load");
-        assert!(
-            interp.graph().nodes.contains_key(&loose),
-            "the load kept it"
-        );
+        assert!(interp.graph().node(&loose).is_some(), "the load kept it");
 
         interp.halt(handle.id).unwrap();
         interp.tick(&mut ctx).unwrap();
@@ -1449,36 +1470,34 @@ mod task_runs {
         );
     }
 
-    /// A graph that reads `variable`, declared under `name`: a sequence whose
-    /// one child takes the variable as an argument.
-    fn reading(root: u128, variable: Uuid, name: &str) -> arora_behavior::graph::Graph {
-        use arora_behavior::graph::{Graph, Link, LinkSource, Node as GraphNode, Port};
+    /// A graph that reads the key `key`: one node taking it as an argument.
+    fn reading(root: u128, key: &str) -> arora_behavior::graph::Graph {
+        use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
         let root = Uuid::from_u128(root);
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        graph.nodes.insert(
-            root,
-            GraphNode {
-                id: root,
-                function: nodes::SUCCEED_FUNCTION_ID,
-                ..GraphNode::default()
-            },
+        graph.nodes.push(GraphNode {
+            id: root,
+            function: nodes::SUCCEED_FUNCTION_ID,
+            ..GraphNode::default()
+        });
+        bind_all(
+            &mut graph,
+            vec![binding(
+                Port::new(root, Uuid::from_u128(0x1)),
+                Source::Key(key.to_string()),
+            )],
         );
-        graph.links.push(Link::new(
-            Port::new(root, Uuid::from_u128(0x1)),
-            LinkSource::Variable(variable),
-        ));
-        graph.variables.insert(variable, name.to_string());
         graph
     }
 
     /// A spawned graph is a region of its own: a graph type the interpreter
-    /// reads, one tree of new nodes under its root, links among its own nodes,
-    /// and no renaming of a variable the device's behavior reads. A load cannot
-    /// take over a run's nodes either.
+    /// reads, one tree of new nodes under its root, each listed once, whose
+    /// bindings read only its own nodes. A load cannot take over a run's nodes
+    /// either.
     #[test]
     fn a_spawned_graph_that_overlaps_the_device_s_is_refused() {
-        use arora_behavior::graph::{Graph, GraphType, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{Graph, GraphType, Node as GraphNode, Port, Source};
 
         let leaf = Uuid::from_u128(0xD1);
         let mut interp = BehaviorTreeInterpreter::new();
@@ -1489,8 +1508,7 @@ mod task_runs {
                 RunPolicy::Concurrent,
             )
             .unwrap();
-        let variable = Uuid::from_u128(0x5);
-        interp.load(reading(0xA0, variable, "face/x")).unwrap();
+        interp.load(reading(0xA0, "face/x")).unwrap();
         let nodes_before = interp.graph().nodes.len();
 
         let fresh = || stepping_graph([0x80, 0x81, 0x82], leaf);
@@ -1501,30 +1519,30 @@ mod task_runs {
         stray_root.root = Some(Uuid::from_u128(0x99));
         let reused = stepping_graph([0x80, 0x71, 0x82], leaf);
         let mut reaching_out = fresh();
-        reaching_out.links.push(Link::new(
-            Port::new(Uuid::from_u128(0x71), nodes::RUN_CALL_PARAM_ID),
-            LinkSource::Literal(Value::Unit),
-        ));
-        let mut renaming = fresh();
-        renaming.variables.insert(variable, "face/y".to_string());
+        bind_all(
+            &mut reaching_out,
+            vec![binding(
+                Port::new(call_node, nodes::RUN_CALL_PARAM_ID),
+                Source::Port(Port::new(Uuid::from_u128(0x71), nodes::RUN_CALL_PARAM_ID)),
+            )],
+        );
+        let mut listed_twice = fresh();
+        listed_twice.nodes.push(listed_twice.nodes[2].clone());
         let mut dangling_child = fresh();
-        dangling_child.nodes.get_mut(&parallel).unwrap().children =
+        node_mut(&mut dangling_child, parallel).children =
             Some(vec![call_node, run, Uuid::from_u128(0x99)]);
         let mut cycle = fresh();
-        cycle.nodes.get_mut(&run).unwrap().children = Some(vec![run]);
+        node_mut(&mut cycle, run).children = Some(vec![run]);
         let mut two_parents = fresh();
-        two_parents.nodes.get_mut(&run).unwrap().children = Some(vec![call_node]);
+        node_mut(&mut two_parents, run).children = Some(vec![call_node]);
         let mut stray_node = fresh();
-        stray_node.nodes.insert(
-            Uuid::from_u128(0x83),
-            GraphNode {
-                id: Uuid::from_u128(0x83),
-                function: nodes::RUN_FUNCTION_ID,
-                ..GraphNode::default()
-            },
-        );
+        stray_node.nodes.push(GraphNode {
+            id: Uuid::from_u128(0x83),
+            function: nodes::RUN_FUNCTION_ID,
+            ..GraphNode::default()
+        });
         let mut child_outside = fresh();
-        child_outside.nodes.get_mut(&run).unwrap().children = Some(vec![Uuid::from_u128(0xA0)]);
+        node_mut(&mut child_outside, run).children = Some(vec![Uuid::from_u128(0xA0)]);
 
         let tree = graph_type();
         let ty = |name: &str, major, minor| GraphType {
@@ -1535,16 +1553,17 @@ mod task_runs {
             ("no root", tree.clone(), rootless),
             ("a root that is not a node", tree.clone(), stray_root),
             ("a node id the device uses", tree.clone(), reused),
-            ("a link onto another node", tree.clone(), reaching_out),
-            ("a variable in use renamed", tree.clone(), renaming),
+            ("a binding reading another node", tree.clone(), reaching_out),
+            ("a node listed twice", tree.clone(), listed_twice),
             ("a child that is not a node", tree.clone(), dangling_child),
             ("a cycle", tree.clone(), cycle),
             ("a node with two parents", tree.clone(), two_parents),
             ("a node outside the tree", tree.clone(), stray_node),
             ("a child of the main behavior", tree.clone(), child_outside),
             ("another language", ty("node-graph", 1, 0), fresh()),
-            ("another major", ty("behavior-tree", 2, 0), fresh()),
-            ("a newer minor", ty("behavior-tree", 1, 99), fresh()),
+            ("an older major", ty("behavior-tree", 1, 3), fresh()),
+            ("another major", ty("behavior-tree", 3, 0), fresh()),
+            ("a newer minor", ty("behavior-tree", 2, 99), fresh()),
         ] {
             let refused = interp.spawn_graph(&graph_type, graph, RunPolicy::Concurrent);
             assert!(refused.is_err(), "a graph with {what} is refused");
@@ -1558,57 +1577,15 @@ mod task_runs {
         let mut over_a_run = Graph::empty();
         let run_node = Uuid::from_u128(0x72);
         over_a_run.root = Some(run_node);
-        over_a_run.nodes.insert(
-            run_node,
-            GraphNode {
-                id: run_node,
-                function: nodes::SUCCEED_FUNCTION_ID,
-                ..GraphNode::default()
-            },
-        );
+        over_a_run.nodes.push(GraphNode {
+            id: run_node,
+            function: nodes::SUCCEED_FUNCTION_ID,
+            ..GraphNode::default()
+        });
         assert!(
             interp.load(over_a_run).is_err(),
             "a load cannot replace a run's node"
         );
-    }
-
-    /// A run's variables leave with it: once halted, a graph may declare the
-    /// same variable under another name. While it runs, a load cannot rename a
-    /// variable the run reads.
-    #[test]
-    fn a_run_s_variables_leave_with_it() {
-        let leaf = Uuid::from_u128(0xE1);
-        let (mut bridge, _statuses, _ticks) = scripted(leaf, Status::Success);
-        let store = SimpleDataStore::new();
-        let mut interp = BehaviorTreeInterpreter::new();
-        let variable = Uuid::from_u128(0x6);
-        let handle = interp
-            .spawn_graph(
-                &graph_type(),
-                reading(0xB0, variable, "a"),
-                RunPolicy::Concurrent,
-            )
-            .unwrap();
-        assert!(
-            interp.load(reading(0xB1, variable, "b")).is_err(),
-            "a load cannot rename a variable a run reads"
-        );
-
-        interp.halt(handle.id).unwrap();
-        let mut ctx = BehaviorContext {
-            functions: &arora_behavior::FunctionIndex::new(),
-            store: &store,
-            call_bridge: &mut bridge,
-        };
-        interp.tick(&mut ctx).unwrap();
-        assert!(!interp.graph().variables.contains_key(&variable));
-        interp
-            .spawn_graph(
-                &graph_type(),
-                reading(0xB2, variable, "b"),
-                RunPolicy::Concurrent,
-            )
-            .expect("the halted run's declaration is gone");
     }
 
     /// A run whose program errors ends `Failure`: the error is reported once,
@@ -1700,14 +1677,11 @@ mod task_runs {
         let one = Uuid::from_u128(0x40);
         let mut once = Graph::empty();
         once.root = Some(one);
-        once.nodes.insert(
-            one,
-            GraphNode {
-                id: one,
-                function: nodes::SUCCEED_FUNCTION_ID,
-                ..GraphNode::default()
-            },
-        );
+        once.nodes.push(GraphNode {
+            id: one,
+            function: nodes::SUCCEED_FUNCTION_ID,
+            ..GraphNode::default()
+        });
         interp
             .spawn_graph(&graph_type(), once.clone(), RunPolicy::Concurrent)
             .unwrap();
@@ -1721,46 +1695,44 @@ mod task_runs {
     /// calling `leaves`. With the first succeeding and the second running, it
     /// stands at its second: calling the first again means it restarted.
     fn seq_star_graph(ids: [u128; 3], leaves: [Uuid; 2]) -> arora_behavior::graph::Graph {
-        use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
         let [root, first, second] = ids.map(Uuid::from_u128);
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        graph.nodes.insert(
-            root,
-            GraphNode {
-                id: root,
-                function: nodes::SEQ_STAR_FUNCTION_ID,
-                children: Some(vec![first, second]),
-                ..GraphNode::default()
-            },
+        graph.nodes.push(GraphNode {
+            id: root,
+            function: nodes::SEQ_STAR_FUNCTION_ID,
+            children: Some(vec![first, second]),
+            ..GraphNode::default()
+        });
+        bind_all(
+            &mut graph,
+            vec![binding(
+                Port::new(root, nodes::SEQ_STAR_CURRENT_INDEX_PARAM_ID),
+                Source::Value(Value::U16(0)),
+            )],
         );
-        graph.links.push(Link::new(
-            Port::new(root, nodes::SEQ_STAR_CURRENT_INDEX_PARAM_ID),
-            LinkSource::Literal(Value::U16(0)),
-        ));
         for (node, leaf) in [(first, leaves[0]), (second, leaves[1])] {
-            graph.nodes.insert(
-                node,
-                GraphNode {
-                    id: node,
-                    function: nodes::RUN_CALL_FUNCTION_ID,
-                    inputs: vec![Io::new(nodes::RUN_CALL_PARAM_ID)],
-                    ..GraphNode::default()
-                },
+            graph.nodes.push(GraphNode {
+                id: node,
+                function: nodes::RUN_CALL_FUNCTION_ID,
+                ..GraphNode::default()
+            });
+            bind_all(
+                &mut graph,
+                vec![binding(
+                    Port::new(node, nodes::RUN_CALL_PARAM_ID),
+                    Source::Value(
+                        arora_types::value_serde::to_value(&call_to(0xB0, leaf)).unwrap(),
+                    ),
+                )],
             );
-            graph.links.push(Link::new(
-                Port::new(node, nodes::RUN_CALL_PARAM_ID),
-                LinkSource::Literal(
-                    arora_types::value_serde::to_value(&call_to(0xB0, leaf)).unwrap(),
-                ),
-            ));
         }
         graph
     }
 
     /// A graph spawned again as a live run runs it answers that run's handle
-    /// and changes nothing, its variables included: the run goes on where it
-    /// stood.
+    /// and changes nothing: the run goes on where it stood.
     #[test]
     fn a_graph_spawned_again_as_it_runs_answers_its_run() {
         let [a1, a2] = [0x91, 0x92].map(Uuid::from_u128);
@@ -1772,16 +1744,10 @@ mod task_runs {
         let mut bridge = TestBridge::new(statuses, ticks.clone());
         let store = SimpleDataStore::new();
         let mut interp = BehaviorTreeInterpreter::new();
-        let declaring = |mut graph: arora_behavior::graph::Graph| {
-            graph
-                .variables
-                .insert(Uuid::from_u128(0x7A), "face/w".to_string());
-            graph
-        };
         let spawned = interp
             .spawn_graph(
                 &graph_type(),
-                declaring(seq_star_graph([0x90, 0x93, 0x94], [a1, a2])),
+                seq_star_graph([0x90, 0x93, 0x94], [a1, a2]),
                 RunPolicy::Concurrent,
             )
             .unwrap();
@@ -1796,7 +1762,7 @@ mod task_runs {
         let again = interp
             .spawn_graph(
                 &graph_type(),
-                declaring(seq_star_graph([0x90, 0x93, 0x94], [a1, a2])),
+                seq_star_graph([0x90, 0x93, 0x94], [a1, a2]),
                 RunPolicy::Concurrent,
             )
             .expect("the run's graph spawned again is answered");
@@ -1807,13 +1773,13 @@ mod task_runs {
         assert_eq!(ticks.borrow().get(&a2), Some(&2), "the run goes on");
     }
 
-    /// A graph spawned with a live run's root and other nodes or links is that
-    /// run's program from then on: the nodes and links that differ change,
-    /// the nodes it drops leave but for one the main behavior holds, and the
-    /// handle answered halts it.
+    /// A graph spawned with a live run's root and other nodes or bindings is
+    /// that run's program from then on: the nodes and bindings that differ
+    /// change, the nodes it drops leave but for one the main behavior holds,
+    /// and the handle answered halts it.
     #[test]
     fn a_graph_spawned_again_with_changes_becomes_its_run_s_program() {
-        use arora_behavior::graph::{GraphDiff, Link, LinkSource, Node as GraphNode, Port};
+        use arora_behavior::graph::{GraphDiff, Node as GraphNode, Port, Source};
         let [a, b] = [0xA1, 0xB1].map(Uuid::from_u128);
         let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
             (a, Status::Running),
@@ -1837,67 +1803,67 @@ mod task_runs {
         };
         interp.tick(&mut ctx).unwrap();
 
-        // An edit puts the main behavior's root under the run too, and links
+        // An edit puts the main behavior's root under the run too, and binds
         // a port of the run's root.
         let [parallel, call_node, run, added] = [0xC0, 0xC1, 0xC2, 0xC3].map(Uuid::from_u128);
         let main = Uuid::from_u128(0xA0);
-        interp
-            .load(reading(0xA0, Uuid::from_u128(0x8), "face/x"))
-            .unwrap();
+        interp.load(reading(0xA0, "face/x")).unwrap();
         let extra = Port::new(parallel, Uuid::from_u128(0x5));
         interp
             .apply(GraphDiff {
-                add_nodes: vec![GraphNode {
+                set: vec![GraphNode {
                     id: parallel,
                     function: nodes::PARALLEL_FUNCTION_ID,
                     children: Some(vec![call_node, run, main]),
                     ..GraphNode::default()
                 }],
-                add_links: vec![Link::new(extra, LinkSource::Literal(Value::Unit))],
+                bind: vec![binding(extra, Source::Value(Value::Unit))],
                 ..GraphDiff::default()
             })
             .unwrap();
 
         // The call leaf calls `b`, and a new `Run` node replaces the old one.
         let mut changed = stepping_graph([0xC0, 0xC1, 0xC2], b);
-        changed.nodes.remove(&run);
-        changed.nodes.insert(
-            added,
-            GraphNode {
-                id: added,
-                function: nodes::RUN_FUNCTION_ID,
-                ..GraphNode::default()
-            },
+        changed.nodes.retain(|node| node.id != run);
+        changed.nodes.push(GraphNode {
+            id: added,
+            function: nodes::RUN_FUNCTION_ID,
+            ..GraphNode::default()
+        });
+        node_mut(&mut changed, parallel).children = Some(vec![call_node, added]);
+        bind_all(
+            &mut changed,
+            vec![binding(
+                Port::new(added, Uuid::from_u128(0x6)),
+                Source::Key("face/z".to_string()),
+            )],
         );
-        changed.nodes.get_mut(&parallel).unwrap().children = Some(vec![call_node, added]);
-        let declared = Uuid::from_u128(0x7B);
-        changed.variables.insert(declared, "face/z".to_string());
-        changed.links.push(Link::new(
-            Port::new(added, Uuid::from_u128(0x6)),
-            LinkSource::Variable(declared),
-        ));
         let again = interp
             .spawn_graph(&graph_type(), changed, RunPolicy::Concurrent)
             .expect("a graph with a live run's root is answered");
         assert_eq!(again, spawned, "the answer is the run's handle");
         let graph = interp.graph();
+        assert!(graph.node(&added).is_some(), "the new node joined the run");
+        assert!(!graph.node(&run).is_some(), "the dropped node left");
         assert!(
-            graph.nodes.contains_key(&added),
-            "the new node joined the run"
-        );
-        assert!(!graph.nodes.contains_key(&run), "the dropped node left");
-        assert!(
-            graph.nodes.contains_key(&main),
+            graph.node(&main).is_some(),
             "a dropped node the main behavior holds stays"
         );
-        assert_eq!(graph.link_to(&extra), None, "a link the graph lacks left");
         assert_eq!(
-            graph.link_to(&Port::new(call_node, nodes::RUN_CALL_PARAM_ID)),
-            Some(&Link::new(
-                Port::new(call_node, nodes::RUN_CALL_PARAM_ID),
-                LinkSource::Literal(arora_types::value_serde::to_value(&call_to(0xB0, b)).unwrap()),
+            graph.node(&parallel).unwrap().bind.get(&extra.port),
+            None,
+            "a binding the graph lacks left"
+        );
+        assert_eq!(
+            graph
+                .node(&call_node)
+                .unwrap()
+                .bind
+                .get(&nodes::RUN_CALL_PARAM_ID),
+            Some(&Source::Value(
+                arora_types::value_serde::to_value(&call_to(0xB0, b)).unwrap()
             )),
-            "the call leaf's link is the new graph's"
+            "the call leaf's binding is the new graph's"
         );
         interp.tick(&mut ctx).unwrap();
         assert_eq!(ticks.borrow().get(&a), Some(&1), "the old call is gone");
@@ -1920,17 +1886,12 @@ mod task_runs {
             2,
             "the runner and the main behavior remain"
         );
-        assert!(
-            !interp.graph().variables.contains_key(&declared),
-            "a variable the run's new graph declared leaves with it"
-        );
     }
 
     /// A take-over restarts only the nodes it changes: the run's nodes the
     /// new graph leaves as they are keep their state.
     #[test]
     fn a_take_over_keeps_the_state_of_the_nodes_it_leaves_as_they_are() {
-        use arora_behavior::graph::Io;
         let [a1, a2, a3] = [0x91, 0x92, 0x95].map(Uuid::from_u128);
         let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
             (a1, Status::Success),
@@ -1974,13 +1935,13 @@ mod task_runs {
         );
         assert_eq!(ticks.borrow().get(&a3), Some(&1), "the relinked child runs");
 
-        // The seq_star itself changes: it restarts from its first child.
+        // A binding of the seq_star changes: it restarts from its first
+        // child.
         let mut changed = seq_star_graph(ids, [a1, a3]);
-        changed
-            .nodes
-            .get_mut(&Uuid::from_u128(0x90))
-            .unwrap()
-            .inputs = vec![Io::new(Uuid::from_u128(0xE0))];
+        node_mut(&mut changed, Uuid::from_u128(0x90)).bind.insert(
+            Uuid::from_u128(0xE0),
+            arora_behavior::graph::Source::Value(Value::Unit),
+        );
         interp
             .spawn_graph(&graph_type(), changed, RunPolicy::Concurrent)
             .unwrap();
@@ -1994,8 +1955,7 @@ mod task_runs {
 
     /// A graph with a live run's root is refused, changing nothing, when it
     /// holds a node of the main behavior or of another run — one an edit
-    /// placed under the run too — the run's decorator, or a variable in use
-    /// renamed.
+    /// placed under the run too — or the run's decorator.
     #[test]
     fn a_graph_with_a_live_run_s_root_and_others_nodes_is_refused() {
         use arora_behavior::graph::{GraphDiff, Node as GraphNode};
@@ -2015,10 +1975,11 @@ mod task_runs {
                 RunPolicy::Concurrent,
             )
             .unwrap();
-        let variable = Uuid::from_u128(0x7);
-        interp.load(reading(0xA0, variable, "face/x")).unwrap();
+        interp.load(reading(0xA0, "face/x")).unwrap();
         let before = interp.graph().clone();
-        let decorator = before.nodes[&before.root.unwrap()]
+        let decorator = before
+            .node(&before.root.unwrap())
+            .unwrap()
             .children
             .as_ref()
             .unwrap()[1];
@@ -2026,20 +1987,15 @@ mod task_runs {
         let [parallel, call_node] = [0xE0, 0xE1].map(Uuid::from_u128);
         let holding = |other: Uuid| {
             let mut graph = stepping_graph([0xE0, 0xE1, 0xE2], leaf);
-            graph.nodes.insert(
-                other,
-                GraphNode {
-                    id: other,
-                    function: nodes::RUN_FUNCTION_ID,
-                    ..GraphNode::default()
-                },
-            );
-            graph.nodes.get_mut(&parallel).unwrap().children =
+            graph.nodes.push(GraphNode {
+                id: other,
+                function: nodes::RUN_FUNCTION_ID,
+                ..GraphNode::default()
+            });
+            node_mut(&mut graph, parallel).children =
                 Some(vec![call_node, Uuid::from_u128(0xE2), other]);
             graph
         };
-        let mut renaming = stepping_graph([0xE0, 0xE1, 0xE2], leaf);
-        renaming.variables.insert(variable, "face/y".to_string());
         for (what, graph) in [
             (
                 "a node of the main behavior",
@@ -2047,7 +2003,6 @@ mod task_runs {
             ),
             ("a node of another run", holding(Uuid::from_u128(0xF2))),
             ("the run's decorator", holding(decorator)),
-            ("a variable in use renamed", renaming),
         ] {
             assert!(
                 interp
@@ -2063,7 +2018,7 @@ mod task_runs {
         let [main, other_root, run] = [0xA0, 0xF0, 0xE2].map(Uuid::from_u128);
         interp
             .apply(GraphDiff {
-                add_nodes: vec![GraphNode {
+                set: vec![GraphNode {
                     id: parallel,
                     function: nodes::PARALLEL_FUNCTION_ID,
                     children: Some(vec![call_node, run, main, other_root]),
@@ -2078,15 +2033,12 @@ mod task_runs {
             ("another run's root", other_root),
         ] {
             let mut graph = stepping_graph([0xE0, 0xE1, 0xE2], leaf);
-            graph.nodes.insert(
-                shared,
-                GraphNode {
-                    id: shared,
-                    function: nodes::RUN_FUNCTION_ID,
-                    ..GraphNode::default()
-                },
-            );
-            graph.nodes.get_mut(&parallel).unwrap().children = Some(vec![call_node, run, shared]);
+            graph.nodes.push(GraphNode {
+                id: shared,
+                function: nodes::RUN_FUNCTION_ID,
+                ..GraphNode::default()
+            });
+            node_mut(&mut graph, parallel).children = Some(vec![call_node, run, shared]);
             assert!(
                 interp
                     .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
@@ -2095,6 +2047,98 @@ mod task_runs {
             );
             assert_eq!(interp.graph(), &before, "{what}: the graph is unchanged");
         }
+    }
+
+    /// The main behavior's root, as the runner holds it.
+    fn main_root(interp: &BehaviorTreeInterpreter) -> Option<Uuid> {
+        let graph = interp.graph();
+        graph
+            .node(&graph.root.unwrap())
+            .and_then(|runner| runner.children.as_ref())
+            .and_then(|children| children.first().copied())
+    }
+
+    /// Removing the main behavior's root unroots it, even when the same edit
+    /// sets the node again: the node stays, and an edit's root roots it again.
+    #[test]
+    fn removing_the_main_root_unroots_it_even_when_set_again() {
+        use arora_behavior::graph::GraphDiff;
+        let mut interp = BehaviorTreeInterpreter::new();
+        interp.load(reading(0xA0, "face/x")).unwrap();
+        let main = Uuid::from_u128(0xA0);
+        assert_eq!(main_root(&interp), Some(main));
+        let node = interp.graph().node(&main).unwrap().clone();
+        interp
+            .apply(GraphDiff {
+                remove: vec![main],
+                set: vec![node],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        assert_eq!(main_root(&interp), None, "unrooted");
+        assert!(interp.graph().node(&main).is_some(), "the node stays");
+        interp
+            .apply(GraphDiff {
+                root: Some(main),
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        assert_eq!(main_root(&interp), Some(main), "rooted again");
+    }
+
+    /// A refused edit or load leaves the main behavior's root as it was, and
+    /// the next edit applies.
+    #[test]
+    fn a_refused_edit_leaves_the_main_root_as_it_was() {
+        use arora_behavior::graph::{Graph, GraphDiff, Node as GraphNode};
+        let mut interp = BehaviorTreeInterpreter::new();
+        interp.load(reading(0xA0, "face/x")).unwrap();
+        let main = Some(Uuid::from_u128(0xA0));
+        assert!(interp
+            .apply(GraphDiff {
+                root: Some(Uuid::from_u128(0xDEAD)),
+                ..GraphDiff::default()
+            })
+            .is_err());
+        assert_eq!(main_root(&interp), main, "a root that is no node");
+        let dangling = Graph {
+            root: Some(Uuid::from_u128(0xB0)),
+            nodes: vec![GraphNode {
+                id: Uuid::from_u128(0xB0),
+                function: nodes::SEQ_FUNCTION_ID,
+                children: Some(vec![Uuid::from_u128(0xDEAD)]),
+                ..GraphNode::default()
+            }],
+        };
+        assert!(interp.load(dangling).is_err());
+        assert_eq!(main_root(&interp), main, "a load that does not apply");
+        interp
+            .apply(GraphDiff::default())
+            .expect("the next edit applies");
+    }
+
+    /// A graph lists each node once: a load or a spawn listing one twice is
+    /// refused, rather than one of the two being kept.
+    #[test]
+    fn a_graph_listing_a_node_twice_is_refused() {
+        let leaf = Uuid::from_u128(0xD1);
+        let mut twice = stepping_graph([0x80, 0x81, 0x82], leaf);
+        twice.nodes.push(twice.nodes[1].clone());
+        let mut interp = BehaviorTreeInterpreter::new();
+        let refused = interp
+            .spawn_graph(&graph_type(), twice.clone(), RunPolicy::Concurrent)
+            .expect_err("a spawn");
+        assert!(
+            refused.message.contains("listed twice"),
+            "{}",
+            refused.message
+        );
+        let refused = interp.load(twice).expect_err("a load");
+        assert!(
+            refused.message.contains("listed twice"),
+            "{}",
+            refused.message
+        );
     }
 
     /// A halt keeps the nodes the main behavior also holds, its root
@@ -2112,13 +2156,11 @@ mod task_runs {
             )
             .unwrap();
         let main = Uuid::from_u128(0xA0);
-        interp
-            .load(reading(0xA0, Uuid::from_u128(0x9), "face/x"))
-            .unwrap();
+        interp.load(reading(0xA0, "face/x")).unwrap();
         let [parallel, call_node, run] = [0x60, 0x61, 0x62].map(Uuid::from_u128);
         interp
             .apply(GraphDiff {
-                add_nodes: vec![GraphNode {
+                set: vec![GraphNode {
                     id: parallel,
                     function: nodes::PARALLEL_FUNCTION_ID,
                     children: Some(vec![call_node, run, main]),
@@ -2130,7 +2172,7 @@ mod task_runs {
 
         interp.halt(handle.id).expect("the halt applies");
         let graph = interp.graph();
-        assert!(graph.nodes.contains_key(&main), "the main behavior stays");
+        assert!(graph.node(&main).is_some(), "the main behavior stays");
         assert_eq!(
             graph.nodes.len(),
             2,
@@ -2154,7 +2196,13 @@ mod task_runs {
             )
             .unwrap();
         let runner = interp.graph().root.unwrap();
-        let decorator = interp.graph().nodes[&runner].children.as_ref().unwrap()[0];
+        let decorator = interp
+            .graph()
+            .node(&runner)
+            .unwrap()
+            .children
+            .as_ref()
+            .unwrap()[0];
         let [parallel, _, run] = [0x50, 0x51, 0x52].map(Uuid::from_u128);
         let before = interp.graph().clone();
         let node = |id, children| GraphNode {
@@ -2167,35 +2215,35 @@ mod task_runs {
             (
                 "the main root set to a decorator",
                 GraphDiff {
-                    set_root: Some(decorator),
+                    root: Some(decorator),
                     ..GraphDiff::default()
                 },
             ),
             (
                 "a decorator as a child",
                 GraphDiff {
-                    add_nodes: vec![node(Uuid::from_u128(0x60), vec![decorator])],
+                    set: vec![node(Uuid::from_u128(0x60), vec![decorator])],
                     ..GraphDiff::default()
                 },
             ),
             (
                 "the runner as a child",
                 GraphDiff {
-                    add_nodes: vec![node(Uuid::from_u128(0x60), vec![runner])],
+                    set: vec![node(Uuid::from_u128(0x60), vec![runner])],
                     ..GraphDiff::default()
                 },
             ),
             (
                 "a run's node removed under its parent",
                 GraphDiff {
-                    remove_nodes: vec![run],
+                    remove: vec![run],
                     ..GraphDiff::default()
                 },
             ),
             (
                 "a cycle",
                 GraphDiff {
-                    add_nodes: vec![node(run, vec![parallel])],
+                    set: vec![node(run, vec![parallel])],
                     ..GraphDiff::default()
                 },
             ),
@@ -2211,10 +2259,12 @@ mod task_runs {
 /// stands at its second child; calling its first child again means it
 /// restarted.
 mod kept_state {
+    #[allow(unused_imports)]
+    use super::{bind_all, binding, node_mut};
     use super::{LeafStatuses, LeafTicks, TestBridge};
     use crate::behavior::{graph_type, BehaviorTreeInterpreter};
     use crate::nodes;
-    use arora_behavior::graph::{Graph, GraphDiff, Io, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::graph::{Binding, Graph, GraphDiff, Node as GraphNode, Port, Source};
     use arora_behavior::Status;
     use arora_behavior::{
         BehaviorContext, BehaviorError, BehaviorInterpreter, FunctionIndex, RunPolicy,
@@ -2222,7 +2272,6 @@ mod kept_state {
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::call::Call;
     use arora_types::data::DataStore;
-    use arora_types::gen_uuid_from_str;
     use arora_types::value::Value;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -2273,17 +2322,17 @@ mod kept_state {
         }
     }
 
-    /// The link that makes the run-call leaf `node` call the scripted leaf
+    /// The binding that makes the run-call leaf `node` call the scripted leaf
     /// `leaf`.
-    fn call_link(node: Uuid, leaf: Uuid) -> Link {
+    fn call_link(node: Uuid, leaf: Uuid) -> Binding {
         let call = Call {
             module_id: Some(Uuid::from_u128(0xB0)),
             id: leaf,
             args: Vec::new(),
         };
-        Link::new(
+        binding(
             Port::new(node, nodes::RUN_CALL_PARAM_ID),
-            LinkSource::Literal(arora_types::value_serde::to_value(&call).unwrap()),
+            Source::Value(arora_types::value_serde::to_value(&call).unwrap()),
         )
     }
 
@@ -2291,8 +2340,8 @@ mod kept_state {
     fn add_call(graph: &mut Graph, node: Uuid, leaf: Uuid) {
         graph
             .nodes
-            .insert(node, leaf_node(node, nodes::RUN_CALL_FUNCTION_ID));
-        graph.links.push(call_link(node, leaf));
+            .push(leaf_node(node, nodes::RUN_CALL_FUNCTION_ID));
+        bind_all(graph, vec![call_link(node, leaf)]);
     }
 
     fn leaf_node(id: Uuid, function: Uuid) -> GraphNode {
@@ -2312,11 +2361,11 @@ mod kept_state {
         }
     }
 
-    /// The link that starts the `seq_star` `node` at its first child.
-    fn first_child(node: Uuid) -> Link {
-        Link::new(
+    /// The binding that starts the `seq_star` `node` at its first child.
+    fn first_child(node: Uuid) -> Binding {
+        binding(
             Port::new(node, nodes::SEQ_STAR_CURRENT_INDEX_PARAM_ID),
-            LinkSource::Literal(Value::U16(0)),
+            Source::Value(Value::U16(0)),
         )
     }
 
@@ -2326,11 +2375,12 @@ mod kept_state {
         let [root, first, second] = ids.map(Uuid::from_u128);
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        graph.nodes.insert(
+        graph.nodes.push(control(
             root,
-            control(root, nodes::SEQ_STAR_FUNCTION_ID, vec![first, second]),
-        );
-        graph.links.push(first_child(root));
+            nodes::SEQ_STAR_FUNCTION_ID,
+            vec![first, second],
+        ));
+        bind_all(&mut graph, vec![first_child(root)]);
         add_call(&mut graph, first, leaves[0]);
         add_call(&mut graph, second, leaves[1]);
         graph
@@ -2344,7 +2394,7 @@ mod kept_state {
         graph.root = Some(root);
         graph
             .nodes
-            .insert(root, control(root, nodes::SEQ_FUNCTION_ID, vec![call]));
+            .push(control(root, nodes::SEQ_FUNCTION_ID, vec![call]));
         add_call(&mut graph, call, leaf);
         graph
     }
@@ -2402,7 +2452,7 @@ mod kept_state {
         device
             .interp
             .apply(GraphDiff {
-                add_links: vec![call_link(Uuid::from_u128(0x31), b2)],
+                bind: vec![call_link(Uuid::from_u128(0x31), b2)],
                 ..GraphDiff::default()
             })
             .unwrap();
@@ -2457,22 +2507,33 @@ mod kept_state {
         device
             .interp
             .apply(GraphDiff {
-                add_links: vec![call_link(second, a3)],
+                bind: vec![call_link(second, a3)],
                 ..GraphDiff::default()
             })
             .unwrap();
         device.tick();
-        assert_eq!(device.calls(a1), 1, "a relinked child leaves its seq_star");
-        assert_eq!(device.calls(a3), 1, "the relinked child calls its new leaf");
+        assert_eq!(
+            device.calls(a1),
+            1,
+            "a child bound again leaves its seq_star"
+        );
+        assert_eq!(
+            device.calls(a3),
+            1,
+            "the child bound again calls its new leaf"
+        );
 
         device
             .interp
             .apply(GraphDiff {
-                add_nodes: vec![control(
-                    root,
-                    nodes::SEQ_STAR_FUNCTION_ID,
-                    vec![first, second],
-                )],
+                set: vec![GraphNode {
+                    bind: [(
+                        nodes::SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+                        Source::Value(Value::U16(0)),
+                    )]
+                    .into(),
+                    ..control(root, nodes::SEQ_STAR_FUNCTION_ID, vec![first, second])
+                }],
                 ..GraphDiff::default()
             })
             .unwrap();
@@ -2482,12 +2543,12 @@ mod kept_state {
         device
             .interp
             .apply(GraphDiff {
-                add_links: vec![first_child(root)],
+                bind: vec![first_child(root)],
                 ..GraphDiff::default()
             })
             .unwrap();
         device.tick();
-        assert_eq!(device.calls(a1), 3, "a relinked seq_star restarts");
+        assert_eq!(device.calls(a1), 3, "a seq_star bound again restarts");
     }
 
     /// The nodes of a `once` behavior.
@@ -2497,39 +2558,36 @@ mod kept_state {
     /// nodes `ids`: it calls `m` once, then `.done` is set.
     fn once(m: Uuid, ids: [u128; 5]) -> Graph {
         let [root, done, first, call, set] = ids.map(Uuid::from_u128);
-        let variable = gen_uuid_from_str(".done");
+        let variable = Source::Key(".done".to_string());
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        graph.nodes.insert(
+        graph.nodes.push(control(
             root,
-            control(root, nodes::FALLBACK_FUNCTION_ID, vec![done, first]),
-        );
-        graph.nodes.insert(
-            first,
-            control(first, nodes::SEQ_FUNCTION_ID, vec![call, set]),
-        );
+            nodes::FALLBACK_FUNCTION_ID,
+            vec![done, first],
+        ));
         graph
             .nodes
-            .insert(done, leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
+            .push(control(first, nodes::SEQ_FUNCTION_ID, vec![call, set]));
         graph
             .nodes
-            .insert(set, leaf_node(set, nodes::SET_STR_FUNCTION_ID));
+            .push(leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
+        graph.nodes.push(leaf_node(set, nodes::SET_STR_FUNCTION_ID));
         add_call(&mut graph, call, m);
-        graph.links.extend([
-            Link::new(
-                Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
-                LinkSource::Variable(variable),
-            ),
-            Link::new(
-                Port::new(set, nodes::SET_STR_VARIABLE_PARAM_ID),
-                LinkSource::Variable(variable),
-            ),
-            Link::new(
-                Port::new(set, nodes::SET_STR_VALUE_PARAM_ID),
-                LinkSource::Literal(Value::String("yes".to_string())),
-            ),
-        ]);
-        graph.variables.insert(variable, ".done".to_string());
+        bind_all(
+            &mut graph,
+            [
+                binding(
+                    Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
+                    variable.clone(),
+                ),
+                binding(Port::new(set, nodes::SET_STR_VARIABLE_PARAM_ID), variable),
+                binding(
+                    Port::new(set, nodes::SET_STR_VALUE_PARAM_ID),
+                    Source::Value(Value::String("yes".to_string())),
+                ),
+            ],
+        );
         graph
     }
 
@@ -2575,21 +2633,20 @@ mod kept_state {
         device.interp.load(once(m, ONCE)).unwrap();
         // The run calls `r`, then would check `.done`.
         let [root, call, done] = [0x30, 0x31, 0x32].map(Uuid::from_u128);
-        let variable = gen_uuid_from_str(".done");
         let mut run = Graph::empty();
         run.root = Some(root);
-        run.nodes.insert(
-            root,
-            control(root, nodes::SEQ_FUNCTION_ID, vec![call, done]),
-        );
         run.nodes
-            .insert(done, leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
+            .push(control(root, nodes::SEQ_FUNCTION_ID, vec![call, done]));
+        run.nodes
+            .push(leaf_node(done, nodes::IS_STR_SET_FUNCTION_ID));
         add_call(&mut run, call, r);
-        run.links.push(Link::new(
-            Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
-            LinkSource::Variable(variable),
-        ));
-        run.variables.insert(variable, ".done".to_string());
+        bind_all(
+            &mut run,
+            vec![binding(
+                Port::new(done, nodes::IS_STR_SET_VALUE_PARAM_ID),
+                Source::Key(".done".to_string()),
+            )],
+        );
         device
             .interp
             .spawn_graph(&graph_type(), run, RunPolicy::Concurrent)
@@ -2606,41 +2663,94 @@ mod kept_state {
         assert_eq!(device.calls(m), 1, "the run's .done kept its value");
     }
 
-    /// Unlinking a node's input, or setting the predetermined key of one,
-    /// restarts the node.
+    /// Unbinding a port of a node, or binding one to a key, restarts the
+    /// node.
     #[test]
-    fn unlinking_or_rekeying_a_node_restarts_it() {
+    fn unbinding_or_rekeying_a_node_restarts_it() {
         let [a1, a2] = [0xA1, 0xA2].map(Uuid::from_u128);
         let mut device = Device::new(&[(a1, Status::Success), (a2, Status::Running)]);
         let root = Uuid::from_u128(0x20);
         let extra = Port::new(root, Uuid::from_u128(0xE0));
         let mut graph = seq_star([0x20, 0x21, 0x22], [a1, a2]);
-        graph.nodes.get_mut(&root).unwrap().inputs = vec![Io::new(extra.port)];
-        graph
-            .links
-            .push(Link::new(extra, LinkSource::Literal(Value::U8(7))));
+        bind_all(
+            &mut graph,
+            vec![binding(extra, Source::Value(Value::U8(7)))],
+        );
         device.interp.load(graph).unwrap();
         device.tick();
 
         device
             .interp
             .apply(GraphDiff {
-                remove_links: vec![extra],
+                unbind: vec![extra],
                 ..GraphDiff::default()
             })
             .unwrap();
         device.tick();
-        assert_eq!(device.calls(a1), 2, "an unlinked seq_star restarts");
+        assert_eq!(device.calls(a1), 2, "an unbound seq_star restarts");
 
         device
             .interp
             .apply(GraphDiff {
-                set_predetermined: vec![(extra, Some(".k".to_string()))],
+                bind: vec![binding(extra, Source::Key(".k".to_string()))],
                 ..GraphDiff::default()
             })
             .unwrap();
         device.tick();
         assert_eq!(device.calls(a1), 3, "a re-keyed seq_star restarts");
+    }
+
+    /// Removing a node a binding reads unbinds it, and restarts its node as
+    /// unbinding it would.
+    #[test]
+    fn removing_a_node_a_binding_reads_restarts_the_reader() {
+        let [a1, a2] = [0xA1, 0xA2].map(Uuid::from_u128);
+        let mut device = Device::new(&[(a1, Status::Success), (a2, Status::Running)]);
+        let root = Uuid::from_u128(0x20);
+        let producer = Uuid::from_u128(0x30);
+        let mut graph = seq_star([0x20, 0x21, 0x22], [a1, a2]);
+        graph
+            .nodes
+            .push(leaf_node(producer, nodes::EQUAL_FUNCTION_ID));
+        bind_all(
+            &mut graph,
+            vec![
+                binding(
+                    Port::new(producer, nodes::EQUAL_A_PARAM_ID),
+                    Source::Value(Value::U8(1)),
+                ),
+                binding(
+                    Port::new(producer, nodes::EQUAL_B_PARAM_ID),
+                    Source::Value(Value::U8(1)),
+                ),
+                binding(
+                    Port::new(root, Uuid::from_u128(0xE0)),
+                    Source::Port(Port::new(producer, nodes::EQUAL_A_PARAM_ID)),
+                ),
+            ],
+        );
+        device.interp.load(graph).unwrap();
+        device.tick();
+        device.tick();
+        assert_eq!(
+            device.calls(a1),
+            1,
+            "the seq_star resumes at its second child"
+        );
+
+        device
+            .interp
+            .apply(GraphDiff {
+                remove: vec![producer],
+                ..GraphDiff::default()
+            })
+            .unwrap();
+        device.tick();
+        assert_eq!(
+            device.calls(a1),
+            2,
+            "the seq_star unbound by a removal restarts"
+        );
     }
 
     /// A refused edit restarts nothing, at the next lowering either.
@@ -2662,12 +2772,12 @@ mod kept_state {
         // It relinks the seq_star's index, and names a child that is not a
         // node: refused whole.
         let refused = device.interp.apply(GraphDiff {
-            add_nodes: vec![control(
+            set: vec![control(
                 root,
                 nodes::SEQ_STAR_FUNCTION_ID,
                 vec![first, second, Uuid::from_u128(0xBAD)],
             )],
-            add_links: vec![first_child(root)],
+            bind: vec![first_child(root)],
             ..GraphDiff::default()
         });
         assert!(refused.is_err());
@@ -2728,16 +2838,15 @@ mod kept_state {
         device
             .interp
             .apply(GraphDiff {
-                add_nodes: vec![GraphNode {
+                set: vec![GraphNode {
                     id: consumer,
                     function,
-                    inputs: vec![Io::new(frame)],
                     ..GraphNode::default()
                 }],
-                add_links: vec![Link::new(
+                bind: vec![binding(
                     Port::new(consumer, frame),
-                    LinkSource::Select {
-                        source: Box::new(LinkSource::Variable(Uuid::from_u128(0x31))),
+                    Source::Select {
+                        source: Box::new(Source::Key(".a".to_string())),
                         path: Key::new(".a"),
                     },
                 )],
@@ -2748,7 +2857,7 @@ mod kept_state {
         device
             .interp
             .apply(GraphDiff {
-                remove_nodes: vec![consumer],
+                remove: vec![consumer],
                 ..GraphDiff::default()
             })
             .unwrap();
@@ -2775,12 +2884,11 @@ mod kept_state {
 
         // Two detached nodes returning into one tree-local variable: the edit
         // applies, and the lowering refuses it.
-        let variable = Uuid::from_u128(0x31);
         let writers = [0x30, 0x32].map(Uuid::from_u128);
         device
             .interp
             .apply(GraphDiff {
-                add_nodes: writers
+                set: writers
                     .iter()
                     .map(|id| GraphNode {
                         id: *id,
@@ -2788,12 +2896,12 @@ mod kept_state {
                         ..GraphNode::default()
                     })
                     .collect(),
-                add_links: writers
+                bind: writers
                     .iter()
                     .map(|id| {
-                        Link::new(
+                        binding(
                             Port::new(*id, crate::schema::_RET_PARAM_ID),
-                            LinkSource::Variable(variable),
+                            Source::Key(".v".to_string()),
                         )
                     })
                     .collect(),
@@ -2805,7 +2913,7 @@ mod kept_state {
         device
             .interp
             .apply(GraphDiff {
-                remove_nodes: writers.to_vec(),
+                remove: writers.to_vec(),
                 ..GraphDiff::default()
             })
             .unwrap();
@@ -2828,11 +2936,11 @@ mod kept_state {
         let mut device = Device::new(&[(m, Status::Success)]);
         let [root, equal, first, call, unpack] =
             [0x10, 0x11, 0x12, 0x13, 0x14].map(Uuid::from_u128);
-        let x = gen_uuid_from_str(".x");
+        let x = Source::Key(".x".to_string());
         let field = Uuid::from_u128(0xF1E1D);
-        let values = Link::new(
+        let values = binding(
             Port::new(unpack, nodes::UNPACK_VALUES_PARAM_ID),
-            LinkSource::Literal(Value::ArrayValue(vec![Value::Structure(Structure {
+            Source::Value(Value::ArrayValue(vec![Value::Structure(Structure {
                 id: Uuid::from_u128(0x50),
                 fields: vec![StructureField {
                     id: field,
@@ -2844,40 +2952,37 @@ mod kept_state {
         // calls `m` once: then `.x` holds the structure.
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        graph.nodes.insert(
+        graph.nodes.push(control(
             root,
-            control(root, nodes::FALLBACK_FUNCTION_ID, vec![equal, first]),
-        );
-        graph.nodes.insert(
-            first,
-            control(first, nodes::SEQ_FUNCTION_ID, vec![call, unpack]),
-        );
+            nodes::FALLBACK_FUNCTION_ID,
+            vec![equal, first],
+        ));
         graph
             .nodes
-            .insert(equal, leaf_node(equal, nodes::EQUAL_FUNCTION_ID));
+            .push(control(first, nodes::SEQ_FUNCTION_ID, vec![call, unpack]));
+        graph.nodes.push(leaf_node(equal, nodes::EQUAL_FUNCTION_ID));
         graph
             .nodes
-            .insert(unpack, leaf_node(unpack, nodes::UNPACK_FUNCTION_ID));
+            .push(leaf_node(unpack, nodes::UNPACK_FUNCTION_ID));
         add_call(&mut graph, call, m);
-        graph.links.extend([
-            Link::new(
-                Port::new(equal, nodes::EQUAL_A_PARAM_ID),
-                LinkSource::Select {
-                    source: Box::new(LinkSource::Variable(x)),
-                    path: Key::new(format!(".{field}")),
-                },
-            ),
-            Link::new(
-                Port::new(equal, nodes::EQUAL_B_PARAM_ID),
-                LinkSource::Literal(Value::U64(42)),
-            ),
-            values.clone(),
-            Link::new(
-                Port::new(unpack, nodes::UNPACK_OUT_PARAM_IDS[0]),
-                LinkSource::Variable(x),
-            ),
-        ]);
-        graph.variables.insert(x, ".x".to_string());
+        bind_all(
+            &mut graph,
+            [
+                binding(
+                    Port::new(equal, nodes::EQUAL_A_PARAM_ID),
+                    Source::Select {
+                        source: Box::new(x.clone()),
+                        path: Key::new(format!(".{field}")),
+                    },
+                ),
+                binding(
+                    Port::new(equal, nodes::EQUAL_B_PARAM_ID),
+                    Source::Value(Value::U64(42)),
+                ),
+                values.clone(),
+                binding(Port::new(unpack, nodes::UNPACK_OUT_PARAM_IDS[0]), x),
+            ],
+        );
         device.interp.load(graph).unwrap();
         device.tick();
         device.tick();
@@ -2888,7 +2993,7 @@ mod kept_state {
         device
             .interp
             .apply(GraphDiff {
-                add_links: vec![values],
+                bind: vec![values],
                 ..GraphDiff::default()
             })
             .unwrap();
@@ -2929,15 +3034,18 @@ fn a_tree_does_not_call_the_interpreter_module_s_functions() {
     let node = Uuid::from_u128(0x1);
     let mut graph = Graph::empty();
     graph.root = Some(node);
-    graph.nodes.insert(
-        node,
-        GraphNode {
-            id: node,
-            function: interpreter_module::HALT,
-            ..GraphNode::default()
-        },
-    );
+    graph.nodes.push(GraphNode {
+        id: node,
+        function: interpreter_module::HALT,
+        ..GraphNode::default()
+    });
     let mut interp = BehaviorTreeInterpreter::new();
+    assert!(interp
+        .spawn_graph(&graph_type(), graph.clone(), RunPolicy::Concurrent)
+        .is_err());
+
+    // Nor one starting a trace.
+    graph.nodes[0].function = interpreter_module::TRACE;
     assert!(interp
         .spawn_graph(&graph_type(), graph, RunPolicy::Concurrent)
         .is_err());
@@ -2946,6 +3054,8 @@ fn a_tree_does_not_call_the_interpreter_module_s_functions() {
 /// The core string nodes run natively in a Groot tree over a data store, with
 /// no module loaded: their ports bind to store keys that need not exist yet.
 mod core_string_nodes {
+    #[allow(unused_imports)]
+    use super::{bind_all, binding, node_mut};
     use super::{LeafStatuses, LeafTicks, TestBridge};
     use crate::behavior::BehaviorTreeInterpreter;
     use crate::nodes;
@@ -3147,6 +3257,8 @@ mod core_string_nodes {
 /// absent: an absent key passes `None`, an optional out-parameter writes
 /// `Some` as the key's value and `None` as unsetting it.
 mod optional_parameters {
+    #[allow(unused_imports)]
+    use super::{bind_all, binding, node_mut};
     use crate::behavior::BehaviorTreeInterpreter;
     use crate::ModuleFunction;
     use arora_behavior::{BehaviorContext, BehaviorInterpreter};
@@ -3344,13 +3456,14 @@ mod optional_parameters {
 /// The data nodes: `Equal` as a condition, `Unpack` spreading an array over
 /// variables.
 mod data_nodes {
+    #[allow(unused_imports)]
+    use super::{bind_all, binding, node_mut};
     use crate::behavior::BehaviorTreeInterpreter;
     use crate::nodes::{self, UNPACK_OUT_PARAM_IDS as OUT};
-    use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::graph::{Graph, Node as GraphNode, Port, Source};
     use arora_behavior::{BehaviorContext, BehaviorInterpreter};
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::data::{DataStore, Key, StateChange};
-    use arora_types::gen_uuid_from_str;
     use arora_types::value::{Structure, StructureField, Value};
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -3361,77 +3474,55 @@ mod data_nodes {
     const UNPACK: Uuid = Uuid::from_u128(0x102);
     const MARK: Uuid = Uuid::from_u128(0x103);
 
-    fn node(id: Uuid, function: Uuid, inputs: &[Uuid]) -> GraphNode {
+    fn node(id: Uuid, function: Uuid) -> GraphNode {
         GraphNode {
             id,
             function,
-            inputs: inputs.iter().copied().map(Io::new).collect(),
             ..GraphNode::default()
         }
     }
 
-    /// The variable named `name`.
+    /// The variable named `name`, as the lowering identifies it.
     fn variable(name: &str) -> Uuid {
-        gen_uuid_from_str(name)
+        crate::graph::key_variable(name)
+    }
+
+    /// A binding to the key `name`.
+    fn key(name: &str) -> Source {
+        Source::Key(name.to_string())
     }
 
     /// `Sequence(Equal(a, b), Unpack(values, out_i → {name}…), Unpack([true],
     /// out_0 → {done}))`: the last node marks that the sequence got past the
     /// first two.
-    fn guarded_unpack(
-        a: LinkSource,
-        b: LinkSource,
-        outputs: &[(usize, &str)],
-        values: LinkSource,
-    ) -> Graph {
+    fn guarded_unpack(a: Source, b: Source, outputs: &[(usize, &str)], values: Source) -> Graph {
         let mut graph = Graph::empty();
         graph.root = Some(SEQ);
-        graph.nodes.insert(
-            SEQ,
-            GraphNode {
-                children: Some(vec![EQUAL, UNPACK, MARK]),
-                ..node(SEQ, nodes::SEQ_FUNCTION_ID, &[])
-            },
-        );
-        graph.nodes.insert(
-            EQUAL,
-            node(
-                EQUAL,
-                nodes::EQUAL_FUNCTION_ID,
-                &[nodes::EQUAL_A_PARAM_ID, nodes::EQUAL_B_PARAM_ID],
-            ),
-        );
+        graph.nodes.push(GraphNode {
+            children: Some(vec![EQUAL, UNPACK, MARK]),
+            ..node(SEQ, nodes::SEQ_FUNCTION_ID)
+        });
+        graph.nodes.push(node(EQUAL, nodes::EQUAL_FUNCTION_ID));
         for id in [UNPACK, MARK] {
-            graph.nodes.insert(
-                id,
-                node(
-                    id,
-                    nodes::UNPACK_FUNCTION_ID,
-                    &[nodes::UNPACK_VALUES_PARAM_ID],
+            graph.nodes.push(node(id, nodes::UNPACK_FUNCTION_ID));
+        }
+        let link = |node, port, source| binding(Port::new(node, port), source);
+        bind_all(
+            &mut graph,
+            vec![
+                link(EQUAL, nodes::EQUAL_A_PARAM_ID, a),
+                link(EQUAL, nodes::EQUAL_B_PARAM_ID, b),
+                link(UNPACK, nodes::UNPACK_VALUES_PARAM_ID, values),
+                link(
+                    MARK,
+                    nodes::UNPACK_VALUES_PARAM_ID,
+                    Source::Value(Value::ArrayBoolean(vec![true])),
                 ),
-            );
-        }
-        let link = |node, port, source| Link::new(Port::new(node, port), source);
-        graph.links = vec![
-            link(EQUAL, nodes::EQUAL_A_PARAM_ID, a),
-            link(EQUAL, nodes::EQUAL_B_PARAM_ID, b),
-            link(UNPACK, nodes::UNPACK_VALUES_PARAM_ID, values),
-            link(
-                MARK,
-                nodes::UNPACK_VALUES_PARAM_ID,
-                LinkSource::Literal(Value::ArrayBoolean(vec![true])),
-            ),
-            link(MARK, OUT[0], LinkSource::Variable(variable("done"))),
-        ];
+                link(MARK, OUT[0], key("done")),
+            ],
+        );
         for (index, name) in outputs {
-            graph.links.push(link(
-                UNPACK,
-                OUT[*index],
-                LinkSource::Variable(variable(name)),
-            ));
-        }
-        for name in outputs.iter().map(|(_, name)| *name).chain(["done"]) {
-            graph.variables.insert(variable(name), name.to_string());
+            bind_all(&mut graph, vec![link(UNPACK, OUT[*index], key(name))]);
         }
         graph
     }
@@ -3454,8 +3545,8 @@ mod data_nodes {
         store.read(&keys)
     }
 
-    fn literal(value: Value) -> LinkSource {
-        LinkSource::Literal(value)
+    fn literal(value: Value) -> Source {
+        Source::Value(value)
     }
 
     #[test]
@@ -3555,7 +3646,6 @@ mod data_nodes {
     fn selections_feed_equal_and_unpack() {
         let revision = Uuid::from_u128(0x51);
         let values = Uuid::from_u128(0x52);
-        let frame = Uuid::from_u128(0x53);
         let store = SimpleDataStore::new();
         store
             .write(StateChange::set(
@@ -3575,17 +3665,16 @@ mod data_nodes {
                 }),
             ))
             .unwrap();
-        let select = |field: Uuid| LinkSource::Select {
-            source: Box::new(LinkSource::Variable(frame)),
+        let select = |field: Uuid| Source::Select {
+            source: Box::new(key("frame")),
             path: Key::new(format!(".{field}")),
         };
-        let mut graph = guarded_unpack(
+        let graph = guarded_unpack(
             select(revision),
             literal(Value::U64(3)),
             &[(0, "face/x"), (1, "face/y")],
             select(values),
         );
-        graph.variables.insert(frame, "frame".to_string());
         tick_once(&store, graph).unwrap();
         assert_eq!(
             read(&store, &["face/x", "face/y", "done"]),
@@ -3598,8 +3687,8 @@ mod data_nodes {
     }
 
     /// Lowering checks the data nodes: both of `Equal`'s arguments and
-    /// `Unpack`'s values linked, each of its outputs a port bound to a
-    /// variable no other output binds.
+    /// `Unpack`'s values bound, each of its outputs a port bound to a key no
+    /// other output binds.
     #[test]
     fn data_nodes_are_checked_at_lowering() {
         let graph = |outputs: &[(usize, &str)]| {
@@ -3612,35 +3701,21 @@ mod data_nodes {
         };
         let unlinked = |node: Uuid, port: Uuid| {
             let mut graph = graph(&[(0, "out/a")]);
-            graph
-                .links
-                .retain(|link| link.target != Port::new(node, port));
+            node_mut(&mut graph, node).bind.remove(&port);
             graph
         };
-        let bound = |port: Uuid, source: LinkSource| {
+        let bound = |port: Uuid, source: Source| {
             let mut graph = graph(&[]);
-            graph.links.push(Link::new(Port::new(UNPACK, port), source));
+            bind_all(&mut graph, vec![binding(Port::new(UNPACK, port), source)]);
             graph
         };
-        // Two variables of one name: one store key.
-        let mut one_name = graph(&[(0, "out/a")]);
-        let other = Uuid::from_u128(0x77);
-        one_name.variables.insert(other, "out/a".to_string());
-        one_name.links.push(Link::new(
-            Port::new(UNPACK, OUT[1]),
-            LinkSource::Variable(other),
-        ));
         for (what, graph) in [
             ("Equal without b", unlinked(EQUAL, nodes::EQUAL_B_PARAM_ID)),
             (
                 "Unpack without values",
                 unlinked(UNPACK, nodes::UNPACK_VALUES_PARAM_ID),
             ),
-            (
-                "two ports on one variable",
-                graph(&[(0, "out/a"), (1, "out/a")]),
-            ),
-            ("two ports on one name", one_name),
+            ("two ports on one key", graph(&[(0, "out/a"), (1, "out/a")])),
             (
                 "an output bound to a literal",
                 bound(OUT[0], literal(Value::F64(1.0))),
@@ -3649,8 +3724,8 @@ mod data_nodes {
                 "an output bound to a selection",
                 bound(
                     OUT[0],
-                    LinkSource::Select {
-                        source: Box::new(LinkSource::Variable(variable("done"))),
+                    Source::Select {
+                        source: Box::new(key("done")),
                         path: Key::new(".0"),
                     },
                 ),
@@ -3659,15 +3734,12 @@ mod data_nodes {
                 "an output bound to another node's port",
                 bound(
                     OUT[0],
-                    LinkSource::Port(Port::new(EQUAL, nodes::EQUAL_A_PARAM_ID)),
+                    Source::Port(Port::new(EQUAL, nodes::EQUAL_A_PARAM_ID)),
                 ),
             ),
             (
                 "a port Unpack does not have",
-                bound(
-                    Uuid::from_u128(0x78),
-                    LinkSource::Variable(variable("done")),
-                ),
+                bound(Uuid::from_u128(0x78), key("done")),
             ),
         ] {
             let store = SimpleDataStore::new();
@@ -3688,23 +3760,19 @@ mod data_nodes {
         );
         // A check after the writes: Equal({k}, 5).
         let check = Uuid::from_u128(0x104);
-        graph.nodes.get_mut(&SEQ).unwrap().children = Some(vec![EQUAL, UNPACK, MARK, check]);
-        graph.nodes.insert(
-            check,
-            node(
-                check,
-                nodes::EQUAL_FUNCTION_ID,
-                &[nodes::EQUAL_A_PARAM_ID, nodes::EQUAL_B_PARAM_ID],
-            ),
+        node_mut(&mut graph, SEQ).children = Some(vec![EQUAL, UNPACK, MARK, check]);
+        graph.nodes.push(node(check, nodes::EQUAL_FUNCTION_ID));
+        bind_all(
+            &mut graph,
+            vec![binding(Port::new(check, nodes::EQUAL_A_PARAM_ID), key("k"))],
         );
-        graph.links.push(Link::new(
-            Port::new(check, nodes::EQUAL_A_PARAM_ID),
-            LinkSource::Variable(variable("k")),
-        ));
-        graph.links.push(Link::new(
-            Port::new(check, nodes::EQUAL_B_PARAM_ID),
-            literal(Value::U8(5)),
-        ));
+        bind_all(
+            &mut graph,
+            vec![binding(
+                Port::new(check, nodes::EQUAL_B_PARAM_ID),
+                literal(Value::U8(5)),
+            )],
+        );
         let tree = build_behavior_tree(&graph, &|_| None).expect("the tree lowers");
         let mut bridge = super::TestBridge::empty();
         let status = crate::run_behavior_tree(&tree, &HashMap::new(), &mut bridge, false).unwrap();
@@ -3748,14 +3816,11 @@ mod data_nodes {
         let before = interp.graph().clone();
         for diff in [
             GraphDiff {
-                remove_links: vec![Port::new(UNPACK, nodes::UNPACK_VALUES_PARAM_ID)],
+                unbind: vec![Port::new(UNPACK, nodes::UNPACK_VALUES_PARAM_ID)],
                 ..GraphDiff::default()
             },
             GraphDiff {
-                add_links: vec![Link::new(
-                    Port::new(UNPACK, OUT[1]),
-                    LinkSource::Variable(variable("out/a")),
-                )],
+                bind: vec![binding(Port::new(UNPACK, OUT[1]), key("out/a"))],
                 ..GraphDiff::default()
             },
         ] {
@@ -3808,7 +3873,7 @@ mod data_nodes {
 
         interp
             .apply(GraphDiff {
-                add_links: vec![Link::new(
+                bind: vec![binding(
                     Port::new(UNPACK, nodes::UNPACK_VALUES_PARAM_ID),
                     literal(Value::ArrayF64(vec![1.0, 3.0])),
                 )],
@@ -3863,7 +3928,7 @@ mod data_nodes {
         let function = Uuid::from_u128(0xF00);
         let param = Uuid::from_u128(0xF01);
         let field = Uuid::from_u128(0xF02);
-        let frame = Uuid::from_u128(0xF03);
+        let frame = Source::Key("frame".to_string());
         let leaf = Uuid::from_u128(0xF04);
         let producer = Uuid::from_u128(0xF06);
         let produced = Uuid::from_u128(0xF07);
@@ -3897,33 +3962,28 @@ mod data_nodes {
                 value: Box::new(Value::U64(42)),
             }],
         });
-        let select = |source: LinkSource| LinkSource::Select {
+        let select = |source: Source| Source::Select {
             source: Box::new(source),
             path: Key::new(format!(".{field}")),
         };
         // `Sequence(producer, leaf)`: the producer holds the structure in an
-        // argument, which a port link can read.
-        let graph = |source: LinkSource, target: Uuid| {
+        // argument, which a port binding can read.
+        let graph = |source: Source, target: Uuid| {
             let mut graph = Graph::empty();
             graph.root = Some(SEQ);
-            graph.nodes.insert(
-                SEQ,
-                GraphNode {
-                    children: Some(vec![producer, leaf]),
-                    ..node(SEQ, nodes::SEQ_FUNCTION_ID, &[])
-                },
+            graph.nodes.push(GraphNode {
+                children: Some(vec![producer, leaf]),
+                ..node(SEQ, nodes::SEQ_FUNCTION_ID)
+            });
+            graph.nodes.push(node(producer, nodes::SUCCEED_FUNCTION_ID));
+            graph.nodes.push(node(leaf, function));
+            bind_all(
+                &mut graph,
+                vec![
+                    binding(Port::new(producer, produced), literal(structure.clone())),
+                    binding(Port::new(leaf, target), source),
+                ],
             );
-            graph.nodes.insert(
-                producer,
-                node(producer, nodes::SUCCEED_FUNCTION_ID, &[produced]),
-            );
-            graph.nodes.insert(leaf, node(leaf, function, &[param]));
-            graph.links.push(Link::new(
-                Port::new(producer, produced),
-                literal(structure.clone()),
-            ));
-            graph.links.push(Link::new(Port::new(leaf, target), source));
-            graph.variables.insert(frame, "frame".to_string());
             graph
         };
         // What the leaf receives, with the store holding `stored` under
@@ -3949,7 +4009,7 @@ mod data_nodes {
             *calls[0].args[0].value.clone()
         };
 
-        let from_variable = graph(select(LinkSource::Variable(frame)), param);
+        let from_variable = graph(select(frame.clone()), param);
         assert_eq!(
             received(from_variable.clone(), Some(structure.clone())),
             Value::U64(42)
@@ -3959,19 +4019,13 @@ mod data_nodes {
             Value::Unit,
             "a selection over an absent value reads as absent"
         );
-        let from_port = graph(
-            select(LinkSource::Port(Port::new(producer, produced))),
-            param,
-        );
+        let from_port = graph(select(Source::Port(Port::new(producer, produced))), param);
         assert_eq!(received(from_port, None), Value::U64(42));
 
         // A selection is read-only. On the return binding it is refused at
         // load; on a parameter the device's index declares mutable, the next
         // tick fails, and keeps failing while the graph holds it.
-        let on_return = graph(
-            select(LinkSource::Variable(frame)),
-            crate::schema::_RET_PARAM_ID,
-        );
+        let on_return = graph(select(frame), crate::schema::_RET_PARAM_ID);
         let mut interp = BehaviorTreeInterpreter::new();
         assert!(interp.load(on_return).is_err(), "the return binding");
 
@@ -3998,9 +4052,11 @@ mod data_nodes {
 /// Tree-local variables: a variable whose name starts with `.` is a cell of
 /// its lowered tree, never a store key.
 mod tree_locals {
+    #[allow(unused_imports)]
+    use super::{bind_all, binding, node_mut};
     use crate::behavior::BehaviorTreeInterpreter;
     use crate::nodes::{self, UNPACK_OUT_PARAM_IDS as OUT};
-    use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node as GraphNode, Port};
+    use arora_behavior::graph::{Graph, Node as GraphNode, Source};
     use arora_behavior::{BehaviorContext, BehaviorInterpreter};
     use arora_simple_data_store::SimpleDataStore;
     use arora_types::data::{DataStore, Key};
@@ -4008,67 +4064,50 @@ mod tree_locals {
     use uuid::Uuid;
 
     const SEQ: Uuid = Uuid::from_u128(0x200);
-    const X: Uuid = Uuid::from_u128(0x2F0);
 
-    /// `Unpack` reading `values`, its outputs bound to `outputs`.
-    fn unpack(id: Uuid, values: LinkSource, outputs: &[Uuid]) -> (GraphNode, Vec<Link>) {
-        let node = GraphNode {
+    /// `Unpack` reading `values`, its outputs bound to the keys `outputs`.
+    fn unpack(id: Uuid, values: Source, outputs: &[&str]) -> GraphNode {
+        GraphNode {
             id,
             function: nodes::UNPACK_FUNCTION_ID,
-            inputs: vec![Io::new(nodes::UNPACK_VALUES_PARAM_ID)],
-            ..GraphNode::default()
-        };
-        let links =
-            std::iter::once(Link::new(
-                Port::new(id, nodes::UNPACK_VALUES_PARAM_ID),
-                values,
-            ))
-            .chain(outputs.iter().enumerate().map(|(i, variable)| {
-                Link::new(Port::new(id, OUT[i]), LinkSource::Variable(*variable))
-            }))
-            .collect();
-        (node, links)
+            bind: std::iter::once((nodes::UNPACK_VALUES_PARAM_ID, values))
+                .chain(
+                    outputs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, key)| (OUT[i], Source::Key(key.to_string()))),
+                )
+                .collect(),
+            children: None,
+        }
     }
 
     /// `Sequence(Unpack(values) → out_0: {x}, Unpack({x}) → out_i: {keys[i]})`
     /// with `{x}` named `x_name`, or only the second `Unpack` when `values` is
     /// `None`.
     fn graph(x_name: &str, values: Option<Value>, keys: &[&str]) -> Graph {
-        let mut graph = Graph::empty();
-        graph.root = Some(SEQ);
-        let key_variables: Vec<Uuid> = (0..keys.len())
-            .map(|i| Uuid::from_u128(0x2A0 + i as u128))
-            .collect();
         let mut parts = Vec::new();
         if let Some(values) = values {
             parts.push(unpack(
                 Uuid::from_u128(0x201),
-                LinkSource::Literal(values),
-                &[X],
+                Source::Value(values),
+                &[x_name],
             ));
         }
         parts.push(unpack(
             Uuid::from_u128(0x202),
-            LinkSource::Variable(X),
-            &key_variables,
+            Source::Key(x_name.to_string()),
+            keys,
         ));
-        graph.nodes.insert(
-            SEQ,
-            GraphNode {
-                id: SEQ,
-                function: nodes::SEQ_FUNCTION_ID,
-                children: Some(parts.iter().map(|(node, _)| node.id).collect()),
-                ..GraphNode::default()
-            },
-        );
-        for (node, links) in parts {
-            graph.nodes.insert(node.id, node);
-            graph.links.extend(links);
-        }
-        graph.variables.insert(X, x_name.to_string());
-        for (variable, key) in key_variables.iter().zip(keys) {
-            graph.variables.insert(*variable, key.to_string());
-        }
+        let mut graph = Graph::empty();
+        graph.root = Some(SEQ);
+        graph.nodes.push(GraphNode {
+            id: SEQ,
+            function: nodes::SEQ_FUNCTION_ID,
+            children: Some(parts.iter().map(|node| node.id).collect()),
+            ..GraphNode::default()
+        });
+        graph.nodes.extend(parts);
         graph
     }
 

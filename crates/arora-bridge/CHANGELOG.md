@@ -4,6 +4,13 @@ All notable changes to `arora-bridge`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.3.0] - 2026-10-30
+
+### Changed
+
+- Depends on arora-behavior 10 (the interpreter module's ABI `client` speaks;
+  none of its types appear in this crate's API).
+
 ## [6.2.0] - 2026-10-10
 
 ### Changed

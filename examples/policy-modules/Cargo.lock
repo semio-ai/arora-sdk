@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "17.0.0"
+version = "18.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -217,17 +217,18 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "9.6.0"
+version = "10.0.0"
 dependencies = [
  "arora-types",
  "semver",
  "serde",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
 name = "arora-behavior-tree"
-version = "9.7.1"
+version = "10.0.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
@@ -247,7 +248,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree-types"
-version = "2.2.0"
+version = "3.0.0"
 dependencies = [
  "arora-behavior",
  "arora-types",
@@ -258,7 +259,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "6.2.0"
+version = "6.3.0"
 dependencies = [
  "arora-behavior",
  "arora-types",
@@ -271,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge-ws"
-version = "7.2.5"
+version = "7.3.0"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -426,9 +427,8 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "11.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d002771103d77500c307f4bf5bb77451deae8f8bb389a29a58e0d47103f4f23f"
+version = "11.3.0"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fhandle-record#6aa7190fed354e26331895ce8a130ccd1304f9e9"
 dependencies = [
  "arora-bridge",
  "arora-types",
@@ -5365,8 +5365,7 @@ dependencies = [
 [[package]]
 name = "semio-studio-auth"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ede50887ae578bf5d4e17349c908aeed4091132cf2d15280afd69d7d5c84ce07"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fhandle-record#6aa7190fed354e26331895ce8a130ccd1304f9e9"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5868,8 +5867,7 @@ dependencies = [
 [[package]]
 name = "studio-bridge-msgs"
 version = "7.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fc586adeaecd20cd3c5691ab29d1421f101df68f8cdca9ce74b832a84b9f7cd"
+source = "git+https://github.com/semio-ai/studio-bridge?branch=feat%2Fhandle-record#6aa7190fed354e26331895ce8a130ccd1304f9e9"
 dependencies = [
  "arora-types",
  "chrono",

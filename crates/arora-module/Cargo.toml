@@ -23,7 +23,7 @@ wit-bindgen = "0.63"
 [dev-dependencies]
 # The record round-trip test reads the store's wire form back.
 yaml_serde = "0.10"
-arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 arora-engine = { path = "../arora-engine", version = "7" }
 # The compile-fail cases: every error a declaration reports.
 trybuild = "1"

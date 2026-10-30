@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "17.0.0"
+version = "18.0.0"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -51,29 +51,32 @@ tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "9.1" }
-arora-behavior = { path = "../arora-behavior", version = "9.4" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "10" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 # 3.8: `PrimitiveKind::from_id`.
 arora-types = { path = "../arora-types", version = "3.8" }
 # 2.1: `LocalRegistry::module_at`, `missing_dependencies`.
 arora-registry = { path = "../arora-registry", version = "2.1" }
-arora-bridge-ws = { path = "../arora-bridge-ws", version = "7", optional = true }
+# 7.3: the local bridge serves `describe_methods` and `call`.
+arora-bridge-ws = { path = "../arora-bridge-ws", version = "7.3", optional = true }
 anyhow = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 # The run loop's clock: `performance.now()` in the browser, `std::time` elsewhere.
 web-time = "1"
 # 4.3: `Hal::describe_keys`.
 arora-hal = { path = "../arora-hal", version = "4.3" }
-# 6.1: `client`, the conventions `LocalCaller` speaks.
-arora-bridge = { path = "../arora-bridge", version = "6.1" }
+# 6.1: `client`, the conventions `LocalCaller` speaks. 6.3: on arora-behavior
+# 10, the one this crate's run handles are of.
+arora-bridge = { path = "../arora-bridge", version = "6.3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 futures = "0.3"
 # Sync primitives only: the runtime-bearing tokio is native-only (below).
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# The Semio Studio connector (feature `studio-bridge`). 11.2:
+# The Semio Studio connector (feature `studio-bridge`). 11.3:
+# `StudioHandle::enroll_when_needed` and its `Enroller`, over 11.2's
 # `StudioDevice::bridge`, the bridge a runtime carries before the device is
-# enrolled, and its `StudioHandle`.
-arora-studio-bridge-client = { version = "11.2", optional = true }
+# enrolled.
+arora-studio-bridge-client = { version = "11.3", optional = true }
 # The per-user directory the device directory defaults to.
 dirs = { version = "7", optional = true }
 # A module directory's `header.json`.

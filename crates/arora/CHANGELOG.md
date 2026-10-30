@@ -4,7 +4,7 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [17.0.0] - 2026-10-30
+## [18.0.0] - 2026-10-30
 
 A runtime built with Semio Studio carries the device's Studio bridge from its
 start, and the device enrolls while it runs.
@@ -85,6 +85,27 @@ start, and the device enrolls while it runs.
   `handle.enroll(&DeviceDescription::new(name), how)` enrolls it when a person
   asks, the code showing in the status. A run given the handle with
   `with_studio_handle` enrolls the device as `connect_with_operator` did.
+
+## [17.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** depends on arora-behavior 10 and arora-behavior-tree 10,
+  whose `BehaviorInterpreter` this crate takes and whose
+  `BehaviorTreeInterpreter` it re-exports: a node holds its own bindings,
+  and the device reads `behavior-tree` 2.0 graphs. A remote's `LOAD`,
+  `EDIT` and `SPAWN_GRAPH` carry the new forms. The log of an edit counts
+  the nodes it sets and removes and the ports it binds and unbinds.
+- Requires arora-bridge 6.3, on arora-behavior 10.
+- Requires arora-bridge-ws 7.3: the local bridge a device serves answers
+  `describe_methods` and `call`.
+
+### Added
+
+- The interpreter module's `TRACE` function, reaching
+  `BehaviorInterpreter::trace`, and `Caller::trace`. It stays out of the
+  method index, as `LOAD` and `EDIT` do. The device follows and logs a trace
+  as it does a task run.
 
 ## [16.0.2] - 2026-10-30
 

@@ -7,6 +7,14 @@ node graph's, published from [vizij-rs](https://github.com/vizij-ai/vizij-rs)
 as `vizij-graph-core`, whose node code this crate continues; the graph
 format continues there, in `vizij-graph-core` 4.
 
+## [2.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** depends on arora-behavior 10, whose `FunctionIndex` and
+  `ModuleFunction` this crate's functions take and return. They are
+  unchanged.
+
 ## [1.0.0] - Unreleased
 
 ### Added

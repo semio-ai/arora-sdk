@@ -11,14 +11,14 @@ fallback                                   # the first node is the root
   sequence
     equal(a: {person/visible}, b: true)    # {key}: a store key
     set_string(variable: {.mood}, value: "happy")   # {.x}: a tree-local variable
-    below(x: @cm, limit: 30)               # @node: a node's return value
-    smooth(x: @raw, alpha: 0.2, state: @s.state)    # @node.parameter: a node's parameter
+    below(x: @cm._ret, limit: 30)          # @node._ret: a node's return value
+    smooth(x: @raw._ret, alpha: 0.2, state: @s.state)   # @node.parameter: a node's parameter
   succeed
 
 raw: mul(a: {sensor/distance}, b: 100)     # name: … names a node; no node holds it: detached
-cm: clamp(x: @raw, lo: 0)
-level: {face/level} = add(a: @cm, b: 1)    # {target} = …: where its return value goes
-s: smooth(x: @cm, alpha: 0.5, state: 0)
+cm: clamp(x: @raw._ret, lo: 0)
+level: {face/level} = add(a: @cm._ret, b: 1)   # {target} = …: where its return value goes
+s: smooth(x: @cm._ret, alpha: 0.5, state: 0)
 sway: {rig/arm_wave} = mul(a: oscillator(t: {arora/time}, frequency: 1.6), b: 0.6)   # a call in an argument
 ```
 
@@ -77,7 +77,7 @@ expression = primary { "[" path "]" } ;              (* a selection *)
 primary    = literal | variable | port | call ;
 call       = function "(" [ arguments ] ")" ;
 variable   = "{" key "}" | "{" string "}" | "{" id "}" ;
-port       = "@" word [ "." parameter ] ;
+port       = "@" word "." parameter ;                (* "@node._ret": its return value *)
 literal    = number | string | "true" | "false" | "()" | "none" | "some" "(" expression ")"
            | [ element ] "[" [ expression { "," expression } [ "," ] ] "]"
            | "uuid" "(" id ")" | "json" "(" string ")" ;
@@ -118,14 +118,17 @@ word       = identifier | id ;
 
 | Expression | Text | In the graph |
 |---|---|---|
-| a literal | `1.5`, `1.5f64`, `"text"`, `true`, `()`, `f64[1.0, 2.0]`, `[1.0, 2.0]`, `some(x)`, `none` | `LinkSource::Literal` |
-| an id | `uuid(…)` | `Literal(Value::Uuid)` |
-| a structure, an enumeration | `json("…")`: the value's serde JSON | `Literal` |
-| a variable | `{person/visible}` (a store key), `{.mood}` (tree-local), `{"a key"}` (quoted), `{<uuid>}` | `LinkSource::Variable` |
-| a node's return value | `@cm` | `LinkSource::Port` on `_ret` |
-| a node's parameter | `@s.state` | `LinkSource::Port` on the parameter |
-| a selection | `@record[.name]`, `{pose}[.0]`, `@step[.<field id>]` | `LinkSource::Select` |
+| a literal | `1.5`, `1.5f64`, `"text"`, `true`, `()`, `f64[1.0, 2.0]`, `[1.0, 2.0]`, `some(x)`, `none` | `Source::Value` |
+| an id | `uuid(…)` | `Value(Value::Uuid)` |
+| a structure, an enumeration | `json("…")`: the value's serde JSON | `Value` |
+| a variable | `{person/visible}` (a store key), `{.mood}` (tree-local), `{"a key"}` (quoted), `{<uuid>}` | `Source::Key` |
+| a node's return value | `@cm._ret` | `Source::Port` on `_ret` |
+| a node's parameter | `@s.state` | `Source::Port` on the parameter |
+| a selection | `@record._ret[.name]`, `{pose}[.0]`, `@step._ret[.<field id>]` | `Source::Select` |
 | a call | `oscillator(t: {arora/time}, frequency: 1.6)` | a node of its own, read by its return value |
+
+An argument binds its parameter, on the node it is written on: each graph
+node holds its bindings (`Node::bind`).
 
 The display writes two more forms, which a text does not: `{= value}`, a cell
 the tree holds with no variable (a call's literal argument once the tree is
@@ -150,22 +153,22 @@ using either is told so.
   A node named by an id has that id. An edit that keeps a node's name, or
   its place when it has none, keeps its id, so the interpreter's edit keeps
   its state.
-- **Variables.** `{name}` is the graph variable `name`, its id derived from the
-  name as the graph lowering derives a key's (`arora_types::gen_uuid_from_str`):
-  one name, one id. A name starting with `.` is tree-local; any other is a
-  store key under the Direct convention. `{<uuid>}` is the variable of that
-  id, which names none: tree-local.
-- **Targets.** `{key} = f(…)` links `_ret` (`5f726574-0000-4000-8000-000000000000`)
-  to the variable. `@n.p = f(…)` links it to another node's input, which then
+- **Variables.** `{name}` binds the key `name`. A key starting with `.` is
+  tree-local; any other is a store key under the Direct convention. `{<uuid>}`
+  is a variable known by its id alone, which names no key: it binds the
+  tree-local key `.<uuid>`.
+- **Targets.** `{key} = f(…)` binds `_ret` (`5f726574-0000-4000-8000-000000000000`)
+  to the key. `@n.p = f(…)` binds it to another node's input, which then
   reads this node.
-- **Ports.** `@n` is node `n`'s `_ret`; `@n.p` its parameter `p`, by name or
-  id. `n` is a node of the text, by its name or its id. A node no node holds
+- **Ports.** `@n.p` is node `n`'s parameter `p`, by name or id, and
+  `@n._ret` its return value. A bare `@n` is an error: it names no port. `n`
+  is a node of the text, by its name or its id. A node no node holds
   outputs its return value and the parameters it writes, and those alone are
   read from it; a tree node's argument is a cell any node reads.
 - **Cycles.** Nodes no node holds that read one another in a cycle, or a
   node reading an output of its own, are an error: a value fed back goes
   through a store key.
-- **Calls in arguments.** A link holds no call: a call in an argument is a
+- **Calls in arguments.** A binding holds no call: a call in an argument is a
   node no node holds, with the holder's path and the parameter for its path,
   read by its return value. A native is no such call.
 - **Literals** take the type of the parameter they are given to: `100` given
@@ -176,9 +179,10 @@ using either is told so.
   its type's range (`1e999f64`) is refused, not made infinite.
 - **Natives' own state** is seeded when a node leaves it out:
   `sequence_star`'s `current_index` at `0u16`, `run_status`'s `latch` at `()`.
-- **Inputs and outputs.** A node's inputs are its function's parameters,
-  its outputs its return value (`_ret`) and the parameters it writes, each
-  with its type.
+- **Inputs and outputs.** Which of a node's ports are inputs and which
+  outputs, and their types, is its function's signature's to say: its
+  parameters are inputs, its return value (`_ret`) and the parameters it
+  writes are outputs. The graph holds the bindings alone.
 - **Unstated parameters.** A native's parameters a node must bind are known,
   and leaving one out is warned about. A module function declares no
   default: a parameter a node leaves out is not in the call, which the
@@ -255,6 +259,128 @@ native or another module's function shows as `<module>::name`. A key shows
 quoted when it needs it. A float shows in its shortest form that reads back:
 `1e300f64`, not three hundred digits.
 
+## Which form to use
+
+A behavior is written in three forms, one per kind of reader:
+
+| Form | Use it for | Because |
+|---|---|---|
+| Text (`.bt`) | writing and reading behaviors | The tree shows as indentation and a binding as an argument, everything by name. |
+| [Readable graph or diff](#readable-graphs-and-diffs), JSON or YAML | files people write, read or review in git — fixtures, examples, hand-made diffs — and tools working on a graph's structure | It is the shared model field by field, with a name wherever a person reads a reference. |
+| Graph or diff by ids, JSON or YAML | the machine world: `LOAD`, `EDIT` and `SPAWN_GRAPH` payloads, graphs programs exchange or store, and wherever a name may be ambiguous or renamed | An id means one thing on every device and after every rename. |
+
+A payload to the interpreter module is by ids: whoever holds the function
+index resolves names before sending. A name means what the functions the
+device has make it mean when it reads it, so a payload by name could name one
+function when it is written and another, or none, once a module is loaded or
+dropped.
+
+## Readable graphs and diffs
+
+[`readable`](../src/readable.rs) mirrors the shared `Graph` and `GraphDiff`
+field by field, every reference a string: a node's `id`, its `function`, the
+ports its `bind` maps, its `children`, the `root`, the `node` and `port` of a
+`port` source or of a diff's binding, the nodes a diff `remove`s. A string
+that parses as a UUID is an id; any other is a name, and one file may mix
+both. This is the graph of a text:
+
+```text
+watch: fallback
+  calm: sequence
+    near: below(x: @cm._ret, limit: 30)
+    settle: smooth(x: @cm._ret, alpha: 0.5, state: {.s})
+  done: succeed
+
+cm: clamp(x: {sensor/distance}, lo: 0)
+level: {face/level} = add(a: @cm._ret, b: 1)
+```
+
+```yaml
+root: watch
+nodes:
+- id: watch
+  function: fallback
+  children: [calm, done]
+- id: calm
+  function: sequence
+  children: [near, settle]
+- id: near
+  function: below
+  bind:
+    x: {port: {node: cm, port: _ret}}
+    limit: {value: {f64: 30.0}}
+- id: settle
+  function: smooth
+  bind:
+    x: {port: {node: cm, port: _ret}}
+    alpha: {value: {f64: 0.5}}
+    state: {key: .s}
+- id: done
+  function: succeed
+- id: cm
+  function: clamp
+  bind:
+    x: {key: sensor/distance}
+    lo: {value: {f64: 0.0}}
+- id: level
+  function: add
+  bind:
+    _ret: {key: face/level}
+    a: {port: {node: cm, port: _ret}}
+    b: {value: {f64: 1.0}}
+```
+
+and a diff to it, applied to that graph:
+
+```yaml
+remove: [level]
+set:
+- id: pulse
+  function: mul
+  bind:
+    _ret: {key: face/pulse}
+    a: {port: {node: cm, port: _ret}}
+    b: {value: {f64: 2.0}}
+unbind:
+- {node: settle, port: state}
+bind:
+- {node: near, port: limit, source: {value: {f64: 20.0}}}
+- {node: cm, port: hi, source: {value: {f64: 50.0}}}
+```
+
+- **Nodes.** A name is the id a text gives the node of that name, or the
+  node at that path for a node with none (`root.0.2`): `cm` here is `cm:` in
+  the text. A name in a reference names a node of the file. In a diff,
+  `remove` names nodes of the graph the diff applies to, and every other
+  reference a node of that graph it does not remove, or one it sets. An id is
+  taken as it is.
+- **Functions** resolve as in a text: a native's name, else a function of
+  the index, `<module>::name` naming one of several modules' functions of
+  that name.
+- **Ports.** A name is the parameter of that name of the node's function,
+  and `_ret` its return value. The ports of a node whose function the index
+  does not have are named by their ids.
+
+A reference that does not resolve is an error naming where the file writes
+it — ``nodes[5].bind.low: `clamp` has no parameter `low` `` — and so is a name
+naming several functions or ports, or a port bound twice. A file by ids
+resolves with no function index.
+
+| Function | Does |
+|---|---|
+| `readable::Graph::resolve(&self, &functions) -> Result<Graph, Vec<ReferenceError>>` | The graph a file describes, or every reference that does not resolve. |
+| `readable::GraphDiff::resolve(&self, &base, &functions) -> Result<GraphDiff, Vec<ReferenceError>>` | The diff a file describes, `base` the graph it applies to. |
+| `readable::Graph::from_graph(&graph, &names)` | A graph written with a name for each reference that has one. |
+| `readable::GraphDiff::from_diff(&diff, &base, &names)` | A diff written so, `base` the graph it applies to. |
+
+A file is read by deserializing it, in any serde format, into a
+`readable::Graph` or `readable::GraphDiff`, then resolving it; a file by ids
+reads the same way. `names` is a [`display::Names`](../src/display.rs): its
+`functions` name the functions and ports, its `nodes` the nodes, such as a
+text's `Loaded::nodes`. A reference is written as a name when that name
+resolves back to the same id, and as its id otherwise, so a file written
+reads back to the graph or diff exactly.
+
 ## Examples
 
 The examples of [The NGBT spectrum](../../../docs/ngbt-spectrum.html), with
@@ -277,9 +403,9 @@ A pure mapping: sinks beside a tree that does nothing.
 running
 
 amount: clamp(x: {face/smile}, min: 0, max: 1)
-corner: remap(x: @amount, in_min: 0, in_max: 1, out_min: -0.2, out_max: 1)
-mouth: {rig/mouth_corner} = damp(target: @corner, half_life: 0.12)
-cheeks: {rig/cheek_raise} = mul(a: @amount, b: 0.6)
+corner: remap(x: @amount._ret, in_min: 0, in_max: 1, out_min: -0.2, out_max: 1)
+mouth: {rig/mouth_corner} = damp(target: @corner._ret, half_life: 0.12)
+cheeks: {rig/cheek_raise} = mul(a: @amount._ret, b: 0.6)
 ```
 
 Breathing, driven by time: the wave runs every tick, the amplitude and the
@@ -290,7 +416,7 @@ running
 
 wave: oscillator(t: {arora/time}, frequency: {face/breath_rate})
 amplitude: remap(x: {face/energy}, in_min: 0, in_max: 1, out_min: 0.03, out_max: 0.2)
-chest: {rig/chest} = add(a: mul(a: @wave, b: @amplitude), b: 0.5)
+chest: {rig/chest} = add(a: mul(a: @wave._ret, b: @amplitude._ret), b: 0.5)
 flush: {face/flush} = remap(x: {face/energy}, in_min: 0, in_max: 1, out_min: 0.15, out_max: 0.85)
 ```
 
@@ -301,7 +427,7 @@ a key writes it each time it ticks, and succeeds.
 fallback                                   # greet or rest
   sequence                                 # greet
     truthy(x: {person/visible})
-    truthy(x: @fresh)                      # not greeted yet
+    truthy(x: @fresh._ret)                 # not greeted yet
     parallel                               # wave until the timer ends
       {rig/arm_raise} = damp(target: 1, half_life: 0.12, initial: {rig/arm_raise})
       {rig/arm_wave} = mul(a: oscillator(t: {arora/time}, frequency: 1.6), b: 0.6)

@@ -10,12 +10,16 @@ pub mod error;
 pub mod graph;
 mod id_hash;
 pub mod nodes;
+pub mod readable;
 mod scatter;
 pub mod schema;
 pub mod schema_groot;
 #[cfg(test)]
 mod tests;
 pub mod text;
+mod trace;
+#[cfg(test)]
+mod trace_tests;
 pub mod tree_node;
 pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
@@ -67,6 +71,11 @@ pub struct BehaviorTree {
     outputs: HashMap<Uuid, Outputs>,
     /// The nodes no node holds, evaluated when what they output is read.
     detached: Rc<Detached>,
+    /// The names of the variables the tree was loaded with, by id: a tree
+    /// built from a graph names each variable by the key it binds.
+    variable_names: HashMap<Uuid, String>,
+    /// What each tick does, recorded while a trace runs.
+    record: Rc<trace::TickRecord>,
 }
 
 /// Where a data node writes, bound when the tree is loaded.
@@ -123,6 +132,47 @@ impl BehaviorTree {
         self.node_arg_variables
             .get(&NodeParameterId { node, parameter })
             .and_then(VariableCell::get)
+    }
+
+    /// The outputs of node `id` as they stand, by port, from the cells that
+    /// hold them: its return value under [`_RET_PARAM_ID`], and each
+    /// parameter it writes — a mutable parameter of its function in
+    /// `functions`, or one a native node writes. A return no cell keeps is
+    /// `returned`, the value the node last returned. An output that holds
+    /// nothing is left out.
+    pub(crate) fn outputs_of(
+        &self,
+        id: Uuid,
+        functions: &FunctionIndex,
+        returned: Option<&Value>,
+    ) -> Vec<(Uuid, Value)> {
+        let Some(node) = self.node_index.get(&id) else {
+            return Vec::new();
+        };
+        let written = functions.get(&node.function).map_or_else(
+            || detached::native_writes(node.function).to_vec(),
+            |function| {
+                function
+                    .function
+                    .parameters
+                    .iter()
+                    .filter(|(_, parameter)| parameter.mutable)
+                    .map(|(id, _)| *id)
+                    .collect()
+            },
+        );
+        let has_return_cell = self.node_arg_variables.contains_key(&NodeParameterId {
+            node: id,
+            parameter: _RET_PARAM_ID,
+        });
+        let mut outputs: Vec<(Uuid, Value)> = std::iter::once(_RET_PARAM_ID)
+            .chain(written)
+            .filter_map(|port| Some((port, self.argument_value(id, port)?)))
+            .collect();
+        if let (false, Some(returned)) = (has_return_cell, returned) {
+            outputs.push((_RET_PARAM_ID, returned.clone()));
+        }
+        outputs
     }
 
     /// Set the cell of `node`'s argument `parameter` to `value`, as a write
@@ -399,6 +449,7 @@ fn register_ticks(
         tree.node_arg_variables.clone(),
         tree.detached.clone(),
         &tree.outputs,
+        &tree.record,
         caller,
         if trace {
             TraceTick::YesAll
@@ -453,6 +504,7 @@ fn setup_tick_function(
     node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     outputs: &HashMap<Uuid, Outputs>,
+    record: &Rc<trace::TickRecord>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
     // Every callable registered on behalf of this (sub)tree, collected so the
@@ -482,6 +534,7 @@ fn setup_tick_function(
                 node_arg_variables.clone(),
                 detached.clone(),
                 outputs,
+                record,
                 caller,
                 trace,
                 callables,
@@ -503,6 +556,7 @@ fn setup_tick_function(
         detached,
         outputs: outputs.get(&node.id).cloned(),
         children: children_ticks,
+        record: record.clone(),
         trace,
     });
     let callable_id = caller.arora_register_callable(tick_function);
@@ -834,6 +888,7 @@ fn tick(
     outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
     node: Rc<Node>,
+    record: &trace::TickRecord,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
     let trace_line = |status: Status| {
@@ -1024,6 +1079,10 @@ fn tick(
         write_back(var, result.ret.clone(), function.return_ty.is_option());
         Status::Success
     } else {
+        // A value no binding keeps: a trace watching the node reads it here.
+        if record.is_on() && record.watches(node.id) {
+            record.returned(node.id, &result.ret, function.return_ty.is_option());
+        }
         result.ret.try_into().unwrap_or(Status::Success)
     };
     trace_line(status);
@@ -1118,12 +1177,14 @@ struct TickFunction {
     /// Where the node writes, for an `Unpack` or a `Scatter` node.
     outputs: Option<Outputs>,
     children: Vec<TickId>,
+    /// Where the node records the status it returns, while a trace runs.
+    record: Rc<trace::TickRecord>,
     trace: TraceTick,
 }
 
 impl Tickable for TickFunction {
     fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
-        tick(
+        let ticked = tick(
             caller,
             self.function.as_ref(),
             &self.calls,
@@ -1134,8 +1195,14 @@ impl Tickable for TickFunction {
             self.outputs.as_ref(),
             &self.children,
             self.node.clone(),
+            &self.record,
             self.trace,
-        )
+        );
+        if self.record.is_on() {
+            self.record
+                .status(self.node.id, *ticked.as_ref().unwrap_or(&Status::Failure));
+        }
+        ticked
     }
 }
 
@@ -1261,7 +1328,7 @@ pub fn load_behavior_tree_nodes_with(
                 names,
             )?;
             // A detached node's port bound to a store key keeps a tree-local
-            // cell of its own, which `@node` reads; the key is published to
+            // cell of its own, which `@node._ret` reads; the key is published to
             // after the tree ticks. A return bound to another node's input
             // feeds the input its chain of ports ends at: when that input
             // names a store key, the two share a tree-local cell, every port
@@ -1361,7 +1428,8 @@ pub fn load_behavior_tree_nodes_with(
             outputs.insert(node.id, bound);
         }
     }
-    let detached = Detached::new(detached_nodes, bindings);
+    let record = Rc::new(trace::TickRecord::default());
+    let detached = Detached::new(detached_nodes, bindings, record.clone());
 
     Ok(BehaviorTree {
         root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
@@ -1372,6 +1440,8 @@ pub fn load_behavior_tree_nodes_with(
         node_arg_variables: Rc::new(node_parameters_variables),
         outputs,
         detached: Rc::new(detached),
+        variable_names: names.clone(),
+        record,
     })
 }
 
@@ -1806,20 +1876,19 @@ fn call_expression(
 }
 
 /// Whether `function` is one of the interpreter module's own functions
-/// (`load`, `edit`, `spawn`, `spawn_graph`, `halt`). They act on the
+/// (`load`, `edit`, `spawn`, `spawn_graph`, `trace`, `halt`). They act on the
 /// interpreter, which a tree cannot call while it is being ticked, so a tree
 /// names none of them.
 pub(crate) fn is_interpreter_function(function: &ModuleFunction) -> bool {
-    use arora_behavior::interpreter_module::{EDIT, HALT, ID, LOAD, SPAWN, SPAWN_GRAPH};
-    function.module_id == ID
-        && [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function.function_id)
+    function.module_id == arora_behavior::interpreter_module::ID
+        && is_interpreter_function_id(function.function_id)
 }
 
 /// Whether `function` is the id of one of the interpreter module's own
 /// functions; see [`is_interpreter_function`].
 pub(crate) fn is_interpreter_function_id(function: Uuid) -> bool {
-    use arora_behavior::interpreter_module::{EDIT, HALT, LOAD, SPAWN, SPAWN_GRAPH};
-    [LOAD, EDIT, SPAWN, SPAWN_GRAPH, HALT].contains(&function)
+    use arora_behavior::interpreter_module::{EDIT, HALT, LOAD, SPAWN, SPAWN_GRAPH, TRACE};
+    [LOAD, EDIT, SPAWN, SPAWN_GRAPH, TRACE, HALT].contains(&function)
 }
 
 // Call expressions.

@@ -618,22 +618,60 @@ run beside the main behavior; `edit` reaches its nodes and `halt` drops it. A
 client that gives a device a program of its own — a behavior that calls a
 module each tick and writes what it returns — therefore neither evicts the
 behavior the device runs, as `load` would, nor needs a module of its own on
-the device. A change to a running program is one `edit` of its links, applied
+the device. A change to a running program is one `edit` of its bindings, applied
 between two ticks, and so is a new program for the run: a `spawn_graph` of a
 graph with its root.
 
 **A change restarts only the nodes it touches.** The interpreter lowers the
 whole changed graph again, and the new tree takes over the state of every node
 the change left in place, by node id: a `SequenceStar`'s position, a run's
-latch, a tree-local variable such a node reads. A node the change adds,
-replaces, relinks or re-keys starts afresh, and a tree-local variable does
+latch, a tree-local variable such a node reads. A node the change sets, or
+whose bindings it changes, starts afresh, and a tree-local variable does
 when every node reading it does: a load keeps one a run also reads, as the run
 the load leaves in place sees it. Spawning, editing, halting or ending one run
 therefore leaves the main behavior and every other run where they stand.
 Lowering each run on its own would confine a change too, but runs and the
 main behavior can share what a tree holds: an edit may place one node under
-both, or link a run's node to a port of the main behavior's, and both may read
+both, or bind a run's node to a port of the main behavior's, and both may read
 one tree-local variable. Separate lowerings would each hold their own copy.
+
+**A node holds its own bindings.** A graph node carries, for each port it
+binds, what the port is bound to: a value, a store key by its path, another
+node's port, or a selection out of one. An input's binding feeds it; an
+output's is where it is written. Nothing else describes a port: which ports
+a function reads and writes, and their types, is its signature's, which the
+device's function index holds. So a node is read, written and compared in one
+place, and a key appears where it is used: there is no variables table that
+an edit would have to keep consistent with the bindings reading it, and no id
+standing for a key. A key starting with `.` stays in the interpreter; a
+separate source kind for it would add a case to every reader of a binding for
+a distinction the key's name already carries, and that the text language
+already writes (`{.x}`).
+
+**An edit names single bindings.** A `GraphDiff` sets or removes whole nodes,
+and binds or unbinds single ports. An interpreter restarts what a diff
+touches, so a diff that binds one port of a node restarts that node, and a
+diff setting the node whole would restart it as well but carry everything it
+binds. A diff of whole nodes only would be simpler to apply and would restart
+the same nodes, but a binding entry keeps a diff the size of the change.
+`Graph::diff` derives the minimal
+diff between two graphs, so an editor that keeps the graph it last sent sends
+an edit rather than a load, and the device keeps the state of every node the
+edit leaves alone.
+
+**Files name references; payloads carry ids.** A graph or diff file may name
+its nodes, functions and ports, each name resolved as the text language
+resolves it, and may mix names and ids: a string that parses as a UUID is an
+id. Loading it resolves it, against the function index, to the shared model
+by ids, which is all an interpreter takes. A payload by name would mean what
+the device's functions make it mean when it is read: one more module
+exporting a function of that name makes the name ambiguous, and one module
+fewer leaves it naming nothing, so the same payload could run differently, or
+not at all, from one day to the next. Whoever holds the index resolves names
+before sending, once. The readable form is a mirror of the shared model
+rather than a generic parameter of it, so the model an interpreter reads
+stays one concrete type, and only arora-behavior-tree, which has the text's
+resolution rules, knows names.
 
 **A graph run is known by its root.** The client chooses a graph's node ids,
 so the graph's root names its run. Spawning a graph whose root a live run has
@@ -661,6 +699,26 @@ read. A minor version adds to a format, so an interpreter reading `1.1` runs a
 `1.0` graph; a major changes what a graph means. The type is an argument, not
 a field of `Graph`, so a host can route a call on it without decoding the
 graph.
+
+**A trace is a task run.** `trace` answers the `TaskHandle` a spawn answers,
+and `halt` ends it. A client that already follows runs follows a trace with
+no new vocabulary: a status key that goes terminal, a feedback key, a stop
+call, and the device logs it as it logs any run. Several clients each start
+their own, with their own options, and a lost client's trace ends with the
+same halt as a lost run. A stream of its own, or a key the interpreter writes
+whenever a flag is set, would need a lifecycle of its own beside the runs'.
+
+**A trace reports changes, recorded where the tick makes them.** Each node
+records the status it returns as it ticks, and each detached node whether it
+called or answered from its cache as it is read; the interpreter compares the
+tick's record with the previous tick's and gives each trace what changed. A
+report carries only what changed since that trace's last one, so an editor
+keeps its view and a settled behavior writes nothing. A snapshot of every
+node at every tick would cost the size of the graph whether or not anything
+moved, and walking the lowered tree after the tick would visit it a second
+time. Values are the exception: an output is read from its cell at a report,
+for the watched nodes only, since a value that a node writes is already
+where it can be read.
 
 ### The HAL is a module
 
@@ -840,7 +898,7 @@ forms accepted while clients move.
 
 Behaviors read their inputs from store paths and write outputs back; the
 built-in keys are reserved names, not hard-wired node plumbing. Anything a node
-would be "predetermined" to read can be overridden by linking a different
+would be "predetermined" to read can be overridden by binding a different
 producer onto the same path.
 
 ### Semio Studio is opt-in

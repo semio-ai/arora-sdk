@@ -4,6 +4,24 @@ All notable changes to `arora-bridge-ws`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.3.0] - 2026-10-30
+
+### Added
+
+- `describe_methods` (an optional name prefix in `path`, as `list_methods`):
+  the device's methods as `arora_bridge::MethodSignature`s — module id,
+  function id, name, and the frozen function record with its parameters by
+  id, their order and the return type. It lists what the device's method index
+  describes; the behavior interpreter's `load` and `edit` are called by their
+  fixed ids.
+- `call`: an `arora_types::call::Call` by ids, its fields beside the message's
+  own, answered by `call_resp` with the `CallResult` (`ret`, `mutated`) or the
+  device's reason. It reaches any function the device dispatches, the
+  interpreter's `load` and `edit` included, as the in-process caller does, and
+  calls a task-shaped function rather than spawning it.
+- `Device::describe_methods` and `Device::call`, which the server answers those
+  messages with. Both have a default: no signatures, and every call refused.
+
 ## [7.2.5] - 2026-10-30
 
 ### Changed
