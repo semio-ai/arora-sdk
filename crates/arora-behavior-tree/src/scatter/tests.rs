@@ -5,12 +5,11 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use arora_behavior::graph::{Graph, GraphDiff, Io, Link, LinkSource, Node as GraphNode, Port};
+use arora_behavior::graph::{Binding, Graph, GraphDiff, Node as GraphNode, Source};
 use arora_behavior::{BehaviorContext, BehaviorInterpreter, FunctionIndex, Status};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::data::{DataStore, Key, Slot, StateChange};
-use arora_types::gen_uuid_from_str;
 use arora_types::value::Value;
 use uuid::Uuid;
 
@@ -58,17 +57,17 @@ impl CallBridge for Bridge {
 
 /// The variable named `name`.
 fn variable(name: &str) -> Uuid {
-    gen_uuid_from_str(name)
+    crate::graph::key_variable(name)
 }
 
-/// A link source reading the variable `name`: under the Direct convention,
-/// the store key of that name, or a tree-local cell for a `.` name.
-fn named(name: &str) -> LinkSource {
-    LinkSource::Variable(variable(name))
+/// A binding to the key `name`: under the Direct convention, the store key
+/// of that name, or a tree-local cell for a `.` name.
+fn named(name: &str) -> Source {
+    Source::Key(name.to_string())
 }
 
-fn literal(value: Value) -> LinkSource {
-    LinkSource::Literal(value)
+fn literal(value: Value) -> Source {
+    Source::Value(value)
 }
 
 fn strings(names: &[&str]) -> Value {
@@ -79,74 +78,49 @@ fn floats(values: &[f64]) -> Value {
     Value::ArrayF64(values.to_vec())
 }
 
-fn graph_node(id: Uuid, function: Uuid, inputs: &[Uuid]) -> GraphNode {
+fn graph_node(id: Uuid, function: Uuid) -> GraphNode {
     GraphNode {
         id,
         function,
-        inputs: inputs.iter().copied().map(Io::new).collect(),
         ..GraphNode::default()
     }
 }
 
 /// `Sequence(Scatter(values, keys, within), Unpack([true], out_0 → {done}))`:
 /// `done` is written when the `Scatter` succeeded. A `None` argument is left
-/// unlinked. Every variable a link reads is named after `named`'s convention.
-fn scatter_graph(
-    values: Option<LinkSource>,
-    keys: Option<LinkSource>,
-    within: Option<LinkSource>,
-) -> Graph {
-    let mut graph = Graph::empty();
-    graph.root = Some(SEQ);
-    graph.nodes.insert(
-        SEQ,
-        GraphNode {
-            children: Some(vec![SCATTER, MARK]),
-            ..graph_node(SEQ, SEQ_FUNCTION_ID, &[])
-        },
-    );
-    graph.nodes.insert(
-        SCATTER,
-        graph_node(
-            SCATTER,
-            SCATTER_FUNCTION_ID,
-            &[
-                SCATTER_VALUES_PARAM_ID,
-                SCATTER_KEYS_PARAM_ID,
-                SCATTER_WITHIN_PARAM_ID,
-            ],
-        ),
-    );
-    graph.nodes.insert(
-        MARK,
-        graph_node(MARK, UNPACK_FUNCTION_ID, &[UNPACK_VALUES_PARAM_ID]),
-    );
-    let link = |node, port, source| Link::new(Port::new(node, port), source);
+/// unbound.
+fn scatter_graph(values: Option<Source>, keys: Option<Source>, within: Option<Source>) -> Graph {
+    let mut scatter = graph_node(SCATTER, SCATTER_FUNCTION_ID);
     for (port, source) in [
         (SCATTER_VALUES_PARAM_ID, values),
         (SCATTER_KEYS_PARAM_ID, keys),
         (SCATTER_WITHIN_PARAM_ID, within),
     ] {
         if let Some(source) = source {
-            graph.links.push(link(SCATTER, port, source));
+            scatter.bind.insert(port, source);
         }
     }
-    graph.links.push(link(
-        MARK,
+    let mut mark = graph_node(MARK, UNPACK_FUNCTION_ID);
+    mark.bind.insert(
         UNPACK_VALUES_PARAM_ID,
         literal(Value::ArrayBoolean(vec![true])),
-    ));
-    graph
-        .links
-        .push(link(MARK, UNPACK_OUT_PARAM_IDS[0], named("done")));
-    for name in ["done", "table/values", "table/keys", "prefix", ".keys"] {
-        graph.variables.insert(variable(name), name.to_string());
+    );
+    mark.bind.insert(UNPACK_OUT_PARAM_IDS[0], named("done"));
+    Graph {
+        root: Some(SEQ),
+        nodes: vec![
+            GraphNode {
+                children: Some(vec![SCATTER, MARK]),
+                ..graph_node(SEQ, SEQ_FUNCTION_ID)
+            },
+            scatter,
+            mark,
+        ],
     }
-    graph
 }
 
 /// The `Scatter` graph with all three arguments linked.
-fn scatter(values: LinkSource, keys: LinkSource, within: &str) -> Graph {
+fn scatter(values: Source, keys: Source, within: &str) -> Graph {
     scatter_graph(
         Some(values),
         Some(keys),
@@ -450,10 +424,11 @@ fn within_is_a_literal_key_prefix_or_none_and_values_and_keys_are_linked() {
         .unwrap();
     assert!(interp
         .apply(GraphDiff {
-            add_links: vec![Link::new(
-                Port::new(SCATTER, SCATTER_WITHIN_PARAM_ID),
-                named("prefix"),
-            )],
+            bind: vec![Binding {
+                node: SCATTER,
+                port: SCATTER_WITHIN_PARAM_ID,
+                source: named("prefix"),
+            }],
             ..GraphDiff::default()
         })
         .is_err());

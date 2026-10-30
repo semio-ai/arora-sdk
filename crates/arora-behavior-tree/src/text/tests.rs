@@ -4,11 +4,10 @@
 
 use std::collections::HashMap;
 
-use arora_behavior::graph::{Graph, LinkSource, Port};
+use arora_behavior::graph::{Graph, Port, Source};
 use arora_behavior::{FunctionIndex, Status};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::data::{DataStore, Key, StateChange};
-use arora_types::gen_uuid_from_str;
 use arora_types::value::Value;
 use uuid::Uuid;
 
@@ -33,14 +32,14 @@ fallback                                   # the first top-level node is the roo
   sequence
     equal(a: {person/visible}, b: true)
     set_string(variable: {.mood}, value: \"happy\")
-    below(x: @cm, limit: 30)
-    smooth(x: @raw, alpha: 0.2, state: @s.state)
+    below(x: @cm._ret, limit: 30)
+    smooth(x: @raw._ret, alpha: 0.2, state: @s.state)
   succeed
 
 raw: mul(a: {sensor/distance}, b: 100)
-cm: clamp(x: @raw, lo: 0)
-level: {face/level} = add(a: @cm, b: 1)
-s: smooth(x: @cm, alpha: 0.5, state: 0)
+cm: clamp(x: @raw._ret, lo: 0)
+level: {face/level} = add(a: @cm._ret, b: 1)
+s: smooth(x: @cm._ret, alpha: 0.5, state: 0)
 sway: {rig/arm_wave} = mul(a: add(a: {arora/time}, b: 1.6), b: 0.6)
 ";
 
@@ -94,11 +93,11 @@ fn at_path(loaded: &Loaded, path: &str) -> Uuid {
         .id
 }
 
-fn link(graph: &Graph, node: Uuid, port: Uuid) -> &LinkSource {
-    &graph
-        .link_to(&Port::new(node, port))
-        .unwrap_or_else(|| panic!("a link to {node}.{port}"))
-        .source
+fn link(graph: &Graph, node: Uuid, port: Uuid) -> &Source {
+    graph
+        .node(&node)
+        .and_then(|node| node.bind.get(&port))
+        .unwrap_or_else(|| panic!("a binding of {node}.{port}"))
 }
 
 /// The id of the node named, or at the path, `name`.
@@ -175,7 +174,7 @@ fn every_part_has_the_span_of_its_text() {
         panic!("a port");
     };
     assert_eq!(at(text, read.span), "raw");
-    assert_eq!(at(text, parameter.as_ref().unwrap().span), "state");
+    assert_eq!(at(text, parameter.span), "state");
     assert_eq!(
         alpha.value.kind,
         ExprKind::Number {
@@ -306,7 +305,7 @@ fn any_text_is_read_to_its_end() {
         "sequence\r\n  succeed\r\n",
         "  indented\nfirst",
         "a: b: c: d",
-        "@x = @y = f",
+        "@x._ret = @y._ret = f",
         "f(a: g(b: h(c: [[[[1]]]], d: some(some(none)))))",
         "f(a: 1)[x]",
         ")))(((",
@@ -414,13 +413,13 @@ fn formatting_is_canonical_and_idempotent() {
     let text = "\
 # the root
 fallback()
-    below( limit : 30 , x:@cm )   # a check
+    below( limit : 30 , x:@cm._ret )   # a check
     succeed
 cm: clamp(lo: 0.0, x: mul(b: 100, a: {sensor/distance}))
 
 
 # the level
-{face/level} = add(b: 1.5f64, a: @cm)
+{face/level} = add(b: 1.5f64, a: @cm._ret)
 # the end
 ";
     let functions = index();
@@ -430,13 +429,13 @@ cm: clamp(lo: 0.0, x: mul(b: 100, a: {sensor/distance}))
         "\
 # the root
 fallback
-  below(x: @cm, limit: 30)  # a check
+  below(x: @cm._ret, limit: 30)  # a check
   succeed
 
 cm: clamp(x: mul(a: {sensor/distance}, b: 100), lo: 0.0)
 
 # the level
-{face/level} = add(a: @cm, b: 1.5f64)
+{face/level} = add(a: @cm._ret, b: 1.5f64)
 
 # the end
 "
@@ -486,7 +485,7 @@ below(x: 1, limit: 2)
             None => v5(&node.path),
         };
         assert_eq!(node.id, expected, "{}", node.path);
-        assert!(loaded.graph.nodes.contains_key(&node.id));
+        assert!(loaded.graph.node(&node.id).is_some());
     }
     assert_eq!(loaded.graph.root, Some(v5("root")));
     let attached: Vec<bool> = loaded.nodes.iter().map(|node| node.attached).collect();
@@ -504,15 +503,44 @@ below(x: 1, limit: 2)
         "a call's node is held by the node whose argument it is"
     );
     assert_eq!(
-        loaded.graph.nodes[&at_path(&loaded, "root.0")].children,
+        loaded
+            .graph
+            .node(&at_path(&loaded, "root.0"))
+            .unwrap()
+            .children,
         Some(vec![v5("root.0.0"), check])
     );
 }
 
-/// Variables are named by their key, ids derived as the graph lowering
-/// derives them; a target binds `_ret`; `@n` reads a node's return value,
-/// `@n.p` its parameter; a call in an argument is a node read by its return
-/// value.
+/// A bare `@node` names no port: it is refused where it is written, with the
+/// return value's spelling, `@node._ret`, in the message.
+#[test]
+fn a_bare_node_reference_is_refused_with_its_return_value_s_spelling() {
+    for (text, reference) in [
+        (
+            "below(x: @cm, limit: 30)\n\ncm: clamp(x: 1, lo: 0)\n",
+            "@cm",
+        ),
+        ("@cm = add(a: 1, b: 2)\n", "@cm"),
+        ("below(x: @cm[.0], limit: 30)\n", "@cm"),
+    ] {
+        let parsed = parse(text);
+        let [diagnostic] = parsed.diagnostics.as_slice() else {
+            panic!("one error: {:?}", parsed.diagnostics);
+        };
+        assert_eq!(diagnostic.severity, Severity::Error, "{text}");
+        assert_eq!(at(text, diagnostic.span), reference, "{text}");
+        assert!(
+            diagnostic.message.contains("`@cm._ret`"),
+            "{text}: {}",
+            diagnostic.message
+        );
+    }
+}
+
+/// A variable binds its key; a target binds `_ret`; `@n._ret` reads a node's
+/// return value, `@n.p` its parameter; a call in an argument is a node read
+/// by its return value.
 #[test]
 fn references_resolve_to_variables_ports_and_nodes() {
     let loaded = loaded(EXAMPLE);
@@ -524,80 +552,87 @@ fn references_resolve_to_variables_ports_and_nodes() {
         named(&loaded, "s"),
         named(&loaded, "sway"),
     );
-    for name in [
-        "person/visible",
-        ".mood",
-        "sensor/distance",
-        "face/level",
-        "arora/time",
-    ] {
-        assert_eq!(
-            graph
-                .variables
-                .get(&gen_uuid_from_str(name))
-                .map(String::as_str),
-            Some(name)
-        );
-    }
+    let keys: std::collections::BTreeSet<&str> = graph
+        .nodes
+        .iter()
+        .flat_map(|node| node.bind.values())
+        .filter_map(|source| match source {
+            Source::Key(key) => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "person/visible",
+            ".mood",
+            "sensor/distance",
+            "face/level",
+            "arora/time",
+            "rig/arm_wave",
+        ]
+        .into_iter()
+        .collect()
+    );
     assert_eq!(
         *link(graph, raw, MUL_A),
-        LinkSource::Variable(gen_uuid_from_str("sensor/distance"))
+        Source::Key("sensor/distance".to_string())
     );
-    assert_eq!(
-        *link(graph, raw, MUL_B),
-        LinkSource::Literal(Value::F64(100.0))
-    );
+    assert_eq!(*link(graph, raw, MUL_B), Source::Value(Value::F64(100.0)));
     assert_eq!(
         *link(graph, cm, CLAMP_X),
-        LinkSource::Port(Port::new(raw, _RET_PARAM_ID))
+        Source::Port(Port::new(raw, _RET_PARAM_ID))
     );
     assert_eq!(
         *link(graph, level, _RET_PARAM_ID),
-        LinkSource::Variable(gen_uuid_from_str("face/level"))
+        Source::Key("face/level".to_string())
     );
     let reader = at_path(&loaded, "root.0.3");
     assert_eq!(
         *link(graph, reader, SMOOTH_STATE),
-        LinkSource::Port(Port::new(s, SMOOTH_STATE))
+        Source::Port(Port::new(s, SMOOTH_STATE))
     );
     let nested = at_path(&loaded, "detached.4.a");
     assert_eq!(
         *link(graph, sway, MUL_A),
-        LinkSource::Port(Port::new(nested, _RET_PARAM_ID))
+        Source::Port(Port::new(nested, _RET_PARAM_ID))
     );
     assert_eq!(
         *link(graph, nested, ADD_A),
-        LinkSource::Variable(gen_uuid_from_str("arora/time"))
+        Source::Key("arora/time".to_string())
     );
     let set_string = at_path(&loaded, "root.0.1");
     assert_eq!(
         *link(graph, set_string, SET_STR_VALUE_PARAM_ID),
-        LinkSource::Literal(Value::String("happy".to_string()))
+        Source::Value(Value::String("happy".to_string()))
     );
     assert_eq!(
         *link(graph, set_string, SET_STR_VARIABLE_PARAM_ID),
-        LinkSource::Variable(gen_uuid_from_str(".mood"))
+        Source::Key(".mood".to_string())
     );
     assert_eq!(
-        graph.nodes[&at_path(&loaded, "root.0.0")].function,
+        graph.node(&at_path(&loaded, "root.0.0")).unwrap().function,
         EQUAL_FUNCTION_ID
     );
-    assert_eq!(graph.nodes[&v5("root")].function, FALLBACK_FUNCTION_ID);
     assert_eq!(
-        graph.nodes[&at_path(&loaded, "root.0")].function,
+        graph.node(&v5("root")).unwrap().function,
+        FALLBACK_FUNCTION_ID
+    );
+    assert_eq!(
+        graph.node(&at_path(&loaded, "root.0")).unwrap().function,
         SEQ_FUNCTION_ID
     );
-    let smooth = &graph.nodes[&s];
+}
+
+/// A variable known by its id alone names no key: it binds the tree-local
+/// key `.<uuid>`, which no store sees.
+#[test]
+fn a_variable_known_by_its_id_binds_a_tree_local_key() {
+    let id = "00000000-0000-4000-8000-0000000000ab";
+    let loaded = loaded(&format!("set_string(variable: {{{id}}}, value: \"x\")\n"));
     assert_eq!(
-        smooth.outputs.iter().map(|io| io.id).collect::<Vec<_>>(),
-        [_RET_PARAM_ID, SMOOTH_STATE],
-        "the return value and the mutable parameter are outputs"
-    );
-    assert_eq!(
-        smooth.inputs[0].ty,
-        Some(arora_types::module::high::TypeRef::Scalar {
-            id: "f64".to_string()
-        })
+        *link(&loaded.graph, v5("root"), SET_STR_VARIABLE_PARAM_ID),
+        Source::Key(format!(".{id}"))
     );
 }
 
@@ -609,15 +644,15 @@ fn literals_take_the_type_of_their_parameter() {
     let root = v5("root");
     assert_eq!(
         *link(&loaded.graph, root, CLAMP_X),
-        LinkSource::Literal(Value::F64(1.0))
+        Source::Value(Value::F64(1.0))
     );
     assert_eq!(
         *link(&loaded.graph, root, CLAMP_LO),
-        LinkSource::Literal(Value::F64(-2.5))
+        Source::Value(Value::F64(-2.5))
     );
     assert_eq!(
         *link(&loaded.graph, root, CLAMP_HI),
-        LinkSource::Literal(Value::F64(7.0))
+        Source::Value(Value::F64(7.0))
     );
 
     let text = "sequence\n  clamp(x: 1u8, lo: \"a\")\n  equal(a: {k}, b: 3)\n";
@@ -637,7 +672,7 @@ fn literals_take_the_type_of_their_parameter() {
 #[test]
 fn unknown_and_ambiguous_names_are_errors_at_the_name() {
     let text =
-        "sequence\n  nope(x: 1)\n  below(y: 1, x: 2, limit: 3)\n  below(x: @nobody, limit: 1)\n";
+        "sequence\n  nope(x: 1)\n  below(y: 1, x: 2, limit: 3)\n  below(x: @nobody._ret, limit: 1)\n";
     let loaded = resolve(&parsed(text), &index());
     let refused: Vec<&str> = errors(&loaded.diagnostics)
         .iter()
@@ -658,7 +693,7 @@ fn unknown_and_ambiguous_names_are_errors_at_the_name() {
     assert_eq!(errors(&ambiguous.diagnostics).len(), 1);
     assert_eq!(at(text, ambiguous.diagnostics[0].span), "mul");
     let picked = loaded_with(&format!("{MATH}::mul(a: 1, b: 2)\n"), &functions);
-    assert_eq!(picked.graph.nodes[&v5("root")].function, MUL);
+    assert_eq!(picked.graph.node(&v5("root")).unwrap().function, MUL);
 }
 
 /// A native's own state is seeded when a node leaves it out; a node that
@@ -670,7 +705,7 @@ fn natives_are_seeded_and_omissions_warned() {
     let loaded = resolve(&parsed(text), &index());
     assert_eq!(
         *link(&loaded.graph, v5("root"), SEQ_STAR_CURRENT_INDEX_PARAM_ID),
-        LinkSource::Literal(Value::U16(0))
+        Source::Value(Value::U16(0))
     );
     let warnings: Vec<&str> = loaded
         .diagnostics
@@ -743,17 +778,15 @@ fn the_ast_and_the_loaded_graph_are_serde_values() {
 // The display, read back.
 //================================================================
 
-/// `graph` with its links in one order, to compare graphs whose links were
-/// added in different orders.
+/// `graph` with its nodes in one order, to compare graphs whose nodes are
+/// listed in different orders.
 fn sorted(mut graph: Graph) -> Graph {
-    graph
-        .links
-        .sort_by_key(|link| (link.target.node, link.target.port));
+    graph.nodes.sort_by_key(|node| node.id);
     graph
 }
 
 /// A tree shown as text reads back to the graph it was built from: every
-/// node with its id, every link, every variable.
+/// node with its id, every binding.
 #[test]
 fn a_displayed_tree_reads_back_to_its_graph() {
     let functions = index();
@@ -766,7 +799,7 @@ fn a_displayed_tree_reads_back_to_its_graph() {
         .collect();
     let names = Names {
         functions: Some(&functions),
-        variables: Some(&loaded.graph.variables),
+        variables: None,
         nodes: Some(&node_names),
     };
     let shown = tree.display(names).to_string();
@@ -785,7 +818,8 @@ fn a_displayed_tree_reads_back_to_its_graph() {
     let again = build_behavior_tree(&read.graph, &|_| None).unwrap();
     assert_eq!(again.display(names).to_string(), shown);
 
-    // Without names, nodes are named by their ids, and read back the same.
+    // Without names, nodes are named by their ids, and read back the same;
+    // a tree built from a graph names its variables by their keys.
     let anonymous = tree.display(Names::functions(&functions)).to_string();
     let read = resolve(&parsed(&anonymous), &functions);
     assert_eq!(
@@ -793,10 +827,11 @@ fn a_displayed_tree_reads_back_to_its_graph() {
         Vec::<&Diagnostic>::new(),
         "{anonymous}"
     );
-    let mut expected = sorted(loaded.graph.clone());
-    // Variables are shown by their ids, which name none.
-    expected.variables.clear();
-    assert_eq!(sorted(read.graph), expected, "{anonymous}");
+    assert_eq!(
+        sorted(read.graph),
+        sorted(loaded.graph.clone()),
+        "{anonymous}"
+    );
 }
 
 /// The display of a tree built from nodes, a nested call among their
@@ -865,12 +900,12 @@ fn a_cascade_read_by_three_conditions_runs_once() {
     let store = store_with(&[("sensor/distance", 0.2)]);
     let text = "\
 parallel
-  below(x: @cm, limit: 10)
-  below(x: @cm, limit: 30)
-  below(x: @cm, limit: 50)
+  below(x: @cm._ret, limit: 10)
+  below(x: @cm._ret, limit: 30)
+  below(x: @cm._ret, limit: 50)
 
 raw: mul(a: {sensor/distance}, b: 100)
-cm: clamp(x: @raw, lo: 0)
+cm: clamp(x: @raw._ret, lo: 0)
 ";
     let tree = tree(&store, text);
     let mut engine = Engine::default();
@@ -909,8 +944,8 @@ fn under_a_fallback_only_what_a_ticking_condition_reads_runs() {
     let store = store_with(&[("left", 1.0), ("right", 1.0)]);
     let text = "\
 fallback
-  below(x: @l, limit: 100)
-  below(x: @r, limit: 100)
+  below(x: @l._ret, limit: 100)
+  below(x: @r._ret, limit: 100)
 
 l: mul(a: {left}, b: 2)
 r: mul(a: {right}, b: 3)
@@ -998,7 +1033,7 @@ s: {out} = smooth(x: {target}, alpha: 1, state: 0)
 /// A text with an error does not load, and says where.
 #[test]
 fn a_text_with_an_error_does_not_load() {
-    let text = "sequence\n  below(x: @nobody, limit: 1)\n";
+    let text = "sequence\n  below(x: @nobody._ret, limit: 1)\n";
     let error = match load_behavior_tree_text(text, &index(), &|_| None) {
         Err(error) => error.to_string(),
         Ok(_) => panic!("the text does not load"),
@@ -1166,7 +1201,7 @@ fn a_number_past_its_range_is_refused() {
     let loaded = loaded("clamp(x: 1e300, lo: -inf)\n");
     assert_eq!(
         *link(&loaded.graph, v5("root"), CLAMP_X),
-        LinkSource::Literal(Value::F64(1e300))
+        Source::Value(Value::F64(1e300))
     );
     assert_eq!(
         crate::display::literal(&Value::F64(1e300)),
@@ -1226,7 +1261,7 @@ fn a_return_value_written_to_an_input_feeds_it() {
     let loaded = loaded(text);
     assert_eq!(
         *link(&loaded.graph, v5("feed"), _RET_PARAM_ID),
-        LinkSource::Port(Port::new(v5("r"), BELOW_X))
+        Source::Port(Port::new(v5("r"), BELOW_X))
     );
     let store = store_with(&[("in", 10.0)]);
     let tree = tree(&store, text);
@@ -1249,7 +1284,7 @@ fn a_return_value_written_to_an_input_feeds_it() {
 fn what_lowering_refuses_is_an_error_where_written() {
     for (text, refused) in [
         (
-            "below(x: @00000000-0000-4000-8000-0000000000ee, limit: 1)\n",
+            "below(x: @00000000-0000-4000-8000-0000000000ee._ret, limit: 1)\n",
             vec!["00000000-0000-4000-8000-0000000000ee"],
         ),
         (
@@ -1257,12 +1292,12 @@ fn what_lowering_refuses_is_an_error_where_written() {
             vec!["a"],
         ),
         (
-            "below(x: @a, limit: 1)\n\na: add(a: @b, b: 1)\nb: add(a: @a, b: 1)\n",
-            vec!["a: add(a: @b, b: 1)", "b: add(a: @a, b: 1)"],
+            "below(x: @a._ret, limit: 1)\n\na: add(a: @b._ret, b: 1)\nb: add(a: @a._ret, b: 1)\n",
+            vec!["a: add(a: @b._ret, b: 1)", "b: add(a: @a._ret, b: 1)"],
         ),
         (
-            "succeed\n\ne: add(a: @e, b: 1)\n",
-            vec!["e: add(a: @e, b: 1)"],
+            "succeed\n\ne: add(a: @e._ret, b: 1)\n",
+            vec!["e: add(a: @e._ret, b: 1)"],
         ),
     ] {
         let loaded = resolve(&parsed(text), &index());
@@ -1272,7 +1307,7 @@ fn what_lowering_refuses_is_an_error_where_written() {
             .collect();
         assert_eq!(errors, refused, "{text}: {:?}", loaded.diagnostics);
     }
-    loaded("sequence\n  t: below(x: 1, limit: 4)\n  below(x: @m, limit: 100)\n\nm: mul(a: @t.limit, b: 10)\n");
+    loaded("sequence\n  t: below(x: 1, limit: 4)\n  below(x: @m._ret, limit: 100)\n\nm: mul(a: @t.limit, b: 10)\n");
     loaded("below(x: @s.state, limit: 1)\n\ns: smooth(x: 1, alpha: 1, state: 0)\n");
 }
 
@@ -1300,7 +1335,7 @@ fn some_holds_literals() {
 /// An error's column counts characters.
 #[test]
 fn an_error_column_counts_characters() {
-    let text = "sequence\n  set_string(variable: {\"é\"}, value: @nobody)\n";
+    let text = "sequence\n  set_string(variable: {\"é\"}, value: @nobody._ret)\n";
     let error = match load_behavior_tree_text(text, &index(), &|_| None) {
         Err(error) => error.to_string(),
         Ok(_) => panic!("the text does not load"),
@@ -1318,7 +1353,7 @@ fn an_error_column_counts_characters() {
 /// name that is not written as a name as it is shows as the id.
 #[test]
 fn a_display_reads_back_whatever_the_names() {
-    use arora_behavior::graph::{Link, Node as GraphNode};
+    use arora_behavior::graph::Node as GraphNode;
     let keys = [
         "a}b",
         "a b",
@@ -1378,33 +1413,32 @@ fn a_display_reads_back_whatever_the_names() {
                 Uuid::from_u128(0x1000 + offset as u128)
             }
         };
-        let variable = gen_uuid_from_str(key);
-        let node = |id: Uuid, function: Uuid| GraphNode {
+        let node = |id: Uuid, function: Uuid, bind: Vec<(Uuid, Source)>| GraphNode {
             id,
             function,
-            ..GraphNode::default()
+            bind: bind.into_iter().collect(),
+            children: None,
         };
-        let mut graph = Graph::empty();
-        graph.root = Some(id(0));
-        graph.nodes.insert(id(0), node(id(0), shadowed));
-        graph.nodes.insert(id(1), node(id(1), spaced));
-        graph.nodes.insert(id(2), node(id(2), twin));
-        graph.variables.insert(variable, key.to_string());
-        graph.links = vec![
-            Link::new(Port::new(id(0), shadowed_p), LinkSource::Variable(variable)),
-            Link::new(
-                Port::new(id(1), spaced_p),
-                LinkSource::Port(Port::new(id(2), _RET_PARAM_ID)),
-            ),
-            Link::new(
-                Port::new(id(1), _RET_PARAM_ID),
-                LinkSource::Variable(variable),
-            ),
-            Link::new(
-                Port::new(id(2), twin_p),
-                LinkSource::Literal(Value::F64(1e300)),
-            ),
-        ];
+        let key = Source::Key(key.to_string());
+        let graph = Graph {
+            root: Some(id(0)),
+            nodes: vec![
+                node(id(0), shadowed, vec![(shadowed_p, key.clone())]),
+                node(
+                    id(1),
+                    spaced,
+                    vec![
+                        (spaced_p, Source::Port(Port::new(id(2), _RET_PARAM_ID))),
+                        (_RET_PARAM_ID, key),
+                    ],
+                ),
+                node(
+                    id(2),
+                    twin,
+                    vec![(twin_p, Source::Value(Value::F64(1e300)))],
+                ),
+            ],
+        };
         let tree = build_behavior_tree(&graph, &|_| None).expect("the tree builds");
         let node_names: HashMap<Uuid, String> = (0..3)
             .map(|offset| (id(offset), name(offset).to_string()))
@@ -1412,7 +1446,7 @@ fn a_display_reads_back_whatever_the_names() {
         let shown = tree
             .display(Names {
                 functions: Some(&functions),
-                variables: Some(&graph.variables),
+                variables: None,
                 nodes: Some(&node_names),
             })
             .to_string();
@@ -1424,21 +1458,7 @@ fn a_display_reads_back_whatever_the_names() {
             Vec::<&Diagnostic>::new(),
             "{shown}"
         );
-        let shape = |graph: &Graph| {
-            let mut nodes: Vec<(Uuid, Uuid, Option<Vec<Uuid>>)> = graph
-                .nodes
-                .values()
-                .map(|node| (node.id, node.function, node.children.clone()))
-                .collect();
-            nodes.sort();
-            (
-                nodes,
-                sorted(graph.clone()).links,
-                graph.variables.clone(),
-                graph.root,
-            )
-        };
-        assert_eq!(shape(&read.graph), shape(&graph), "{shown}");
+        assert_eq!(sorted(read.graph), sorted(graph), "{shown}");
     }
 }
 
@@ -1452,7 +1472,7 @@ fn a_dataflow_node_reads_back() {
 below(x: 1, limit: @d.state[0])
 
 d: {face/out} = damp(in: {face/x}, param.half_life: 0.12f32, t: {arora/time}, state: ())
-s: spring(in: @d, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}, state: ())
+s: spring(in: @d._ret, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}, state: ())
 ";
     let mut index = index();
     index.extend(
@@ -1462,11 +1482,11 @@ s: spring(in: @d, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}
     );
     let loaded = resolve(&parsed(text), &index);
     assert_eq!(loaded.diagnostics, [], "{:?}", loaded.diagnostics);
-    let damp = &loaded.graph.nodes[&v5("d")];
+    let damp = loaded.graph.node(&v5("d")).unwrap();
     let half_life = parameter_named(&index[&damp.function], "param.half_life");
     assert_eq!(
         *link(&loaded.graph, v5("d"), half_life),
-        LinkSource::Literal(Value::F32(0.12))
+        Source::Value(Value::F32(0.12))
     );
 
     let tree = build_behavior_tree(&loaded.graph, &|_| None).unwrap();
@@ -1478,11 +1498,22 @@ s: spring(in: @d, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}
     let shown = tree
         .display(Names {
             functions: Some(&index),
-            variables: Some(&loaded.graph.variables),
+            variables: None,
             nodes: Some(&node_names),
         })
         .to_string();
     assert!(shown.contains("param.half_life: 0.12f32"), "{shown}");
+    let naming_no_variable = tree
+        .display(Names {
+            functions: Some(&index),
+            variables: Some(&HashMap::new()),
+            nodes: Some(&node_names),
+        })
+        .to_string();
+    assert_eq!(
+        naming_no_variable, shown,
+        "a variable the names do not name keeps its key"
+    );
     let read = resolve(&parsed(&shown), &index);
     assert_eq!(
         errors(&read.diagnostics),
@@ -1496,7 +1527,7 @@ s: spring(in: @d, param.stiffness: 120f32, param.damping: 14f32, t: {arora/time}
     else {
         panic!("a port");
     };
-    assert_eq!(parameter.as_ref().unwrap().text, "param.half_life");
+    assert_eq!(parameter.text, "param.half_life");
 }
 
 /// The parameter of `function` named `name`.
@@ -1508,4 +1539,53 @@ fn parameter_named(function: &arora_behavior::ModuleFunction, name: &str) -> Uui
         .find(|(_, parameter)| parameter.name == name)
         .unwrap_or_else(|| panic!("a parameter {name}"))
         .0
+}
+
+/// A reference to a parameter named `_ret`, which its node writes, shows
+/// the parameter's id, since `@node._ret` reads as the node's return value:
+/// the graph reads back as itself.
+#[test]
+fn a_parameter_named_like_the_return_value_is_referenced_by_its_id() {
+    use arora_behavior::graph::Node as GraphNode;
+
+    let named_ret = Uuid::from_u128(0xDD02);
+    let (odd, function) = function(
+        Uuid::from_u128(0xDD00),
+        Uuid::from_u128(0xDD01),
+        "odd",
+        vec![(named_ret, parameter("_ret", f64_ty(), true))],
+    );
+    let mut functions = index();
+    functions.insert(odd, function);
+    let node = |name: &str, source: Source| GraphNode {
+        id: v5(name),
+        function: odd,
+        bind: [(named_ret, source)].into(),
+        children: None,
+    };
+    let graph = Graph {
+        root: Some(v5("a")),
+        nodes: vec![
+            node("a", Source::Port(Port::new(v5("b"), named_ret))),
+            node("b", Source::Value(Value::F64(1.0))),
+        ],
+    };
+    let tree = build_behavior_tree(&graph, &|_| None).expect("the tree builds");
+    let node_names: HashMap<Uuid, String> =
+        ["a", "b"].map(|name| (v5(name), name.to_string())).into();
+    let shown = tree
+        .display(Names {
+            functions: Some(&functions),
+            variables: None,
+            nodes: Some(&node_names),
+        })
+        .to_string();
+    assert!(shown.contains(&format!("@b.{named_ret}")), "{shown}");
+    let read = resolve(&parsed(&shown), &functions);
+    assert_eq!(
+        errors(&read.diagnostics),
+        Vec::<&Diagnostic>::new(),
+        "{shown}"
+    );
+    assert_eq!(sorted(read.graph), sorted(graph), "{shown}");
 }

@@ -340,23 +340,17 @@ fn a_reload_interrupts_a_run_taken_over_to_call_the_module() {
         let [root, leaf] = [0x1, 0x2].map(Uuid::from_u128);
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        graph.nodes.insert(
-            root,
-            Node {
-                id: root,
-                function: PARALLEL_FUNCTION_ID,
-                children: Some(vec![leaf]),
-                ..Node::default()
-            },
-        );
-        graph.nodes.insert(
-            leaf,
-            Node {
-                id: leaf,
-                function,
-                ..Node::default()
-            },
-        );
+        graph.nodes.push(Node {
+            id: root,
+            function: PARALLEL_FUNCTION_ID,
+            children: Some(vec![leaf]),
+            ..Node::default()
+        });
+        graph.nodes.push(Node {
+            id: leaf,
+            function,
+            ..Node::default()
+        });
         graph
     };
     let spawn = |arora: &mut Arora, graph: Graph| {

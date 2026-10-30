@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "13.0.0"
+version = "14.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -15,14 +15,14 @@ crate-type = ["cdylib", "rlib"]
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
 arora-types = { path = "../arora-types", version = "3" }
 # Without default features: the browser engine host and a Tokio-free runtime.
-# 16: the `Arora`/`AroraBuilder` this crate's API carries.
-arora = { path = "../arora", version = "16", default-features = false }
+# 17: the `Arora`/`AroraBuilder` this crate's API carries.
+arora = { path = "../arora", version = "17", default-features = false }
 # 2.1: the records layout `withRecords` loads.
 arora-registry = { path = "../arora-registry", version = "2.1" }
-# 6.1: `arora_bridge::client`.
-arora-bridge = { path = "../arora-bridge", version = "6.1" }
+# 6.1: `arora_bridge::client`. 6.3: on arora-behavior 10.
+arora-bridge = { path = "../arora-bridge", version = "6.3" }
 # The run handle's encoding, which `client::run_value` reads.
-arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 wasm-bindgen = "0.2"
 futures = "0.3"
 # Sync primitives only: the device's behavior-error watch.

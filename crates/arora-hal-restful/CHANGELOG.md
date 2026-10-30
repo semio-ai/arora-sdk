@@ -4,6 +4,13 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.1.0] - 2026-10-30
+
+### Changed
+
+- The `arora-restful` runner requires arora 17: its device reads `behavior-tree`
+  2.0 graphs, a node holding its own bindings, and refuses a 1.x graph.
+
 ## [5.0.0] - 2026-10-23
 
 ### Added

@@ -12,7 +12,8 @@ Two things share the word "behavior":
 
 - A **behavior** is data: what a device should do, authored in an editor
   (Semio Studio, the Vizij Workspace) as a `Graph` — nodes bound to
-  functions, their typed inputs and outputs, and the links between them.
+  functions, each holding what its ports are bound to: values, store keys,
+  other nodes' ports.
 - A **behavior interpreter** (`BehaviorInterpreter`) runs one. A device holds
   exactly one and ticks it once per step; loading a behavior into it, or
   editing the one it holds, changes what the device does.
@@ -45,8 +46,9 @@ impl BehaviorInterpreter for Idle {
 runtime then drops; an `Err` is transient: the runtime raises it and ticks the
 interpreter again next step. The other methods default to refusing: `load`
 replaces the behavior with a `Graph`, `apply` edits it with a `GraphDiff`,
-`spawn`, `spawn_graph` and `halt` host task runs, and `described_methods` lists
-the methods the interpreter implements itself. The trait is not `Send`: a
+`spawn`, `spawn_graph` and `halt` host task runs, `trace` reports what the
+ticks do, and `described_methods` lists the methods the interpreter
+implements itself. The trait is not `Send`: a
 device is stepped on one thread.
 
 Time is not a tick argument: the runtime writes the step's clock to the store
@@ -56,7 +58,7 @@ first ([built-in keys](#built-in-keys)).
 
 The runtime registers its interpreter as a module under
 `interpreter_module::ID`, whose functions are the interpreter's entry points:
-`LOAD`, `EDIT`, `SPAWN`, `SPAWN_GRAPH` and `HALT`. A remote client, an
+`LOAD`, `EDIT`, `SPAWN`, `SPAWN_GRAPH`, `TRACE` and `HALT`. A remote client, an
 in-process caller or a behavior loads a behavior with an ordinary call:
 
 ```rust,ignore
@@ -86,6 +88,17 @@ that run's handle, the run then running the graph, so a client that lost a
 handle takes its run over by spawning its graph again. `halt` stops either
 kind. Runs coexist under `RunPolicy::Concurrent`: overlapping writes to one
 key are last-write-wins.
+
+## Traces
+
+A **trace** is a task run that reports what the behavior does: `trace`
+starts one under `TraceOptions` (the nodes whose values to report, the least
+time between reports) and answers its `TaskHandle`. At the end of each tick
+that changed something, its feedback key holds a `TraceReport`: the tick, the
+nodes whose status changed, the detached nodes whose activity changed, and
+the watched nodes' outputs that changed. `halt` ends it. A behavior editor
+starts one when playback starts and halts it when playback stops;
+[`docs/trace.md`](docs/trace.md) describes the report and its cost.
 
 ## Methods an interpreter implements
 
@@ -123,9 +136,10 @@ device's step rate from them, or filters them out.
 | module | contents |
 |---|---|
 | crate root | `BehaviorInterpreter`, `BehaviorContext`, `BehaviorStatus`, `BehaviorError`, `FunctionIndex`, `ModuleFunction` |
-| [`graph`](src/graph.rs) | `Graph`, `Node`, `Io`, `Link`, `LinkSource`, `Port`, `GraphDiff`, `GraphType` |
+| [`graph`](src/graph.rs) | `Graph`, `Node`, `Source`, `Port`, `GraphDiff`, `Binding`, `GraphType`: references by id, the form an interpreter takes ([which form to use](../arora-behavior-tree/docs/text.md#which-form-to-use)) |
 | [`interpreter_module`](src/interpreter_module.rs) | the interpreter module's ids and its calls' encoders and decoders |
 | [`task`](src/task.rs) | `TaskHandle`, `TaskId`, `RunPolicy` |
+| [`trace`](src/trace.rs) | `TraceOptions`, `TraceReport`, `NodeStatus`, `Activity`, the report's encoder and decoder |
 | [`status`](src/status.rs) | `Status`, its record's ids and version, `declare_status_enumeration` |
 | [`built_in`](src/built_in.rs) | `PREFIX`, `TIME`, `DT`, `is_built_in` |
 

@@ -27,7 +27,7 @@ In short:
 - **Detaching a node states a contract**: when it computes does not matter,
   only that its outputs are up to date when they are used.
 - **Reads are deduced, not marked.** A node reads another node's output as
-  `@node` or `@node.parameter`, or through the variable the output is bound
+  `@node._ret` or `@node.parameter`, or through the variable the output is bound
   to. Lowering finds which detached node writes what each node reads, and
   brings it up to date first. No expression is added for it.
 - **A detached node runs at most once per tick, and only when its inputs
@@ -145,10 +145,10 @@ A node is the tree's `Node`, whether the tree holds it or not:
   is bound by the `_ret` argument; a mutable parameter is written back to the
   cell its argument names. Any number of outputs can be bound, each to a
   tree-local variable or a store key.
-- **A port** is read as `@node` (its return value) or `@node.parameter` (a
+- **A port** is read as `@node._ret` (its return value) or `@node.parameter` (a
   mutable parameter's value), or through the variable it is bound to. A
   detached node's return value is a port whether or not `_ret` is bound. A
-  port bound to a store key is still read at its current value: `@node` is the
+  port bound to a store key is still read at its current value: `@node._ret` is the
   node's result this tick, while the key holds what the node last published
   (§3.3).
 
@@ -171,12 +171,12 @@ nodes are listed after the tree:
 
 ```text
 fallback
-  below(x: @cm, limit: 10f64)
-  below(x: @cm, limit: 30f64)
+  below(x: @cm._ret, limit: 10f64)
+  below(x: @cm._ret, limit: 30f64)
 
 raw: mul(a: {sensor/distance}, b: 100f64)
-cm: clamp(x: @raw, lo: 0f64)
-level: {face/level} = add(a: @cm, b: 1f64)
+cm: clamp(x: @raw._ret, lo: 0f64)
+level: {face/level} = add(a: @cm._ret, b: 1f64)
 ```
 
 ### 3.2 Reads are deduced from the source
@@ -594,5 +594,5 @@ The design holds without them. Each is settled before the stage it touches.
 - **A call an edit adds before the edit that places it** runs as a detached
   node meanwhile. An authoring tool that adds a leaf and its placement in one
   edit avoids it.
-- **Names**: the `@node` syntax, the crates, and the module of node
+- **Names**: the `@node._ret` and `@node.parameter` syntax, the crates, and the module of node
   functions.

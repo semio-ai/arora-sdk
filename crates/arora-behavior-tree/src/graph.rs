@@ -1,28 +1,26 @@
 //! Lowering the shared [`Graph`] model onto the behavior tree's runtime form.
 //!
 //! The behavior tree is an [interpreter](crate::behavior::BehaviorTreeInterpreter)
-//! over `arora-behavior`'s shared [`Graph`]: its tree is a graph whose links are
-//! the argument and child edges. This module is the bridge — it lowers a
-//! [`Graph`] into the crate's [`schema::Node`] list, which
+//! over `arora-behavior`'s shared [`Graph`]: its tree is a graph whose
+//! bindings are the nodes' arguments and whose children are the tree's edges.
+//! This module is the bridge — it lowers a [`Graph`] into the crate's
+//! [`schema::Node`] list, which
 //! [`load_behavior_tree_nodes_with`](crate::load_behavior_tree_nodes_with) then
-//! instantiates into a runnable [`BehaviorTree`]. The execution machinery
-//! (native builtins vs. `arora_call` module dispatch) is unchanged; only the
-//! authored representation is now the shared model.
+//! instantiates into a runnable [`BehaviorTree`].
 //!
-//! Link sources map onto the tree's argument [`Expression`]s:
-//! - [`LinkSource::Literal`] → [`Expression::Value`]
-//! - [`LinkSource::Variable`] → [`Expression::VariableId`] (a shared `{var}`)
-//! - [`LinkSource::Port`] → [`Expression::NodeArgument`] (another node's slot)
-//!
-//! A slot with a **predetermined key** and no link binds to the store variable
-//! of that name (the Direct convention: variable name == store key) — an input
-//! reads it, an output writes it. A link on the slot overrides the
-//! predetermination; nothing else does.
+//! A node's bindings are its arguments, whether the function reads the port
+//! or writes it — an output bound to a key is the cell its value lands in:
+//! - [`Source::Value`] → [`Expression::Value`]
+//! - [`Source::Key`] → [`Expression::VariableId`], the variable named by the
+//!   key (the Direct convention: variable name == store key), its id
+//!   [`key_variable`] of the key, so every binding to one key shares one
+//!   cell. A key starting with `.` is tree-local.
+//! - [`Source::Port`] → [`Expression::NodeArgument`] (another node's port)
+//! - [`Source::Select`] → [`Expression::Select`]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use arora_behavior::graph::{Graph, LinkSource, Port};
-use arora_types::gen_uuid_from_str;
+use arora_behavior::graph::{Graph, Source};
 use uuid::Uuid;
 
 use crate::error::BehaviorTreeError;
@@ -30,105 +28,63 @@ use crate::schema::{Expression, Node as SchemaNode, NodeParameterId};
 use crate::variable::VariableResolver;
 use crate::{load_behavior_tree_nodes_with, BehaviorTree};
 
+const KEY_NAMESPACE: Uuid = uuid::uuid!("beed0a7b-1d2f-4877-ab4f-1be522a521aa");
+
+/// The id of the variable the lowering names by the key `key`, derived from
+/// every byte of the key: two keys never share one, as two spellings of a
+/// uuid would if a key were read as the uuid it spells.
+pub(crate) fn key_variable(key: &str) -> Uuid {
+    Uuid::new_v5(&KEY_NAMESPACE, key.as_bytes())
+}
+
 /// Lower a shared [`Graph`] into the behavior tree's [`schema::Node`] list, root
 /// first (the loader takes the first node as the tree root).
 ///
-/// Each graph node becomes one schema node; the links targeting that node's
-/// inputs become its argument [`Expression`]s. Graph node order is otherwise
-/// preserved, so a [`LinkSource::Port`] referencing another node's slot follows
-/// the same ordering constraints the raw node list always had.
+/// Each graph node becomes one schema node, its bindings its argument
+/// [`Expression`]s.
 pub fn graph_to_bt_nodes(graph: &Graph) -> Result<Vec<SchemaNode>, BehaviorTreeError> {
     Ok(lower_graph(graph)?.0)
 }
 
 /// The full lowering: the schema nodes plus the variable-name map the loader
-/// binds — [`Graph::variables`] extended with one synthesized variable per
-/// **predetermined, unlinked slot** (deterministic id from the key, so every
-/// slot predetermined to one key shares one cell).
+/// binds, one variable per key the graph binds.
 fn lower_graph(
     graph: &Graph,
 ) -> Result<(Vec<SchemaNode>, HashMap<Uuid, String>), BehaviorTreeError> {
-    // Group links by the node they feed, so each node collects its arguments.
-    let mut args_by_node: HashMap<Uuid, HashMap<Uuid, Expression>> = HashMap::new();
-    for link in &graph.links {
-        let expr = link_source_to_expression(&link.source)?;
-        args_by_node
-            .entry(link.target.node)
-            .or_default()
-            .insert(link.target.port, expr);
-    }
-
-    // Output ports a link reads from: their predetermination is overridden.
-    let linked_sources: HashSet<Port> = graph
-        .links
-        .iter()
-        .filter_map(|link| arora_behavior::graph::source_port(&link.source))
-        .collect();
-
-    // Predetermined, unlinked slots bind to the store variable named by their
-    // key — an input argument reads the cell, an output argument is the cell
-    // the node's mutation lands in. A link on the slot took precedence above.
-    let mut variables = graph.variables.clone();
-    for (id, node) in &graph.nodes {
-        let mut bind = |io: &arora_behavior::graph::Io, overridden: bool| {
-            let Some(key) = &io.predetermined_key else {
-                return;
-            };
-            if overridden {
-                return;
-            }
-            let args = args_by_node.entry(*id).or_default();
-            if args.contains_key(&io.id) {
-                return;
-            }
-            let variable = gen_uuid_from_str(key);
-            variables.entry(variable).or_insert_with(|| key.clone());
-            args.insert(io.id, Expression::VariableId(variable));
-        };
-        for io in &node.inputs {
-            bind(io, false);
-        }
-        for io in &node.outputs {
-            bind(
-                io,
-                linked_sources.contains(&Port {
-                    node: *id,
-                    port: io.id,
-                }),
-            );
-        }
-    }
-
-    // Root first; the loader's "first node is the root" contract depends on it.
-    // The others by id: the graph keeps no order among its nodes, and the
-    // order of detached sinks decides which one of two writing a key wins.
-    let mut ordered: Vec<&Uuid> = graph.nodes.keys().collect();
-    ordered.sort_by_key(|id| (graph.root.as_ref() != Some(*id), **id));
     if let Some(root) = &graph.root {
-        if !graph.nodes.contains_key(root) {
+        if graph.node(root).is_none() {
             return Err(BehaviorTreeError::InconsistentTreeError {
                 message: format!("graph root {root} is not a node"),
             });
         }
     }
+    // Root first; the loader's "first node is the root" contract depends on
+    // it. The others by id: their order means nothing to the tree, and the
+    // order of detached sinks decides which one of two writing a key wins.
+    let mut ordered: Vec<&arora_behavior::graph::Node> = graph.nodes.iter().collect();
+    ordered.sort_by_key(|node| (graph.root != Some(node.id), node.id));
 
-    let mut nodes = Vec::with_capacity(graph.nodes.len());
-    for id in ordered {
-        let node = &graph.nodes[id];
-        nodes.push(SchemaNode {
+    let mut variables = HashMap::new();
+    let nodes = ordered
+        .into_iter()
+        .map(|node| SchemaNode {
             id: node.id,
             function: node.function,
-            arguments: args_by_node.remove(&node.id).unwrap_or_default(),
+            arguments: node
+                .bind
+                .iter()
+                .map(|(port, source)| (*port, source_to_expression(source, &mut variables)))
+                .collect(),
             children: node.children.clone(),
-        });
-    }
+        })
+        .collect();
     Ok((nodes, variables))
 }
 
-/// Build a runnable [`BehaviorTree`] from a shared [`Graph`], binding each
-/// variable named in [`Graph::variables`] — plus one synthesized variable per
-/// predetermined, unlinked slot — to a store slot via `resolver` (the Direct
-/// convention). Variables the resolver declines stay tree-local.
+/// Build a runnable [`BehaviorTree`] from a shared [`Graph`], binding the
+/// variable of each key the graph binds to a store slot via `resolver` (the
+/// Direct convention). Keys the resolver declines, and tree-local keys, stay
+/// tree-local.
 pub fn build_behavior_tree(
     graph: &Graph,
     resolver: &VariableResolver,
@@ -137,22 +93,27 @@ pub fn build_behavior_tree(
     load_behavior_tree_nodes_with(nodes, resolver, &variables)
 }
 
-/// A graph link source, as the tree's argument [`Expression`]. A
-/// [`LinkSource::Select`] becomes an [`Expression::Select`] wrapping the lowered
-/// source, so the `Key` path is applied on read (see the eval below).
-fn link_source_to_expression(source: &LinkSource) -> Result<Expression, BehaviorTreeError> {
-    Ok(match source {
-        LinkSource::Literal(value) => Expression::Value(value.clone()),
-        LinkSource::Variable(id) => Expression::VariableId(*id),
-        LinkSource::Port(port) => Expression::NodeArgument(NodeParameterId {
+/// A binding's source, as the tree's argument [`Expression`], recording the
+/// variable a key names in `variables`. A [`Source::Select`] becomes an
+/// [`Expression::Select`] wrapping the lowered source, so the `Key` path is
+/// applied on read.
+fn source_to_expression(source: &Source, variables: &mut HashMap<Uuid, String>) -> Expression {
+    match source {
+        Source::Value(value) => Expression::Value(value.clone()),
+        Source::Key(key) => {
+            let id = key_variable(key);
+            variables.entry(id).or_insert_with(|| key.clone());
+            Expression::VariableId(id)
+        }
+        Source::Port(port) => Expression::NodeArgument(NodeParameterId {
             node: port.node,
             parameter: port.port,
         }),
-        LinkSource::Select { source, path } => Expression::Select {
-            source: Box::new(link_source_to_expression(source)?),
+        Source::Select { source, path } => Expression::Select {
+            source: Box::new(source_to_expression(source, variables)),
             path: path.clone(),
         },
-    })
+    }
 }
 
 #[cfg(test)]
@@ -160,7 +121,8 @@ mod tests {
     use super::*;
     use crate::nodes::{FAIL_FUNCTION_ID, SEQ_FUNCTION_ID, SUCCEED_FUNCTION_ID};
     use crate::run_behavior_tree;
-    use arora_behavior::graph::{GraphDiff, Node as GraphNode};
+    use crate::schema::_RET_PARAM_ID;
+    use arora_behavior::graph::{GraphDiff, Node as GraphNode, Port};
     use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
     use arora_types::value::Value;
     use std::rc::Rc;
@@ -221,24 +183,18 @@ mod tests {
         run_behavior_tree(&tree, &HashMap::new(), &mut bridge, false).expect("run")
     }
 
-    /// A `Select` link lowers to a `Select` expression wrapping the lowered
-    /// source, carrying the `Key` path — the tree applies it on read (the
-    /// path semantics are unit-tested in `arora-behavior`).
-    /// The graph keeps no order among its nodes: they lower root first, then
-    /// by id, the same at every load.
+    /// The order of a graph's nodes means nothing to the tree: they lower
+    /// root first, then by id, whatever order the graph lists them in.
     #[test]
     fn nodes_lower_root_first_then_by_id() {
         let ids = [0x30, 0x10, 0x40, 0x20].map(Uuid::from_u128);
         let mut graph = Graph::empty();
         for id in ids {
-            graph.nodes.insert(
+            graph.nodes.push(GraphNode {
                 id,
-                GraphNode {
-                    id,
-                    function: SUCCEED_FUNCTION_ID,
-                    ..GraphNode::default()
-                },
-            );
+                function: SUCCEED_FUNCTION_ID,
+                ..GraphNode::default()
+            });
         }
         graph.root = Some(ids[2]);
         let order: Vec<Uuid> = graph_to_bt_nodes(&graph)
@@ -249,9 +205,11 @@ mod tests {
         assert_eq!(order, [0x40, 0x10, 0x20, 0x30].map(Uuid::from_u128));
     }
 
+    /// A `Select` binding lowers to a `Select` expression wrapping the lowered
+    /// source, carrying the `Key` path — the tree applies it on read (the
+    /// path semantics are unit-tested in `arora-behavior`).
     #[test]
-    fn a_select_link_lowers_to_a_select_expression() {
-        use arora_behavior::graph::{Link, LinkSource, Port};
+    fn a_select_binding_lowers_to_a_select_expression() {
         use arora_types::data::Key;
 
         let source = Uuid::from_u128(0xA);
@@ -260,19 +218,16 @@ mod tests {
         let input = Uuid::from_u128(0x2);
 
         let mut graph = Graph::empty();
-        graph
-            .nodes
-            .insert(source, leaf(source, SUCCEED_FUNCTION_ID));
-        graph
-            .nodes
-            .insert(target, leaf(target, SUCCEED_FUNCTION_ID));
-        graph.links.push(Link::new(
-            Port::new(target, input),
-            LinkSource::Select {
-                source: Box::new(LinkSource::Port(Port::new(source, out))),
+        graph.nodes.push(leaf(source, SUCCEED_FUNCTION_ID));
+        let mut reader = leaf(target, SUCCEED_FUNCTION_ID);
+        reader.bind.insert(
+            input,
+            Source::Select {
+                source: Box::new(Source::Port(Port::new(source, out))),
                 path: Key::new(".field"),
             },
-        ));
+        );
+        graph.nodes.push(reader);
 
         let (nodes, _) = lower_graph(&graph).expect("lower");
         let target_node = nodes.iter().find(|n| n.id == target).expect("target node");
@@ -293,17 +248,17 @@ mod tests {
         let b = Uuid::from_u128(0x2);
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        graph
-            .nodes
-            .insert(root, control(root, SEQ_FUNCTION_ID, vec![a, b]));
-        graph.nodes.insert(a, leaf(a, SUCCEED_FUNCTION_ID));
-        graph.nodes.insert(b, leaf(b, SUCCEED_FUNCTION_ID));
+        graph.nodes = vec![
+            control(root, SEQ_FUNCTION_ID, vec![a, b]),
+            leaf(a, SUCCEED_FUNCTION_ID),
+            leaf(b, SUCCEED_FUNCTION_ID),
+        ];
         assert_eq!(run(&graph), Status::Success);
 
         // Swap the second child to fail via a diff, and the tree now fails.
         graph
             .apply(GraphDiff {
-                add_nodes: vec![leaf(b, FAIL_FUNCTION_ID)],
+                set: vec![leaf(b, FAIL_FUNCTION_ID)],
                 ..GraphDiff::default()
             })
             .unwrap();
@@ -316,11 +271,11 @@ mod tests {
         let child = Uuid::from_u128(0x1);
         let mut graph = Graph::empty();
         graph.root = Some(root);
-        // Insert child first so map order can't accidentally put it first.
-        graph.nodes.insert(child, leaf(child, SUCCEED_FUNCTION_ID));
-        graph
-            .nodes
-            .insert(root, control(root, SEQ_FUNCTION_ID, vec![child]));
+        // The child listed first: the root still lowers first.
+        graph.nodes = vec![
+            leaf(child, SUCCEED_FUNCTION_ID),
+            control(root, SEQ_FUNCTION_ID, vec![child]),
+        ];
         let nodes = graph_to_bt_nodes(&graph).unwrap();
         assert_eq!(nodes.first().unwrap().id, root);
     }
@@ -354,126 +309,81 @@ mod tests {
         assert_eq!(run(&graph), Status::Success);
     }
 
-    /// An unlinked input with a predetermined key lowers to a variable
-    /// expression on that key's deterministic id; a linked one keeps the link.
+    /// A key binding lowers to the variable of that key, whichever port it
+    /// binds: an input reads the variable's cell, an output — here the
+    /// return value — is written to it. Every binding to one key shares one
+    /// variable.
     #[test]
-    fn predetermined_slots_bind_unless_linked() {
-        use arora_behavior::graph::{Io, Link, Port};
-
+    fn a_key_lowers_to_its_variable_whichever_port_binds_it() {
         let node_id = Uuid::from_u128(0x1);
-        let bound_port = Uuid::from_u128(0x10);
-        let linked_port = Uuid::from_u128(0x11);
+        let input = Uuid::from_u128(0x10);
+        let other = Uuid::from_u128(0x11);
         let mut node = leaf(node_id, SUCCEED_FUNCTION_ID);
-        node.inputs = vec![
-            Io {
-                predetermined_key: Some("face/x".to_string()),
-                ..Io::new(bound_port)
-            },
-            Io {
-                predetermined_key: Some("face/y".to_string()),
-                ..Io::new(linked_port)
-            },
-        ];
+        node.bind.insert(input, Source::Key("face/x".into()));
+        node.bind.insert(other, Source::Key("face/x".into()));
+        node.bind
+            .insert(_RET_PARAM_ID, Source::Key("motor/left".into()));
         let mut graph = Graph::empty();
         graph.root = Some(node_id);
-        graph.nodes.insert(node_id, node);
-        // The link on the second slot overrides its predetermination.
-        graph.links.push(Link::new(
-            Port {
-                node: node_id,
-                port: linked_port,
-            },
-            LinkSource::Literal(Value::Boolean(true)),
-        ));
+        graph.nodes.push(node);
 
-        let nodes = graph_to_bt_nodes(&graph).unwrap();
-        let lowered = &nodes[0];
+        let (nodes, variables) = lower_graph(&graph).unwrap();
+        let face = key_variable("face/x");
+        let motor = key_variable("motor/left");
+        assert_eq!(nodes[0].arguments[&input], Expression::VariableId(face));
+        assert_eq!(nodes[0].arguments[&other], Expression::VariableId(face));
         assert_eq!(
-            lowered.arguments[&bound_port],
-            Expression::VariableId(gen_uuid_from_str("face/x")),
-            "the unlinked slot binds to its predetermined key's variable"
+            nodes[0].arguments[&_RET_PARAM_ID],
+            Expression::VariableId(motor)
         );
         assert_eq!(
-            lowered.arguments[&linked_port],
-            Expression::Value(Value::Boolean(true)),
-            "the link wins over the predetermined key"
+            variables,
+            HashMap::from([
+                (face, "face/x".to_string()),
+                (motor, "motor/left".to_string())
+            ])
         );
     }
 
-    /// An output slot binds to its predetermined key too — unless a link reads
-    /// from it, which overrides the predetermination.
+    /// Two keys are two variables, however alike: keys spelling one uuid in
+    /// two cases are two store keys.
     #[test]
-    fn predetermined_outputs_bind_unless_read_by_a_link() {
-        use arora_behavior::graph::{Io, Link, Port};
+    fn keys_spelling_one_uuid_are_two_variables() {
+        let node_id = Uuid::from_u128(0x1);
+        let [lower, upper] = [Uuid::from_u128(0x10), Uuid::from_u128(0x11)];
+        let mut node = leaf(node_id, SUCCEED_FUNCTION_ID);
+        for (port, key) in [
+            (lower, "00000000-0000-4000-8000-0000000000ab"),
+            (upper, "00000000-0000-4000-8000-0000000000AB"),
+        ] {
+            node.bind.insert(port, Source::Key(key.into()));
+        }
+        let mut graph = Graph::empty();
+        graph.root = Some(node_id);
+        graph.nodes.push(node);
 
-        let producer = Uuid::from_u128(0x1);
-        let consumer = Uuid::from_u128(0x2);
-        let out_port = Uuid::from_u128(0x20);
-        let in_port = Uuid::from_u128(0x21);
-
-        let make = |linked: bool| {
-            let mut p = leaf(producer, SUCCEED_FUNCTION_ID);
-            p.outputs = vec![Io {
-                predetermined_key: Some("motor/left".to_string()),
-                ..Io::new(out_port)
-            }];
-            let mut graph = Graph::empty();
-            graph.root = Some(producer);
-            graph.nodes.insert(producer, p);
-            if linked {
-                graph
-                    .nodes
-                    .insert(consumer, leaf(consumer, SUCCEED_FUNCTION_ID));
-                graph.links.push(Link::new(
-                    Port {
-                        node: consumer,
-                        port: in_port,
-                    },
-                    LinkSource::Port(Port {
-                        node: producer,
-                        port: out_port,
-                    }),
-                ));
-            }
-            graph
+        let (nodes, variables) = lower_graph(&graph).unwrap();
+        let variable = |port| match &nodes[0].arguments[&port] {
+            Expression::VariableId(id) => variables[id].clone(),
+            other => panic!("{other:?}"),
         };
-
-        let unlinked = graph_to_bt_nodes(&make(false)).unwrap();
-        assert_eq!(
-            unlinked[0].arguments[&out_port],
-            Expression::VariableId(gen_uuid_from_str("motor/left")),
-            "the unread output binds to its predetermined key's variable"
-        );
-
-        let linked = graph_to_bt_nodes(&make(true)).unwrap();
-        assert!(
-            !linked
-                .iter()
-                .find(|n| n.id == producer)
-                .unwrap()
-                .arguments
-                .contains_key(&out_port),
-            "a link reading the output overrides its predetermination"
-        );
+        assert_eq!(variable(lower), "00000000-0000-4000-8000-0000000000ab");
+        assert_eq!(variable(upper), "00000000-0000-4000-8000-0000000000AB");
     }
 
-    /// The synthesized variables reach the loader with the key as their name, so
-    /// the Direct resolver is asked for the store slot at exactly that key.
+    /// The variables reach the loader with the key as their name, so the
+    /// Direct resolver is asked for the store slot at exactly that key.
     #[test]
-    fn predetermined_keys_resolve_by_name() {
-        use arora_behavior::graph::Io;
+    fn bound_keys_resolve_by_name() {
         use std::cell::RefCell;
 
         let node_id = Uuid::from_u128(0x1);
-        let port = Uuid::from_u128(0x10);
         let mut node = leaf(node_id, SUCCEED_FUNCTION_ID);
-        node.inputs = vec![Io {
-            predetermined_key: Some("face/x".to_string()),
-            ..Io::new(port)
-        }];
+        node.bind
+            .insert(Uuid::from_u128(0x10), Source::Key("face/x".into()));
         let mut graph = Graph::empty();
         graph.root = Some(node_id);
-        graph.nodes.insert(node_id, node);
+        graph.nodes.push(node);
 
         let asked = RefCell::new(Vec::new());
         build_behavior_tree(&graph, &|name: &str| {
@@ -483,7 +393,7 @@ mod tests {
         .expect("tree builds");
         assert!(
             asked.borrow().contains(&"face/x".to_string()),
-            "the loader asked the resolver for the predetermined key, got {:?}",
+            "the loader asked the resolver for the bound key, got {:?}",
             asked.borrow()
         );
     }

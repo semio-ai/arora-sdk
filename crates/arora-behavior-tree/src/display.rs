@@ -19,7 +19,7 @@
 //! | a structure, an enumeration | `json("…")`: the value's serde JSON |
 //! | a variable | `{name}`, or `{<uuid>}` when its name is not known |
 //! | an anonymous cell | `{= value}`: the value it holds now |
-//! | another node's return value | `@node` |
+//! | another node's return value | `@node._ret` |
 //! | another node's argument | `@node.parameter` |
 //! | a selection | `source[path]` |
 //! | a call | `function(parameter: value, …)` |
@@ -46,9 +46,9 @@
 //! detached nodes show alike:
 //!
 //! ```text
-//! cm: clamp(x: @raw, lo: 0f64)
-//! level: {face/level} = add(a: @cm, b: 1f64)
-//! below(x: @cm, limit: 30f64)
+//! cm: clamp(x: @raw._ret, lo: 0f64)
+//! level: {face/level} = add(a: @cm._ret, b: 1f64)
+//! below(x: @cm._ret, limit: 30f64)
 //! ```
 //!
 //! A [`BehaviorTree`] shows as a text: its root and the nodes under it, each
@@ -80,7 +80,9 @@ pub const WIDTH: usize = 60;
 pub struct Names<'a> {
     /// The functions, by id: their names and their parameters' names.
     pub functions: Option<&'a FunctionIndex>,
-    /// The variables' names, by id.
+    /// The variables' names, by id. A tree names a variable they do not name
+    /// as it was loaded with it: a tree built from a graph, by the key the
+    /// graph binds.
     pub variables: Option<&'a HashMap<Uuid, String>>,
     /// The nodes' names, by id, for the nodes a reference or a listing names.
     pub nodes: Option<&'a HashMap<Uuid, String>>,
@@ -114,7 +116,7 @@ impl<'a> Names<'a> {
     /// alone names a native or another module's function, or its id when its
     /// name is not written as a name as it is, or names another function of
     /// its module too.
-    fn head(&self, function: &ModuleFunction) -> String {
+    pub(crate) fn head(&self, function: &ModuleFunction) -> String {
         let name = &function.function_name;
         if crate::text::native(function.function_id).is_some() {
             return name.clone();
@@ -152,7 +154,8 @@ impl<'a> Names<'a> {
             )
             .find_map(|function| function.function.parameters.get(&id))
             .map(|parameter| parameter.name.clone())
-            .filter(|name| is_parameter_name(name))
+            // `@node._ret` reads as the node's return value.
+            .filter(|name| is_parameter_name(name) && name != crate::text::RETURN)
             .unwrap_or_else(|| id.to_string())
     }
 
@@ -326,8 +329,15 @@ impl Display for TreeDisplay<'_> {
                 labels.insert(*id, id.to_string());
             }
         }
+        // A variable the names do not name keeps the name the tree was
+        // loaded with, so a text read back binds the same key.
+        let mut variables = tree.variable_names.clone();
+        if let Some(named) = self.names.variables {
+            variables.extend(named.iter().map(|(id, name)| (*id, name.clone())));
+        }
         let names = Names {
             nodes: Some(&labels),
+            variables: Some(&variables),
             ..self.names
         };
         for (depth, node) in &attached {
@@ -479,7 +489,7 @@ fn expression(expression: &Expression, names: &Names, form: Form, indent: usize)
         },
         Expression::VariableId(id) => names.variable(*id),
         Expression::NodeArgument(port) if port.parameter == _RET_PARAM_ID => {
-            format!("@{}", names.node(port.node))
+            format!("@{}.{}", names.node(port.node), crate::text::RETURN)
         }
         Expression::NodeArgument(port) => format!(
             "@{}.{}",

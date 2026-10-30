@@ -4,6 +4,83 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [10.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** on arora-behavior 10's graph model, a node holding its own
+  bindings. The interpreter reads `behavior-tree` 2.0 (`GRAPH_TYPE_VERSION`)
+  and refuses a 1.x graph, which names keys through a variables table and
+  links.
+  - Lowering: each node's bindings are its arguments, a port bound to a key
+    the variable of that key, whichever way the function uses the port.
+  - An edit restarts the nodes it sets and those whose bindings it changes,
+    a binding reading a node it removes included; every other node keeps
+    its state, as before.
+  - Removing the main behavior's root unroots it, even in a diff that sets
+    the node again; the diff's `root` roots it again.
+  - `load` and `spawn_graph` refuse a graph listing a node twice. Variables
+    leaving with a run, and a graph renaming a variable a run reads, are
+    gone with the variables table.
+  - A refused `apply` or `load` leaves the main behavior's root as it was.
+  - A key starting with `.` is one cell of the interpreter's tree, shared
+    by the main behavior and its runs, as a text's `{.x}` was: a Groot
+    tree's `{.x}` is now that cell too, rather than one of its own.
+- **Breaking:** the text reads a node's return value as `@node._ret`, in
+  the shape of a parameter, `@node.parameter`. A bare `@node` is an error
+  naming `@node._ret`, and `ExprKind::Port::parameter` is a `Name`, no
+  longer optional. `BehaviorTree::display` and `text::format` write
+  `@node._ret`, and a reference to a parameter named `_ret` with the
+  parameter's id.
+- `text::resolve` binds `{key}` to the key itself, and lists the graph's
+  nodes in the order the text writes them. `{<uuid>}`, a variable known by
+  its id alone, binds the tree-local key `.<uuid>`. The graph carries no
+  slot types: they are the functions' signatures'.
+- `BehaviorTree::display` names a variable by the key it was built with
+  when `Names::variables` does not name it, so a tree built from a graph
+  reads back to it with no names given.
+- `schema_groot::BehaviorTree::into_graph` lists the nodes root first, each
+  before its children, and binds `{var}` to the key `var`. A return port
+  Groot leaves empty (`res=""`, an unconnected output) binds nothing.
+- A Groot attribute of a module function is read as its parameter's type:
+  `delta="0.1f32"` or `delta="0.1"` is an `f32` for an `f32` parameter, and
+  `json:` holds any value. It was a string whatever the type. A tree written
+  back holds each value so that it reads back as itself for its parameter: a
+  string as it is, a number with its suffix, a boolean, `json:` for the rest.
+  An attribute left empty, Groot's unconnected port, binds nothing, but for a
+  string parameter, which takes the empty string; one that names no port is
+  refused.
+- A halted run's terminal status that the store fails to write is written
+  at the next tick, with those halted after it, rather than dropped.
+- Requires arora-behavior-tree-types 3.
+
+### Added
+
+- `readable`: the shared graph and diff with references by name, for the
+  files people write, read and review. A reference is a string, an id when
+  it parses as a UUID and a name otherwise, one file mixing both: a node by
+  the name a text gives it, a function as a text resolves it, a port by its
+  parameter's name or `_ret`. `readable::Graph::resolve` and
+  `readable::GraphDiff::resolve` read a file into the shared form, reporting
+  each reference that does not resolve or is ambiguous with where it is
+  written (`ReferenceError`): a port two references name, or a
+  `<module>::name` naming two functions of that module. A node whose `bind`
+  writes one port twice is refused as it is read; `from_graph` and `from_diff` write the shared
+  form with a name wherever one resolves back to the same id.
+  [`docs/text.md`](docs/text.md#which-form-to-use) says which form to use
+  where: the text for behaviors, readable files for what people review, ids
+  for interpreter payloads and what programs exchange.
+- `BehaviorTreeInterpreter::trace`: traces of the interpreter's ticks, as
+  task runs under the interpreter module's `TRACE` function. Each node
+  records the status it returns as it ticks, and each detached node whether
+  it called or answered from its cache, while a trace runs; each trace
+  reports what changed since its last report, at its own pace, and the
+  watched nodes' outputs, read from their cells, and a watched node's
+  return value that no binding keeps. A trace survives an edit and names
+  the nodes it restarted; one whose report cannot be written starts over. `halt` ends one. With no trace running,
+  a tick tests one flag per node.
+- The `trace` bench: what a trace costs a tick, in instructions.
+
 ## [9.7.1] - 2026-10-30
 
 ### Changed

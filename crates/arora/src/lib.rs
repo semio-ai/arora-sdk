@@ -720,6 +720,19 @@ impl LocalCaller {
         async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
     }
 
+    /// Start a trace of the device's behavior under `options`, answering with
+    /// its handle like [`spawn`](Self::spawn): each step that changes what the
+    /// trace follows writes an
+    /// [`arora_behavior::TraceReport`] to the handle's feedback key, until the
+    /// trace is [halted](Self::halt). An interpreter that cannot trace refuses.
+    pub fn trace(
+        &self,
+        options: &arora_behavior::TraceOptions,
+    ) -> impl Future<Output = Result<TaskHandle, CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::Call(interpreter_module::encode_trace(options)));
+        async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
+    }
+
     /// Stop the run `run` names: it ends `Failure` on the step after the halt is
     /// applied. Idempotent — halting a finished or unknown run is a clean no-op.
     pub fn halt(
@@ -1369,6 +1382,7 @@ impl AroraBuilder {
             interpreter_module::EDIT,
             interpreter_module::SPAWN,
             interpreter_module::SPAWN_GRAPH,
+            interpreter_module::TRACE,
             interpreter_module::HALT,
         ];
         for (function_id, name, function) in &own {
@@ -1466,7 +1480,7 @@ impl AroraBuilder {
 
         // The interpreter as a module: a host module under
         // `interpreter_module::ID` whose `LOAD`/`EDIT`/`SPAWN`/`SPAWN_GRAPH`/
-        // `HALT` functions
+        // `TRACE`/`HALT` functions
         // run on the same cell the step loop ticks. A Call to those ids — from a
         // remote or from a behavior — reaches the interpreter through the
         // engine's normal dispatch, like any module function.
@@ -1503,11 +1517,11 @@ impl AroraBuilder {
                     let diff = interpreter_module::decode_edit(&call)
                         .map_err(|message| CallError::Guest { message })?;
                     let summary = format!(
-                        "+{} -{} node(s), +{} -{} link(s)",
-                        diff.add_nodes.len(),
-                        diff.remove_nodes.len(),
-                        diff.add_links.len(),
-                        diff.remove_links.len()
+                        "{} node(s) set, {} removed, {} port(s) bound, {} unbound",
+                        diff.set.len(),
+                        diff.remove.len(),
+                        diff.bind.len(),
+                        diff.unbind.len()
                     );
                     let result =
                         runtime::with_interpreter(&cell, |interpreter| interpreter.apply(diff))?;
@@ -1549,7 +1563,7 @@ impl AroraBuilder {
                         .map_err(|message| CallError::Guest { message })?;
                     let graph_functions = graph.nodes.len();
                     let calls = runtime::RunCalls::Graph {
-                        functions: graph.nodes.values().map(|node| node.function).collect(),
+                        functions: graph.nodes.iter().map(|node| node.function).collect(),
                     };
                     let mut handle = None;
                     let result = runtime::with_interpreter_value(&cell, |interpreter| {
@@ -1578,6 +1592,30 @@ impl AroraBuilder {
                             }
                             None => runs.push(runtime::TaskRun::started(&handle, calls, policy)),
                         }
+                    }
+                    Ok(result)
+                }
+            })
+            .function(interpreter_module::TRACE, {
+                let cell = interpreter.clone();
+                let task_runs = task_runs.clone();
+                move |call| {
+                    let options = interpreter_module::decode_trace(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    let mut handle = None;
+                    let result = runtime::with_interpreter_value(&cell, |interpreter| {
+                        interpreter.trace(options).map(|started| {
+                            let value = interpreter_module::encode_spawn_result(&started);
+                            handle = Some(started);
+                            value
+                        })
+                    })?;
+                    if let Some(handle) = handle {
+                        task_runs.borrow_mut().push(runtime::TaskRun::started(
+                            &handle,
+                            runtime::RunCalls::Trace,
+                            arora_behavior::RunPolicy::Concurrent,
+                        ));
                     }
                     Ok(result)
                 }
@@ -3245,49 +3283,37 @@ mod caller_tests {
     /// A graph that calls `double` with `x` each step, writing the return
     /// under `tools/doubled`, and never ends.
     fn doubling_graph(x: f64) -> arora_behavior::graph::Graph {
-        use arora_behavior::graph::{Graph, Io, Link, LinkSource, Node, Port};
+        use arora_behavior::graph::{Graph, Node, Source};
         use arora_behavior_tree::nodes::{PARALLEL_FUNCTION_ID, RUN_FUNCTION_ID};
         use arora_behavior_tree::schema::_RET_PARAM_ID;
 
         let [parallel, double, run] = [0x1, 0x2, 0x3].map(Uuid::from_u128);
-        let out = Uuid::from_u128(0x4);
-        let mut graph = Graph::empty();
-        graph.root = Some(parallel);
-        graph.nodes.insert(
-            parallel,
-            Node {
-                id: parallel,
-                function: PARALLEL_FUNCTION_ID,
-                children: Some(vec![double, run]),
-                ..Node::default()
-            },
-        );
-        graph.nodes.insert(
-            double,
-            Node {
-                id: double,
-                function: DOUBLE,
-                inputs: vec![Io::new(DOUBLE_X), Io::new(_RET_PARAM_ID)],
-                ..Node::default()
-            },
-        );
-        graph.nodes.insert(
-            run,
-            Node {
-                id: run,
-                function: RUN_FUNCTION_ID,
-                ..Node::default()
-            },
-        );
-        graph.links = vec![
-            Link::new(
-                Port::new(double, DOUBLE_X),
-                LinkSource::Literal(Value::F64(x)),
-            ),
-            Link::new(Port::new(double, _RET_PARAM_ID), LinkSource::Variable(out)),
-        ];
-        graph.variables.insert(out, "tools/doubled".to_string());
-        graph
+        Graph {
+            root: Some(parallel),
+            nodes: vec![
+                Node {
+                    id: parallel,
+                    function: PARALLEL_FUNCTION_ID,
+                    children: Some(vec![double, run]),
+                    ..Node::default()
+                },
+                Node {
+                    id: double,
+                    function: DOUBLE,
+                    bind: [
+                        (DOUBLE_X, Source::Value(Value::F64(x))),
+                        (_RET_PARAM_ID, Source::Key("tools/doubled".to_string())),
+                    ]
+                    .into(),
+                    children: None,
+                },
+                Node {
+                    id: run,
+                    function: RUN_FUNCTION_ID,
+                    ..Node::default()
+                },
+            ],
+        }
     }
 
     /// `spawn_graph` starts a graph as a run: each step it calls a module
@@ -3319,6 +3345,65 @@ mod caller_tests {
             arora.store().read(std::slice::from_ref(&handle.status)),
             vec![Some(failure)],
             "a halted run ends Failure"
+        );
+    }
+
+    /// A call to the interpreter module's `TRACE` answers a handle, and each
+    /// step that changes the behavior writes a report to its feedback key,
+    /// until a halt ends the trace.
+    #[test]
+    fn a_trace_reports_the_behavior_until_halted() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let trace = settle(
+            &mut arora,
+            caller.trace(&arora_behavior::TraceOptions::default()),
+        )
+        .expect("the default interpreter traces");
+        assert_eq!(arora.task_runs.borrow().len(), 1, "the trace is followed");
+        let report = |arora: &Arora| {
+            arora
+                .store()
+                .read(std::slice::from_ref(&trace.feedback[0]))
+                .remove(0)
+                .map(|value| arora_behavior::trace::decode_report(&value).expect("a report"))
+        };
+        // The step that applied the call ticked the behavior: its first
+        // report is written.
+        let first = report(&arora).expect("the first step is reported");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&trace.status)),
+            vec![Some(running)]
+        );
+
+        // A run spawned beside the behavior: its nodes are reported.
+        let graph_type = arora_behavior_tree::behavior::graph_type();
+        let graph = doubling_graph(2.0);
+        settle(&mut arora, caller.spawn_graph(&graph_type, &graph)).expect("the run starts");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let spawned = report(&arora).expect("a report");
+        assert!(spawned.tick > first.tick);
+        assert!(
+            spawned
+                .status
+                .contains(&(graph.root.unwrap(), arora_behavior::NodeStatus::Running)),
+            "{spawned:?}"
+        );
+
+        settle(&mut arora, caller.halt(trace.id)).expect("the halt is applied");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&trace.status)),
+            vec![Some(failure)],
+            "a halted trace ends Failure"
+        );
+        assert_eq!(report(&arora), Some(spawned), "and reports no more");
+        assert_eq!(
+            arora.task_runs.borrow().len(),
+            1,
+            "only the run is followed"
         );
     }
 
@@ -3421,17 +3506,14 @@ mod caller_tests {
         let run = Uuid::from_u128(0x1);
         let mut graph = Graph::empty();
         graph.root = Some(run);
-        graph.nodes.insert(
-            run,
-            Node {
-                id: run,
-                function: RUN_FUNCTION_ID,
-                ..Node::default()
-            },
-        );
+        graph.nodes.push(Node {
+            id: run,
+            function: RUN_FUNCTION_ID,
+            ..Node::default()
+        });
         let args = HashMap::from([
             ("graph_type".to_string(), Value::from("behavior-tree")),
-            ("graph_version".to_string(), Value::from("1.0")),
+            ("graph_version".to_string(), Value::from("2.0")),
             (
                 "graph".to_string(),
                 arora_types::value_serde::to_value(&graph).expect("a graph converts"),

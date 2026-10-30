@@ -229,10 +229,7 @@ impl Writer<'_> {
                 let _ = write!(self.text, "{{{value}}}");
             }
             ExprKind::Port { node, parameter } => {
-                let _ = write!(self.text, "@{}", node.text);
-                if let Some(parameter) = parameter {
-                    let _ = write!(self.text, ".{}", parameter.text);
-                }
+                let _ = write!(self.text, "@{}.{}", node.text, parameter.text);
             }
             ExprKind::Select { source, path } => {
                 self.expression(source, depth + 1)?;

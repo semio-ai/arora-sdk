@@ -4,6 +4,13 @@ All notable changes to `arora-bridge-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.3.0] - 2026-10-30
+
+### Changed
+
+- Depends on arora-behavior-tree-types 3 (the `Status` ids `actions` reads;
+  none of its types appear in this crate's API).
+
 ## [11.2.0] - 2026-10-29
 
 ### Added

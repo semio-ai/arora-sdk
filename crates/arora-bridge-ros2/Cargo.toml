@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge-ros2"
-version = "11.2.0"
+version = "11.3.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "ROS 2 bridge for Arora: exposes a device's keys over ROS 2 topics and accepts commands, as an arora_bridge::Bridge."
@@ -14,7 +14,7 @@ arora-types = { path = "../arora-types", version = "3" }
 arora-bridge = { path = "../arora-bridge", version = "6" }
 # The behavior `Status` ids: the action plane finds action-shaped methods by
 # their `Status` return and maps a run's statuses onto ROS goal statuses.
-arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
+arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "3" }
 # The ROS 2 message types and the CDR codec (re-exported as `cdr`); its backend
 # is selected through [features]. 2.4: on ros2-client 0.14, as this crate is.
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2.4" }
@@ -40,12 +40,12 @@ zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 [dev-dependencies]
 # A device behind the bridge (tests/device.rs), without the wasm engine
 # (`native` off).
-arora = { path = "../arora", version = "16", default-features = false }
+arora = { path = "../arora", version = "17", default-features = false }
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1" }
 # The interpreter-module spawn ABI, which a test pins the bridge's ids and
 # encodings to.
-arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 rand = "0.10"
 env_logger = "0.11"
 # The live-DDS tests run one at a time: concurrent participants flood discovery.

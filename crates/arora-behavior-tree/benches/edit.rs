@@ -3,8 +3,8 @@
 //!
 //! `cargo bench -p arora-behavior-tree --bench edit -- <edits> <mode>` runs
 //! `<edits>` iterations after a warm-up, `<mode>` being `edit` (an edit, then
-//! a tick) or `tick` (a tick alone). Each edit relinks one literal of the run,
-//! the way a client relinks a run's ports.
+//! a tick) or `tick` (a tick alone). Each edit binds one port of the run to
+//! another value, the way a client edits a run's ports.
 //!
 //! Count instructions, not time: run it under callgrind, or difference the
 //! process's instructions retired (`/usr/bin/time -l` on macOS) between
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
-use arora_behavior::graph::{Graph, GraphDiff, Link, LinkSource, Node, Port};
+use arora_behavior::graph::{Binding, Graph, GraphDiff, Node, Source};
 use arora_behavior::{BehaviorContext, BehaviorInterpreter, RunPolicy, Status};
 use arora_behavior_tree::behavior::{graph_type, BehaviorTreeInterpreter};
 use arora_behavior_tree::nodes::{
@@ -74,45 +74,45 @@ impl Ids {
 }
 
 fn control(graph: &mut Graph, id: Uuid, function: Uuid, children: Vec<Uuid>) {
-    graph.nodes.insert(
+    graph.nodes.push(Node {
         id,
-        Node {
-            id,
-            function,
-            children: Some(children),
-            ..Node::default()
-        },
-    );
+        function,
+        children: Some(children),
+        ..Node::default()
+    });
 }
 
 fn leaf(graph: &mut Graph, id: Uuid, function: Uuid) {
-    graph.nodes.insert(
+    graph.nodes.push(Node {
         id,
-        Node {
-            id,
-            function,
-            ..Node::default()
-        },
-    );
+        function,
+        ..Node::default()
+    });
 }
 
-/// The link making the run-call leaf `node` call function `function`.
-fn call_link(node: Uuid, function: u128) -> Link {
+/// The binding making the run-call leaf `node` call function `function`.
+fn call_binding(node: Uuid, function: u128) -> Binding {
     let call = Call {
         module_id: Some(Uuid::from_u128(0xB0)),
         id: Uuid::from_u128(function),
         args: Vec::new(),
     };
-    Link::new(
-        Port::new(node, RUN_CALL_PARAM_ID),
-        LinkSource::Literal(arora_types::value_serde::to_value(&call).unwrap()),
-    )
+    Binding {
+        node,
+        port: RUN_CALL_PARAM_ID,
+        source: Source::Value(arora_types::value_serde::to_value(&call).unwrap()),
+    }
 }
 
 /// A run-call leaf `node` calling function `function`.
 fn call(graph: &mut Graph, node: Uuid, function: u128) {
-    leaf(graph, node, RUN_CALL_FUNCTION_ID);
-    graph.links.push(call_link(node, function));
+    let Binding { port, source, .. } = call_binding(node, function);
+    graph.nodes.push(Node {
+        id: node,
+        function: RUN_CALL_FUNCTION_ID,
+        bind: [(port, source)].into(),
+        children: None,
+    });
 }
 
 /// The main behavior: a parallel of four `seq_star`s of five calls each.
@@ -127,11 +127,16 @@ fn main_behavior(ids: &mut Ids) -> Graph {
         for (at, node) in calls.iter().enumerate() {
             call(&mut graph, *node, 0x100 + at as u128);
         }
-        control(&mut graph, branch, SEQ_STAR_FUNCTION_ID, calls);
-        graph.links.push(Link::new(
-            Port::new(branch, SEQ_STAR_CURRENT_INDEX_PARAM_ID),
-            LinkSource::Literal(Value::U16(0)),
-        ));
+        graph.nodes.push(Node {
+            id: branch,
+            function: SEQ_STAR_FUNCTION_ID,
+            bind: [(
+                SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+                Source::Value(Value::U16(0)),
+            )]
+            .into(),
+            children: Some(calls),
+        });
         branches.push(branch);
     }
     control(&mut graph, root, PARALLEL_FUNCTION_ID, branches);
@@ -140,7 +145,7 @@ fn main_behavior(ids: &mut Ids) -> Graph {
 
 /// The run: `Parallel(Sequence(call, call, Fallback(Sequence(call, call),
 /// Succeed)), Run)`, the shape of a stepping behavior. Returns it with the
-/// call leaf an edit relinks.
+/// call leaf an edit binds again.
 fn run(ids: &mut Ids) -> (Graph, Uuid) {
     let mut graph = Graph::empty();
     let [root, step, first, second, or_else, guard, third, fourth, skip, run] =
@@ -189,7 +194,7 @@ fn main() {
         if let Some(edit) = edit {
             interp
                 .apply(GraphDiff {
-                    add_links: vec![call_link(relinked, 0x300 + u128::from(edit % 2))],
+                    bind: vec![call_binding(relinked, 0x300 + u128::from(edit % 2))],
                     ..GraphDiff::default()
                 })
                 .unwrap();

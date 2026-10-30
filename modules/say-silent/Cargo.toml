@@ -8,6 +8,6 @@ description = "The say contract of behavior trees without a speaker: a sentence 
 readme = "readme.md"
 
 [dependencies]
-arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "10" }
 arora-module = { path = "../../crates/arora-module", version = "2" }
 log = "0.4"

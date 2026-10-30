@@ -1,6 +1,6 @@
 [package]
 name = "arora-bridge"
-version = "6.2.0"
+version = "6.3.0"
 edition = "2021"
 description = "The Arora Bridge trait: an endpoint through which remote clients read and write a device's keys and call its functions."
 license = "Apache-2.0"
@@ -15,7 +15,7 @@ categories = ["api-bindings"]
 arora-types = { path = "../arora-types", version = "3.2" }
 # The interpreter module's ABI and `Status` id, for `client`'s runs; none of
 # its types are in this crate's API.
-arora-behavior = { path = "../arora-behavior", version = "9" }
+arora-behavior = { path = "../arora-behavior", version = "10" }
 async-trait = "0.1"
 futures-channel = "0.3"
 futures-core = "0.3"

@@ -139,13 +139,16 @@ impl TreeNode {
                 outputs.insert(node.id, bound);
             }
         }
+        let record: Rc<crate::trace::TickRecord> = Rc::default();
         Ok(BehaviorTree {
             root,
             node_index,
             variables: Rc::new(RefCell::new(variables)),
             node_arg_variables: Rc::new(node_arg_variables),
             outputs,
-            detached: Rc::new(crate::detached::Detached::empty()),
+            detached: Rc::new(crate::detached::Detached::empty(record.clone())),
+            variable_names: names.clone(),
+            record,
         })
     }
 }

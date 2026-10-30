@@ -30,8 +30,8 @@ log = "0.4"
 
 # `path` while the workspace lives in the SDK checkout, `version` for crates.io:
 # moving it out is deleting the `path` keys.
-arora = { path = "../../crates/arora", version = "16" }
-arora-behavior = { path = "../../crates/arora-behavior", version = "9.6" }
+arora = { path = "../../crates/arora", version = "17" }
+arora-behavior = { path = "../../crates/arora-behavior", version = "10" }
 arora-hal = { path = "../../crates/arora-hal", version = "4.3" }
 arora-module = { path = "../../crates/arora-module", version = "2.3" }
 arora-simple-data-store = { path = "../../crates/arora-simple-data-store", version = "3.2" }

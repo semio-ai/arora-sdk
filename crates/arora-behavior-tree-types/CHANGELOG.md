@@ -4,6 +4,13 @@ All notable changes to `arora-behavior-tree-types`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** depends on arora-behavior 10, whose `Status` this crate
+  re-exports. `Status` itself is unchanged.
+
 ## [2.2.0] - 2026-10-18
 
 ### Changed

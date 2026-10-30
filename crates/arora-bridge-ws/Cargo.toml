@@ -21,5 +21,6 @@ tokio-tungstenite = "0.30"
 tokio-util = "0.7"
 
 [dev-dependencies]
-# The run handle the wire tests' fake runtime answers a spawn with.
-arora-behavior = { path = "../arora-behavior", version = "9" }
+# The interpreter module's ABI and the run handle the wire tests' fake runtime
+# answers a spawn with.
+arora-behavior = { path = "../arora-behavior", version = "10" }
