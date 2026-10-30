@@ -15,13 +15,13 @@
 //! tree; a watched node's outputs are read only at a report. A watched node
 //! records the value it returns when no binding keeps it.
 
-use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
-
-use arora_behavior::trace::{encode_report, Activity, NodeStatus, TraceOptions, TraceReport};
+use arora_behavior::trace::{
+    encode_report, Activity, NodeStatus, PortValue, TraceOptions, TraceReport,
+};
 use arora_behavior::{built_in, FunctionIndex, Status, TaskHandle};
 use arora_types::data::{DataStore, Key, StateChange};
 use arora_types::value::Value;
+use std::cell::{Cell, RefCell};
 use uuid::Uuid;
 
 use crate::id_hash::{IdMap, IdSet};
@@ -357,38 +357,48 @@ impl Trace {
                 .get(&node)
                 .map_or(NodeStatus::NotReached, |status| NodeStatus::from(*status));
             if differs(&mut self.status, node, now, NodeStatus::NotReached) {
-                report.status.insert(node, now);
+                report.status.push((node, now));
             }
         }
         for node in self.activity_changed.drain() {
             let now = activity.get(&node).copied().unwrap_or(Activity::Idle);
             if differs(&mut self.activity, node, now, Activity::Idle) {
-                report.activity.insert(node, now);
+                report.activity.push((node, now));
             }
         }
         if let Some(tree) = tree {
             for node in &self.options.values {
                 let reported = self.values.entry(*node).or_default();
-                let mut changed = BTreeMap::new();
                 let outputs = tree.outputs_of(*node, functions, returns.get(node));
                 for (port, value) in &outputs {
                     if reported.get(port) != Some(value) {
                         reported.insert(*port, value.clone());
-                        changed.insert(*port, value.clone());
+                        report.values.push(PortValue {
+                            node: *node,
+                            port: *port,
+                            value: value.clone(),
+                        });
                     }
                 }
                 reported.retain(|port, _| {
                     let kept = outputs.iter().any(|(output, _)| output == port);
                     if !kept {
-                        changed.insert(*port, Value::Unit);
+                        report.values.push(PortValue {
+                            node: *node,
+                            port: *port,
+                            value: Value::Unit,
+                        });
                     }
                     kept
                 });
-                if !changed.is_empty() {
-                    report.values.insert(*node, changed);
-                }
             }
         }
+        // Listed by node, then port: a report reads the same each time.
+        report.status.sort_unstable_by_key(|(node, _)| *node);
+        report.activity.sort_unstable_by_key(|(node, _)| *node);
+        report
+            .values
+            .sort_unstable_by_key(|value| (value.node, value.port));
         report
     }
 }

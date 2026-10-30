@@ -158,6 +158,32 @@ fn statuses(report: &TraceReport) -> BTreeMap<Uuid, NodeStatus> {
         .collect()
 }
 
+/// The activities `report` states, by node.
+fn activity(report: &TraceReport) -> BTreeMap<Uuid, Activity> {
+    report.activity.iter().copied().collect()
+}
+
+/// The values `report` states, by node then port.
+fn values(report: &TraceReport) -> BTreeMap<Uuid, BTreeMap<Uuid, Value>> {
+    let mut by_node: BTreeMap<Uuid, BTreeMap<Uuid, Value>> = BTreeMap::new();
+    for value in &report.values {
+        by_node
+            .entry(value.node)
+            .or_default()
+            .insert(value.port, value.value.clone());
+    }
+    by_node
+}
+
+/// The status `report` states of `node`.
+fn status_of(report: &TraceReport, node: Uuid) -> Option<NodeStatus> {
+    report
+        .status
+        .iter()
+        .find(|(id, _)| *id == node)
+        .map(|(_, status)| *status)
+}
+
 #[test]
 fn a_trace_reports_the_first_tick_then_transitions() {
     let mut device = Device::new();
@@ -248,13 +274,16 @@ fn a_trace_reports_detached_activity() {
     // Read for the first time: called.
     device.tick();
     let first = device.report_at(&trace, 1).unwrap();
-    assert_eq!(first.activity, BTreeMap::from([(DOUBLE, Activity::Called)]));
+    assert_eq!(
+        activity(&first),
+        BTreeMap::from([(DOUBLE, Activity::Called)])
+    );
 
     // Read again, its input unchanged: cached.
     device.tick();
     let cached = device.report_at(&trace, 2).unwrap();
     assert_eq!(
-        cached.activity,
+        activity(&cached),
         BTreeMap::from([(DOUBLE, Activity::Cached)])
     );
     assert!(cached.status.is_empty(), "no status changed: {cached:?}");
@@ -267,7 +296,7 @@ fn a_trace_reports_detached_activity() {
     device.set("gate", 1.0);
     device.tick();
     let idle = device.report_at(&trace, 4).unwrap();
-    assert_eq!(idle.activity, BTreeMap::from([(DOUBLE, Activity::Idle)]));
+    assert_eq!(activity(&idle), BTreeMap::from([(DOUBLE, Activity::Idle)]));
 
     // Read again with a new input: called.
     device.set("gate", 0.0);
@@ -275,7 +304,7 @@ fn a_trace_reports_detached_activity() {
     device.tick();
     let called = device.report_at(&trace, 5).unwrap();
     assert_eq!(
-        called.activity,
+        activity(&called),
         BTreeMap::from([(DOUBLE, Activity::Called)])
     );
 }
@@ -294,7 +323,7 @@ fn a_trace_reports_watched_values_when_they_change() {
     device.tick();
     let first = device.report_at(&trace, 1).unwrap();
     assert_eq!(
-        first.values,
+        values(&first),
         BTreeMap::from([
             (SUM, BTreeMap::from([(_RET_PARAM_ID, Value::F64(11.0))])),
             (DOUBLE, BTreeMap::from([(_RET_PARAM_ID, Value::F64(20.0))])),
@@ -309,7 +338,7 @@ fn a_trace_reports_watched_values_when_they_change() {
     device.set("in", 12.0);
     device.tick();
     assert_eq!(
-        device.report_at(&trace, 3).unwrap().values,
+        values(&device.report_at(&trace, 3).unwrap()),
         BTreeMap::from([
             (SUM, BTreeMap::from([(_RET_PARAM_ID, Value::F64(13.0))])),
             (DOUBLE, BTreeMap::from([(_RET_PARAM_ID, Value::F64(24.0))])),
@@ -354,7 +383,7 @@ fn concurrent_traces_report_under_their_own_options() {
     tick_at(&mut device, 1_000);
     assert!(device.report_at(&every_tick, 1).unwrap().values.is_empty());
     assert_eq!(
-        device.report_at(&paced, 1).unwrap().values[&SUM][&_RET_PARAM_ID],
+        values(&device.report_at(&paced, 1).unwrap())[&SUM][&_RET_PARAM_ID],
         Value::F64(11.0)
     );
 
@@ -378,7 +407,7 @@ fn concurrent_traces_report_under_their_own_options() {
         BTreeMap::from([(NEAR, NodeStatus::Failure), (ROOT, NodeStatus::Failure)]),
         "the gate and sum are as last reported"
     );
-    assert_eq!(report.values[&SUM][&_RET_PARAM_ID], Value::F64(31.0));
+    assert_eq!(values(&report)[&SUM][&_RET_PARAM_ID], Value::F64(31.0));
     assert_eq!(
         statuses(&device.report_at(&every_tick, 3).unwrap()),
         BTreeMap::from([
@@ -479,7 +508,7 @@ fn a_trace_survives_an_edit_and_reports_the_restarted_nodes() {
     device.tick();
     let report = device.report_at(&trace, 4).unwrap();
     assert_eq!(report.restarted, vec![SUM]);
-    assert_eq!(report.values[&SUM][&_RET_PARAM_ID], Value::F64(11.0));
+    assert_eq!(values(&report)[&SUM][&_RET_PARAM_ID], Value::F64(11.0));
 
     // Then on as before: the detached node, called again by the new
     // lowering, answers from its cache, and then nothing changes.
@@ -540,7 +569,7 @@ fn a_trace_reports_unbound_returns_and_written_parameters() {
     device.tick();
     let first = device.report_at(&trace, 1).unwrap();
     assert_eq!(
-        first.values,
+        values(&first),
         BTreeMap::from([
             (SUM, BTreeMap::from([(_RET_PARAM_ID, Value::F64(11.0))])),
             (
@@ -552,12 +581,12 @@ fn a_trace_reports_unbound_returns_and_written_parameters() {
             ),
         ])
     );
-    assert_eq!(first.status.get(&SUM), Some(&NodeStatus::Success));
+    assert_eq!(status_of(&first, SUM), Some(NodeStatus::Success));
 
     // The state settles toward the input; the sum holds.
     device.tick();
     assert_eq!(
-        device.report_at(&trace, 2).unwrap().values,
+        values(&device.report_at(&trace, 2).unwrap()),
         BTreeMap::from([(
             SMOOTHED,
             BTreeMap::from([
@@ -602,7 +631,7 @@ fn a_node_set_again_reports_no_former_return() {
         .unwrap();
     device.tick();
     assert_eq!(
-        device.report_at(&trace, 1).unwrap().values[&SUM][&_RET_PARAM_ID],
+        values(&device.report_at(&trace, 1).unwrap())[&SUM][&_RET_PARAM_ID],
         Value::F64(11.0)
     );
 
@@ -617,7 +646,7 @@ fn a_node_set_again_reports_no_former_return() {
         .unwrap();
     device.tick();
     assert_eq!(
-        device.report_at(&trace, 2).unwrap().values[&SUM][&_RET_PARAM_ID],
+        values(&device.report_at(&trace, 2).unwrap())[&SUM][&_RET_PARAM_ID],
         Value::Unit
     );
 
@@ -670,7 +699,7 @@ fn an_unwatched_node_forgets_its_return() {
     device.interpreter.trace(TraceOptions::default()).unwrap();
     device.tick();
     assert_eq!(
-        device.report_at(&watching, 1).unwrap().values[&SUM][&_RET_PARAM_ID],
+        values(&device.report_at(&watching, 1).unwrap())[&SUM][&_RET_PARAM_ID],
         Value::F64(11.0)
     );
 
@@ -683,5 +712,5 @@ fn an_unwatched_node_forgets_its_return() {
     device.tick();
     let first = device.report_at(&later, 3).unwrap();
     assert!(first.values.is_empty(), "{first:?}");
-    assert_eq!(first.status.get(&SUM), None, "not reached");
+    assert_eq!(status_of(&first, SUM), None, "not reached");
 }
