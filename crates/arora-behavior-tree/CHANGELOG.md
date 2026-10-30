@@ -50,6 +50,8 @@ All notable changes to `arora-behavior-tree`. The format follows
   An attribute left empty, Groot's unconnected port, binds nothing, but for a
   string parameter, which takes the empty string; one that names no port is
   refused.
+- A halted run's terminal status that the store fails to write is written
+  at the next tick, with those halted after it, rather than dropped.
 - Requires arora-behavior-tree-types 3.
 
 ### Added
