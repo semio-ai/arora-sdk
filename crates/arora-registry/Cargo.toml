@@ -1,6 +1,6 @@
 [package]
 name = "arora-registry"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 description = "Local type-record registry for Arora: stores, tags and freezes type records."
 license = "Apache-2.0"
@@ -14,7 +14,7 @@ arora-types = { path = "../arora-types", version = "3.8" }
 async-trait = "0.1"
 derive_more = "2"
 semver = { version = "1", features = ["serde"] }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]

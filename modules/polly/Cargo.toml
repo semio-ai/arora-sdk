@@ -31,7 +31,7 @@ arora-registry = { path = "../../crates/arora-registry" }
 arora-types = { path = "../../crates/arora-types", version = "3" }
 convert_case = "0.12"
 rand = "0.10"
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 test-behavior-tree-nodes = { path = "../../modules/test-behavior-tree-nodes", artifact = "cdylib", target = "wasm32-wasip2" }

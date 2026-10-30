@@ -134,7 +134,7 @@ async-trait = "0.1"
 # are fully synchronous (the I/O seams are non-blocking), so they need no timers.
 tokio = { version = "1", features = ["time", "test-util"] }
 # Parse the test module's low-level header YAML in the with_module load test.
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 # The test-rust-wasm guest (built for wasm32-wasip2 as a cdylib artifact
 # dependency: a component): its `.wasm` bytes back the guest-loading tests.
 # Cargo exposes the bytes as CARGO_CDYLIB_FILE_TEST_RUST_WASM_test_rust_wasm.

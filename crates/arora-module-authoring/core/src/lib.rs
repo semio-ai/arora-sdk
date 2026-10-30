@@ -26,7 +26,7 @@ pub async fn analyze_module_from_path<P: AsRef<Path>, R: ReadableRegistry + Reso
 ) -> Result<Vec<ModuleAsset>, ModuleDeclarationError> {
     let module_yaml = read_to_string(path).map_err(ModuleDeclarationError::IoError)?;
     let module_definition: ModuleDefinition =
-        serde_yaml::from_str(&module_yaml).map_err(ModuleDeclarationError::YAMLError)?;
+        yaml_serde::from_str(&module_yaml).map_err(ModuleDeclarationError::YAMLError)?;
     analyze_module(module_definition, registry).await
 }
 
@@ -227,7 +227,7 @@ pub enum ModuleDeclarationError {
     IoError(std::io::Error),
 
     /// Serialization / deserialization error.
-    YAMLError(serde_yaml::Error),
+    YAMLError(yaml_serde::Error),
 
     /// Virtual file system error.
     VfsError(VfsError),
@@ -249,7 +249,7 @@ mod tests {
     fn parse_uuid() {
         let uuid_string = "b41899c3-66dc-40d4-ab61-d1ccf5231c88";
         let expected = Uuid::from_str(uuid_string).unwrap();
-        let actual: Uuid = serde_yaml::from_str(uuid_string).unwrap();
+        let actual: Uuid = yaml_serde::from_str(uuid_string).unwrap();
         assert!(actual == expected);
     }
 
@@ -288,7 +288,7 @@ imports: []
 dependencies: []
 executable_mime: application/wasm";
 
-        let header: ModuleDefinition = serde_yaml::from_str(module_string).unwrap();
+        let header: ModuleDefinition = yaml_serde::from_str(module_string).unwrap();
         assert!(header.name == "test-cpp-2");
     }
 
@@ -303,7 +303,7 @@ executable_mime: application/wasm";
         use arora_types::module::low::Header;
         use arora_vfs::Entry;
 
-        let definition: ModuleDefinition = serde_yaml::from_str(
+        let definition: ModuleDefinition = yaml_serde::from_str(
             "id: 23a75559-025c-4be8-8b48-0784e30dc9ec
 author: Semio
 description: Test C++ module
@@ -346,7 +346,7 @@ executable_mime: application/wasm",
             _ => panic!("no {name} among the header files"),
         };
         let headers: [Header; 2] = [
-            serde_yaml::from_str(&file("module.yaml")).unwrap(),
+            yaml_serde::from_str(&file("module.yaml")).unwrap(),
             serde_json::from_str(&file("header.json")).unwrap(),
         ];
         for header in headers {

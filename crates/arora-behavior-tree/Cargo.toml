@@ -33,9 +33,9 @@ regex = "1"
 semver = "1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-# 0.9 writes an enum as a `!Tag`; tree files write an expression as a
-# single-key map, which `schema::Node` keeps with `singleton_map_recursive`.
-serde_yaml = "0.9"
+# Writes an enum as a `!Tag`; tree files write an expression as a single-key
+# map, which `schema::Node` keeps with `singleton_map_recursive`.
+yaml_serde = "0.10"
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 derive_more = "2"
 

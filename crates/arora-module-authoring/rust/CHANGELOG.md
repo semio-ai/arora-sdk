@@ -4,6 +4,15 @@ All notable changes to `arora-module-rust`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** depends on arora-module-core 4, whose types its API carries
+  (`ModuleAsset`, `GenerationError::ModuleDeclarationError`).
+- Records are written with `yaml_serde` 0.10 and names converted with
+  `convert_case` 0.12; the generated sources and records are unchanged.
+
 ## [4.1.0] - 2026-10-23
 
 ### Added

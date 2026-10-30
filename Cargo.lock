@@ -198,7 +198,6 @@ dependencies = [
  "ratatui",
  "rustls 0.23.46",
  "serde_json",
- "serde_yaml",
  "sysinfo",
  "test-rust-wasm",
  "tokio",
@@ -206,6 +205,7 @@ dependencies = [
  "uuid",
  "wasm-bindgen-test",
  "web-time",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -258,8 +258,8 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -271,8 +271,8 @@ dependencies = [
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -283,9 +283,9 @@ dependencies = [
  "arora-registry",
  "arora-types",
  "serde",
- "serde_yaml",
  "tokio",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -348,15 +348,15 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "anyhow",
  "arora-types",
  "bytes",
  "cbindgen",
  "serde",
- "serde_yaml",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -375,10 +375,10 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml",
  "tokio",
  "url",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -418,7 +418,6 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml",
  "tempfile",
  "test-rust-component",
  "test-rust-wasm",
@@ -431,6 +430,7 @@ dependencies = [
  "wasmtime-wasi",
  "wat",
  "web-sys",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -528,7 +528,6 @@ dependencies = [
  "example-cpp",
  "futures",
  "serde_json",
- "serde_yaml",
  "test-behavior-tree-nodes",
  "test-cpp",
  "test-cpp-2",
@@ -536,6 +535,7 @@ dependencies = [
  "test-rust-wasm",
  "uuid",
  "wasmparser 0.262.0",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -547,9 +547,9 @@ dependencies = [
  "arora-engine",
  "arora-module-macros",
  "arora-types",
- "serde_yaml",
  "trybuild",
  "wit-bindgen 0.63.0",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -568,15 +568,15 @@ dependencies = [
  "reqwest",
  "semio-client",
  "serde",
- "serde_yaml",
  "tokio",
  "url",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
 name = "arora-module-core"
-version = "3.0.0"
+version = "4.0.0"
 dependencies = [
  "arora-registry",
  "arora-types",
@@ -586,9 +586,9 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "tokio",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -606,26 +606,26 @@ dependencies = [
  "lazy_static",
  "semver",
  "serde",
- "serde_yaml",
  "tokio",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
 name = "arora-module-macros"
-version = "3.1.0"
+version = "3.1.1"
 dependencies = [
  "arora-types",
  "proc-macro2",
  "quote",
- "serde_yaml",
  "syn 3.0.9",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
 name = "arora-module-rust"
-version = "4.1.0"
+version = "5.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -644,9 +644,9 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "tokio",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -660,22 +660,22 @@ dependencies = [
  "serde",
  "serde-big-array",
  "serde_json",
- "serde_yaml",
  "thiserror 2.0.21",
+ "yaml_serde",
 ]
 
 [[package]]
 name = "arora-registry"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "arora-module",
  "arora-types",
  "async-trait",
  "derive_more 2.1.1",
  "semver",
- "serde_yaml",
  "tokio",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -693,10 +693,10 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "tokio",
  "url",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -755,10 +755,10 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -808,13 +808,13 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "serde_yaml",
  "test-rust-wasm",
  "tokio",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -4355,6 +4355,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libyaml-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
+
+[[package]]
 name = "line-clipping"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5570,11 +5576,11 @@ dependencies = [
  "derive_more 2.1.1",
  "lazy_static",
  "rand 0.10.3",
- "serde_yaml",
  "soloud",
  "test-behavior-tree-nodes",
  "tokio",
  "uuid",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -9877,6 +9883,19 @@ name = "xxhash-rust"
 version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7"
+
+[[package]]
+name = "yaml_serde"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33b729a08a9a6be689bbad3e2bf8015926db54b6622cc89c3a5f7dc174b9e918"
+dependencies = [
+ "indexmap 2.14.2",
+ "itoa",
+ "libyaml-rs",
+ "ryu",
+ "serde",
+]
 
 [[package]]
 name = "yansi"

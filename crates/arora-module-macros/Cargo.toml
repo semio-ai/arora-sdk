@@ -1,6 +1,6 @@
 [package]
 name = "arora-module-macros"
-version = "3.1.0"
+version = "3.1.1"
 edition = "2021"
 description = "Declare an Arora module on a Rust module: #[module], #[export], #[param], declare_module!, #[contract], module_from_header!."
 license = "Apache-2.0"
@@ -18,4 +18,4 @@ syn = { version = "3", features = ["full", "extra-traits"] }
 # `module_from_header!` — the low header model and its YAML.
 uuid = "1"
 arora-types = { path = "../arora-types", version = "3", default-features = false }
-serde_yaml = "0.9"
+yaml_serde = "0.10"

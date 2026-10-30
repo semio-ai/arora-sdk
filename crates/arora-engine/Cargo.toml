@@ -55,13 +55,13 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+yaml_serde = "0.10"
 uuid = { version = "1", features = ["serde", "v4"] }
 # The text-format assembler for the hand-written guests and components.
 wat = "1"
 
 # Browser-host integration test (tests/browser_component.rs), wasm32-only.
-# serde_yaml + uuid above supply the header/value types; these add the test
+# yaml_serde + uuid above supply the header/value types; these add the test
 # harness, the panic hook, and the guest the test loads through the browser
 # component executor.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

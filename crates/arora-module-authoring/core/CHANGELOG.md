@@ -4,6 +4,15 @@ All notable changes to `arora-module-core`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** `ModuleDeclarationError::YAMLError` holds a
+  `yaml_serde::Error`: module definitions are read with `yaml_serde` 0.10, the
+  maintained continuation of the deprecated `serde_yaml`. The YAML read and
+  written is unchanged.
+
 ## [3.0.0] - 2026-10-22
 
 ### Changed
