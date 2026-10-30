@@ -42,6 +42,29 @@ cargo test -p arora-behavior-tree graph::tests::groot_lowers_to_graph_and_runs
 [`docs/testing.md`](docs/testing.md) covers the integration tests, the browser
 and Zenoh runs, coverage, and the rules for adding a test.
 
+Cargo traps that cost hours when unknown:
+
+- `[patch.crates-io]` is silently ignored when the patched crate's version
+  does not satisfy the requirement; raise the requirement first. Patch a
+  crate's whole dependency closure, never one crate of it: a lone patched
+  crate pulls path copies of its dependencies beside the registry ones
+  ("multiple versions of crate `arora_bridge`"). A temporary patch goes in
+  `.cargo/config.toml`, not `--config`: `arora-buffers`' build script runs
+  `cargo metadata`, which does not see a `--config` patch.
+- A git dependency on these crates needs `[unstable] bindeps` (nightly) just
+  to parse their manifests, because some carry `artifact =` dependencies;
+  without it cargo reports "no matching package". crates.io consumers are
+  unaffected.
+- On `wasm32-unknown-unknown`, tokio compiles only with `sync`, `macros`,
+  `io-util`, `rt` and `time`. Never `tokio = { features = ["full"] }` in the
+  runtime's graph; use `std::fs` for startup and code-generation I/O.
+- A `[target.'cfg(…)'.build-dependencies]` gate is evaluated against the
+  host, so it cannot keep a build dependency out of a wasm build: make the
+  dependency optional behind a feature.
+- Cargo applies no LTO to a lib whose `crate-type` includes `rlib`, even with
+  `lto = true`. When a smaller wasm matters, build a `cdylib`-only crate;
+  `wasm-opt --strip-debug` is the larger saving either way.
+
 ### What CI runs on a pull request
 
 CI builds and tests only the members the diff can reach
@@ -133,11 +156,165 @@ Docs, comments and commit messages follow the same rules:
   type registry. A keyframed asset is an "animation". A module's name has no
   `-module` suffix (the module `@arora/animation`); the crate shipping it does
   (`arora-animation-module`). Say "wire format" and "messages", never "Arora
-  protocol"; "slot" means `arora_types::data::Slot` only.
+  protocol"; "slot" means `arora_types::data::Slot` only. A task run starts
+  with `spawn` and stops with `halt` (`drop` overloads Rust's `Drop`, `abort`
+  collides with ROS's `ABORTED`). Never "io pump". Before naming a public
+  item, search the existing vocabulary of Arora, Vizij and Studio and reuse
+  it.
 - **Semio Studio is opt-in.** Nothing in Arora connects to Studio by default:
   the connection sits behind the `studio-bridge` feature of `arora` and each
   runner's `studio` feature.
+- **Write a comment for the code's client**, not for the discussion that
+  produced it: what the item does, its effects, and the "why" that stops a
+  reader from deleting something that looks dead. An item defines itself by
+  what it does, never by its callers. Document a private item as if it were
+  public; document public API exhaustively, because it is a contract, and keep
+  internal comments lean.
+- **Something awkward to explain is a design smell.** Raise it instead of
+  writing around it.
 - Every relative link must resolve; CI link-checks every Markdown file.
+
+## Design rules
+
+These constrain every change. Each has its reason, so it can be applied to a
+case it does not name.
+
+- **Arora stands alone.** It builds and runs without Studio and without Vizij:
+  Vizij's nodes and modules (its speech providers included) live in vizij-rs,
+  and Studio's store, credentials and caches live in studio-bridge. Reuse
+  Arora's own concepts (records, `arora-registry`) before adding vocabulary.
+- **A bridge exposes the device by itself.** Methods come from the modules'
+  declarations (`DescribeMethods`, `Call`), keys and their meta from the store
+  (`KeyMeta`). An app never restates its device to a bridge and a bridge never
+  filters the device's keys: what one app restates is restated in every app
+  and lost on every other bridge. A client controls volume by choosing the
+  keys it subscribes to. A bridge's own state is conversion only (ROS 2
+  profiles).
+- **Opening keys to remote writers is explicit**, and easy by subtree (the
+  empty prefix opens everything); nothing is open by default, because an open
+  key lets any connected client drive the device. Check every
+  `#[derive(Default)]` on a struct whose default must be the closed one.
+- **Features go through a module's declared functions.** What a device holds
+  (animations, programs) is loaded and unloaded through the calls any client
+  sends, at any time, and the resulting state is observable through the
+  module. A real device gains resources at run time from clients that never
+  saw its build, so a construction-time list or a host-only method leaves
+  them blind. Declare a missing inverse (`unload`, `remove`) instead of adding
+  a side door.
+- **A client library adds no function Arora already provides** without a
+  written reason: each wrapper is a second API that remote clients lack, and
+  it drifts. When a host lacks an operation remote clients have, add it to
+  Arora.
+- **No JSON on the value plane.** Values, signatures and handles travel as
+  `Value`s (`value_serde`); a ROS bridge speaks real ROS messages, never a
+  JSON-wrapping service.
+- **A ROS HAL is typed and builds on both backends**: generated message
+  structs, typed publishers, the `dds` and `zenoh` features. String-dispatched
+  `Value`/CDR publishing loses the build-time checks and ties the HAL to one
+  middleware.
+- **Never change a standard ROS interface type**, even with an added field.
+  Add a distinct interface, and document which one a client chooses when two
+  drive the same thing. A type is matched by its name and, from Jazzy, by a
+  hash of its fields: an extended type under the standard name fails to match
+  upstream peers or mis-decodes.
+- **The HAL carries actuation.** A simulated sensor reading is a store write,
+  not a HAL path. The device binary runs the same on the robot and in
+  simulation; only the HAL differs.
+- **The runtime holds no mutex and spawns nothing it does not need.** An
+  async module function is polled on the tick
+  ([`docs/async-functions.md`](docs/async-functions.md)). Stopping a run is
+  dropping its future: there is no `run_until` or `with_shutdown`.
+- **A library never reads `argv`.** The binary parses its arguments (a clap
+  helper in the library is fine), and Arora is not patched for one app's
+  command line. A feature is named for the concept it gates, not for the
+  consumer that wants it.
+- **`arora-buffers`' wire format is discussed before it changes.**
+- **`module.yaml` and the generators are a product path**: modules written in
+  other languages, and records published to a registry. A new type-model form
+  lands in the Rust and C++ generators and in the header ↔ record conversion
+  in the same change, with tests.
+- **Generic means indifferent.** A type parameter depends on the minimal
+  interface the code needs; a trait restating one concrete type's whole
+  vocabulary is not generic.
+- **Fix a cross-platform problem at the layer that makes platforms uniform.**
+  A platform-specific mitigation is a labelled stopgap, agreed before it
+  lands, because per-platform patches multiply and entrench the wrong design.
+- **Private by default.** An item becomes `pub(crate)` or `pub` when a real
+  caller needs it, never to test it: a public item is a contract whose removal
+  is a major. A design that must expose a lot is a smell to raise.
+- **DRY, without factoring ahead of need.** Extract on real redundancy or a
+  function grown very long: every extraction is indirection paid on each
+  read. Name an extracted free function for what it does; code reused within
+  one function becomes a closure.
+- **Measure performance in instructions, not wall time** (callgrind's `Ir`,
+  `ri_instructions` from `proc_pid_rusage`, `time -l`'s "instructions
+  retired"). Builds and agents share the machines, so timings there are noise.
+
+## Versions and releases
+
+[`docs/building.md`](docs/building.md#releasing) has the mechanics; these are
+the rules.
+
+- **A breaking change bumps the real major**, below 1.0 too (`0.4` → `1.0.0` →
+  `2.0.0`): cargo's 0.x-minor convention is not used, so "we broke the API"
+  always reads as a major. Dependents re-pin in the same change, and a
+  dependent whose API carries the changed types bumps its own major.
+- **Before a major, list who can hit the break.** A change no consumer can
+  hit is not one: public fields added to a struct nobody builds by literal
+  ship as a minor.
+- **A requirement names the minor the code calls into** (`"1.2"`, not `"1"`),
+  raised in the change that first uses the new API: a lockfile holding 1.0.0
+  satisfies `"1"`. Path dependencies hide this inside the workspace; they
+  still carry `version =`, which publishing keeps as the requirement.
+- **Every published crate keeps a Keep a Changelog `CHANGELOG.md`.**
+- **A crate whose API differs from its published version of the same number
+  is bumped**: publishing resolves dependencies from crates.io only, so it
+  breaks every dependent's publish.
+- **Check concurrent version changes together.** Two pull requests green on
+  their own can break `main` together; of two raising one crate to the same
+  version, the second to merge takes the next one.
+- **A crate stays unpublished until a consumer needs it** (the HAL crates).
+  A new crate's first version is published by hand, because crates.io's
+  trusted publishing cannot create a crate.
+- **New crates and modules are `Apache-2.0`.** A crate linking GPL code stays
+  GPL (`say-piper`).
+- **A major of `arora-bridge` or `arora-types` is a two-repo release.**
+  `arora`'s `studio-bridge` feature depends on `arora-studio-bridge-client`,
+  which implements `arora_bridge::Bridge` from crates.io, so that feature
+  fails to build until the client moves. The order: merge and publish here,
+  then the client re-pins and publishes its major, then an `arora` patch
+  re-pins the client. State it in the pull request. Do not gate pull requests
+  on a Studio build: it is red by construction on the one carrying the major.
+
+## Pull requests and issues
+
+- **Issues live in Linear, not GitHub issues.** Link a pull request or ticket
+  with a Markdown link: Linear rewrites a bare `#N` into a link to another
+  repository's pull request.
+- **A title states the change**, not the fault it fixes. The body opens with
+  an **Intent** paragraph — what the change is for and what it deliberately
+  does not do — then the current behaviour, the change, and why it matters.
+- **Reviews, automated ones included, are measured against the intent.** A
+  correction of what the pull request claims or does is applied and the
+  thread answered with the fixing commit; a suggestion adding a capability
+  beyond the intent is declined on the thread, and a real problem it names
+  gets a ticket.
+- **A finished pull request is ready, not draft**: draft reads as "not ready
+  for review".
+- **Pull requests are rebase-merged**, so each commit stands on its own and
+  its message explains it.
+- **A stacked pull request is retargeted when the one below merges.** Merged
+  branches are not deleted, so GitHub does not retarget it, and merging it
+  lands it on the dead branch. Retarget it to `main` and rebase it; after any
+  merge, check `git merge-base --is-ancestor <commit> origin/main`.
+- **Never bypass a hook or a check** (`--no-verify`). One failing on code you
+  did not touch points at stale state — a dirty checkout, stale generated
+  files — and that is what to fix.
+- **Read `git diff --cached --stat` before committing.** A shared checkout can
+  lose content under you, and `git add -A` then commits the loss as a revert;
+  stage by path or with `git add -u`. Squash onto the branch's merge base,
+  never with `git reset --soft origin/main`, which reverts whatever `main`
+  gained since the branch was cut.
 
 ## Crates
 
