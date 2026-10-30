@@ -12,24 +12,17 @@ name = "arora_bridge_ros2"
 [dependencies]
 arora-types = { path = "../arora-types", version = "3" }
 arora-bridge = { path = "../arora-bridge", version = "6" }
-# The behavior-tree Status enumeration's well-known ids: the action plane
-# discovers action-shaped methods by their Status return type and maps the
-# status-key values a run writes onto the ROS goal statuses.
+# The behavior `Status` ids: the action plane finds action-shaped methods by
+# their `Status` return and maps a run's statuses onto ROS goal statuses.
 arora-behavior-tree-types = { path = "../arora-behavior-tree-types", version = "2" }
-# The ROS 2 message types + the shared CDR codec (re-exported as this crate's
-# `cdr`). Core only here — the REP-2016 hash (its `interop` feature) is pulled in
-# where the bridge creates hash-keyed publishers. 2.3 carries the
-# `vizij_face_msgs`, `hri_actions_msgs` and `diagnostic_msgs` types the
-# ROS4HRI preset binds; 2.4 is on ros2-client 0.14, the line this crate speaks.
+# The ROS 2 message types and the CDR codec (re-exported as `cdr`); its backend
+# is selected through [features]. 2.4: on ros2-client 0.14, as this crate is.
 arora-msgs-ros2 = { path = "../arora-msgs-ros2", version = "2.4" }
 async-trait = "0.1"
 futures = "0.3"
 log = "0.4"
-# The semio-ai ros2-client fork, published as `ros2-client-multi-rmw` (upstream
-# owns `ros2-client` on crates.io); the library is still imported as `ros2_client`.
-# It carries both the DDS backend and a ROS 2-over-Zenoh backend (rmw_zenoh
-# compatible), chosen by this crate's `dds` / `zenoh` features (see [features]);
-# `jazzy` selects the ROS 2 distro wire format and is always on.
+# The semio-ai fork of ros2-client, with DDS and rmw_zenoh-compatible backends
+# (see [features]); `jazzy` is the ROS 2 distro's wire format.
 ros2-client = { package = "ros2-client-multi-rmw", version = "0.14", default-features = false, features = ["jazzy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -37,32 +30,24 @@ tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 tokio-util = "0.7"
 
 [features]
-# Middleware backend selection, forwarded to ros2-client (which requires exactly
-# one of `dds`/`zenoh`). DDS is the default; `zenoh` is rmw_zenoh-compatible.
-# Build the Zenoh backend with `--no-default-features --features zenoh`.
-# Each also turns on `arora-msgs-ros2`'s matching backend feature, which is
-# what makes its REP-2016 hasher available: a typed publisher keys itself on
-# its message's hash so native `rmw_zenoh` subscribers match it.
+# The middleware backend: exactly one of `dds` and `zenoh`. Each also enables
+# arora-msgs-ros2's REP-2016 hash, which a publisher keys on for native
+# rmw_zenoh subscribers to match. Zenoh: `--no-default-features --features zenoh`.
 default = ["dds"]
 dds = ["ros2-client/dds", "arora-msgs-ros2/dds"]
 zenoh = ["ros2-client/zenoh", "arora-msgs-ros2/zenoh"]
 
 [dev-dependencies]
-# A real device behind the bridge (tests/device.rs): the runtime, the fake HAL
-# whose described keys the bridge exposes, and the store their meta lives in.
-# Without `native` the runtime carries no wasm engine, which a device of host
-# parts does not need.
+# A device behind the bridge (tests/device.rs), without the wasm engine
+# (`native` off).
 arora = { path = "../arora", version = "16", default-features = false }
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.1" }
-# The crate that DEFINES the interpreter-module SPAWN ABI the action plane
-# speaks over the value plane. A dev-dependency only: the ABI-pin test asserts
-# the bridge's ids and encodings match, without a runtime engine dependency.
+# The interpreter-module spawn ABI, which a test pins the bridge's ids and
+# encodings to.
 arora-behavior = { path = "../arora-behavior", version = "9" }
 rand = "0.10"
 env_logger = "0.11"
-# Serialize the live-DDS tests: running concurrently, their DDS participants pile
-# discovery traffic onto the writers (WouldBlock), slowing discovery. `#[serial]`
-# runs them one at a time.
+# The live-DDS tests run one at a time: concurrent participants flood discovery.
 serial_test = "4"
 tokio = { version = "1", features = ["full"] }

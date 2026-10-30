@@ -14,9 +14,9 @@ description = "Arora animation playback and baking as a host-linked module or We
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# 2.2: a declaration's scope and the records of the types its functions name.
+# 2.3: `artifact!`.
 arora-module = { path = "../../crates/arora-module", version = "2.3" }
-# 3.8: the records the derive gives each record type.
+# 3.8: the derived types' records.
 arora-types = { path = "../../crates/arora-types", version = "3.8" }
 arora-animation = { path = "../../crates/arora-animation", version = "1" }
 # `module-dir`: write the module directory a device loads the guest from.

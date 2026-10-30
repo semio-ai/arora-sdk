@@ -14,8 +14,8 @@ proc-macro = true
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full", "extra-traits"] }
-# Read at expansion time: `#[arora(id)]` literals, and — for
-# `module_from_header!` — the low header model and its YAML.
+# Read at expansion time: `#[arora(id)]` literals, and the header
+# `module_from_header!` reads.
 uuid = "1"
 arora-types = { path = "../arora-types", version = "3", default-features = false }
 yaml_serde = "0.10"

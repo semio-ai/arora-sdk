@@ -14,7 +14,7 @@ futures-channel = "0.3"
 futures-core = "0.3"
 # The empty key-description feed of a HAL that describes no key.
 futures-util = { version = "0.3", default-features = false }
-# The models' JSON shape, for a client that hands them on (a browser).
+# The models' JSON shape, for a client that hands them on.
 serde = { version = "1", features = ["derive"] }
 # A model's content hash: the SHA-256 Semio Studio addresses content by.
 sha2 = "0.11"

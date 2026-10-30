@@ -10,37 +10,28 @@ repository = "https://github.com/semio-ai/arora-sdk"
 name = "arora_msgs_ros2"
 
 [dependencies]
-# The arora type vocabulary this crate speaks: `Value`, `ty::low::Type`, the
-# `TypeRegistry`, and the `value_serde` walk the CDR codec is a backend of. The
-# `derive` feature is on because the generated message structs are the schema
-# source of truth via `#[derive(AroraType)]`.
+# `derive`: the generated message structs declare their types with
+# `#[derive(AroraType)]`.
 arora-types = { path = "../arora-types", version = "3", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# serde implements its traits for arrays only up to length 32; the generated
-# messages with a larger fixed array (geometry/sensor `float64[36]` covariance)
-# use this for those fields.
+# serde stops at arrays of 32; the covariance fields are `float64[36]`.
 serde-big-array = "0.5"
 thiserror = "2"
 
-# Only the REP-2016 type-hash (`hash` module) needs ros2-client — for its
-# `type_description` REP-2016 reproduction. The core (codec, registry, types,
-# predicate) is ros2-client-free, so a modeling consumer (the node editor, a
-# wasm build) pulls none of the DDS/Zenoh stack, which is why `interop` is
-# opt-in. 0.10.1 is the first release carrying `type_description` (used here) and
-# the `publish_raw`/`take_raw` runtime-typed pub/sub the bridge drives.
+# Only the REP-2016 hash (`hash`, feature `interop`) needs ros2-client, so the
+# rest builds without the DDS/Zenoh stack (e.g. for wasm).
 ros2-client = { package = "ros2-client-multi-rmw", version = "0.14", default-features = false, optional = true }
 
 [features]
 default = []
-# The REP-2016 hash + live-ROS interop surface. Not usable on its own —
-# ros2-client requires exactly one backend, so enable it through `dds`/`zenoh`.
+# The REP-2016 hash. Enable it through `dds` or `zenoh`: ros2-client needs
+# exactly one backend.
 interop = ["dep:ros2-client", "ros2-client/jazzy"]
 dds = ["interop", "ros2-client/dds"]
 zenoh = ["interop", "ros2-client/zenoh"]
 
-# The build script parses the vendored `.msg` files (via the std-only
-# `src/schema.rs`) and emits the message structs with `quote`.
+# The build script generates the message structs from the vendored `.msg` files.
 [build-dependencies]
 quote = "1"
 proc-macro2 = "1"

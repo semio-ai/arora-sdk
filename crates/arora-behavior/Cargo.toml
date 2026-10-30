@@ -7,7 +7,7 @@ license = "Apache-2.0"
 readme = "readme.md"
 
 [dependencies]
-# 3.8: `Status` states the scope of its record (`Scope`, `ARORA`).
+# 3.8: `Scope`, `ARORA`.
 arora-types = { path = "../arora-types", version = "3.8" }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde"] }

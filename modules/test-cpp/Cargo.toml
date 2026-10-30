@@ -6,17 +6,14 @@ license = "Apache-2.0"
 description = "C++ test module — wasm guest, built via cargo + cmake + WASI SDK"
 build = "build.rs"
 
-# This crate is the cargo-side entry point for a C++ wasm guest. The Rust
-# source is empty; the build script invokes cmake against the in-tree
-# CMakeLists.txt to produce the actual .wasm. The output path is exported
-# to dependents via cargo:metadata.
+# A C++ wasm guest: the Rust source is empty, and the build script builds
+# CMakeLists.txt with the WASI SDK.
 
 [lib]
 path = "src/lib.rs"
 
-# For the directories of their C headers, which their `links` metadata gives
-# the build script (DEP_ARORA_BUFFERS_INCLUDE, DEP_ARORA_UTIL_INCLUDE): cargo
-# passes it through a regular dependency, not through the artifact ones below.
+# For their C headers' directories (DEP_ARORA_*_INCLUDE), which cargo passes
+# through a regular dependency only.
 [dependencies]
 arora-buffers = { path = "../../crates/arora-buffers" }
 arora-util = { path = "../../crates/arora-util" }
@@ -25,15 +22,10 @@ arora-util = { path = "../../crates/arora-util" }
 anyhow = "1"
 wasi-sdk = { path = "../../crates/wasi-sdk" }
 cmake = "0.1"
-# Host bin for code generation (module.yaml -> C++ source). arora-module-cli
-# locates the language-specific generator by appending the language name to
-# its own argv[0] directory, so the cpp generator must be co-located with
-# the cli. The build script stages both binaries into one directory.
+# The generators (module.yaml -> C++). arora-module-cli finds the C++ generator
+# beside itself, so the build script stages both into one directory.
 arora-module-cli = { path = "../../crates/arora-module-authoring/cli", artifact = "bin" }
 arora-module-cpp = { path = "../../crates/arora-module-authoring/cpp", artifact = "bin" }
 # wasm32-wasip2 static libraries the C++ links against.
 arora-buffers = { path = "../../crates/arora-buffers", artifact = "staticlib", target = "wasm32-wasip2" }
 arora-util = { path = "../../crates/arora-util", artifact = "staticlib", target = "wasm32-wasip2" }
-# The build.rs reads the records/ directory populated by this crate's
-# build script — declared here purely to force build-order so a cold
-# `cargo build --workspace` works without prior builds.
