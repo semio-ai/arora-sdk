@@ -142,7 +142,8 @@ pub enum Kind {
     /// the parameter whose id is `record_keys[i]`) over the
     /// [`value`](crate::params::Params::value) bundle's fields. The first evaluation
     /// sets the baseline and spawns nothing, so a graph spawns on a change it
-    /// observes, never on being loaded.
+    /// observes — unless [`spawn_on_load`](crate::params::Params::spawn_on_load)
+    /// is set, and the first evaluation spawns with the baseline too.
     ///
     /// Where a [`TaskRun`](Self::TaskRun) node *is* one run's call, this node
     /// starts runs: the request is queued on the evaluation's spawns

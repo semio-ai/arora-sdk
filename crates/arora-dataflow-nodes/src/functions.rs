@@ -468,6 +468,7 @@ const FIELDS: &[(&str, FieldKind)] = &[
     ("function", FieldKind::OptUuid),
     ("param_ids", FieldKind::OptVecUuid),
     ("module", FieldKind::OptUuid),
+    ("spawn_on_load", FieldKind::OptBool),
 ];
 
 /// What a parameter id stands for in a call.
@@ -843,8 +844,13 @@ pub fn encode(params: &Params) -> Result<Vec<(Uuid, Value)>, String> {
             Value::String(name.as_str().unwrap_or_default().to_string()),
         );
     }
-    if let Some(clamp) = params.clamp {
-        push("clamp", Value::Boolean(clamp));
+    for (field, flag) in [
+        ("clamp", params.clamp),
+        ("spawn_on_load", params.spawn_on_load),
+    ] {
+        if let Some(flag) = flag {
+            push(field, Value::Boolean(flag));
+        }
     }
     for (field, text) in [
         ("urdf_xml", &params.urdf_xml),
@@ -950,6 +956,12 @@ fn set_field(params: &mut Params, at: usize, value: Value) -> Result<(), String>
         ("max_iters", _) => params.max_iters = Some(f32_of()? as u32),
         ("clamp", _) => {
             params.clamp = Some(match value {
+                Value::Boolean(on) => on,
+                _ => return Err(wrong()),
+            })
+        }
+        ("spawn_on_load", _) => {
+            params.spawn_on_load = Some(match value {
                 Value::Boolean(on) => on,
                 _ => return Err(wrong()),
             })

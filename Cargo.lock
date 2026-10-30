@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "arora-dataflow-nodes"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree",

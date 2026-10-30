@@ -117,6 +117,12 @@ pub struct Params {
     /// names one. `None` leaves resolution to the host's function→module map,
     /// like an [`Kind::ExternalFunction`](crate::kind::Kind::ExternalFunction) call.
     pub module: Option<Uuid>,
+    /// Whether a [`Kind::Spawn`](crate::kind::Kind::Spawn) node spawns on
+    /// its first evaluation too, with the arguments it records as loaded:
+    /// for a graph whose inputs command a state that holds, which is then set
+    /// from them at once as well as on every change. `None` or `false`
+    /// spawns on changes only.
+    pub spawn_on_load: Option<bool>,
 }
 
 /// Rounding strategy for [`Kind::Round`](crate::kind::Kind::Round).

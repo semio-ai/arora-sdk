@@ -1,6 +1,6 @@
 [package]
 name = "arora-dataflow-nodes"
-version = "2.0.0"
+version = "3.0.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Arora's dataflow nodes: the node vocabulary as the functions of @arora/dataflow, @arora/geometry and @arora/kinematics, computing on Arora's values, for a loader to put on a behavior tree."

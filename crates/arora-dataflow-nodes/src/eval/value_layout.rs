@@ -301,17 +301,20 @@ impl ValueLayout {
     }
 }
 
-/// Flatten a [`Value`] whose leaves are all numbers: a number, an
-/// `ArrayF32`, or a structure, record or sequence of those, where a
-/// structure's number fields are floats. Any other value (a boolean, text, an
-/// enumeration, a structure with an integer or text field) has no flat form.
+/// Flatten a [`Value`] whose leaves are all numbers: a number, a numeric
+/// array, or a structure, record or sequence of those, where a structure's
+/// number fields are floats. A numeric array of any element type is a
+/// vector, rebuilt as an `ArrayF32`; in a structure only an `ArrayF32` is, as
+/// a structure keeps the field types it declares. Any other value (a
+/// boolean, text, an enumeration, a structure with an integer or text field)
+/// has no flat form.
 pub fn flatten_numeric(value: &Value) -> Option<FlatValue> {
     // Room for a number, a numeric array, or a structure up to a transform's
     // ten numbers, so that reading them does not grow the buffer.
     let mut data = Vec::with_capacity(match value {
         Value::ArrayF32(xs) => xs.len(),
         Value::Structure(_) | Value::KeyValue(_) | Value::ArrayValue(_) => 16,
-        _ => 1,
+        value => numeric_array_len(value).unwrap_or(1),
     });
     let layout = flatten_into(value, &mut data, false)?;
     Some(FlatValue { layout, data })
@@ -337,6 +340,12 @@ fn flatten_into(value: &Value, data: &mut Vec<f32>, in_structure: bool) -> Optio
         Value::ArrayF32(xs) => {
             data.extend_from_slice(xs);
             Some(ValueLayout::Vector(xs.len()))
+        }
+        // Rebuilt as an `ArrayF32`, which a structure's field must not be.
+        _ if !in_structure && numeric_array_len(value).is_some() => {
+            let start = data.len();
+            push_numeric_array(value, data);
+            Some(ValueLayout::Vector(data.len() - start))
         }
         Value::Structure(s) if !s.fields.is_empty() => {
             let start = data.len();
@@ -394,6 +403,40 @@ fn flatten_into(value: &Value, data: &mut Vec<f32>, in_structure: bool) -> Optio
             Some(ValueLayout::Array(layouts))
         }
         _ => None,
+    }
+}
+
+/// The length of a numeric array other than an `ArrayF32`: an `ArrayF64` or
+/// an integer array. `None` for any other value.
+fn numeric_array_len(value: &Value) -> Option<usize> {
+    Some(match value {
+        Value::ArrayF64(xs) => xs.len(),
+        Value::ArrayU8(xs) => xs.len(),
+        Value::ArrayU16(xs) => xs.len(),
+        Value::ArrayU32(xs) => xs.len(),
+        Value::ArrayU64(xs) => xs.len(),
+        Value::ArrayI8(xs) => xs.len(),
+        Value::ArrayI16(xs) => xs.len(),
+        Value::ArrayI32(xs) => xs.len(),
+        Value::ArrayI64(xs) => xs.len(),
+        _ => return None,
+    })
+}
+
+/// Push the numbers of a numeric array [`numeric_array_len`] reads onto
+/// `data`, as `f32`.
+fn push_numeric_array(value: &Value, data: &mut Vec<f32>) {
+    match value {
+        Value::ArrayF64(xs) => data.extend(xs.iter().map(|x| *x as f32)),
+        Value::ArrayU8(xs) => data.extend(xs.iter().map(|x| f32::from(*x))),
+        Value::ArrayU16(xs) => data.extend(xs.iter().map(|x| f32::from(*x))),
+        Value::ArrayU32(xs) => data.extend(xs.iter().map(|x| *x as f32)),
+        Value::ArrayU64(xs) => data.extend(xs.iter().map(|x| *x as f32)),
+        Value::ArrayI8(xs) => data.extend(xs.iter().map(|x| f32::from(*x))),
+        Value::ArrayI16(xs) => data.extend(xs.iter().map(|x| f32::from(*x))),
+        Value::ArrayI32(xs) => data.extend(xs.iter().map(|x| *x as f32)),
+        Value::ArrayI64(xs) => data.extend(xs.iter().map(|x| *x as f32)),
+        _ => {}
     }
 }
 
@@ -511,5 +554,33 @@ mod tests {
         let flat = flatten_numeric(&nested(5.0)).expect("numeric");
         assert_eq!(flat.data, vec![2.0, 5.0, 3.0, 5.0]);
         assert_eq!(flat.layout.reconstruct(&flat.data), nested(5.0));
+    }
+
+    /// A numeric array of any element type flattens as a vector, rebuilt as
+    /// an `ArrayF32`; in a structure, only an `ArrayF32` does, as the
+    /// structure keeps the field types it declares.
+    #[test]
+    fn a_numeric_array_of_any_element_type_flattens_as_a_vector() {
+        for (value, numbers) in [
+            (Value::ArrayU8(vec![4, 26]), vec![4.0, 26.0]),
+            (Value::ArrayI16(vec![-3, 5]), vec![-3.0, 5.0]),
+            (Value::ArrayU64(vec![7]), vec![7.0]),
+            (Value::ArrayF64(vec![0.5, 1.5]), vec![0.5, 1.5]),
+            (Value::ArrayU8(Vec::new()), Vec::new()),
+        ] {
+            let flat = flatten_numeric(&value).expect("numeric");
+            assert_eq!(flat.layout, ValueLayout::Vector(numbers.len()));
+            assert_eq!(
+                flat.layout.reconstruct(&flat.data),
+                Value::ArrayF32(numbers)
+            );
+        }
+        let record = Value::ArrayValue(vec![Value::F32(1.0), Value::ArrayU8(vec![2, 3])]);
+        assert_eq!(
+            flatten_numeric(&record).expect("numeric").data,
+            vec![1.0, 2.0, 3.0]
+        );
+        assert!(flatten_numeric(&structure(0xA1, vec![(1, Value::ArrayU8(vec![1]))])).is_none());
+        assert!(flatten_numeric(&Value::ArrayString(vec!["a".into()])).is_none());
     }
 }
