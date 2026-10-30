@@ -411,7 +411,15 @@ fn a_run_s_edit_that_changes_the_behavior_advances_the_revision() {
         ..GraphDiff::default()
     };
     device.interpreter.apply(reads_the_run).unwrap();
-    assert_eq!(read(&device.interpreter).revision, 2);
+    let reading = read(&device.interpreter);
+    assert_eq!(reading.revision, 2);
+
+    // The binding is answered as it stands: the graph loads back beside the
+    // run it reads.
+    device.interpreter.load(reading.graph.clone()).unwrap();
+    device.tick();
+    assert_eq!(read(&device.interpreter).graph, reading.graph);
+    assert_eq!(read(&device.interpreter).revision, 3);
 
     // The run's sum leaves: the binding reading it goes with it.
     device
@@ -423,7 +431,7 @@ fn a_run_s_edit_that_changes_the_behavior_advances_the_revision() {
         })
         .unwrap();
     let unbound = read(&device.interpreter);
-    assert_eq!(unbound.revision, 3);
+    assert_eq!(unbound.revision, 4);
     let expected = applied(
         behavior(),
         GraphDiff {
