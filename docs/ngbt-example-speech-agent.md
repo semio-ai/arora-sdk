@@ -454,8 +454,26 @@ download it and open it in a browser.
     writer reads the write, as the reply run reads the utterance `listen` wrote.
     That connector runs back from the right, and shows only at the ticks it
     happens.
-  - **The change passing.** At each tick a part that changed or ran is blue,
-    and a connector between two of them is the change passing.
+  - **What the tick did.** Each part is coloured in the words of Arora's
+    behavior trace (#448, `crates/arora-behavior/docs/trace.md`):
+    - **Tree nodes and calls.** A tree node is lit when the tick reached it,
+      and a leaf when it made its call. A detached node is blue when it was
+      called, amber when it answered from its last call.
+    - **Keys and inputs.** Blue when it changed; amber when a node that ran
+      read it unchanged.
+    - **Providers.** Lit when called.
+    - **Connectors.** One between two blue parts is the change passing. One
+      into or out of an amber part is a read. The trees' own connectors follow
+      the running path.
+
+    A leaf that has finished answers from its status: it reads nothing and
+    calls nothing.
+  - **A node settling on its own.** A damp, a slew or a hold reads its own
+    state, which its last call wrote back. On main, that state is the call's
+    `state` parameter, beside `dt: {arora/dt}`. It is drawn as the loop on the
+    node's corner, blue while the last call moved it. A slew still closing on
+    a target that no longer moves runs with nothing before it lit. So does
+    `sp_w` at the first tick, going from no state to its first.
   - **A node's connectors.** Selecting a node picks out all of them.
   - **The order of a tick** is numbered per design. Where the motion reads the
     keys a tick late (#405, #257), those connectors are dashed.
@@ -465,9 +483,29 @@ download it and open it in a browser.
     and the bytes they sent at each tick, and a call leaf's inspector shows
     what its call sends.
 
-  One limit is the bench's: it projects a tick's statuses from the state the
-  tick ends in. So on the tick a state changes, the leaf that changed it shows
-  as reached on the tick before, and its key lights without it.
+  A tick's statuses are the tree's, the tick a leaf finishes included: its
+  write changes the conversation's state, and the next tick reaches the branch
+  it leads to. At tick 0 the store holds what the behavior loaded with, so
+  nothing in it changes.
+
+  Every lit part has a lit or read connector into it, except for five
+  mismatches between the bench's simulation and its trees. The view shows them
+  as they are:
+  - **The judge's follow-ups.** They stream for 1 s after its verdict, and the
+    cost model polls the judge for them. But the judge's leaf returned at the
+    verdict, and no other leaf polls it.
+  - **The simulation enters a state in the tick the leaf before it
+    finishes.** The audio starts or resumes as `await`, the judge or `listen`
+    finishes (16.60, 19.20 and 25.30 s), a tick before `play` first polls.
+    Pip ponders from 10.60 s, a tick before `show_thinking` writes it.
+  - **#404's executor ticks a leaf again only when its status changes,** not
+    when what it reads changes. Every design runs its control tree on that
+    executor. So `set_present`, which reads `{conversation/state}`, is not
+    ticked when Pip starts and stops talking (5.00 and 27.51 s), though its
+    write changes.
+  - **`remember`** is called as the reply ends, but the reply run reaches it
+    once the last sentence is synthesized, before it is spoken.
+  - **A faded emotion** leaves `{emotion/active}`, and no node writes that.
 - **How each design holds it.** One part at a time, the same part on both
   sides: the conversation, attention and reply run, or one of the seven motion
   groups; or Full, every part at once, the three trees above the whole motion
@@ -495,7 +533,8 @@ download it and open it in a browser.
   the 3,961 ticks it changes. The reference and the foil run no graph: a node
   is blue where their code computes it, on the branches it takes, when it or
   what it follows from changed. Edges between two blue nodes are blue, edges
-  into or out of a visit amber. A tree node's border is its status. A node can
+  into or out of a visit amber. A damp, a slew or a hold has a loop on its
+  corner: its state, blue while its last call moved it. A tree node's border is its status. A node can
   be dragged to untangle a graph, with a reset per part.
 - **The inspector and the watch.** Select a node in any view, or a line that
   names one: each side's inspector shows what its design holds for the node's
@@ -561,6 +600,9 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 - **Its stages are module-call leaves,** returning `Running` until done and
   polled at every tick. This is Arora's call contract (§5), and the way
   arora-dataflow-nodes places external calls and task runs.
+- **The answer is spoken as it streams.** FOR EACH runs beside the answer
+  loop under a `PARALLEL`. It synthesizes each sentence as the llm brings it,
+  and stays Running for the next while the llm streams.
 - **The prompt is built once a call,** by a leaf under `SEQUENCE*`
   (`sequence_star`), which resumes the llm past it while it waits. `{.prompt}`
   keeps it, and the llm leaf sends it at every poll. Built by a node that runs
@@ -746,19 +788,19 @@ while no wave plays, and knows a schedule a design does not (the glance away).
   | Implementation | µs | Engine's path | Node ticks | Executions | Checks | 1 s on the llm | Prompt builds |
   |---|---|---|---|---|---|---|---|
   | Reference | **55** | — | 28 | 27 | 18 | 0 · 0 · 100 | 4 |
-  | #396 detached nodes | 78 | 12.3 | 37 | 30 | 64 | 100 · 100 · 100, 70 µs | 4 |
-  | #409 full tree nodes | 78.6 | 12.3 | 37 | 30 | 64 | the same | 4 |
+  | #396 detached nodes | 78 | 12.3 | 38 | 30 | 64 | 100 · 100 · 100, 70 µs | 4 |
+  | #409 full tree nodes | 78.7 | 12.3 | 38 | 30 | 64 | the same | 4 |
   | #404 incremental tree | 78.4 | 12.3 | 51 | 30 | 69 | the same | 4 |
-  | #405 macros, placed | 78.3 | 12.3 | 48 | 30 | 69 | the same | 4 |
-  | #257 BT in NG | 78.4 | 12.3 | 45 | 30 | 64 | the same | 4 |
+  | #405 macros, placed | 78.3 | 12.3 | 49 | 30 | 69 | the same | 4 |
+  | #257 BT in NG | 78.4 | 12.3 | 46 | 30 | 64 | the same | 4 |
 
 - **The designs end within 0.7 µs of each other.** What is left is
   the 30 functions that change a tick, at 2 µs each, the engine's path for
   each call, and each framework's bookkeeping. #396, #409 and #257, with
   invalidation, visit only what changed: the same nodes at nearly every tick,
-  and the same 64 checks. #396 and #409 tick the fewest nodes (37 a tick);
-  #257 also visits its graph's input and output nodes (45). #404 and #405 tick
-  51 and 48, with 69 checks. The polls are the same in every design: one node
+  and the same 64 checks. #396 and #409 tick the fewest nodes (38 a tick);
+  #257 also visits its graph's input and output nodes (46). #404 and #405 tick
+  51 and 49, with 69 checks. The polls are the same in every design: one node
   tick and one call a tick on average.
 - **The bespoke reference is the cheapest,** 22.8 µs a tick under the best
   design. It makes 3.2 fewer calls a tick (6.4 µs): the selections it takes as
@@ -783,33 +825,41 @@ motion graph over the run:
 | Implementation | Outputs kept | Stale among them | Inputs show what the node ran with | Store keys a tick apart | Statuses | What an inspector reaches |
 |---|---|---|---|---|---|---|
 | Reference | 45% | — | — | 0% | none: no tree | nothing it names: instrument the code |
-| #396 detached nodes | 100% | 13% | 98% | 0% | kept, private | `detached_output`; `observe_detached` |
+| #396 detached nodes | 100% | 13% | 98% | 0% | reported by a trace (#448) | a trace: statuses, each detached node called, cached or idle, watched outputs; `detached_output`; `observe_detached` |
 | #409 full tree nodes | 100% | 13% | 98% | 0% | kept; each call's `detached_status` | as #396, with a status and a trace line per call |
 | #404 incremental tree | 100% | 13% | 86% | 0% | kept, private | nothing outside the tree |
 | #405 macros, placed | 100% | 13% | 93% | 8.6% | kept, private | less than #404 for placed nodes |
 | #257 BT in NG | 100% | 13% | 93% | 8.6% | the `out` port, typed `Status` | `eval_all`, `get_outputs_delta` |
 
-- **No design passes node values by publish and subscribe.** Each keeps them
-  in a cache, a cell or a port, for the next tick to read. The store is the
-  only push channel (`subscribe` in `arora-types/src/data/store.rs:322-345`,
-  and the bridge's `subscribe` and `values_changed`), and it carries store
-  keys, never a node's inputs or outputs. A tree-local cell reaches no observer
-  (`variable.rs:109-115`).
+- **Only main pushes a node's values, through a trace.** Each design keeps
+  them in a cache, a cell or a port, for the next tick to read. The store is
+  the only push channel (`subscribe` in `arora-types/src/data/store.rs:322-345`,
+  and the bridge's `subscribe` and `values_changed`). On main it carries a
+  trace (#448, `crates/arora-behavior/docs/trace.md`), a task run that writes
+  a report to its feedback key at the end of each tick that changed
+  something. A report holds each node's status, or not reached; each detached
+  node's activity: called, cached, or idle when nothing read it; and the
+  outputs of the nodes it watches, mutable parameters included. It holds no
+  node's inputs. The branches of #404, #405, #407 and #409 predate it. A
+  tree-local cell reaches no observer (`variable.rs:109-116`).
 - **Every build holds the same stale values,** 13% of its node outputs: they
   take the same laziness, so the same nodes go unread. They differ in what they
   keep beside the output, and in whether anything outside the executor can
-  tell a stale value from a current one. No build exposes that today; #257's
+  tell a stale value from a current one. No build says a value is stale. Main's
+  trace comes closest: a node reported idle was not brought up to date. #257's
   code sidesteps it by keeping nothing for a node it did not tick.
 - **#396 and #409 keep the most.** A detached node's cache holds its last call:
   the outputs, and the arguments it ran with, which it compares and lends to
-  the call (`detached.rs:186-199, 1000-1025, 1063-1066`). An input row shows
-  what the node ran with at every tick after its first call, older than what
-  feeds it now at 19% of input-ticks. `detached_output` reads the outputs. The
-  arguments and the cache's tick are private: an accessor for each would give
-  an inspector the whole call, and staleness by comparing the arguments with
-  their sources. `observe_detached` keeps a node current by running it at
-  every tick (`behavior_tree.rs:92-98`), which advances a stateful node on a
-  branch not taken: watching that way changes what runs. #409 adds a status
+  the call (`detached.rs:188-201, 1008-1035, 1065-1077` on main). An input row
+  shows what the node ran with at every tick after its first call, older than
+  what feeds it now at 19% of input-ticks. `detached_output` reads the outputs,
+  and a trace reports them for the nodes it watches, with each node's activity,
+  without running anything. The arguments and the cache's tick are private: an
+  accessor for each would give an inspector the whole call, and staleness by
+  comparing the arguments with their sources. `observe_detached` keeps a node
+  current by running it at every tick (`behavior_tree.rs:102-108`), which
+  advances a stateful node on a branch not taken: watching that way changes
+  what runs. #409 adds a status
   per call, `detached_status`, which is none before the first call and after
   a failure, so a failed call shows, and a trace line per real call
   (`behavior_tree.rs:98, 1295` on #409).
