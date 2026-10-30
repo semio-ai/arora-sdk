@@ -714,3 +714,46 @@ fn an_unwatched_node_forgets_its_return() {
     assert!(first.values.is_empty(), "{first:?}");
     assert_eq!(status_of(&first, SUM), None, "not reached");
 }
+
+/// A paced trace spanning several edits names each restarted node once, in
+/// order.
+#[test]
+fn a_paced_trace_names_each_restarted_node_once() {
+    let mut device = Device::new();
+    let trace = device
+        .interpreter
+        .trace(TraceOptions {
+            values: Vec::new(),
+            min_interval_ns: Some(10_000),
+        })
+        .unwrap();
+    let tick_at = |device: &mut Device, time: u64| {
+        device
+            .store
+            .write(StateChange::set(built_in::TIME, Value::U64(time)))
+            .unwrap();
+        device.tick();
+    };
+    let rebind = |node, port, limit: f64| GraphDiff {
+        bind: vec![Binding {
+            node,
+            port,
+            source: value(limit),
+        }],
+        ..GraphDiff::default()
+    };
+    tick_at(&mut device, 1_000);
+    for (time, diff) in [
+        (2_000, rebind(SUM, ADD_B, 2.0)),
+        (3_000, rebind(GATE, BELOW_LIMIT, 0.8)),
+        (4_000, rebind(SUM, ADD_B, 1.0)),
+    ] {
+        device.interpreter.apply(diff).expect("the edit applies");
+        tick_at(&mut device, time);
+    }
+    assert_eq!(device.report(&trace).unwrap().tick, 1, "not due yet");
+    tick_at(&mut device, 11_000);
+    let report = device.report_at(&trace, 5).expect("due");
+    assert_eq!(report.since, Some(1));
+    assert_eq!(report.restarted, vec![GATE, SUM]);
+}

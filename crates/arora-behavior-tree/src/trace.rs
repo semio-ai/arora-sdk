@@ -220,6 +220,7 @@ impl Traces {
                 trace.status_changed.insert(*node);
                 trace.activity_changed.insert(*node);
             }
+            // Deduplicated as the report is made.
             trace.restarted.extend_from_slice(restarted);
         }
     }
@@ -394,6 +395,8 @@ impl Trace {
             }
         }
         // Listed by node, then port: a report reads the same each time.
+        report.restarted.sort_unstable();
+        report.restarted.dedup();
         report.status.sort_unstable_by_key(|(node, _)| *node);
         report.activity.sort_unstable_by_key(|(node, _)| *node);
         report
