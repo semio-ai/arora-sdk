@@ -4,6 +4,14 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [15.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** depends on arora 18, whose `Arora` and `AroraBuilder` this
+  crate's surface carries. Nothing in the browser changes: arora 18 changes
+  only how a native `studio-bridge` run connects to Semio Studio.
+
 ## [14.0.0] - 2026-10-30
 
 ### Changed

@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "17.1.0"
+version = "18.0.0"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -35,8 +35,9 @@ native = [
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
-# The Semio Studio connection (`arora::studio`): enrollment, credentials and the
-# Zenoh connector. Opt-in; a binary built with it connects unless run with
+# The Semio Studio connection (`arora::studio`): the device's Studio bridge, and
+# what a run does through its handle (enrollment, the code, the device's id).
+# Opt-in; a binary built with it serves the device's Studio bridge unless run with
 # --no-studio.
 studio-bridge = [
     "native",
@@ -73,9 +74,11 @@ arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 futures = "0.3"
 # Sync primitives only: the runtime-bearing tokio is native-only (below).
 tokio = { version = "1", default-features = false, features = ["sync"] }
-# The Semio Studio connector (feature `studio-bridge`). 11: enrollment
-# (`studio::enroll`) and the device's credentials (`DeviceCredentials`).
-arora-studio-bridge-client = { version = "11", optional = true }
+# The Semio Studio connector (feature `studio-bridge`). 11.3:
+# `StudioHandle::enroll_when_needed` and its `Enroller`, over 11.2's
+# `StudioDevice::bridge`, the bridge a runtime carries before the device is
+# enrolled.
+arora-studio-bridge-client = { version = "11.3", optional = true }
 # The per-user directory the device directory defaults to.
 dirs = { version = "7", optional = true }
 # A module directory's `header.json`.

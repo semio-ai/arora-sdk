@@ -5,8 +5,8 @@
 //! [lockstep](Device::run_for) it is a deterministic, faster-than-real-time
 //! simulation for tests and batch runs; [served](serve) it is a live device
 //! at real time on the standard Arora run — the operator front end, and the
-//! open local bridge, or under the `studio` feature Semio Studio when the run
-//! asks for it.
+//! open local bridge, or under the `studio` feature the device's Semio
+//! Studio bridge unless the run passes `--no-studio`.
 //!
 //! Only the HAL is simulation-specific: a device for the real robot is this
 //! assembly with the robot's HAL in place of [`MujocoHal`], publishing the
@@ -110,10 +110,10 @@ pub struct DeviceConfig {
     /// drives this robot's model by, instead of the joint names.
     pub studio: Option<StudioModel>,
     pub speech: Speech,
-    /// What a [served](serve) run does about Semio Studio: Studio, unless
-    /// `--no-studio`.
+    /// Whether a [served](serve) run serves the device's Semio Studio
+    /// bridge: unless `--no-studio`.
     #[cfg(feature = "studio")]
-    pub studio_choice: arora::studio::Choice,
+    pub connects_to_studio: bool,
 }
 
 /// The device, with a handle onto its simulation.
@@ -219,24 +219,55 @@ impl Device {
 
 /// Serve the device until the process stops, on the standard Arora run: the
 /// simulator paces itself at real time, the runtime steps at the policies'
-/// period, and the bridge is the run's default — the open local bridge on
-/// `ws://127.0.0.1:9000`, or under the `studio` feature Semio Studio unless
-/// `studio_choice` is `Local` (a device that is not enrolled enrolls first,
-/// named by `DEVICE_NAME` or the operator, its code shown for a person to
-/// approve in Studio).
+/// period, and the bridge is the open local bridge on
+/// `ws://127.0.0.1:9000`, or under the `studio` feature the device's Semio
+/// Studio bridge when `connects_to_studio`: a device that is not enrolled
+/// enrolls while it runs, through the front end's enroller (the terminal UI
+/// asks whether to enroll and the device's name, and shows the code a person
+/// approves it with in Studio).
 pub async fn serve(config: DeviceConfig) -> Result<()> {
+    let frontend = arora::standard_frontend();
     #[cfg(feature = "studio")]
-    let studio = config.studio_choice;
+    let enroller = frontend.operator.clone().enroller();
+    #[cfg(feature = "studio")]
+    let studio = config
+        .connects_to_studio
+        .then(|| arora::studio::reported_model(&description(&config)));
     let (builder, _sim) = assemble(config)?;
+    let builder = builder.with_frontend(frontend).with_step_period(PERIOD);
     #[cfg(feature = "studio")]
-    let builder = builder.with_studio(studio);
-    builder.with_step_period(PERIOD).run().await
+    if let Some(model) = studio {
+        let (bridge, handle) = arora::studio::of(&arora::Device::from_env()?)?.bridge(model);
+        let run = builder.with_bridge(Box::new(bridge)).run();
+        return tokio::select! {
+            ran = run => ran,
+            ended = handle.enroll_when_needed(&*enroller) => Err(ended.into()),
+        };
+    }
+    builder.run().await
+}
+
+/// The model the device reports to Studio: the family of the model it
+/// publishes for, the simulator as its hardware.
+fn description(config: &DeviceConfig) -> HalDescription {
+    HalDescription {
+        model_family: Some(
+            config
+                .studio
+                .as_ref()
+                .and_then(|model| model.family.clone())
+                .unwrap_or_else(|| "Microduck".to_string()),
+        ),
+        hardware_version: Some("mujoco".to_string()),
+        software_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+    }
 }
 
 /// The device's parts on a builder: the simulator on the model, the modules
 /// on the chosen executor, the tree, the seeded commands. The simulator's
 /// joint order is checked against the policies' before anything runs.
 fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
+    let description = description(&config);
     let keys: Vec<String> = match &config.studio {
         Some(model) => model.joint_ids(&microduck_policies::JOINT_NAMES)?,
         None => microduck_policies::JOINT_NAMES
@@ -269,19 +300,7 @@ fn assemble(config: DeviceConfig) -> Result<(AroraBuilder, SimHandle)> {
         control_hz: 50.0,
         clock: config.clock,
         record: config.record.clone(),
-        // The model the device reports to Studio: the family of the model it
-        // publishes for, the simulator as its hardware.
-        description: HalDescription {
-            model_family: Some(
-                config
-                    .studio
-                    .as_ref()
-                    .and_then(|model| model.family.clone())
-                    .unwrap_or_else(|| "Microduck".to_string()),
-            ),
-            hardware_version: Some("mujoco".to_string()),
-            software_version: Some(env!("CARGO_PKG_VERSION").to_string()),
-        },
+        description,
     })
     .map_err(|e| {
         anyhow!(

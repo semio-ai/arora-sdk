@@ -4,6 +4,25 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** requires arora 18. The `arora-restful` runner built with `studio`
+  serves the device's Semio Studio bridge from its start, unless the run
+  passes `--no-studio`: the robot runs at once, and a device that is not
+  enrolled with Studio enrolls while it runs, as arora-studio-bridge-client
+  11.3's `StudioHandle::enroll_when_needed` does it — by the token in
+  `STUDIO_ENROLLMENT_TOKEN`, or by a code once a person accepts to enroll.
+  The terminal UI asks whether to enroll, the device's name and its model
+  family, shows the code in its prompt line, then the device's Studio
+  record — name and model family — and id in its header; headless, the code
+  is logged, and goes to standard error when the log shows no info lines.
+  A refused enrollment fails the run, and so does a bridge that halts, such
+  as on a credential of another Firebase project than the run's, the error
+  naming the credentials directory to delete. Studio out of reach no longer
+  fails the run: the bridge connects again by itself.
+
 ## [5.1.0] - 2026-10-30
 
 ### Changed

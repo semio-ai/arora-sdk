@@ -36,10 +36,6 @@ mod module_discovery;
 pub mod operator;
 mod run;
 pub mod runtime;
-/// The Semio Studio connection. Its [`connect`](studio::connect) builds a
-/// ready-to-inject Studio [`Bridge`] an embedder attaches with
-/// [`AroraBuilder::with_bridge`] — the producer side of viewing a runtime's
-/// live data through the Studio bridge.
 #[cfg(feature = "studio-bridge")]
 pub mod studio;
 /// The terminal operator UI. Native, and only when the `tui` feature is on; an
@@ -829,9 +825,6 @@ pub struct AroraBuilder {
     /// The device a runner said the run is.
     #[cfg(feature = "native")]
     device: Option<Device>,
-    /// What a runner said of Semio Studio; none serves the open local bridge.
-    #[cfg(feature = "studio-bridge")]
-    studio: Option<studio::Choice>,
 }
 
 impl AroraBuilder {
@@ -1172,41 +1165,25 @@ impl AroraBuilder {
 
     /// The device the run is, as a runner's options give it
     /// ([`RunnerArgs::device`]): [`run`](AroraBuilder::run) serves the open
-    /// local bridge on its port, and connects to Semio Studio as it, when it
-    /// fills the default bridge. Without it, the local bridge serves on
-    /// [`device::DEFAULT_BRIDGE_PORT`], and a run that connects is the device
-    /// the environment configures ([`Device::from_env`]).
+    /// local bridge on its port when it is given no bridge. Without it, the
+    /// local bridge serves on [`device::DEFAULT_BRIDGE_PORT`].
     #[cfg(feature = "native")]
     pub fn with_device(mut self, device: Device) -> Self {
         self.device = Some(device);
         self
     }
 
-    /// What the run does about Semio Studio when [`run`](AroraBuilder::run)
-    /// fills the default bridge: a runner built with Studio passes what its
-    /// command line says ([`StudioArgs::choice`](studio::StudioArgs::choice)),
-    /// Studio unless `--no-studio`. Without it, the run serves the open local
-    /// bridge, as a runner built without Studio does in a build where another
-    /// crate enables `studio-bridge`. See
-    /// [whether a run connects](studio#whether-a-run-connects).
-    #[cfg(feature = "studio-bridge")]
-    pub fn with_studio(mut self, choice: studio::Choice) -> Self {
-        self.studio = Some(choice);
-        self
-    }
-
     /// Run the assembled device to completion with the standard operator flow:
     /// pick the front end (the injected one, else terminal UI or headless by
-    /// terminal detection), fill the default bridge when none was injected,
-    /// default any other unset seam (a private `SimpleDataStore`, the fake
-    /// HAL, an empty interpreter), and drive the step loop.
+    /// terminal detection), serve the open local bridge when no bridge was
+    /// given, default any other unset seam (a private `SimpleDataStore`, the
+    /// fake HAL, an empty interpreter), and drive the step loop.
     ///
-    /// The default bridge is the open local bridge, on the port of the device
-    /// [`with_device`](Self::with_device) gives, unless the `studio-bridge`
-    /// feature is on and the runner hands Studio to `with_studio`, as
-    /// `arora::studio` says. A run that connects enrolls a device that is not
-    /// enrolled with Studio: under the terminal UI, the operator names it and
-    /// is shown the code a person approves it with in Studio.
+    /// The open local bridge serves on the port of the device
+    /// [`with_device`](Self::with_device) gives. A runner built with Semio
+    /// Studio gives the device's Studio bridge instead, and enrolls a device
+    /// that is not enrolled beside the run, through the front end's enroller,
+    /// as `arora::studio` says.
     ///
     /// **Stopping is dropping**: everything the run holds — the front end (and
     /// its terminal takeover), the device, its bridges and their servers —
@@ -1227,28 +1204,8 @@ impl AroraBuilder {
             None => run::standard_frontend(),
         };
         if self.bridges.is_empty() {
-            #[cfg(feature = "studio-bridge")]
-            {
-                // The device reports to Studio the model family and versions
-                // its HAL describes.
-                let description = match &self.hal {
-                    Some(hal) => hal.describe().await,
-                    None => arora_hal::HalDescription::default(),
-                };
-                let bridge = studio::default_bridge(
-                    &frontend,
-                    &description,
-                    self.studio.unwrap_or(studio::Choice::Local),
-                    self.device.take(),
-                )
-                .await?;
-                self = self.with_bridge(bridge);
-            }
-            #[cfg(not(feature = "studio-bridge"))]
-            {
-                let bridge = run::local_ws_bridge_on(self.device.as_ref()).await?;
-                self = self.with_bridge(bridge);
-            }
+            let bridge = run::local_ws_bridge_on(self.device.as_ref()).await?;
+            self = self.with_bridge(bridge);
         }
         run::run_builder_with_frontend(self, frontend).await
     }

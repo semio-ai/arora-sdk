@@ -4,8 +4,9 @@
 //! It reads its configuration from its options and the environment (the
 //! device's name, directory and local bridge port, Firebase options, Zenoh
 //! endpoints), loads the modules in its device directory and those `--module`
-//! names, serves the open local bridge, and runs the arora runtime. A `studio-bridge` build connects to Semio Studio
-//! over Zenoh instead, unless the run passes `--no-studio`. [`arora::RunnerArgs`]
+//! names, serves the open local bridge, and runs the arora runtime. A
+//! `studio-bridge` build serves the device's Semio Studio bridge instead,
+//! unless the run passes `--no-studio`. [`arora::RunnerArgs`]
 //! documents the device options and their variables, `arora::studio` the
 //! Studio connection's.
 //!
@@ -40,9 +41,12 @@ async fn main() -> anyhow::Result<()> {
     // The front end first: building it installs the log sink, so what the
     // module loading below says — the directories it reads, a deprecated
     // variable it honours — is captured like the rest of the run.
+    let frontend = arora::standard_frontend();
+    #[cfg(feature = "studio-bridge")]
+    let enroller = frontend.operator.clone().enroller();
     let mut builder = arora::Arora::builder()
         .with_data_store(Box::new(store))
-        .with_frontend(arora::standard_frontend());
+        .with_frontend(frontend);
     // The device the run is: its name, its directory, its local bridge's port.
     let device = cli.runner.device()?;
     // The modules the device carries: its device directory's, then `--module`'s.
@@ -52,12 +56,7 @@ async fn main() -> anyhow::Result<()> {
     // the record does not match it.
     builder = builder
         .with_module_dirs(device.dir(), &cli.runner.module)
-        .await?
-        .with_device(device);
-    #[cfg(feature = "studio-bridge")]
-    {
-        builder = builder.with_studio(cli.studio.choice());
-    }
+        .await?;
     // A Groot file is the device's behavior: the build resolves its tags
     // against the method index it assembles — the native nodes and the
     // functions of every module the device carries — and fails when the tree
@@ -70,5 +69,22 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("Groot file {} does not parse: {e:?}", path.display()))?;
         builder = builder.with_groot(xml);
     }
-    builder.run().await
+    // Built with Studio, the run's bridge is the device's Studio bridge,
+    // reporting the fake HAL's model, unless the run passes `--no-studio`;
+    // the device enrolls beside the run, through the front end's enroller,
+    // the enrollment's end failing the run.
+    #[cfg(feature = "studio-bridge")]
+    if cli.studio.connects() {
+        let model = arora::studio::reported_model(&arora_hal::HalDescription::default());
+        let (bridge, handle) = arora::studio::of(&device)?.bridge(model);
+        let run = builder
+            .with_bridge(Box::new(bridge))
+            .with_device(device)
+            .run();
+        return tokio::select! {
+            ran = run => ran,
+            ended = handle.enroll_when_needed(&*enroller) => Err(ended.into()),
+        };
+    }
+    builder.with_device(device).run().await
 }

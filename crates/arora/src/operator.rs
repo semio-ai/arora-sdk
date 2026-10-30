@@ -1,11 +1,11 @@
 //! The operator interface — how a running arora asks whoever operates the
 //! device for input and decisions, independently of *how* they are asked.
 //!
-//! An [`Operator`] answers two kinds of questions: free-text prompts (the
-//! device's name when it enrolls with Semio Studio) and access decisions (a
-//! remote client asking to join the session — see
-//! [`arora_bridge::AccessRequest`]). It also shows what a person acts on
-//! elsewhere: the [`EnrollmentCode`] that enrolls the device with Studio.
+//! An [`Operator`] answers two kinds of questions: free-text prompts and
+//! access decisions (a remote client asking to join the session — see
+//! [`arora_bridge::AccessRequest`]). In a `studio-bridge` build, it also gives
+//! the `studio::Enroller` presenting the device's enrollment with Semio
+//! Studio (`Operator::enroller`).
 //! Implementations decide the medium:
 //!
 //! - [`crate::tui`]'s handle renders them in the terminal UI's prompt line;
@@ -83,17 +83,6 @@ pub struct AccessRuling {
     pub remember: bool,
 }
 
-/// A code that enrolls the device with Semio Studio: a person enters it in
-/// Studio, or opens its approval page, and chooses the device's owner.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnrollmentCode {
-    /// The code, `XXXX-XXXX`.
-    pub code: String,
-    /// The Studio page that approves it, when the device knows Studio's web
-    /// address (`STUDIO_URL`, or the one baked into the Studio client).
-    pub approval_url: Option<String>,
-}
-
 /// Whoever (or whatever) answers the device's questions.
 #[async_trait]
 pub trait Operator: Send + Sync {
@@ -106,17 +95,16 @@ pub trait Operator: Send + Sync {
     /// allowing after [`DEFAULT_ACCESS_GRACE`]).
     async fn decide_access(&self, request: &AccessRequestSummary) -> AccessRuling;
 
-    /// Show `code` until the next call, which shows the code replacing it
-    /// when it expires undecided, or `None` once the enrollment ends. Nothing
-    /// is awaited: a person acts on it in Studio.
-    ///
-    /// Returns whether the operator shows the code to a person. The run
-    /// waits on someone seeing it, so a code the operator does not show goes
-    /// to standard error unless the run's log shows info lines. The default
-    /// shows nothing and returns `false`.
-    fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
-        let _ = code;
-        false
+    /// The enroller presenting the device's enrollment with Semio Studio
+    /// through this operator, which a runner hands
+    /// [`StudioHandle::enroll_when_needed`](crate::studio::StudioHandle::enroll_when_needed),
+    /// as [`arora::studio`](crate::studio#enrollment) says. The terminal UI
+    /// asks and shows in its prompt line and header. The default is the
+    /// [`UnattendedEnroller`](crate::studio::UnattendedEnroller), which asks
+    /// nobody and logs each code.
+    #[cfg(feature = "studio-bridge")]
+    fn enroller(self: Arc<Self>) -> Arc<dyn crate::studio::Enroller> {
+        Arc::new(crate::studio::UnattendedEnroller)
     }
 }
 
@@ -174,13 +162,6 @@ impl Operator for UnattendedOperator {
 pub struct Frontend {
     /// Who answers the device's questions.
     pub operator: Arc<dyn Operator>,
-    /// Whether a human actually answers this front end's prompts (the terminal
-    /// UI), as opposed to the [`UnattendedOperator`], which never does. A run
-    /// enrolling the device with Studio asks the operator for the device's
-    /// name, and shows it the enrollment code, only when this is true, and
-    /// takes the name from the environment otherwise — so a headless device
-    /// never blocks waiting on input nobody will type.
-    pub interactive: bool,
     /// Called once, after the runtime and bridge are up, with a subscription to
     /// the device's state, the registered device info, and the backend device
     /// id.
@@ -200,7 +181,6 @@ pub fn default_frontend() -> Frontend {
     let _ = env_logger::try_init();
     Frontend {
         operator: Arc::new(UnattendedOperator::default()),
-        interactive: false,
         on_ready: Box::new(|_state, _info, _device_id| {}),
     }
 }

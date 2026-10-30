@@ -1000,8 +1000,9 @@ unknown verb is an error.
 - **Building with Studio is the opt-in.** A runtime built with its Studio
   feature connects to Studio unless a run passes `--no-studio`; a build
   without it has no Studio code and no Studio flag. When the device's name
-  has no credential, the run enrolls first
-  ([#423](https://github.com/semio-ai/arora-sdk/pull/423)).
+  has no credential, the device runs and enrolls while it runs
+  ([#423](https://github.com/semio-ai/arora-sdk/pull/423),
+  [#442](https://github.com/semio-ai/arora-sdk/pull/442)).
 - **A device's local name is the key between `arora` and its enrollment.**
   Enrollment is Studio's; arora is the framework that sets it up: it names
   the device, decides when a run must enroll, and its operator names the

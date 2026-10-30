@@ -258,7 +258,7 @@ describes the JavaScript surface.
 | --- | --- | --- | --- |
 | `arora` | `native` | on | The wasmtime and native-library engine hosts, the local WebSocket bridge and the `arora` binary. Off for `wasm32`. |
 | `arora` | `tui` | on | The terminal operator interface the binary uses on an interactive terminal. |
-| `arora` | `studio-bridge` | off | The Semio Studio connection: `arora-studio-bridge-client` and the device's enrollment. A binary built with it connects to Studio unless its run passes `--no-studio`. |
+| `arora` | `studio-bridge` | off | The Semio Studio connection: `arora-studio-bridge-client` and the device's enrollment. A binary built with it serves the device's Studio bridge unless its run passes `--no-studio`, the device enrolling while it runs. |
 | `arora-engine` | `wasmtime-host`, `native-host` | on | The component executor (wasmtime) and the native-library executor. Off for `wasm32`. |
 | `arora-hal-ros2` | `dds`, `zenoh` | `dds` | The ROS 2 middleware; exactly one. |
 | `arora-hal-ros2` | `runner` | off | The `arora-ros2` binary. |

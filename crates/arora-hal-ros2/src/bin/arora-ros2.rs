@@ -11,10 +11,11 @@
 //! overrides the config's domain id.
 //!
 //! The device serves the open local bridge. Built with the `studio` feature, it
-//! connects to Semio Studio instead, enrolling a device that is not enrolled
-//! with Studio first, unless the run passes `--no-studio`. Its enrollment and
-//! credential are arora's (`arora::studio`), the credential kept under the
-//! device's name.
+//! serves its Semio Studio bridge instead, unless the run passes
+//! `--no-studio`: the device runs at once, and a device that is not enrolled
+//! with Studio enrolls while it runs, as `arora::studio` says: the device
+//! client enrolls it, presented by the run's front end, and the credential is
+//! kept under the device's name.
 //!
 //! `--device`, `--device-dir` and `--bridge-port` (`ARORA_DEVICE`,
 //! `ARORA_DEVICE_DIR`, `ARORA_BRIDGE_PORT`) give the device the run is: its
@@ -82,20 +83,43 @@ async fn main() -> anyhow::Result<()> {
     // module loading and the HAL say is captured like the rest of the run. The
     // modules the device carries are read before the robot is reached: a
     // module directory that does not read fails the start at once.
-    let builder = Arora::builder().with_frontend(arora::standard_frontend());
+    let frontend = arora::standard_frontend();
+    #[cfg(feature = "studio")]
+    let enroller = frontend.operator.clone().enroller();
+    let builder = Arora::builder().with_frontend(frontend);
     let device = cli.runner.device()?;
     let builder = builder
         .with_module_dirs(device.dir(), &cli.runner.module)
-        .await?
-        .with_device(device);
-    #[cfg(feature = "studio")]
-    let builder = builder.with_studio(cli.studio.choice());
+        .await?;
     // One runtime carries everything: the HAL's ROS tasks spawn on it at
     // construction, and arora drives the device on it.
     let hal = Ros2Hal::new(config)
         .await
         .map_err(|e| anyhow::anyhow!("failed to start the ROS 2 HAL: {e}"))?;
-    builder.with_hal(Box::new(hal)).run().await
+    // Built with `studio`, the run's bridge is the device's Studio bridge,
+    // reporting the model the HAL describes, unless the run passes
+    // `--no-studio`; the device enrolls beside the run, through the front
+    // end's enroller, the enrollment's end failing the run.
+    #[cfg(feature = "studio")]
+    if cli.studio.connects() {
+        use arora_hal::Hal;
+        let model = arora::studio::reported_model(&hal.describe().await);
+        let (bridge, handle) = arora::studio::of(&device)?.bridge(model);
+        let run = builder
+            .with_bridge(Box::new(bridge))
+            .with_device(device)
+            .with_hal(Box::new(hal))
+            .run();
+        return tokio::select! {
+            ran = run => ran,
+            ended = handle.enroll_when_needed(&*enroller) => Err(ended.into()),
+        };
+    }
+    builder
+        .with_device(device)
+        .with_hal(Box::new(hal))
+        .run()
+        .await
 }
 
 #[cfg(test)]
@@ -173,16 +197,15 @@ mod tests {
     #[cfg(feature = "studio")]
     #[test]
     fn a_run_connects_to_studio_unless_it_passes_no_studio() {
-        use arora::studio::Choice;
-        let choice = |args: &[&str]| {
+        let connects = |args: &[&str]| {
             Cli::try_parse_from(args.iter().copied())
                 .expect("the command line parses")
                 .studio
-                .choice()
+                .connects()
         };
-        assert_eq!(choice(&["arora-ros2", "nao"]), Choice::Studio);
-        assert_eq!(choice(&["arora-ros2", "--no-studio", "nao"]), Choice::Local);
-        assert_eq!(choice(&["arora-ros2", "nao", "--no-studio"]), Choice::Local);
+        assert!(connects(&["arora-ros2", "nao"]));
+        assert!(!connects(&["arora-ros2", "--no-studio", "nao"]));
+        assert!(!connects(&["arora-ros2", "nao", "--no-studio"]));
         let error = Cli::try_parse_from(["arora-ros2", "--studio", "nao"])
             .expect_err("--studio is refused");
         assert_eq!(error.kind(), ErrorKind::UnknownArgument);

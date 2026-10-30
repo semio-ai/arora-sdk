@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "14.0.0"
+version = "15.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -16,7 +16,7 @@ arora-engine = { path = "../arora-engine", version = "7", default-features = fal
 arora-types = { path = "../arora-types", version = "3" }
 # Without default features: the browser engine host and a Tokio-free runtime.
 # 17: the `Arora`/`AroraBuilder` this crate's API carries.
-arora = { path = "../arora", version = "17", default-features = false }
+arora = { path = "../arora", version = "18", default-features = false }
 # 2.1: the records layout `withRecords` loads.
 arora-registry = { path = "../arora-registry", version = "2.1" }
 # 6.1: `arora_bridge::client`. 6.3: on arora-behavior 10.

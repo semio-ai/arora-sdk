@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "17.0.0"
+version = "18.0.0"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior"
-version = "10.0.0"
+version = "10.1.0"
 dependencies = [
  "arora-types",
  "semver",
@@ -228,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "arora-behavior-tree"
-version = "10.0.0"
+version = "10.1.0"
 dependencies = [
  "arora-behavior",
  "arora-behavior-tree-types",
@@ -427,9 +427,9 @@ dependencies = [
 
 [[package]]
 name = "arora-studio-bridge-client"
-version = "11.1.0"
+version = "11.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "707dc2288552886712120553741f2459d216aaffdcb04f6f018bc8253574c8af"
+checksum = "a3d5a2a5d2c5b7c45622cee1163b09edc94b0d3f90fab09dd28906af76a8bf28"
 dependencies = [
  "arora-bridge",
  "arora-types",

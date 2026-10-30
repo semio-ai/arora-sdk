@@ -237,8 +237,9 @@ feature has it, and a run of that build connects unless it passes
        --studio-model assets/microduck/studio-model.glb
    ```
 
-   The first run enrolls the device: the terminal asks for its name and shows
-   a code to enter in Studio.
+   The device runs at once and, the first time, enrolls while it runs: the
+   terminal asks whether to enroll it and its name, and shows a code to
+   enter in Studio.
 4. In a Studio project with the Microduck model, pair the device from the
    **Connections** sidebar: the duck in the scene walks with the simulated
    one. On the device's **Live Data** page, add the command keys and drive.
