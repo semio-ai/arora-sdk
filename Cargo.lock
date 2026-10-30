@@ -265,6 +265,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-behavior-tree-bench"
+version = "0.1.0"
+dependencies = [
+ "arora-behavior",
+ "arora-behavior-tree",
+ "arora-dataflow-nodes",
+ "arora-simple-data-store",
+ "arora-types",
+ "say-silent",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "arora-behavior-tree-types"
 version = "3.0.0"
 dependencies = [

@@ -1,0 +1,33 @@
+[package]
+name = "arora-behavior-tree-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Behavior-tree executor benchmark library and native/WASI harnesses."
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bench]]
+name = "workload"
+harness = false
+
+[[bench]]
+name = "scale"
+harness = false
+
+[features]
+# Additional fixtures and a virtual clock for the WASI agreement checks only.
+bench-check = []
+
+[dependencies]
+arora-dataflow-nodes = { path = "../arora-dataflow-nodes", default-features = false }
+say-silent = { path = "../../modules/say-silent" }
+arora-behavior = { path = "../arora-behavior" }
+arora-behavior-tree = { path = "../arora-behavior-tree" }
+arora-simple-data-store = { path = "../arora-simple-data-store" }
+arora-types = { path = "../arora-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = "1"
