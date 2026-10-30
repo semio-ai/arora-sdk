@@ -266,11 +266,13 @@ them. `SPAWN`, `SPAWN_GRAPH` and `HALT` are described, under the names
 A client that shows the behavior — an editor attached to a running device —
 calls `READ` (`LocalCaller::read_behavior`) and follows the key
 `arora/behavior/revision`, which the interpreter writes at the tick after each
-load or edit of the behavior: when it differs from the revision the client
-read, another client changed the behavior, and the client reads it again. A
-trace's report carries the same revision after a change. A call from inside the interpreter's own tick
-fails with "the behavior is being ticked; call between steps": the step holds
-the interpreter for the length of the tick. `Arora::load_groot` and
+change of the behavior: when it differs from the revision the client read,
+another client changed the behavior, and the client reads it again. A trace's
+report carries the same revision after a change.
+
+A call from inside the interpreter's own tick fails with "the behavior is
+being ticked; call between steps": the step holds the interpreter for the
+length of the tick. `Arora::load_groot` and
 `AroraBuilder::with_groot` lower a Groot tree against the method index and
 `LOAD` it.
 

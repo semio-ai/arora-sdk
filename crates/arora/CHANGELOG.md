@@ -15,7 +15,7 @@ All notable changes to `arora`. The format follows
   do, and its id is reserved: an interpreter cannot describe a method under
   it.
 - The default interpreter writes the behavior's revision to
-  `arora/behavior/revision` at the step after each load or edit, closed to
+  `arora/behavior/revision` at the step after each change of the behavior, closed to
   remote writers with the runtime's other keys: a client follows it to learn
   that another client changed the behavior.
 

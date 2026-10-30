@@ -11,8 +11,8 @@ All notable changes to `arora-behavior`. The format follows
 - `BehaviorInterpreter::read`, answering the main behavior as a
   `LoadedBehavior { revision, graph }`: the graph a `load` of it reproduces
   (no node of the interpreter's own, none of a task run's, the root as
-  loaded), and its revision, which each `load` and each `apply` that changes
-  the main behavior advances by one. It defaults to refusing.
+  loaded), and its revision, which each `load` and each other change of that
+  graph advances by one. It defaults to refusing.
 - `interpreter_module::READ`, its call with no argument, and
   `encode_read`, `decode_read`, `encode_read_result` and
   `decode_read_result`. The answer is a key-value of a `u64` `revision` and

@@ -96,9 +96,10 @@ pub enum BehaviorStatus {
 #[serde(deny_unknown_fields)]
 pub struct LoadedBehavior {
     /// The behavior's revision: 0 before anything is loaded, then one more at
-    /// each [`load`](BehaviorInterpreter::load) and at each
-    /// [`apply`](BehaviorInterpreter::apply) that changes the main behavior.
-    /// Task runs started, edited or halted leave it as it is.
+    /// each [`load`](BehaviorInterpreter::load) and at each other change of
+    /// [`graph`](Self::graph) — an [`apply`](BehaviorInterpreter::apply), or a
+    /// task run ending that takes with it a binding of the main behavior
+    /// reading it. What leaves the graph as it was leaves the revision.
     pub revision: u64,
     /// The main behavior: the graph a [`load`](BehaviorInterpreter::load)
     /// of it reproduces, with no node of the interpreter's own and none of a
@@ -222,9 +223,11 @@ pub trait BehaviorInterpreter {
     /// as loaded or as the last edit set it. Reading changes nothing.
     ///
     /// An interpreter that answers it keeps the revision: one more at each
-    /// `load`, and at each `apply` that changes the main behavior — not at a
-    /// refused one, nor at a spawn, a halt, an edit of a task run's nodes or a
-    /// tick. It writes the revision to
+    /// `load`, and at each other change of the graph it answers — an `apply`
+    /// that changes it, or a task run ending that takes with it a binding of
+    /// the main behavior reading it. A refused `apply`, one that changes only
+    /// a task run, a spawn, a halt that unbinds nothing of the main behavior,
+    /// and a tick leave it as it is. It writes the revision to
     /// [`built_in::BEHAVIOR_REVISION`] at its first tick and at the tick
     /// after each change, and each of its traces' reports carries it when it
     /// changed since that trace's previous report
