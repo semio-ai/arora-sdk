@@ -582,8 +582,8 @@ pub(crate) fn with_interpreter_value(
 }
 
 /// A task run the device started, followed to its end so the log says how it
-/// started and ended. The interpreter module's `SPAWN` and `SPAWN_GRAPH` add
-/// one, its `HALT` marks it, and each step reads its status key once, after
+/// started and ended. The interpreter module's `SPAWN`, `SPAWN_GRAPH` and
+/// `TRACE` add one, its `HALT` marks it, and each step reads its status key once, after
 /// the behavior ticked.
 pub(crate) struct TaskRun {
     pub id: TaskId,
@@ -610,6 +610,8 @@ pub(crate) enum RunCalls {
     },
     /// The functions the nodes of the graph it was spawned with name.
     Graph { functions: Vec<Uuid> },
+    /// Nothing: the run is a trace of the behavior.
+    Trace,
 }
 
 impl TaskRun {
@@ -634,6 +636,7 @@ impl TaskRun {
                 function,
             } => *called == Some(module) && exports.contains(function),
             RunCalls::Graph { functions } => functions.iter().any(|f| exports.contains(f)),
+            RunCalls::Trace => false,
         }
     }
 }
@@ -692,6 +695,7 @@ fn report_task_runs(store: &dyn DataStore, runs: &TaskRuns, functions: &Function
             RunCalls::Graph { functions } => {
                 format!("a graph naming {} function(s)", functions.len())
             }
+            RunCalls::Trace => "a trace of the behavior".to_string(),
         };
         log::info!("task {} started: {label}, {:?} run", run.id.0, run.policy);
         run.label = Some(label);

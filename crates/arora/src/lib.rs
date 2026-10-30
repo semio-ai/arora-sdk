@@ -720,6 +720,19 @@ impl LocalCaller {
         async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
     }
 
+    /// Start a trace of the device's behavior under `options`, answering with
+    /// its handle like [`spawn`](Self::spawn): each step that changes what the
+    /// trace follows writes an
+    /// [`arora_behavior::TraceReport`] to the handle's feedback key, until the
+    /// trace is [halted](Self::halt). An interpreter that cannot trace refuses.
+    pub fn trace(
+        &self,
+        options: &arora_behavior::TraceOptions,
+    ) -> impl Future<Output = Result<TaskHandle, CallError>> + Send + 'static {
+        let reply = self.ask(BridgeOp::Call(interpreter_module::encode_trace(options)));
+        async move { interpreter_module::decode_spawn_result(&reply.await?.ret).map_err(generic) }
+    }
+
     /// Stop the run `run` names: it ends `Failure` on the step after the halt is
     /// applied. Idempotent — halting a finished or unknown run is a clean no-op.
     pub fn halt(
@@ -1369,6 +1382,7 @@ impl AroraBuilder {
             interpreter_module::EDIT,
             interpreter_module::SPAWN,
             interpreter_module::SPAWN_GRAPH,
+            interpreter_module::TRACE,
             interpreter_module::HALT,
         ];
         for (function_id, name, function) in &own {
@@ -1466,7 +1480,7 @@ impl AroraBuilder {
 
         // The interpreter as a module: a host module under
         // `interpreter_module::ID` whose `LOAD`/`EDIT`/`SPAWN`/`SPAWN_GRAPH`/
-        // `HALT` functions
+        // `TRACE`/`HALT` functions
         // run on the same cell the step loop ticks. A Call to those ids — from a
         // remote or from a behavior — reaches the interpreter through the
         // engine's normal dispatch, like any module function.
@@ -1578,6 +1592,30 @@ impl AroraBuilder {
                             }
                             None => runs.push(runtime::TaskRun::started(&handle, calls, policy)),
                         }
+                    }
+                    Ok(result)
+                }
+            })
+            .function(interpreter_module::TRACE, {
+                let cell = interpreter.clone();
+                let task_runs = task_runs.clone();
+                move |call| {
+                    let options = interpreter_module::decode_trace(&call)
+                        .map_err(|message| CallError::Guest { message })?;
+                    let mut handle = None;
+                    let result = runtime::with_interpreter_value(&cell, |interpreter| {
+                        interpreter.trace(options).map(|started| {
+                            let value = interpreter_module::encode_spawn_result(&started);
+                            handle = Some(started);
+                            value
+                        })
+                    })?;
+                    if let Some(handle) = handle {
+                        task_runs.borrow_mut().push(runtime::TaskRun::started(
+                            &handle,
+                            runtime::RunCalls::Trace,
+                            arora_behavior::RunPolicy::Concurrent,
+                        ));
                     }
                     Ok(result)
                 }
@@ -3307,6 +3345,64 @@ mod caller_tests {
             arora.store().read(std::slice::from_ref(&handle.status)),
             vec![Some(failure)],
             "a halted run ends Failure"
+        );
+    }
+
+    /// A call to the interpreter module's `TRACE` answers a handle, and each
+    /// step that changes the behavior writes a report to its feedback key,
+    /// until a halt ends the trace.
+    #[test]
+    fn a_trace_reports_the_behavior_until_halted() {
+        let mut arora = device();
+        let caller = arora.caller();
+        let trace = settle(
+            &mut arora,
+            caller.trace(&arora_behavior::TraceOptions::default()),
+        )
+        .expect("the default interpreter traces");
+        assert_eq!(arora.task_runs.borrow().len(), 1, "the trace is followed");
+        let report = |arora: &Arora| {
+            arora
+                .store()
+                .read(std::slice::from_ref(&trace.feedback[0]))
+                .remove(0)
+                .map(|value| arora_behavior::trace::decode_report(&value).expect("a report"))
+        };
+        // The step that applied the call ticked the behavior: its first
+        // report is written.
+        let first = report(&arora).expect("the first step is reported");
+        let running: Value = Status::Running.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&trace.status)),
+            vec![Some(running)]
+        );
+
+        // A run spawned beside the behavior: its nodes are reported.
+        let graph_type = arora_behavior_tree::behavior::graph_type();
+        let graph = doubling_graph(2.0);
+        settle(&mut arora, caller.spawn_graph(&graph_type, &graph)).expect("the run starts");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let spawned = report(&arora).expect("a report");
+        assert!(spawned.tick > first.tick);
+        assert_eq!(
+            spawned.status.get(&graph.root.unwrap()),
+            Some(&arora_behavior::NodeStatus::Running),
+            "{spawned:?}"
+        );
+
+        settle(&mut arora, caller.halt(trace.id)).expect("the halt is applied");
+        arora.step(Duration::from_millis(10)).expect("step");
+        let failure: Value = Status::Failure.into();
+        assert_eq!(
+            arora.store().read(std::slice::from_ref(&trace.status)),
+            vec![Some(failure)],
+            "a halted trace ends Failure"
+        );
+        assert_eq!(report(&arora), Some(spawned), "and reports no more");
+        assert_eq!(
+            arora.task_runs.borrow().len(),
+            1,
+            "only the run is followed"
         );
     }
 
