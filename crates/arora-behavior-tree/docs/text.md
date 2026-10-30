@@ -267,7 +267,7 @@ A behavior is written in three forms, one per kind of reader:
 |---|---|---|
 | Text (`.bt`) | writing and reading behaviors | The tree shows as indentation and a binding as an argument, everything by name. |
 | [Readable graph or diff](#readable-graphs-and-diffs), JSON or YAML | files people write, read or review in git — fixtures, examples, hand-made diffs — and tools working on a graph's structure | It is the shared model field by field, with a name wherever a person reads a reference. |
-| Graph or diff by ids, JSON or YAML | the machine world: `LOAD`, `EDIT` and `SPAWN_GRAPH` payloads, graphs programs exchange or store, and wherever a name may be ambiguous or renamed | An id means one thing on every device and after every rename. |
+| Graph or diff by ids, JSON or YAML | the machine world: `LOAD`, `EDIT` and `SPAWN_GRAPH` payloads, `READ` answers, graphs programs exchange or store, and wherever a name may be ambiguous or renamed | An id means one thing on every device and after every rename. |
 
 A payload to the interpreter module is by ids: whoever holds the function
 index resolves names before sending. A name means what the functions the
