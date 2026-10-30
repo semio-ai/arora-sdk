@@ -84,7 +84,7 @@ use std::rc::Rc;
 use arora_behavior::graph::{source_port, Graph, GraphDiff, GraphType, Node as GraphNode, Source};
 use arora_behavior::{
     interpreter_module, BehaviorContext, BehaviorError, BehaviorInterpreter, BehaviorStatus,
-    RunPolicy, TaskHandle, TaskId,
+    RunPolicy, TaskHandle, TaskId, TraceOptions,
 };
 use arora_types::call::Call;
 use arora_types::data::{DataStore, Key, StateChange};
@@ -100,6 +100,7 @@ use crate::nodes::{
     RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
 };
 use crate::schema::_RET_PARAM_ID;
+use crate::trace::Traces;
 use crate::variable::VariableResolver;
 use crate::{lower_behavior_tree, schema_groot, FunctionIndex, LoweredTree};
 use arora_behavior::Status;
@@ -176,6 +177,10 @@ pub struct BehaviorTreeInterpreter {
     /// The device's function index as of the last lowering: a run's detached
     /// nodes are lowered against it before the run is accepted.
     functions: FunctionIndex,
+    /// The running traces.
+    traces: Traces,
+    /// The ticks so far: the tick a trace's report names.
+    ticks: u64,
 }
 
 /// Bind a `{var}` name to the store slot under that name — the Direct
@@ -417,6 +422,8 @@ impl BehaviorTreeInterpreter {
             dirty: true,
             fresh: HashSet::new(),
             functions: FunctionIndex::new(),
+            traces: Traces::default(),
+            ticks: 0,
         }
     }
 
@@ -436,6 +443,14 @@ impl BehaviorTreeInterpreter {
             .map_err(|e| crate::error::BehaviorTreeError::InconsistentTreeError {
                 message: e.to_string(),
             })
+    }
+
+    /// Whether the lowered tree records what its ticks do.
+    #[cfg(test)]
+    pub(crate) fn records(&self) -> bool {
+        self.lowered
+            .as_ref()
+            .is_some_and(|lowered| lowered.tree().record.is_on())
     }
 
     /// The scaffold graph: the runner, the loaded behavior, and every task-run
@@ -726,6 +741,7 @@ impl BehaviorTreeInterpreter {
 
 impl BehaviorInterpreter for BehaviorTreeInterpreter {
     fn tick(&mut self, ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
+        self.ticks += 1;
         // The halted runs' terminal status first: this tick owns the store.
         self.write_halts(ctx.store)?;
 
@@ -747,7 +763,26 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
             if let Some(previous) = self.lowered.take() {
                 lowered.tree().keep_state(previous.tree(), &self.fresh);
                 previous.unregister(ctx.call_bridge);
+                // The nodes the change restarted, that were and still are in
+                // the tree: the traces state them anew. The runner is set
+                // again by every change, to list its children; it holds no
+                // state.
+                if !self.traces.is_empty() {
+                    let mut restarted: Vec<Uuid> = self
+                        .fresh
+                        .iter()
+                        .filter(|id| {
+                            **id != self.runner
+                                && previous.tree().node_index.contains_key(id)
+                                && lowered.tree().node_index.contains_key(id)
+                        })
+                        .copied()
+                        .collect();
+                    restarted.sort_unstable();
+                    self.traces.restart(&restarted);
+                }
             }
+            lowered.tree().record.set_on(!self.traces.is_empty());
             self.fresh.clear();
             self.lowered = Some(lowered);
             self.dirty = false;
@@ -757,11 +792,29 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         // One runtime tick is one tree tick. The runner's own status is not an
         // interpreter outcome — the scaffold is a standing policy, so the
         // interpreter stays `Running` (it is never dropped).
-        if let Some(lowered) = &self.lowered {
-            lowered
+        let ticked = match &self.lowered {
+            Some(lowered) => lowered
                 .tick(ctx.call_bridge)
-                .map_err(|e| behavior_error(format!("behavior tree: {e:?}")))?;
+                .map(|_| ())
+                .map_err(|e| behavior_error(format!("behavior tree: {e:?}"))),
+            None => Ok(()),
+        };
+
+        // What the tick did, to the traces: a failed tick's too.
+        if !self.traces.is_empty() {
+            if let Some(lowered) = &self.lowered {
+                self.traces
+                    .report(
+                        self.ticks,
+                        &lowered.tree().record,
+                        Some(lowered.tree()),
+                        &self.functions,
+                        ctx.store,
+                    )
+                    .map_err(behavior_error)?;
+            }
         }
+        ticked?;
 
         // Runs that reached a terminal status this tick latch and await
         // pruning; their ids stop resolving (halting them is now a no-op).
@@ -987,7 +1040,43 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
         )
     }
 
+    fn trace(&mut self, options: TraceOptions) -> Result<TaskHandle, BehaviorError> {
+        // A trace is a run of the interpreter module's trace function: its
+        // keys are laid out as a spawned run's.
+        let task = TaskId(Uuid::new_v4());
+        let prefix = format!(
+            "arora/tasks/{}/{}/{}",
+            interpreter_module::ID,
+            interpreter_module::TRACE,
+            task.0
+        );
+        let handle = TaskHandle {
+            id: task,
+            stop: interpreter_module::encode_halt(task),
+            status: Key::from(format!("{prefix}/status")),
+            feedback: vec![Key::from(format!("{prefix}/feedback"))],
+            result: vec![Key::from(format!("{prefix}/result"))],
+            update: vec![Key::from(format!("{prefix}/update"))],
+        };
+        self.traces.start(handle.clone(), options);
+        if let Some(lowered) = &self.lowered {
+            lowered.tree().record.set_on(true);
+        }
+        Ok(handle)
+    }
+
     fn halt(&mut self, task: TaskId) -> Result<(), BehaviorError> {
+        // A trace ends at once; its terminal status is written on the next
+        // tick, as a halted run's is.
+        if let Some(status) = self.traces.halt(task) {
+            if self.traces.is_empty() {
+                if let Some(lowered) = &self.lowered {
+                    lowered.tree().record.set_on(false);
+                }
+            }
+            self.halted.push(status);
+            return Ok(());
+        }
         // The fragment leaves the graph now, so a spawn reusing its node ids
         // can follow at once; the terminal status is written on the next
         // tick, which owns the store. Idempotent — halting an unknown or

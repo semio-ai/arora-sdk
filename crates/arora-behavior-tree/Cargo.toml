@@ -20,6 +20,10 @@ harness = false
 name = "text"
 harness = false
 
+[[bench]]
+name = "trace"
+harness = false
+
 [dependencies]
 arora-buffers = { path = "../arora-buffers", version = "3" }
 arora-behavior = { path = "../arora-behavior", version = "10" }

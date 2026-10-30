@@ -179,7 +179,9 @@ would leave held.
 The behavior `load` gives is the runner's first child; `apply` edits it;
 `spawn` and `spawn_graph` start **task runs** beside it, each under a
 decorator that publishes its status to the run's status key; `halt` removes
-a run. Everything it runs is ordinary graph data, visible through `graph()`.
+a run. `trace` starts a trace: the nodes it ticks and the detached nodes it
+reads record what they did, and each trace reports what changed
+([`arora-behavior`'s `docs/trace.md`](../arora-behavior/docs/trace.md)). Everything it runs is ordinary graph data, visible through `graph()`.
 An edit re-lowers the graph at the next tick, and every node the edit left in
 place keeps its state.
 

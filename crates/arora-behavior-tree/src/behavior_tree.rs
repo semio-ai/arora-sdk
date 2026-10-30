@@ -17,6 +17,9 @@ pub mod schema_groot;
 #[cfg(test)]
 mod tests;
 pub mod text;
+mod trace;
+#[cfg(test)]
+mod trace_tests;
 pub mod tree_node;
 pub mod variable;
 pub use arora_behavior::{FunctionIndex, ModuleFunction};
@@ -71,6 +74,8 @@ pub struct BehaviorTree {
     /// The names of the variables the tree was loaded with, by id: a tree
     /// built from a graph names each variable by the key it binds.
     variable_names: HashMap<Uuid, String>,
+    /// What each tick does, recorded while a trace runs.
+    record: Rc<trace::TickRecord>,
 }
 
 /// Where a data node writes, bound when the tree is loaded.
@@ -127,6 +132,40 @@ impl BehaviorTree {
         self.node_arg_variables
             .get(&NodeParameterId { node, parameter })
             .and_then(VariableCell::get)
+    }
+
+    /// The outputs of node `id` as they stand, by port: its return value
+    /// under [`_RET_PARAM_ID`] when it keeps one, and each parameter it
+    /// writes — a mutable parameter of its function in `functions`, or one a
+    /// native node writes. A detached node's are those of its last call. An
+    /// output that holds nothing is left out.
+    pub(crate) fn outputs_of(&self, id: Uuid, functions: &FunctionIndex) -> Vec<(Uuid, Value)> {
+        if self.detached.contains(id) {
+            return self
+                .detached
+                .outputs(id)
+                .map(|outputs| outputs.into_iter().collect())
+                .unwrap_or_default();
+        }
+        let Some(node) = self.node_index.get(&id) else {
+            return Vec::new();
+        };
+        let written = functions.get(&node.function).map_or_else(
+            || detached::native_writes(node.function).to_vec(),
+            |function| {
+                function
+                    .function
+                    .parameters
+                    .iter()
+                    .filter(|(_, parameter)| parameter.mutable)
+                    .map(|(id, _)| *id)
+                    .collect()
+            },
+        );
+        std::iter::once(_RET_PARAM_ID)
+            .chain(written)
+            .filter_map(|port| Some((port, self.argument_value(id, port)?)))
+            .collect()
     }
 
     /// Set the cell of `node`'s argument `parameter` to `value`, as a write
@@ -403,6 +442,7 @@ fn register_ticks(
         tree.node_arg_variables.clone(),
         tree.detached.clone(),
         &tree.outputs,
+        &tree.record,
         caller,
         if trace {
             TraceTick::YesAll
@@ -457,6 +497,7 @@ fn setup_tick_function(
     node_arg_variables: Rc<crate::id_hash::IdMap<NodeParameterId, VariableCell>>,
     detached: Rc<Detached>,
     outputs: &HashMap<Uuid, Outputs>,
+    record: &Rc<trace::TickRecord>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
     // Every callable registered on behalf of this (sub)tree, collected so the
@@ -486,6 +527,7 @@ fn setup_tick_function(
                 node_arg_variables.clone(),
                 detached.clone(),
                 outputs,
+                record,
                 caller,
                 trace,
                 callables,
@@ -507,6 +549,7 @@ fn setup_tick_function(
         detached,
         outputs: outputs.get(&node.id).cloned(),
         children: children_ticks,
+        record: record.clone(),
         trace,
     });
     let callable_id = caller.arora_register_callable(tick_function);
@@ -1122,12 +1165,14 @@ struct TickFunction {
     /// Where the node writes, for an `Unpack` or a `Scatter` node.
     outputs: Option<Outputs>,
     children: Vec<TickId>,
+    /// Where the node records the status it returns, while a trace runs.
+    record: Rc<trace::TickRecord>,
     trace: TraceTick,
 }
 
 impl Tickable for TickFunction {
     fn tick(&self, caller: &mut dyn CallBridge) -> Result<Status, BehaviorTreeError> {
-        tick(
+        let ticked = tick(
             caller,
             self.function.as_ref(),
             &self.calls,
@@ -1139,7 +1184,12 @@ impl Tickable for TickFunction {
             &self.children,
             self.node.clone(),
             self.trace,
-        )
+        );
+        if self.record.is_on() {
+            self.record
+                .status(self.node.id, *ticked.as_ref().unwrap_or(&Status::Failure));
+        }
+        ticked
     }
 }
 
@@ -1365,7 +1415,8 @@ pub fn load_behavior_tree_nodes_with(
             outputs.insert(node.id, bound);
         }
     }
-    let detached = Detached::new(detached_nodes, bindings);
+    let record = Rc::new(trace::TickRecord::default());
+    let detached = Detached::new(detached_nodes, bindings, record.clone());
 
     Ok(BehaviorTree {
         root: root.ok_or(BehaviorTreeError::InconsistentTreeError {
@@ -1377,6 +1428,7 @@ pub fn load_behavior_tree_nodes_with(
         outputs,
         detached: Rc::new(detached),
         variable_names: names.clone(),
+        record,
     })
 }
 
