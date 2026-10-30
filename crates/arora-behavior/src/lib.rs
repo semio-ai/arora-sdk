@@ -23,6 +23,8 @@
 //! holding its ports' bindings — and interpreters are edited by
 //! [`apply`](BehaviorInterpreter::apply)ing a [`graph::GraphDiff`]. Loading a
 //! behavior is applying a diff onto an empty graph. See [`graph`] for the model.
+//! [`read`](BehaviorInterpreter::read) answers the behavior as a client loads
+//! it, with its revision, which counts the loads and edits.
 //!
 //! Each tick an interpreter gets a [`BehaviorContext`]: the shared
 //! [`DataStore`](arora_types::data::DataStore) (read inputs, write intent /
@@ -42,6 +44,7 @@ use arora_types::call::{Call, CallBridge};
 use arora_types::data::DataStore;
 use arora_types::record::module::frozen;
 use arora_types::Uuid;
+use serde::{Deserialize, Serialize};
 
 pub mod built_in;
 pub mod graph;
@@ -85,6 +88,23 @@ pub enum BehaviorStatus {
     /// but, unlike a transient `Err`, a run that ends `Done(Err(_))` is dropped,
     /// *not* retried.
     Done(Result<(), BehaviorError>),
+}
+
+/// The main behavior an interpreter runs, as a client loads it, and its
+/// revision: what [`BehaviorInterpreter::read`] answers.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadedBehavior {
+    /// The behavior's revision: 0 before anything is loaded, then one more at
+    /// each [`load`](BehaviorInterpreter::load) and at each
+    /// [`apply`](BehaviorInterpreter::apply) that changes the main behavior.
+    /// Task runs started, edited or halted leave it as it is.
+    pub revision: u64,
+    /// The main behavior: the graph a [`load`](BehaviorInterpreter::load)
+    /// of it reproduces, with no node of the interpreter's own and none of a
+    /// task run's, rooted where it was loaded or last edited to be.
+    /// [`Graph::empty`](graph::Graph::empty) when nothing is loaded.
+    pub graph: graph::Graph,
 }
 
 /// One module function a device can call: the module that serves it, its
@@ -193,6 +213,30 @@ pub trait BehaviorInterpreter {
         let _ = graph;
         Err(BehaviorError {
             message: "this interpreter does not support loading a graph".to_string(),
+        })
+    }
+
+    /// The main behavior and its revision ([`LoadedBehavior`]). The graph is
+    /// what a client [`load`](Self::load)s to run the same behavior: none of
+    /// the interpreter's own structure, none of a task run's nodes, the root
+    /// as loaded or as the last edit set it. Reading changes nothing.
+    ///
+    /// An interpreter that answers it keeps the revision: one more at each
+    /// `load`, and at each `apply` that changes the main behavior — not at a
+    /// refused one, nor at a spawn, a halt, an edit of a task run's nodes or a
+    /// tick. It writes the revision to
+    /// [`built_in::BEHAVIOR_REVISION`] at its first tick and at the tick
+    /// after each change, and each of its traces' reports carries it when it
+    /// changed since that trace's previous report
+    /// ([`TraceReport::revision`](trace::TraceReport::revision)). A client
+    /// that follows either learns that another client changed the behavior,
+    /// and reads it again.
+    ///
+    /// The default rejects reading — override it in interpreters that carry
+    /// a loadable [`graph::Graph`] (the behavior tree does).
+    fn read(&self) -> Result<LoadedBehavior, BehaviorError> {
+        Err(BehaviorError {
+            message: "this interpreter does not support reading its behavior".to_string(),
         })
     }
 
@@ -312,8 +356,8 @@ pub trait BehaviorInterpreter {
 mod tests {
     use super::*;
 
-    /// A minimal interpreter that only ticks, so it keeps the default `spawn`,
-    /// `spawn_graph`, `trace` and `halt` — the ones under test.
+    /// A minimal interpreter that only ticks, so it keeps the default `read`,
+    /// `spawn`, `spawn_graph`, `trace` and `halt` — the ones under test.
     struct Idle;
     impl BehaviorInterpreter for Idle {
         fn tick(&mut self, _ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
@@ -346,6 +390,12 @@ mod tests {
             )
             .is_err());
         assert!(idle.halt(TaskId(uuid::Uuid::nil())).is_err());
+    }
+
+    #[test]
+    fn reading_rejects_by_default() {
+        let refused = Idle.read().unwrap_err();
+        assert!(refused.message.contains("reading"), "{}", refused.message);
     }
 
     #[test]

@@ -39,6 +39,7 @@ default to refusing, so an interpreter implements what it supports.
 | `tick(&mut BehaviorContext)` | once per step | required |
 | `load(Graph)` | on the interpreter module's `LOAD` | refuses |
 | `apply(GraphDiff)` | on `EDIT` | refuses |
+| `read()` | on `READ` | refuses |
 | `spawn(Call, RunPolicy)` | on `SPAWN` | refuses |
 | `spawn_graph(&GraphType, Graph, RunPolicy)` | on `SPAWN_GRAPH` | refuses |
 | `trace(TraceOptions)` | on `TRACE` | refuses |
@@ -151,6 +152,9 @@ built-in keys ([`built_in`](../src/built_in.rs)):
 | `arora/time` (`built_in::TIME`) | `U64` nanoseconds on the device's timeline, from its start time, zero unless set |
 | `arora/dt` (`built_in::DT`) | `U64` nanoseconds since the previous step |
 
+An interpreter that answers `read` writes a third, `arora/behavior/revision`
+(`built_in::BEHAVIOR_REVISION`), at the tick after the behavior changes.
+
 An interpreter that needs time reads them like any other key. The `arora/`
 namespace belongs to the runtime and its interpreter; a behavior writes no
 key of its own there.
@@ -189,6 +193,16 @@ interpreter
 ([vizij-rs](https://github.com/vizij-ai/vizij-rs/blob/main/crates/interop/vizij-arora-behavior/docs/node-graph.md))
 applies the diff and re-lowers at once, refusing an edit that leaves an
 invalid graph.
+
+**Reading it back.** `READ` (`interpreter_module::encode_read`) answers the
+main behavior as a `LoadedBehavior`: the graph a `LOAD` of it reproduces,
+with no node of the interpreter's own or of a task run, and its revision,
+which each load and each edit of the main behavior advances. The interpreter
+writes the revision to `arora/behavior/revision`
+(`built_in::BEHAVIOR_REVISION`) at the tick after each change, and its traces
+report it: an editor that attaches to a device reads the behavior once, then
+follows the revision to learn that another client changed it
+([reading the behavior](../readme.md#reading-the-behavior)).
 
 A call to the interpreter module from inside the interpreter's own tick — a
 behavior editing itself — fails cleanly ("the behavior is being ticked; call

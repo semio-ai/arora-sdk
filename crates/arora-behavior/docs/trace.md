@@ -58,6 +58,7 @@ holds only what changed, ordered by node id, then port id:
 | `activity` | `(node, activity)` for each detached node whose activity changed |
 | `values` | `(node, port, value)` for each output of a watched node that changed |
 | `restarted` | the nodes an edit restarted since the previous report |
+| `revision` | the behavior's revision, when it changed since the previous report; always in the first |
 
 - **A status** is `success`, `failure` or `running`, what the node returned
   when the tick reached it, or `not_reached`: the tick did not tick it. A node
@@ -74,6 +75,11 @@ holds only what changed, ordered by node id, then port id:
 - **A restarted node** is one an edit set or rebound: it starts afresh, and
   the report states its status, activity and values anew, even when they equal
   what was reported before.
+- **The revision** counts the loads and edits of the main behavior
+  ([reading the behavior](../readme.md#reading-the-behavior)). A report
+  carries it when it changed since the trace's previous report, by this
+  client or another: the behavior the editor shows may no longer be the one
+  that runs.
 
 A change is a difference from what the trace last reported. The first report
 states every node the tick reached, every detached node it read, and every
@@ -87,7 +93,8 @@ that changed and changed back is not reported.
 The feedback key holds the report as a key-value of flat arrays: every list
 of changes is parallel arrays, a status or an activity is a byte, and a
 watched value is itself. A field whose list is empty is left out, and so is
-`since` in a first report.
+`since` in a first report, and `revision` in a report that follows no change
+of it.
 
 | field | value | holds |
 |---|---|---|
@@ -97,6 +104,7 @@ watched value is itself. A field whose list is empty is left out, and so is
 | `activity_nodes`, `activity` | uuids, `u8`s | each detached node and its activity: 0 called, 1 cached, 2 idle |
 | `value_nodes`, `value_ports`, `values` | uuids, uuids, values | each output: its node, its port, its value (an unset output is the unit value) |
 | `restarted` | uuids | the nodes an edit restarted |
+| `revision` | `u64` | the behavior's new revision |
 
 The arrays of a list have one entry per change, in the same order; a list
 of uuids is an array of uuid values. A bridge relays the key in the value
@@ -146,7 +154,9 @@ reads the whole report with `trace::decode_report`.
    previous one means the ticks between changed nothing, or that the trace is
    paced. A report whose `since` is not the `tick` of the last report the
    editor read follows one it missed: the editor halts the trace and starts a
-   new one, whose first report gives the whole picture.
+   new one, whose first report gives the whole picture. A report whose
+   `revision` is not the one of the graph the editor shows follows a load or
+   an edit the editor did not make: it reads the behavior again (`READ`).
 3. When the user stops, the editor calls the handle's `stop`. The status key
    going `Failure` confirms the trace ended.
 
@@ -156,6 +166,9 @@ fails to write leaves the trace to start over: its next report is a first
 one, with no `since`, stating everything.
 
 ## Cost
+
+The revision costs a report nothing while it does not change: the
+interpreter compares one number per trace at each report.
 
 With no trace running, a tick tests one flag per node it ticks. While traces
 run, each node the tick reaches records its status, and each detached node it
