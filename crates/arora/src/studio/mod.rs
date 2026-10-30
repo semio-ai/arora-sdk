@@ -424,15 +424,19 @@ where
             _ => {}
         }
         codes.follow(&current, log::log_enabled!(log::Level::Info), &mut *console);
+        // The enrollment's end is taken first: the bridge connects only once
+        // the enrollment has told it the device is enrolled, so what its
+        // status says next follows the enrollment.
         tokio::select! {
-            changed = status.changed(), if followed => {
-                // The bridge was dropped: its status changes no more.
-                followed = changed.is_ok();
-            }
+            biased;
             enrolled = &mut enrollment, if !enrollment.is_terminated() => match enrolled {
                 Ok(_) => just_enrolled = true,
                 Err(error) => return error,
             },
+            changed = status.changed(), if followed => {
+                // The bridge was dropped: its status changes no more.
+                followed = changed.is_ok();
+            }
             () = std::future::pending(), if !followed && enrollment.is_terminated() => {}
         }
     }
@@ -874,6 +878,17 @@ mod tests {
                 .expect("the run is following")
         }
 
+        /// Waits until what the operator was shown passes `check`.
+        async fn until(&self, what: &str, check: impl Fn(&Scripted) -> bool) {
+            tokio::time::timeout(WAIT, async {
+                while !check(&self.operator) {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("the operator is not shown {what}"));
+        }
+
         /// Whether the run starts an enrollment, given the time to.
         async fn enrolls(&mut self) -> bool {
             settle().await;
@@ -907,17 +922,23 @@ mod tests {
         let enrollment = run.enrollment().await;
         run.status.send_replace(enrolling(None, None));
         run.status.send_replace(enrolling(Some("BCDF-GHJK"), None));
-        settle().await;
+        run.until("the first code", |operator| operator.shown().len() == 1)
+            .await;
         run.status.send_replace(enrolling(
             Some("LMNP-QRST"),
             Some("https://studio.example/approve"),
         ));
-        settle().await;
+        run.until("the next code", |operator| operator.shown().len() == 2)
+            .await;
         enrollment.send(Ok("device-1".to_string())).unwrap();
         run.status.send_replace(StudioStatus::Connecting);
-        settle().await;
+        run.until("the code cleared", |operator| operator.shown().len() == 3)
+            .await;
         run.status.send_replace(connected("device-1"));
-        settle().await;
+        run.until("the device's id", |operator| {
+            !operator.device_ids().is_empty()
+        })
+        .await;
 
         assert_eq!(
             run.operator.shown(),
@@ -941,7 +962,10 @@ mod tests {
         settle().await;
         run.status.send_replace(StudioStatus::Connecting);
         run.status.send_replace(connected("device-1"));
-        settle().await;
+        run.until("the device's id", |operator| {
+            !operator.device_ids().is_empty()
+        })
+        .await;
         assert!(
             !run.enrolls().await,
             "a device Studio did not refuse enrolls"
@@ -978,14 +1002,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_device_revoked_after_it_connected_enrolls_again() {
-        let mut run = Followed::start(StudioStatus::NotEnrolled, false);
+        let mut run = Followed::start(StudioStatus::NotEnrolled, true);
         let enrollment = run.enrollment().await;
         enrollment.send(Ok("device-1".to_string())).unwrap();
-        settle().await;
         run.status.send_replace(StudioStatus::Connecting);
-        settle().await;
         run.status.send_replace(connected("device-1"));
-        settle().await;
+        run.until("the device's id", |operator| {
+            !operator.device_ids().is_empty()
+        })
+        .await;
         run.status.send_replace(StudioStatus::NotEnrolled);
         let enrollment = run.enrollment().await;
         enrollment.send(Ok("device-2".to_string())).unwrap();
@@ -1001,7 +1026,13 @@ mod tests {
         let mut run = Followed::start(StudioStatus::NotEnrolled, false);
         let _enrollment = run.enrollment().await;
         run.status.send_replace(enrolling(Some("BCDF-GHJK"), None));
-        settle().await;
+        tokio::time::timeout(WAIT, async {
+            while run.console().is_empty() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the code goes to the console");
         run.status.send_replace(enrolling(Some("BCDF-GHJK"), None));
         settle().await;
         assert_eq!(

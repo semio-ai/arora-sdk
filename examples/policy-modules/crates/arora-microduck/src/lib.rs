@@ -234,7 +234,9 @@ pub async fn serve(config: DeviceConfig) -> Result<()> {
     let builder = match studio {
         Some(model) => {
             let (bridge, handle) = arora::studio::of(&arora::Device::from_env()?)?.bridge(model);
-            builder.with_bridge(Box::new(bridge)).with_studio_handle(handle)
+            builder
+                .with_bridge(Box::new(bridge))
+                .with_studio_handle(handle)
         }
         None => builder,
     };

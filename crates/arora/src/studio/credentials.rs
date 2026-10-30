@@ -633,8 +633,9 @@ mod tests {
     /// directory, `HOME` unset, `/` its working directory — where the
     /// credentials a connection hands the client resolve in the device store
     /// it is given with a device directory and a name
-    /// (`connect_in_device_dir`), and in the directory the deprecated
-    /// `DEVICE_DIR` names alone (`connect`), and keep what is saved in them.
+    /// (`studio::in_device_dir`), and in the directory the deprecated
+    /// `DEVICE_DIR` names alone (`studio::of`), and keep what is saved in
+    /// them.
     #[cfg(unix)]
     #[test]
     fn credentials_resolve_in_the_device_directory_given_as_on_android() {
