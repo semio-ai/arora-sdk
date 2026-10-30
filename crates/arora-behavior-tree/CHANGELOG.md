@@ -22,7 +22,8 @@ All notable changes to `arora-behavior-tree`. The format follows
 
 - `load` takes a node the main behavior holds with a task run, setting it
   in place, so a graph `read` answers loads back. A node only a run holds
-  is still refused.
+  is still refused. The previous behavior's nodes leave but for those the
+  runs hold once the new nodes are set.
 - Requires arora-behavior 10.1.
 - A tree cannot call the interpreter module's `READ`, as it cannot call
   `LOAD` or `EDIT`.
