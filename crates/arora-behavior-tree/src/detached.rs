@@ -75,7 +75,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use arora_behavior::FunctionIndex;
+use arora_behavior::{Activity, FunctionIndex};
 use arora_types::call::{CallBridge, CallError};
 use arora_types::value::Value;
 use uuid::Uuid;
@@ -130,6 +130,8 @@ pub(crate) struct Detached {
     observed: RefCell<HashSet<Uuid>>,
     /// The stack a node is brought up to date with, kept between ticks.
     stack: RefCell<Vec<(usize, usize)>>,
+    /// Where each node records what it did, while a trace runs.
+    record: Rc<crate::trace::TickRecord>,
 }
 
 #[derive(Default)]
@@ -265,6 +267,7 @@ impl Detached {
     pub(crate) fn new(
         nodes: Vec<Rc<Node>>,
         bindings: crate::id_hash::IdMap<NodeParameterId, VariableCell>,
+        record: Rc<crate::trace::TickRecord>,
     ) -> Self {
         let caches = RefCell::new(vec![Cache::default(); nodes.len()]);
         Self {
@@ -280,10 +283,12 @@ impl Detached {
             tick: Cell::new(1),
             observed: RefCell::default(),
             stack: RefCell::default(),
+            record,
         }
     }
 
-    pub(crate) fn empty() -> Self {
+    /// No detached node, recording to `record`.
+    pub(crate) fn empty(record: Rc<crate::trace::TickRecord>) -> Self {
         Self {
             nodes: Vec::new(),
             ids: crate::id_hash::IdMap::default(),
@@ -293,7 +298,13 @@ impl Detached {
             tick: Cell::new(1),
             observed: RefCell::default(),
             stack: RefCell::default(),
+            record,
         }
+    }
+
+    /// Whether `id` is one of the detached nodes.
+    pub(crate) fn contains(&self, id: Uuid) -> bool {
+        self.ids.contains_key(&id)
     }
 
     /// Observe the detached nodes among `ids` from the next lowering on:
@@ -1024,6 +1035,7 @@ impl Detached {
                 if lowered.rewrites[at] {
                     self.rewrite(at, outputs);
                 }
+                self.recorded(at, Activity::Cached);
                 return Ok(());
             }
         }
@@ -1049,6 +1061,7 @@ impl Detached {
             if lowered.rewrites[at] {
                 self.rewrite(at, outputs);
             }
+            self.recorded(at, Activity::Cached);
             return Ok(());
         }
         let module_id = lowered.modules[at].ok_or(BehaviorTreeError::CallError(
@@ -1063,6 +1076,7 @@ impl Detached {
             .collect();
         // A call counts whether or not it succeeds.
         self.caches.borrow_mut()[at].calls += 1;
+        self.recorded(at, Activity::Called);
         let result = caller
             .arora_call_borrowed(Some(module_id), node.function, &args)
             .map_err(BehaviorTreeError::CallError)?;
@@ -1097,6 +1111,14 @@ impl Detached {
         caches[at].arguments = Some(values);
         caches[at].outputs = results;
         Ok(())
+    }
+
+    /// Record that the node at `at` did `activity` this tick, while a trace
+    /// runs.
+    fn recorded(&self, at: usize, activity: Activity) {
+        if self.record.is_on() {
+            self.record.activity(self.nodes[at].id, activity);
+        }
     }
 
     /// Write back the cached outputs of the node at `at`, whose cells a

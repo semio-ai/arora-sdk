@@ -68,6 +68,15 @@ All notable changes to `arora-behavior-tree`. The format follows
   [`docs/text.md`](docs/text.md#which-form-to-use) says which form to use
   where: the text for behaviors, readable files for what people review, ids
   for interpreter payloads and what programs exchange.
+- `BehaviorTreeInterpreter::trace`: traces of the interpreter's ticks, as
+  task runs under the interpreter module's `TRACE` function. Each node
+  records the status it returns as it ticks, and each detached node whether
+  it called or answered from its cache, while a trace runs; each trace
+  reports what changed since its last report, at its own pace, and the
+  watched nodes' outputs, read from their cells. A trace survives an edit
+  and names the nodes it restarted. `halt` ends one. With no trace running,
+  a tick tests one flag per node.
+- The `trace` bench: what a trace costs a tick, in instructions.
 
 ## [9.7.0] - 2026-10-28
 
