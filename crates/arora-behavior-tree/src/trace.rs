@@ -18,7 +18,7 @@
 use arora_behavior::trace::{
     encode_report, Activity, NodeStatus, PortValue, TraceOptions, TraceReport,
 };
-use arora_behavior::{built_in, FunctionIndex, Status, TaskHandle};
+use arora_behavior::{built_in, FunctionIndex, Status, TaskHandle, STATUS_ENUMERATION_ID};
 use arora_types::data::{DataStore, Key, StateChange};
 use arora_types::value::Value;
 use std::cell::{Cell, RefCell};
@@ -69,12 +69,11 @@ impl TickRecord {
     /// Watched node `node` returned `value`, which no binding keeps; its
     /// function's return is an optional when `optional`, which reads as a
     /// bound return's cell does: its value, or nothing. A status is no value:
-    /// the node's status reports it.
+    /// the node's status reports it, and its return holds nothing, so a value
+    /// it returned at an earlier tick is not reported for it.
     pub(crate) fn returned(&self, node: Uuid, value: &Value, optional: bool) {
-        if Status::try_from(value.clone()).is_ok() {
-            return;
-        }
         let kept = match value {
+            Value::Enumeration(enumeration) if enumeration.id == STATUS_ENUMERATION_ID => None,
             Value::Option(held) if optional => held.as_deref().cloned(),
             value => Some(value.clone()),
         };
@@ -440,5 +439,24 @@ fn device_time(store: &dyn DataStore) -> Option<u64> {
     match store.read(&[Key::from(built_in::TIME)]).pop().flatten() {
         Some(Value::U64(time)) => Some(time),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A node returning a status after a value returns nothing: the value is
+    /// not kept as its output.
+    #[test]
+    fn a_status_returned_after_a_value_clears_it() {
+        let record = TickRecord::default();
+        let node = Uuid::from_u128(1);
+        record.returned(node, &Value::F64(1.0), false);
+        record.returned(node, &Status::Running.into(), false);
+        assert_eq!(
+            *record.returns.borrow(),
+            vec![(node, Some(Value::F64(1.0))), (node, None)]
+        );
     }
 }
