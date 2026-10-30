@@ -159,8 +159,9 @@ impl Traces {
     }
 
     /// Set `record` to record while a trace runs, the watched nodes' returns
-    /// included.
-    pub(crate) fn arm(&self, record: &TickRecord) {
+    /// included. A node no trace watches any more forgets what it returned:
+    /// unrecorded, it would grow stale.
+    pub(crate) fn arm(&mut self, record: &TickRecord) {
         record.set_on(!self.traces.is_empty());
         let mut watched = record.watched.borrow_mut();
         watched.clear();
@@ -169,6 +170,7 @@ impl Traces {
                 .iter()
                 .flat_map(|trace| trace.options.values.iter().copied()),
         );
+        self.returns.retain(|node, _| watched.contains(node));
     }
 
     /// End the trace `task` names, answering its status key; `None` when no

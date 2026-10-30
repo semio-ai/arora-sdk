@@ -634,3 +634,54 @@ fn a_node_set_again_reports_no_former_return() {
     let report = device.report_at(&trace, 3).unwrap();
     assert!(report.values.is_empty(), "{report:?}");
 }
+
+/// A node no trace watches forgets what it returned: a later trace watching
+/// it does not report a value it returned while unwatched.
+#[test]
+fn an_unwatched_node_forgets_its_return() {
+    let gate = behavior()
+        .nodes
+        .into_iter()
+        .find(|node| node.id == GATE)
+        .unwrap();
+    let mut device = Device::running(Graph {
+        root: Some(ROOT),
+        nodes: vec![
+            Node {
+                id: ROOT,
+                function: SEQ_FUNCTION_ID,
+                children: Some(vec![GATE, SUM]),
+                ..Node::default()
+            },
+            gate,
+            Node {
+                id: SUM,
+                function: ADD,
+                bind: [(ADD_A, key("in")), (ADD_B, value(1.0))].into(),
+                children: None,
+            },
+        ],
+    });
+    let watch = TraceOptions {
+        values: vec![SUM],
+        min_interval_ns: None,
+    };
+    let watching = device.interpreter.trace(watch.clone()).unwrap();
+    device.interpreter.trace(TraceOptions::default()).unwrap();
+    device.tick();
+    assert_eq!(
+        device.report_at(&watching, 1).unwrap().values[&SUM][&_RET_PARAM_ID],
+        Value::F64(11.0)
+    );
+
+    // Unwatched, it returns another value, then stops being reached.
+    device.interpreter.halt(watching.id).unwrap();
+    device.set("in", 20.0);
+    device.tick();
+    device.set("gate", 1.0);
+    let later = device.interpreter.trace(watch).unwrap();
+    device.tick();
+    let first = device.report_at(&later, 3).unwrap();
+    assert!(first.values.is_empty(), "{first:?}");
+    assert_eq!(first.status.get(&SUM), None, "not reached");
+}
