@@ -458,6 +458,31 @@ fn a_run_s_edit_that_changes_the_behavior_advances_the_revision() {
     assert!(released.graph.node(&RUN_SUM).is_some(), "{released:?}");
 }
 
+/// A run spawned again with a detached node of its own leaves the
+/// revision: the node is the run's.
+#[test]
+fn a_run_spawned_again_with_a_detached_node_leaves_the_revision() {
+    let mut device = device_with_a_run();
+    let mut again = run_graph();
+    again.nodes.push(Node {
+        id: Uuid::from_u128(0x203),
+        function: MUL,
+        bind: [(MUL_A, key("in")), (MUL_B, value(3.0))].into(),
+        children: None,
+    });
+    device
+        .interpreter
+        .spawn_graph(&graph_type(), again, RunPolicy::Concurrent)
+        .unwrap();
+    assert_eq!(
+        read(&device.interpreter),
+        LoadedBehavior {
+            revision: 1,
+            graph: behavior(),
+        }
+    );
+}
+
 /// A halt that unbinds the main behavior's binding reading the run
 /// advances the revision; the tick after writes it. The binding is a
 /// detached node's, which nothing reads, so the tick runs without it.

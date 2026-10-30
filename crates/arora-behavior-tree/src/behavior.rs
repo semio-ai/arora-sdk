@@ -761,11 +761,13 @@ impl BehaviorTreeInterpreter {
         if diff != GraphDiff::default() {
             let before = self.main_graph();
             self.edit_lowering(diff, true)?;
+            // The run's detached nodes are its own before the comparison.
+            self.runs[at].detached = detached;
             self.revise_since(&before);
+        } else {
+            self.runs[at].detached = detached;
         }
-        let run = &mut self.runs[at];
-        run.detached = detached;
-        Ok(run.handle.clone())
+        Ok(self.runs[at].handle.clone())
     }
 
     /// Prune `runs`, already taken out of the live and finished lists: each
