@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use arora_behavior::graph::{Binding, Graph, GraphDiff, Node};
+use arora_behavior::graph::{Binding, Graph, GraphDiff, Node, Port, Source};
 use arora_behavior::{built_in, BehaviorContext, BehaviorInterpreter, LoadedBehavior, RunPolicy};
 use arora_simple_data_store::SimpleDataStore;
 use arora_types::call::Call;
@@ -228,6 +228,8 @@ fn the_revision_counts_loads_and_accepted_edits_of_the_behavior() {
 
     device.interpreter.apply(rebind_sum()).unwrap();
     assert_eq!(revision(&device), 2, "an accepted edit");
+    device.interpreter.apply(rebind_sum()).unwrap();
+    assert_eq!(revision(&device), 2, "an edit that changes nothing");
 
     // A refused edit changes nothing.
     let refused = GraphDiff {
@@ -336,7 +338,16 @@ fn the_revision_is_written_at_the_first_tick_and_once_per_change() {
     assert_eq!(written(), (2, Some(Value::U64(1))), "a load, once");
 
     interpreter.apply(rebind_sum()).unwrap();
-    interpreter.apply(rebind_sum()).unwrap();
+    interpreter
+        .apply(GraphDiff {
+            bind: vec![Binding {
+                node: SUM,
+                port: ADD_B,
+                source: value(3.0),
+            }],
+            ..GraphDiff::default()
+        })
+        .unwrap();
     tick(&mut interpreter);
     tick(&mut interpreter);
     assert_eq!(
@@ -344,4 +355,132 @@ fn the_revision_is_written_at_the_first_tick_and_once_per_change() {
         (3, Some(Value::U64(3))),
         "two edits between ticks, one write"
     );
+}
+
+/// The run graph's sequence, set with `children`.
+fn run_root_with(children: Vec<Uuid>) -> Node {
+    Node {
+        id: RUN_ROOT,
+        function: SEQ_FUNCTION_ID,
+        children: Some(children),
+        ..Node::default()
+    }
+}
+
+/// A device running the behavior beside a live graph run.
+fn device_with_a_run() -> Device {
+    let mut device = Device::new();
+    device
+        .interpreter
+        .spawn_graph(&graph_type(), run_graph(), RunPolicy::Concurrent)
+        .unwrap();
+    device.tick();
+    device
+}
+
+/// An accepted edit that changes nothing a read answers leaves the
+/// revision: an unbinding of a node the graph does not have, with or without
+/// a behavior loaded.
+#[test]
+fn an_edit_that_changes_nothing_leaves_the_revision() {
+    let unbind_nothing = GraphDiff {
+        unbind: vec![Port::new(Uuid::from_u128(0xdead), ADD_B)],
+        ..GraphDiff::default()
+    };
+    let mut empty = BehaviorTreeInterpreter::new();
+    empty.apply(unbind_nothing.clone()).unwrap();
+    assert_eq!(read(&empty), LoadedBehavior::default());
+
+    let mut device = device_with_a_run();
+    device.interpreter.apply(unbind_nothing).unwrap();
+    assert_eq!(read(&device.interpreter).revision, 1);
+}
+
+/// An edit of a run that changes the main behavior advances the revision:
+/// removing a run's node unbinds the main behavior's binding reading it, and
+/// a node a run lets go of is the main behavior's.
+#[test]
+fn a_run_s_edit_that_changes_the_behavior_advances_the_revision() {
+    let mut device = device_with_a_run();
+    let reads_the_run = GraphDiff {
+        bind: vec![Binding {
+            node: SUM,
+            port: ADD_B,
+            source: Source::Port(Port::new(RUN_SUM, _RET_PARAM_ID)),
+        }],
+        ..GraphDiff::default()
+    };
+    device.interpreter.apply(reads_the_run).unwrap();
+    assert_eq!(read(&device.interpreter).revision, 2);
+
+    // The run's sum leaves: the binding reading it goes with it.
+    device
+        .interpreter
+        .apply(GraphDiff {
+            remove: vec![RUN_SUM],
+            set: vec![run_root_with(vec![Uuid::from_u128(0x202)])],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    let unbound = read(&device.interpreter);
+    assert_eq!(unbound.revision, 3);
+    let expected = applied(
+        behavior(),
+        GraphDiff {
+            unbind: vec![Port::new(SUM, ADD_B)],
+            ..GraphDiff::default()
+        },
+    );
+    assert_eq!(unbound.graph, expected, "the binding went with the node");
+
+    // A node the run lets go of, and the main behavior holds no more than
+    // before, is the main behavior's: a detached call.
+    let mut device = device_with_a_run();
+    device
+        .interpreter
+        .apply(GraphDiff {
+            set: vec![run_root_with(vec![Uuid::from_u128(0x202)])],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    let released = read(&device.interpreter);
+    assert_eq!(released.revision, 2);
+    assert!(released.graph.node(&RUN_SUM).is_some(), "{released:?}");
+}
+
+/// A node the main behavior holds with a run is the main behavior's: a read
+/// answers it, and the graph read loads back.
+#[test]
+fn a_node_held_with_a_run_reads_and_loads_back() {
+    let mut device = device_with_a_run();
+    device
+        .interpreter
+        .apply(GraphDiff {
+            set: vec![run_root_with(vec![
+                RUN_SUM,
+                crate::trace_tests::ROOT,
+                Uuid::from_u128(0x202),
+            ])],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    let shared = read(&device.interpreter);
+    assert_eq!(
+        shared.graph,
+        behavior(),
+        "the shared root is the behavior's"
+    );
+    assert_eq!(shared.revision, 1, "the main behavior did not change");
+
+    device.interpreter.load(shared.graph.clone()).unwrap();
+    device.tick();
+    let again = read(&device.interpreter);
+    assert_eq!(again.graph, shared.graph);
+    assert_eq!(again.revision, 2);
+
+    // A node only the run holds is still refused.
+    let mut taken = shared.graph;
+    taken.nodes.push(run_graph().nodes[1].clone());
+    let refused = device.interpreter.load(taken).unwrap_err();
+    assert!(refused.message.contains("task run"), "{}", refused.message);
 }

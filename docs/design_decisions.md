@@ -607,14 +607,14 @@ composed behavior host.
 **A client learns of another's change through a revision key.** `read`
 answers the main behavior as a graph only — what `load` takes, no source
 text and no names, which a client resolves against the device's functions —
-and its revision, a counter of the loads and of the edits that reach the
-main behavior. The interpreter writes the counter to
+and its revision, a counter of the loads and of the edits that change the
+graph `read` answers. The interpreter writes the counter to
 `arora/behavior/revision` at the tick after a change, once: a client
 subscribes to one small key instead of comparing graphs, and a device whose
 behavior does not change spends nothing on it. A trace carries the same
 counter in its report, so a client already tracing needs no second
 subscription. The counter is the interpreter's because only the interpreter
-knows which edits reach the main behavior rather than a task run; a client
+knows which edits change the main behavior rather than a task run; a client
 compares it for equality, not order, so an interpreter that starts again
 from 0 still reads as a change.
 A tree does not call these functions: they act on the interpreter that ticks
