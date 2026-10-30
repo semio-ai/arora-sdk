@@ -40,11 +40,14 @@ case "$(uname -s)-$(uname -m)" in
   Linux-x86_64|Linux-aarch64)
     arch="$(uname -m)"
     tar="mujoco-${MUJOCO_VERSION}-linux-${arch}.tar.gz"
-    if [ ! -e "$dir/lib/libmujoco.so" ]; then
+    # The versioned name is the pinned release: another release in $dir is
+    # replaced, and the unversioned name the build links points at this one.
+    if [ ! -e "$dir/lib/libmujoco.so.${MUJOCO_VERSION}" ]; then
       curl -sSL -o "$dir/$tar" \
         "https://github.com/google-deepmind/mujoco/releases/download/${MUJOCO_VERSION}/${tar}"
       tar -xzf "$dir/$tar" -C "$dir" --strip-components=1
       rm "$dir/$tar"
+      ln -sf "libmujoco.so.${MUJOCO_VERSION}" "$dir/lib/libmujoco.so"
     fi
     echo "export MUJOCO_DYNAMIC_LINK_DIR=$dir/lib"
     echo "export LD_LIBRARY_PATH=$dir/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
