@@ -81,9 +81,11 @@ it through `READ`, a call with no argument (`interpreter_module::encode_read`);
 the `graph` in the form `LOAD` takes.
 
 The revision starts at 0 and counts the changes of the main behavior: one more
-at each `load`, and at each `apply` that changes the graph `read` answers. A
-refused edit, a task run spawned, edited or halted, and a tick leave it as it
-is. The
+at each `load`, and at each other change of the graph `read` answers — an
+`apply` that changes it, or a task run ending that takes with it a binding of
+the main behavior reading it. A refused edit, an edit of a task run alone, a
+spawn, a halt that unbinds nothing of the main behavior, and a tick leave it
+as it is. The
 interpreter writes it to `arora/behavior/revision` (`built_in::BEHAVIOR_REVISION`)
 at its first tick and at the tick after each change, and its traces carry it
 in the report after a change. A behavior editor that attaches to a device

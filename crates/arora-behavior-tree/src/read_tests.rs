@@ -25,6 +25,8 @@ use crate::trace_tests::{behavior, key, value, Device, SUM};
 const RUN_ROOT: Uuid = Uuid::from_u128(0x200);
 /// The run's adding leaf.
 const RUN_SUM: Uuid = Uuid::from_u128(0x201);
+/// A detached node set beside the behavior.
+const EXTRA: Uuid = Uuid::from_u128(0x105);
 
 fn run_graph() -> Graph {
     Graph {
@@ -454,6 +456,47 @@ fn a_run_s_edit_that_changes_the_behavior_advances_the_revision() {
     let released = read(&device.interpreter);
     assert_eq!(released.revision, 2);
     assert!(released.graph.node(&RUN_SUM).is_some(), "{released:?}");
+}
+
+/// A halt that unbinds the main behavior's binding reading the run
+/// advances the revision; the tick after writes it. The binding is a
+/// detached node's, which nothing reads, so the tick runs without it.
+#[test]
+fn a_halt_that_unbinds_the_behavior_advances_the_revision() {
+    let mut device = Device::new();
+    let run = device
+        .interpreter
+        .spawn_graph(&graph_type(), run_graph(), RunPolicy::Concurrent)
+        .unwrap();
+    device.tick();
+    device
+        .interpreter
+        .apply(GraphDiff {
+            set: vec![Node {
+                id: EXTRA,
+                function: MUL,
+                bind: [
+                    (MUL_A, Source::Port(Port::new(RUN_SUM, _RET_PARAM_ID))),
+                    (MUL_B, value(3.0)),
+                ]
+                .into(),
+                children: None,
+            }],
+            ..GraphDiff::default()
+        })
+        .unwrap();
+    device.tick();
+    assert_eq!(read(&device.interpreter).revision, 2);
+
+    device.interpreter.halt(run.id).unwrap();
+    let halted = read(&device.interpreter);
+    assert_eq!(halted.revision, 3, "the binding left with the run");
+    assert!(!halted.graph.node(&EXTRA).unwrap().bind.contains_key(&MUL_A));
+    device.tick();
+    assert_eq!(
+        device.read(&Key::from(built_in::BEHAVIOR_REVISION)),
+        Some(Value::U64(3))
+    );
 }
 
 /// A node the main behavior holds with a run is the main behavior's: a read

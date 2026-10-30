@@ -187,9 +187,11 @@ place keeps its state.
 
 `read` answers the main behavior alone — neither the runner nor a node only a
 run holds, rooted where it was loaded — so that loading it reproduces it,
-with its revision: one more at each `load`, and at each `apply` that changes
-the graph `read` answers. An edit that changes only a run's nodes, a spawn, a
-halt and a tick leave the revision as it is. A node the main behavior holds
+with its revision: one more at each `load`, and at each other change of the
+graph `read` answers — an `apply`, or a run halted, ended or spawned again
+that takes with it the main behavior's bindings reading it. An edit that
+changes only a run's nodes, a spawn, a halt that unbinds nothing of the main
+behavior and a tick leave the revision as it is. A node the main behavior holds
 with a run is the main behavior's, and `load` sets it in place; a binding of
 the main behavior that reads a run's node is answered as it stands, so the
 graph loads back beside that run. The tick after a change writes it to
