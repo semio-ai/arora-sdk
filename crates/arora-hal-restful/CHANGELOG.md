@@ -4,6 +4,19 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [5.1.0] - 2026-10-30
+
+### Changed
+
+- Requires arora 17. The `arora-restful` runner built with `studio` serves the
+  device's Semio Studio bridge from the start, unless the run passes
+  `--no-studio`: the robot runs at once, and a device that is not enrolled
+  with Studio enrolls while it runs, by the token in
+  `STUDIO_ENROLLMENT_TOKEN` or by the code the run shows (in the terminal
+  UI's prompt line, and in the log); the terminal UI shows the device's id
+  once its bridge connects. A refused enrollment still fails the run. Studio
+  out of reach no longer fails the run: the bridge connects again by itself.
+
 ## [5.0.0] - 2026-10-23
 
 ### Added

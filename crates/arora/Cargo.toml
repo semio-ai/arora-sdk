@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "16.1.0"
+version = "17.0.0"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -44,11 +44,12 @@ native = [
     "arora-engine/wasmtime-host",
     "arora-engine/native-host",
 ]
-# The Semio Studio connection: the studio-bridge Zenoh connector plus the
-# headless device runner (enrollment, token storage, app-data dir, logging)
-# that connects the device to Studio. Opt-in: a plain arora runtime (e.g.
-# Vizij hosting a local bridge) does not talk to the Semio store at all. The
-# binary built with it connects unless the run passes --no-studio.
+# The Semio Studio connection: the device's Studio bridge (the studio-bridge
+# Zenoh connector) and what a run does through its handle (enrollment, showing
+# the code and the device's id). Opt-in: a plain arora runtime (e.g. Vizij
+# hosting a local bridge) does not talk to the Semio store at all. The binary
+# built with it serves the device's Studio bridge unless the run passes
+# --no-studio.
 studio-bridge = [
     "native",
     "dep:arora-studio-bridge-client",
@@ -91,14 +92,10 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 # headless runner needs, under `firestore_support::options`). Native-only
 # (zenoh/firestore) and optional, so the wasm build of the library stays lean.
 # arora bundles it so a device-specific binary only has to provide its own HAL.
-# 11 enrolls the device with Studio (`studio::enroll`, by code or enrollment
-# token), signs in only a device its credentials hold enrolled
-# (`Error::NotEnrolled` otherwise), and reports only the device's model to its
-# Studio record; it keeps the device's Studio credentials
-# (`credentials::DeviceCredentials`), with the certificate a TLS bridge knows
-# the device by. 11.1: `studio::StudioDevice`, the device's Studio side in one
-# object, which `arora::studio` builds for a device and hands to embedders.
-arora-studio-bridge-client = { version = "11.1", optional = true }
+# 11.2: `StudioDevice::bridge`, the Studio bridge a runtime carries before the
+# device is enrolled, and the `StudioHandle` that enrolls the device and
+# reports where the bridge stands.
+arora-studio-bridge-client = { version = "11.2", optional = true }
 # Headless device-runner deps (native-only, optional). `dirs` finds the per-user
 # directory the device directory defaults to; `serde_json` reads a module
 # directory's `header.json`.

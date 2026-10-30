@@ -1,6 +1,6 @@
 [package]
 name = "arora-web"
-version = "13.0.0"
+version = "14.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/semio-ai/arora-sdk"
@@ -28,7 +28,7 @@ arora-types = { path = "../arora-types", version = "3" }
 # answer from without a step. 13.7: the browser's component executor
 # registered, which a `wasm-component` guest loads through. 16: the current
 # major, whose `Arora`/`AroraBuilder` this crate's surface carries.
-arora = { path = "../arora", version = "16", default-features = false }
+arora = { path = "../arora", version = "17", default-features = false }
 # 2.1: the records `withRecords` loads, in arora-registry's layout.
 arora-registry = { path = "../arora-registry", version = "2.1" }
 # 6.1: the shapes a client reads keys and methods in, and a run handle's

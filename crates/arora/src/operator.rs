@@ -5,7 +5,8 @@
 //! device's name when it enrolls with Semio Studio) and access decisions (a
 //! remote client asking to join the session — see
 //! [`arora_bridge::AccessRequest`]). It also shows what a person acts on
-//! elsewhere: the [`EnrollmentCode`] that enrolls the device with Studio.
+//! elsewhere — the [`EnrollmentCode`] that enrolls the device with Studio —
+//! and the device's id with Studio, once its bridge connects.
 //! Implementations decide the medium:
 //!
 //! - [`crate::tui`]'s handle renders them in the terminal UI's prompt line;
@@ -117,6 +118,13 @@ pub trait Operator: Send + Sync {
     fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
         let _ = code;
         false
+    }
+
+    /// Show `device_id`, the device's id with Semio Studio, which its Studio
+    /// bridge gives once it connects: after the run has started, when the
+    /// device enrolls while it runs. The default shows nothing.
+    fn show_device_id(&self, device_id: &str) {
+        let _ = device_id;
     }
 }
 

@@ -4,33 +4,87 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [16.1.0] - 2026-10-29
+## [17.0.0] - 2026-10-30
+
+A runtime built with Semio Studio carries the device's Studio bridge from its
+start, and the device enrolls while it runs.
 
 ### Added
 
 - `studio::of(device)` and `studio::in_device_dir(device_dir, name, store)`:
   the device's Studio side, the device client's `StudioDevice`
-  (`arora-studio-bridge-client` 11.1), its credentials the ones a run
-  connecting as the device uses, one an earlier arora kept moving in. Getting
-  it touches local files only. An app embedding a device keeps it to ask at
-  launch whether the device holds a credential (`holds_credential`, which
-  contacts nobody), to connect the device only then (`connect`, which never
-  enrolls), and to enroll it when a person asks.
-- `studio::enroll(studio_device, description, operator)` enrolls the device
-  as a run that connects does, and returns its id: with the token in
-  `STUDIO_ENROLLMENT_TOKEN`, else by code, each logged and shown to
-  `operator`; named by `DEVICE_NAME`, else by `operator`, else generated.
-  `studio::reported_model(description)` is the model a run reports as it
-  connects, which `StudioDevice::connect` takes.
-- `studio` re-exports `StudioDevice`, `EnrollWith`, `DeviceDescription`,
-  `PartialDeviceModel` and the client's `Error`: an embedder calls the
-  device's Studio side with no dependency on the client.
+  (`arora-studio-bridge-client` 11.2), its credentials the ones a run as the
+  device uses, one an earlier arora kept moving in. Getting it touches local
+  files only. Its `bridge(model)` gives the device's Studio bridge, which a
+  runtime carries from its start (`AroraBuilder::with_bridge`), and the
+  bridge's handle. While the device holds no credential Studio accepts, the
+  bridge contacts nobody and keeps the latest value of each key; once the
+  device enrolls, it connects by itself and publishes them. The handle's
+  `status()` says where the bridge stands (not enrolled, enrolling with the
+  code to enter in Studio, connecting, connected as the device's id, failed),
+  and its `enroll` enrolls the device.
+- `studio::reported_model(description)`: the model the device reports to its
+  Studio record, each field from its variable, else from the HAL's
+  description; `StudioDevice::bridge` takes it.
+- `AroraBuilder::with_studio_handle(handle)`: the run follows the Studio
+  bridge given with `with_bridge` through its handle. While the device is not
+  enrolled, the run enrolls it as arora 16 did before connecting — with the
+  token in `STUDIO_ENROLLMENT_TOKEN`, else by code, named by `DEVICE_NAME`,
+  else by the operator, else generated — and the runtime runs meanwhile. Each
+  code is logged, shown in the terminal UI's prompt line, and goes to
+  standard error when nothing else shows it. A refused enrollment fails the
+  run, and so does Studio refusing the device it has just enrolled.
+- `StudioArgs::connects()`: whether the run serves the device's Studio
+  bridge, unless it passes `--no-studio`.
+- `Operator::show_device_id(device_id)`, by default showing nothing: the
+  terminal UI's header shows the device's id once its Studio bridge
+  connects, after the run has started.
+- `studio` re-exports `StudioDevice`, `StudioBridge`, `StudioHandle`,
+  `StudioStatus`, `EnrollWith`, `DeviceDescription`, `PartialDeviceModel` and
+  the client's `Error`: an embedder builds and follows the bridge with no
+  dependency on the client.
 
 ### Changed
 
-- Requires `arora-studio-bridge-client` 11.1. The `studio::connect`
-  functions connect through the `StudioDevice` that `studio::of` and
-  `studio::in_device_dir` give, unchanged otherwise.
+- **Breaking:** a run built with Studio no longer waits for its device to
+  enroll before it starts: its runtime runs at once, with the device's Studio
+  bridge offline until the device is enrolled. Studio or its bridge out of
+  reach, or a credential of another Firebase project than the run's, no
+  longer fails the run: the device does not enroll, and its bridge logs why
+  and connects again by itself, waiting longer after each failure in a row,
+  up to a minute. A device revoked once it has connected enrolls again.
+- Requires `arora-studio-bridge-client` 11.2.
+
+### Removed
+
+- **Breaking:** `AroraBuilder::with_studio` and `studio::Choice`, with
+  `StudioArgs::choice`. A runner built with Studio gives the run the
+  device's Studio bridge and its handle unless the run passes
+  `--no-studio`; an `AroraBuilder` given no bridge serves the open local
+  bridge, as before. To migrate, replace
+  `builder.with_studio(cli.studio.choice())` with
+
+  ```rust
+  let builder = if cli.studio.connects() {
+      let model = arora::studio::reported_model(&hal.describe().await);
+      let (bridge, handle) = arora::studio::of(&device)?.bridge(model);
+      builder.with_bridge(Box::new(bridge)).with_studio_handle(handle)
+  } else {
+      builder
+  };
+  ```
+
+- **Breaking:** `studio::connect`, `connect_with_description`,
+  `connect_with_device_dir`, `connect_in_device_dir`,
+  `connect_with_operator` and `connect_with_operator_and_description`, which
+  connected the device, enrolling it first, before returning its bridge. An
+  embedder gives its runtime the device's Studio bridge instead
+  (`studio::of(device)?.bridge(studio::reported_model(&description))`, or
+  `studio::in_device_dir(device_dir, name, store)?` on Android) and keeps the
+  handle: `handle.status()` tells whether the device is enrolled, and
+  `handle.enroll(&DeviceDescription::new(name), how)` enrolls it when a person
+  asks, the code showing in the status. A run given the handle with
+  `with_studio_handle` enrolls the device as `connect_with_operator` did.
 
 ## [16.0.1] - 2026-10-29
 

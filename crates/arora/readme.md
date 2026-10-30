@@ -107,7 +107,8 @@ holds lives inside it, so a host can then build and run a fresh device.
 Every part has a builder setter: `with_data_store`, `with_hal`, `with_bridge`
 (repeatable), `with_behavior_interpreter`, the module setters below,
 `with_start_time`, `with_guest_limits`, and, for `run`, `with_step_period`,
-`with_frontend`, `with_device` and, in a `studio-bridge` build, `with_studio`.
+`with_frontend`, `with_device` and, in a `studio-bridge` build,
+`with_studio_handle`.
 Between steps, an embedder
 reads the store (`Arora::store`), calls a function (`Arora::call`), and
 watches the behavior's failures (`Arora::behavior_error`). `Arora::caller`
@@ -198,38 +199,41 @@ resolves the options into a `Device` ([`device`](src/device.rs)).
 ## Semio Studio is opt-in
 
 A build with the `studio-bridge` feature can connect a device to Semio Studio.
-The `arora` binary built with it connects unless the run passes
-`--no-studio`; a robot runner does the same under its own `studio` feature. A
-build without the feature has no Studio code and no Studio option.
+The `arora` binary built with it serves the device's Studio bridge unless the
+run passes `--no-studio`; a robot runner does the same under its own `studio`
+feature. A build without the feature has no Studio code and no Studio option.
 
 ```sh
 cargo build -p arora --features studio-bridge
-./target/debug/arora                  # connects to Studio
+./target/debug/arora                  # serves the device's Studio bridge
 ./target/debug/arora --no-studio      # serves the open local bridge instead
 ```
 
-A device not enrolled with Studio enrolls first: with the enrollment token in
-`STUDIO_ENROLLMENT_TOKEN`, or else by a code the run shows, which a person
-enters in Studio. Its credential is kept under its name in Semio's device
-store, `<data_local_dir>/semio/devices/<name>/` (`SEMIO_DEVICE_STORE` replaces
-the root), apart from its device directory. A run that connects given
-`--device-dir` and no `--device` is refused, since two such devices would share
-the credential of `default`.
+The device runs at once, enrolled with Studio or not. While it is not, its
+Studio bridge contacts nobody, and the run enrolls it: with the enrollment
+token in `STUDIO_ENROLLMENT_TOKEN`, or else by a code the run shows (in the
+terminal UI's prompt line, and in the log), which a person enters in Studio;
+then the bridge connects, and the terminal UI shows the device's id. A refused
+enrollment fails the run. The credential is kept under the device's name in
+Semio's device store, `<data_local_dir>/semio/devices/<name>/`
+(`SEMIO_DEVICE_STORE` replaces the root), apart from its device directory. A
+run that connects given `--device-dir` and no `--device` is refused, since two
+such devices would share the credential of `default`.
 
-The library's `run`, `run_with_hal`, `run_with` and an `AroraBuilder` given no
-choice serve the open local bridge: a Cargo feature is on for every crate a
-build links, so the feature alone does not say that the runner at hand chose
-Studio. An embedder connects with `studio::connect` (or a variant) and
-`with_bridge`, or hands `studio::Choice::Studio` to `with_studio`. An app that
-connects only a device holding a credential, and enrolls it when a person
-asks, keeps the device's Studio side instead, the device client's
-`StudioDevice`: `studio::of(device)` gives it, or
-`studio::in_device_dir(device_dir, name, store)` on a platform that gives the
-app its data directory at run time. Getting it contacts nobody, and neither
-does its `holds_credential`; its `connect` never enrolls, and
-`studio::enroll` enrolls the device as a run does. The
-[`studio` module docs](src/studio/mod.rs) cover enrollment, the credential, the
-model the device reports and every variable.
+The Studio bridge is the runner's to give: a runner built with Studio gets the
+device's `StudioDevice` (`studio::of(device)`), whose `bridge(model)` returns
+the bridge and its handle, gives the bridge with `with_bridge` and the handle
+with `with_studio_handle`, through which the run enrolls the device. The
+library's `run`, `run_with_hal`, `run_with` and an `AroraBuilder` given no
+bridge serve the open local bridge: a Cargo feature is on for every crate a
+build links, so the feature alone does not say that the runner at hand was
+built with Studio. An app embedding a device does as a runner does and keeps
+the handle itself: `studio::in_device_dir(device_dir, name, store)` gives the
+`StudioDevice` on a platform that gives the app its data directory at run
+time; the handle's `status()` says whether the device is enrolled and shows
+the code while it enrolls, and its `enroll` enrolls it when a person asks.
+The [`studio` module docs](src/studio/mod.rs) cover enrollment, the
+credential, the model the device reports and every variable.
 
 ## Reference
 
@@ -256,7 +260,7 @@ without `native` carries no executor, only host modules.
 | `--device <NAME>` | `ARORA_DEVICE` | `default` | the device's name on this machine |
 | `--device-dir <PATH>` | `ARORA_DEVICE_DIR` | per-user directory of the name | the device directory |
 | `--bridge-port <PORT>` | `ARORA_BRIDGE_PORT` | `9000` | the open local bridge's port, `ws://127.0.0.1:<PORT>`; 0 is refused |
-| `--no-studio` | | | serve the open local bridge instead of connecting (`studio-bridge` builds) |
+| `--no-studio` | | | serve the open local bridge instead of the device's Studio bridge (`studio-bridge` builds) |
 
 `RUST_LOG` filters the log: errors only by default headless, `info` under the
 terminal UI. In the terminal UI the wheel and PgUp/PgDn scroll the log, `m`

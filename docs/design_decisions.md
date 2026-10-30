@@ -827,14 +827,31 @@ silently run without Studio.
 What a run does is decided by the runner built with Studio, not by the
 feature: a feature of arora is enabled for every crate a build links, so a
 runner built without Studio beside one built with it sees `studio-bridge` on.
-An `AroraBuilder` that no runner hands a choice therefore serves the open local
-bridge, and a runner flattens `--no-studio` only under its own `studio`
-feature. An embedder connects by calling `studio::connect`, or by handing
-`Choice::Studio` to `AroraBuilder::with_studio`. An app whose installs nobody
-set up must contact nobody keeps the device's `StudioDevice` instead
-(`studio::of`), the device client's object for the device's Studio side: it
-connects the device only when it holds a credential, and enrolls it when a
-person asks.
+The run's Studio bridge is therefore the runner's to give: a runner built with
+Studio gives the device's Studio bridge (`AroraBuilder::with_bridge`) and its
+handle (`AroraBuilder::with_studio_handle`) unless the run passes
+`--no-studio`, an `AroraBuilder` given no bridge serves the open local bridge,
+and a runner flattens `--no-studio` only under its own `studio` feature. An
+app embedding a device gives its runtime the same bridge and keeps the handle
+itself.
+
+### A device runs before it is enrolled with Studio
+
+A runtime built with Studio carries the device's Studio bridge from its start,
+enrolled or not, and the device enrolls through the bridge's handle while it
+runs: an app (vizij on a phone) runs at once and enrolls from its settings
+when a person asks, and a runner's robot runs while the person who approves it
+gets to Studio. One bridge serves the device throughout: offline, it contacts
+nobody, keeps the latest value of each key, and publishes them when it
+connects, so Studio sees the device's whole state once it is enrolled, and the
+runtime is built once.
+
+Connecting before the runtime is built, enrolling inline, is not kept: it
+holds the device until a person approves it, and an app that does not want to
+contact anyone until asked would need a second path that builds the runtime
+again once the device is enrolled. arora keeps one path to Studio, the bridge
+and its handle, rather than also offering functions that connect and enroll
+before returning a bridge.
 
 ### A device enrolls with Semio Studio
 
@@ -849,26 +866,31 @@ than anyone: each run reports the fields the environment and the HAL give,
 and only those, so a family the operator typed at enrollment, for a device
 nothing else describes, stays the record's.
 
-A run that connects to Studio and finds the device not enrolled enrolls it
-then, without a separate command: building with Studio is the opt-in, and a
-person's approval in Studio is the consent the enrollment needs. Enrolling as
+A run given its Studio bridge's handle enrolls a device that is not enrolled
+while it runs, without a separate command: building with Studio is the
+opt-in, and a person's approval in Studio is the consent the enrollment
+needs. Enrolling as
 a command of its own is Semio's client's, `semio device enroll NAME`, which
 saves the same credential under the device's name: arora's own verbs never
 reach Studio, and only a build with `studio-bridge`, Semio's runner build, reads
 that credential. Without an enrollment token, it enrolls by code, headless
 included: the code is in the log — or on standard error when the log shows no
-info lines, since the run waits on someone seeing it — and the run waits for a
-person's decision, so a service started from a build with Studio joins Studio
-once someone approves it, and never before. A refused code, or a refused
-token, fails the run instead of serving the local bridge: the run is one of a
-build made for Studio, and serving something else would hide that Studio
-refused the device.
+info lines, since only someone seeing it enrolls the device — and the run
+waits for a person's decision, so a service started from a build with Studio
+joins Studio once someone approves it, and never before. A refused code, or a
+refused token, fails the run instead of running on with an offline bridge: the
+run is one of a build made for Studio, and running on would hide that Studio
+refused the device. Studio refusing the device it has just enrolled fails the
+run too, rather than enrolling it again in a loop.
 
 Only a device the client finds not enrolled enrolls. Studio failing otherwise
 says nothing of the enrollment, and a credential of another Firebase project
 than the run's says the configuration and the device disagree on which Studio
 the device belongs to: either way enrolling would replace a credential that
-may be good, so the run fails and says what to do.
+may be good, so the device does not enroll, and its bridge logs why and
+connects again by itself, waiting longer after each failure in a row. A
+device revoked once it has connected is not enrolled any more, and enrolls
+again.
 
 The enrollment token is read from the environment only. A command-line option
 would put a secret where the host's other users read it (`ps`) and where the

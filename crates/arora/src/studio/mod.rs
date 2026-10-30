@@ -1,43 +1,58 @@
-//! The Semio Studio connection: what
-//! [`AroraBuilder::run`](crate::AroraBuilder::run) wires as the default bridge
-//! when a runner built with Studio hands it [`Choice::Studio`]
-//! ([`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio)) — the
-//! device's enrollment with Studio, its sign-in and token rotation, the Zenoh
-//! connection.
+//! The Semio Studio connection: the device's Studio bridge, which a runtime
+//! carries from its start whether or not the device is enrolled with Studio,
+//! and what a run does through the bridge's handle — the device's enrollment,
+//! and showing the operator where the bridge stands. The bridge signs the
+//! device in, rotates its token, and holds its Zenoh connection.
 //!
-//! This is what makes `arora` Studio-capable (not just its binary):
-//! the full run — read Firebase config + Zenoh endpoints from the environment,
-//! keep the device's encrypted Studio credential under its name in Semio's
-//! device store, enroll the device when it is not enrolled, build the real
-//! `ZenohDeviceClient` (the studio-bridge Zenoh connector), and run the device
-//! over it and the builder's [`DataStore`] (a fresh `SimpleDataStore` when the
-//! builder is given none).
-//!
-//! The binary (`src/main.rs`) assembles the builder from its command line,
-//! handing it the command line's choice, and runs it.
+//! The bridge and its handle are the device client's ([`StudioBridge`],
+//! [`StudioHandle`]): [`StudioDevice::bridge`] gives both, for the
+//! [`StudioDevice`] arora builds for a device ([`of`], [`in_device_dir`]).
+//! The bridge goes to the runtime like any other
+//! ([`AroraBuilder::with_bridge`](crate::AroraBuilder::with_bridge)); the
+//! handle stays with whoever enrolls the device and follows the bridge — the
+//! run ([`AroraBuilder::with_studio_handle`](crate::AroraBuilder::with_studio_handle)),
+//! or the app embedding the device.
 //!
 //! # Whether a run connects
 //!
 //! Building with Studio is the opt-in: a runner built with it — arora's
 //! `studio-bridge` feature for the `arora` binary, a HAL runner's own `studio`
 //! feature — connects to Studio by default, and `--no-studio` opts a run out.
-//! A build without it has no Studio option at all. What a run does is a
-//! [`Choice`], which a runner's command line gives ([`StudioArgs::choice`])
-//! and [`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio) hands
-//! to [`AroraBuilder::run`](crate::AroraBuilder::run):
+//! A build without it has no Studio option at all. A runner reads the option
+//! with [`StudioArgs::connects`] and, when the run connects, gives the run the
+//! device's Studio bridge and its handle:
 //!
-//! | the run | the default bridge |
+//! | the run | its bridge |
 //! |---|---|
-//! | passes nothing | Studio; a device not enrolled with Studio [enrolls](#enrollment) first |
+//! | passes nothing | Studio's; a device not enrolled with Studio [enrolls](#enrollment) while the run runs |
 //! | passes `--no-studio` | the open local bridge, whatever the device holds |
 //!
-//! A builder no runner hands a choice serves the open local bridge. A feature
-//! of `arora` is enabled for every crate a build links, so `studio-bridge`
-//! being on does not tell that the runner at hand was built with Studio: a
-//! runner built without it, beside one built with it, would otherwise connect
-//! with no `--no-studio` to opt out.
+//! ```no_run
+//! # async fn runner(
+//! #     builder: arora::AroraBuilder,
+//! #     studio: arora::studio::StudioArgs,
+//! #     device: arora::Device,
+//! #     hal: Box<dyn arora_hal::Hal>,
+//! # ) -> anyhow::Result<()> {
+//! let builder = if studio.connects() {
+//!     let model = arora::studio::reported_model(&hal.describe().await);
+//!     let (bridge, handle) = arora::studio::of(&device)?.bridge(model);
+//!     builder.with_bridge(Box::new(bridge)).with_studio_handle(handle)
+//! } else {
+//!     builder
+//! };
+//! builder.with_device(device).with_hal(hal).run().await
+//! # }
+//! ```
 //!
-//! A run says in one line of its log which bridge it serves.
+//! A run given no bridge serves the open local bridge
+//! ([`AroraBuilder::run`](crate::AroraBuilder::run)). The Studio bridge is
+//! the runner's to give: a feature of `arora` is enabled for every crate a
+//! build links, so `studio-bridge` being on does not tell that the runner at
+//! hand was built with Studio, and a runner built without it never gives one.
+//!
+//! A run logs which bridge it serves: the local bridge's address, or Semio
+//! Studio's bridge.
 //!
 //! # Where the credential is
 //!
@@ -56,7 +71,7 @@
 //! the device client for the name's credentials, and never computes where
 //! they are. Several devices on one machine are several names.
 //!
-//! - A run that connects given a device directory (`--device-dir`,
+//! - The Studio side of a device given a device directory (`--device-dir`,
 //!   `ARORA_DEVICE_DIR`) and no name is refused: "name this device with
 //!   --device or ARORA_DEVICE". Two such devices would otherwise share the
 //!   credential of the name `default`.
@@ -65,25 +80,22 @@
 //!   store holds none for it; the log says so. Its bridge certificate is
 //!   reissued.
 //! - Given the deprecated `DEVICE_DIR` (or `IDENTITY_FILE`) and no name, the
-//!   run keeps its credential in that directory's `studio/`:
+//!   device keeps its credential in that directory's `studio/`:
 //!   neither store nor move, so an upgraded runner keeps the credential it
 //!   had, and two such devices never share one.
-//!
-//! The `connect` functions below connect whoever calls them: an embedder
-//! calling one connects, a device that is not enrolled enrolling first. An
-//! app that connects only a device holding a credential, and enrolls it when
-//! a person asks, keeps the device's Studio side instead
-//! ([below](#keeping-the-devices-studio-side)).
 //!
 //! # Enrollment
 //!
 //! Studio creates a device, under the owner a person chooses, when the device
 //! enrolls; the device signs in with the credential its enrollment saved from
-//! then on. A run that connects enrolls the device when the client finds no
-//! enrolled device in its credentials: none, one that does not read, one
-//! Studio refuses (a revoked or deleted device), or one that is no device's,
-//! such as the anonymous account an earlier arora signed the device up as.
-//! It enrolls:
+//! then on. While the device holds no credential Studio accepts — none, one
+//! that does not read, one Studio refuses (a revoked or deleted device), or
+//! one that is no device's, such as the anonymous account an earlier arora
+//! signed the device up as — its bridge is offline: it contacts nobody, keeps
+//! the latest value of each key the runtime sends, and publishes them once it
+//! connects. The runtime runs meanwhile.
+//!
+//! A run given the bridge's handle enrolls the device then, while it runs:
 //!
 //! - with the enrollment token `STUDIO_ENROLLMENT_TOKEN` holds, when it holds
 //!   one: a person created it in Studio (`semio_enroll_…`), and Studio creates
@@ -94,18 +106,22 @@
 //!   choosing the device's owner. Each code is logged, and shown to the
 //!   operator under the terminal UI ([`Operator::show_enrollment_code`]);
 //!   when no operator shows it and the log shows no info lines — the
-//!   headless log's default without `RUST_LOG` — it goes to standard error. It comes with
-//!   the Studio page approving it when the client knows Studio's web address
-//!   (`STUDIO_URL`, else the one baked into `arora-studio-bridge-client`). A
-//!   code that expires undecided is replaced by another; the run waits for a
-//!   person's decision for as long as it runs.
+//!   headless log's default without `RUST_LOG` — it goes to standard error.
+//!   It comes with the Studio page approving it when the client knows
+//!   Studio's web address (`STUDIO_URL`, else the one baked into
+//!   `arora-studio-bridge-client`). A code that expires undecided is replaced
+//!   by another; the run waits for a person's decision for as long as it
+//!   runs.
 //!
-//! Then the run connects. A person refusing the code, or Studio refusing the
-//! token, fails the run: it connects to Studio, and Studio refused the device.
-//! Only a device the client finds not enrolled enrolls: Studio failing
-//! otherwise fails the run, the credential kept, and so does a credential of
-//! another Firebase project than the run's, which says the two disagree on
-//! which Studio the device belongs to.
+//! Then the bridge connects by itself, and the operator is shown the device's
+//! id ([`Operator::show_device_id`]). A person refusing the code, or Studio
+//! refusing the token, fails the run, and so does Studio refusing the device
+//! it has just enrolled. Studio failing otherwise — Studio or the bridge out
+//! of reach, a credential of another Firebase project than the run's — says
+//! nothing of the device's enrollment: the device does not enroll again, and
+//! its bridge logs why and connects again by itself, waiting longer after
+//! each failure in a row, up to a minute. A device Studio refuses later in
+//! the run, once revoked, enrolls again.
 //!
 //! A device can also be enrolled before it runs, with Semio's own client:
 //! `semio device enroll NAME` saves the credential under its name in the same
@@ -123,60 +139,52 @@
 //! and describes it when it enrolls: its family, and its hardware and software
 //! versions, each from its variable — `MODEL_FAMILY`, `HARDWARE_VERSION`,
 //! `SOFTWARE_VERSION` — else from the description of the device's HAL
-//! ([`crate::AroraBuilder::run`] passes it). A report writes the fields it
-//! gives, the record keeping the others. A device that enrolls with neither
-//! giving its family is asked for one under the terminal UI: the family it
-//! enrolls with stays its record's, as no later report gives another.
+//! ([`reported_model`]). A report writes the fields it gives, the record
+//! keeping the others. A device that enrolls with neither giving its family
+//! is asked for one under the terminal UI: the family it enrolls with stays
+//! its record's, as no later report gives another.
 //!
-//! # Keeping the device's Studio side
+//! # An app keeping the device's Studio side
 //!
-//! An app embedding a device keeps its [`StudioDevice`], the device client's
-//! object for the device's Studio side: [`of`] gives the one of a
-//! [`Device`], and [`in_device_dir`] the one of a device directory and name,
-//! as [`connect_in_device_dir`] takes them. Its credentials are the ones a
-//! run connecting as the device uses, one an earlier arora kept moving in as
-//! [above](#where-the-credential-is); getting it touches local files only.
-//! With it, the app:
-//!
-//! - asks at launch whether the device holds a credential
-//!   ([`StudioDevice::holds_credential`]), which contacts nobody, so an
-//!   install nobody enrolled stays off the network;
-//! - connects the device only then ([`StudioDevice::connect`], reporting
-//!   [`reported_model`]), which never enrolls: a device Studio no longer
-//!   knows is [`Error::NotEnrolled`];
-//! - enrolls the device when a person asks, as a run does ([`enroll`]), then
-//!   connects it.
+//! An app embedding a device builds its runtime with the device's Studio
+//! bridge from the start, and keeps the bridge's handle: it runs at once,
+//! whether or not the device is enrolled, and enrolls it when a person asks.
+//! [`of`] gives the [`StudioDevice`] of a [`Device`], and [`in_device_dir`]
+//! the one of a device directory and name, for a platform that gives the app
+//! its data directory at run time (Android). Its credentials are the ones a
+//! run as the device uses, one an earlier arora kept moving in as
+//! [above](#where-the-credential-is); getting it, and getting its bridge for
+//! a device holding no credential, contacts nobody. The handle's
+//! [`status`](StudioHandle::status) says where the bridge stands — not
+//! enrolled, enrolling with the code a person enters, connected as the
+//! device's id — and [`enroll`](StudioHandle::enroll) enrolls the device,
+//! after which the bridge connects by itself.
 //!
 //! ```no_run
-//! use arora::operator::Operator;
-//! use arora::studio::{self, StudioDevice};
+//! use arora::studio::{self, DeviceDescription, EnrollWith, StudioHandle, StudioStatus};
 //! use arora_hal::HalDescription;
 //!
-//! /// The device, connected to Studio when it holds a credential, and its
-//! /// Studio side, which the app keeps for as long as it runs.
-//! async fn at_launch(
+//! /// The device's runtime, built with its Studio bridge, and the handle the
+//! /// app keeps for as long as it runs. Called within a Tokio runtime.
+//! fn at_launch(
 //!     device: &arora::Device,
 //!     description: &HalDescription,
-//! ) -> anyhow::Result<(arora::Arora, StudioDevice)> {
-//!     let studio_device = studio::of(device)?;
-//!     let mut builder = arora::Arora::builder();
-//!     if studio_device.holds_credential() {
-//!         let model = studio::reported_model(description);
-//!         let client = studio_device.connect(model).await?;
-//!         builder = builder.with_bridge(Box::new(client));
-//!     }
-//!     Ok((builder.build()?, studio_device))
+//! ) -> anyhow::Result<(arora::Arora, StudioHandle)> {
+//!     let (bridge, handle) = studio::of(device)?.bridge(studio::reported_model(description));
+//!     let arora = arora::Arora::builder()
+//!         .with_bridge(Box::new(bridge))
+//!         .build()?;
+//!     Ok((arora, handle))
 //! }
 //!
-//! /// Enrolls the device a person asked to enroll, and connects it.
-//! async fn on_enroll(
-//!     studio_device: &StudioDevice,
-//!     description: &HalDescription,
-//!     operator: &dyn Operator,
-//! ) -> anyhow::Result<Box<dyn arora_bridge::Bridge>> {
-//!     studio::enroll(studio_device, description, Some(operator)).await?;
-//!     let model = studio::reported_model(description);
-//!     Ok(Box::new(studio_device.connect(model).await?))
+//! /// Enrolls the device a person asked to enroll, under the name they gave;
+//! /// the code to enter in Studio shows in the handle's status.
+//! async fn on_enroll(handle: &StudioHandle, name: &str) -> anyhow::Result<String> {
+//!     if *handle.status().borrow() != StudioStatus::NotEnrolled {
+//!         anyhow::bail!("the device is enrolled");
+//!     }
+//!     let how = EnrollWith::token_from_env().unwrap_or_else(|| EnrollWith::Code(Box::new(|_| {})));
+//!     Ok(handle.enroll(&DeviceDescription::new(name), how).await?)
 //! }
 //! ```
 //!
@@ -201,41 +209,39 @@
 //!   - `ARORA_DEVICE` (`--device`), `ARORA_DEVICE_DIR` (`--device-dir`) — the
 //!     device's name and directory, as [`crate::device`] says, with the
 //!     deprecated `DEVICE_LOCAL_ID`, `DEVICE_DIR` and `IDENTITY_FILE`. An
-//!     embedder passes them to [`connect_with_device_dir`],
-//!     [`connect_in_device_dir`] or [`in_device_dir`] instead.
+//!     embedder passes them to [`in_device_dir`] instead.
 //!   - `SEMIO_DEVICE_STORE` — the device store's root, replacing
 //!     `<data_local_dir>/semio/devices/`: for a service running as another
-//!     user, or tests. An embedder passes it to [`connect_in_device_dir`] or
-//!     [`in_device_dir`] instead.
+//!     user, or tests. An embedder passes it to [`in_device_dir`] instead.
 //!   - `DEVICE_NAME` — the name a device enrolls with; `MODEL_FAMILY`,
 //!     `HARDWARE_VERSION`, `SOFTWARE_VERSION` — its model. A set variable wins
 //!     over every other source of its field; a blank one counts as unset.
 //!   - `RUST_LOG` — log filter (`env_logger`).
-//!
-//! [`DataStore`]: arora_types::data::DataStore
 
 mod credentials;
 
 use std::future::Future;
 use std::path::Path;
 
-use anyhow::{Context, Result};
-use arora_bridge::Bridge;
+use anyhow::{anyhow, Context, Result};
 use arora_hal::HalDescription;
-use arora_studio_bridge_client::auth::{Error as AuthError, PendingSignIn};
 use arora_studio_bridge_client::credentials::DeviceCredentials;
 use arora_studio_bridge_client::firestore_support::options::{
     FirebaseEmulatorOptions, FirebaseOptions,
 };
-use arora_studio_bridge_client::studio::{self as enrollment, ENROLLMENT_TOKEN_VAR};
+use arora_studio_bridge_client::studio::ENROLLMENT_TOKEN_VAR;
 use arora_studio_bridge_client::PartialDeviceModelVersion;
+use futures::future::{Fuse, FusedFuture, FutureExt};
 use log::info;
+use tokio::sync::watch;
 
 // The device's Studio side, the device client's, and what calling its
 // methods takes: an embedder keeping it needs no dependency on the client.
 pub use arora_studio_bridge_client::auth::DeviceDescription;
 pub use arora_studio_bridge_client::error::Error;
-pub use arora_studio_bridge_client::studio::{EnrollWith, StudioDevice};
+pub use arora_studio_bridge_client::studio::{
+    EnrollWith, StudioBridge, StudioDevice, StudioHandle, StudioStatus,
+};
 pub use arora_studio_bridge_client::PartialDeviceModel;
 
 use crate::operator::{EnrollmentCode, Operator};
@@ -250,214 +256,31 @@ const NAME_LABEL: &str = "Device name — leave empty for a generated name";
 /// with no model family.
 const MODEL_FAMILY_LABEL: &str = "Model family — optional, leave empty to skip";
 
-/// What a run does about Semio Studio: the
-/// [module docs](self#whether-a-run-connects) say what each gives. A
-/// runner's command line gives it with [`StudioArgs::choice`];
-/// [`AroraBuilder::with_studio`](crate::AroraBuilder::with_studio) hands it
-/// to the run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Choice {
-    /// Studio, a device that is not enrolled enrolling first: what a run of a
-    /// runner built with Studio does unless it passes `--no-studio`.
-    Studio,
-    /// `--no-studio`: the open local bridge, whatever the device holds.
-    Local,
-}
-
 /// The Studio option of a runner built with Studio, as a clap helper that
 /// [`DeviceCli`](crate::DeviceCli) and the robot runners flatten:
 /// `--no-studio`.
 #[derive(Clone, Debug, Default, clap::Args)]
 pub struct StudioArgs {
-    /// Serve the open local bridge instead of connecting to Semio Studio,
-    /// which a run of this build otherwise connects to, enrolling this device
-    /// with it when it is not enrolled.
+    /// Serve the open local bridge instead of Semio Studio's, which a run of
+    /// this build otherwise serves, enrolling this device with Studio while
+    /// it runs when it is not enrolled.
     #[arg(long)]
     no_studio: bool,
 }
 
 impl StudioArgs {
-    /// What the run does: [`Choice::Local`] with `--no-studio`, else
-    /// [`Choice::Studio`].
-    pub fn choice(&self) -> Choice {
-        if self.no_studio {
-            Choice::Local
-        } else {
-            Choice::Studio
-        }
+    /// Whether the run connects to Studio, giving the runtime the device's
+    /// Studio bridge: unless it passes `--no-studio`.
+    pub fn connects(&self) -> bool {
+        !self.no_studio
     }
-}
-
-/// Resolve the default bridge of a `studio-bridge` run doing `choice` as
-/// `device`, else the device the environment configures: the Semio Studio
-/// connection, or the open local bridge on the device's port with
-/// [`Choice::Local`].
-///
-/// A device that is not enrolled enrolls as the [module docs](self#enrollment)
-/// say: under the terminal UI, the operator names it when `DEVICE_NAME` does
-/// not, and is shown each code; headless, nobody is asked, and the log shows
-/// the codes. The whole Studio side (enrollment, sign-in, token rotation, the
-/// Zenoh connection) is identical for every device — only the hardware behind
-/// it, which `description` describes, differs.
-pub(crate) async fn default_bridge(
-    frontend: &crate::operator::Frontend,
-    description: &HalDescription,
-    choice: Choice,
-    device: Option<Device>,
-) -> Result<Box<dyn Bridge>> {
-    bridge_for(
-        choice,
-        connect_studio(frontend, description, device.as_ref()),
-        crate::run::local_ws_bridge_on(device.as_ref()),
-    )
-    .await
-}
-
-/// The bridge `choice` picks, once the log says which: `studio` for
-/// [`Choice::Studio`], `local` for [`Choice::Local`]. Only the one picked
-/// runs.
-async fn bridge_for(
-    choice: Choice,
-    studio: impl Future<Output = Result<Box<dyn Bridge>>>,
-    local: impl Future<Output = Result<Box<dyn Bridge>>>,
-) -> Result<Box<dyn Bridge>> {
-    match choice {
-        Choice::Studio => {
-            info!(
-                "Studio: connecting to Semio Studio (--no-studio serves the open local bridge \
-                 instead); a device not enrolled with it enrolls first."
-            );
-            studio.await
-        }
-        Choice::Local => {
-            info!("Studio: serving the open local bridge instead of Semio Studio.");
-            local.await
-        }
-    }
-}
-
-/// The Studio connection of a run that connects as `device`, else as the
-/// device the environment configures, through the operator only under the
-/// terminal UI: headless, nobody answers.
-async fn connect_studio(
-    frontend: &crate::operator::Frontend,
-    description: &HalDescription,
-    device: Option<&Device>,
-) -> Result<Box<dyn Bridge>> {
-    let operator = frontend.interactive.then_some(&*frontend.operator);
-    let studio_device = match device {
-        Some(device) => of(device)?,
-        None => of(&Device::from_env()?)?,
-    };
-    connect_device(studio_device, description, operator).await
-}
-
-/// Build the Studio bridge of the device the environment configures,
-/// enrolling it first when it is not enrolled, through `operator`: it is
-/// asked the device's name when `DEVICE_NAME` does not give one, and shown
-/// each code a person approves the device with, as the
-/// [module docs](self#enrollment) say. Fails when the enrollment is refused.
-///
-/// This is the operator-driven counterpart to [`connect`] (which never asks,
-/// for embedders that have no operator). The bridge itself is built the same
-/// way; only how a device that enrolls is named, and how its code is shown,
-/// differ.
-pub async fn connect_with_operator(operator: &dyn Operator) -> Result<Box<dyn Bridge>> {
-    connect_with_operator_and_description(operator, &HalDescription::default()).await
-}
-
-/// [`connect_with_operator`], with the device's model completed by what its
-/// HAL says of itself, as the [module docs](self#the-devices-model) say. Pass
-/// `hal.describe().await`.
-pub async fn connect_with_operator_and_description(
-    operator: &dyn Operator,
-    description: &HalDescription,
-) -> Result<Box<dyn Bridge>> {
-    connect_device(of(&Device::from_env()?)?, description, Some(operator)).await
-}
-
-/// Build the Semio Studio bridge — a ready-to-inject [`Bridge`] endpoint — of
-/// the device the environment configures, enrolling it first when it is not
-/// enrolled, and return it.
-///
-/// This is the injectable counterpart to [`crate::run_with_hal`]: where `run_with_hal`
-/// builds the bridge *and* owns the run loop, `connect` returns just the
-/// finished, connected bridge so an embedder can attach it to a device with
-/// [`AroraBuilder::with_bridge`](crate::AroraBuilder::with_bridge) — the
-/// producer side of "let a Studio see this runtime's live data". A host that
-/// already runs its own Arora (e.g. the Vizij standalone) opts into a Studio
-/// connection with:
-///
-/// ```ignore
-/// let studio_bridge = arora::studio::connect().await?;
-/// let device = arora::Arora::builder().with_bridge(studio_bridge).build()?;
-/// ```
-///
-/// The whole Studio side (enrollment, sign-in, token rotation, the Zenoh
-/// connection) is identical for every device; only the runtime it is attached
-/// to differs. Nobody is asked anything: a device that enrolls is named by
-/// `DEVICE_NAME`, or generated, and the log shows the codes it enrolls by —
-/// see the [module docs](self#enrollment). Fails when the enrollment is
-/// refused.
-pub async fn connect() -> Result<Box<dyn Bridge>> {
-    connect_with_description(&HalDescription::default()).await
-}
-
-/// [`connect`], with the device's model completed by what its HAL says of
-/// itself (`hal.describe().await`), as the
-/// [module docs](self#the-devices-model) say.
-pub async fn connect_with_description(description: &HalDescription) -> Result<Box<dyn Bridge>> {
-    connect_device(of(&Device::from_env()?)?, description, None).await
-}
-
-/// [`connect`], as the device named `name` whose directory is `device_dir`,
-/// rather than the device the environment configures. An app whose platform
-/// gives it a data directory (Android, a Tauri app) passes that;
-/// [`crate::device_dir::of`] gives the per-user one of a name.
-///
-/// The credential is the name's in Semio's default device store
-/// ([where the credential is](self#where-the-credential-is)), created if
-/// missing, and saved when the device enrolls; one `device_dir`'s `studio/`
-/// holds moves in once. Fails on a name that is not one path component.
-pub async fn connect_with_device_dir(device_dir: &Path, name: &str) -> Result<Box<dyn Bridge>> {
-    connect_in_device_dir(device_dir, name, None, &HalDescription::default(), None).await
-}
-
-/// The connection of [`connect_with_operator_and_description`] — or, with no
-/// `operator`, of [`connect_with_description`] — as the device named `name`
-/// whose directory is `device_dir`, as [`connect_with_device_dir`] takes them,
-/// its credential the name's in the device store under `store`, or in the
-/// default one (`SEMIO_DEVICE_STORE`, else `<data_local_dir>/semio/devices/`)
-/// with `None`.
-///
-/// Given a store, nothing else is looked up to place the device's directory
-/// and its Studio credential: an Android app passes the directory its
-/// platform gives it at run time (`AndroidApp::internal_data_path()`) and a
-/// store root inside it, where the executable's directory is not writable,
-/// there is no home directory, and the working directory is `/`, and its own
-/// `operator` to name the device and show the codes it enrolls by. Fails on
-/// a name that is not one path component.
-pub async fn connect_in_device_dir(
-    device_dir: &Path,
-    name: &str,
-    store: Option<&Path>,
-    description: &HalDescription,
-    operator: Option<&dyn Operator>,
-) -> Result<Box<dyn Bridge>> {
-    connect_device(
-        in_device_dir(device_dir, name, store)?,
-        description,
-        operator,
-    )
-    .await
 }
 
 /// The Studio side of `device`, of the Studio the environment configures
-/// ([configuration](self#configuration)): what an app embedding the device
-/// keeps to tell whether it holds a credential, connect it and enroll it, as
-/// the [module docs](self#keeping-the-devices-studio-side) say.
+/// ([configuration](self#configuration)), whose
+/// [`bridge`](StudioDevice::bridge) a runtime carries.
 ///
-/// Its credentials are the ones a run connecting as `device` uses
+/// Its credentials are the ones a run as `device` uses
 /// ([where the credential is](self#where-the-credential-is)), created if
 /// missing, one an earlier arora kept moving in once. Getting it reads and
 /// writes local files only: nobody is contacted. Refuses a device given a
@@ -469,9 +292,14 @@ pub fn of(device: &Device) -> Result<StudioDevice> {
 /// [`of`], as the device named `name` whose directory is `device_dir`, its
 /// credential the name's in the device store under `store`, or in the
 /// default one (`SEMIO_DEVICE_STORE`, else `<data_local_dir>/semio/devices/`)
-/// with `None`: as [`connect_in_device_dir`] takes them, for an app whose
-/// platform gives it its data directory at run time. Fails on a name that is
-/// not one path component.
+/// with `None`.
+///
+/// Given a store, nothing else is looked up to place the device's directory
+/// and its Studio credential: an Android app passes the directory its
+/// platform gives it at run time (`AndroidApp::internal_data_path()`) and a
+/// store root inside it, where the executable's directory is not writable,
+/// there is no home directory, and the working directory is `/`. Fails on a
+/// name that is not one path component.
 pub fn in_device_dir(device_dir: &Path, name: &str, store: Option<&Path>) -> Result<StudioDevice> {
     let store = credentials::store_at(store)?;
     let credentials = credentials::in_store(&store, name, device_dir)?;
@@ -479,26 +307,146 @@ pub fn in_device_dir(device_dir: &Path, name: &str, store: Option<&Path>) -> Res
 }
 
 /// The model the device reports to its Studio record as it connects, which
-/// [`StudioDevice::connect`] takes: each field from its variable, else from
+/// [`StudioDevice::bridge`] takes: each field from its variable, else from
 /// what the device's HAL says of itself (`hal.describe().await`), as the
 /// [module docs](self#the-devices-model) say. `None` when neither gives any.
 pub fn reported_model(description: &HalDescription) -> Option<PartialDeviceModel> {
     Model::of(&env_nonempty, description).reported()
 }
 
-/// Enrolls the device `studio_device` is the Studio side of, as a run that
-/// connects does ([enrollment](self#enrollment)), and returns its id: with
-/// the enrollment token `STUDIO_ENROLLMENT_TOKEN` holds, else by code, each
-/// code logged and shown to `operator`, if any. The device is described by
-/// its name — `DEVICE_NAME`, else what `operator` answers, else generated —
-/// and its model as `description` completes it, `operator` asked its family
-/// when nothing gives one.
+// What a run follows its Studio bridge with is `Send`, so the run's future
+// is, and so is the Studio side an embedder shares with the tasks enrolling
+// the device.
+const _: () = {
+    fn send<T: Send>(_: &T) {}
+    fn shared<T: Send + Sync>(_: &T) {}
+    #[allow(dead_code)]
+    fn studio_futures_are_send(
+        handle: StudioHandle,
+        description: &HalDescription,
+        operator: &dyn Operator,
+        studio_device: &StudioDevice,
+    ) {
+        shared(studio_device);
+        shared(&handle);
+        send(&follow(handle, description, Some(operator)));
+    }
+};
+
+/// The Studio side of the device whose Studio credentials are
+/// `credentials`, of the Studio the environment configures
+/// ([configuration](self#configuration)).
+fn studio_device(credentials: DeviceCredentials) -> StudioDevice {
+    // The Zenoh and Firebase TLS stacks need a default crypto provider,
+    // whoever connects the device: a run, or an embedder through the
+    // device's bridge.
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+    let studio_device = StudioDevice::new(FirebaseOptions::from_env(), credentials)
+        .with_emulators(FirebaseEmulatorOptions::from_env());
+    match env_nonempty("STUDIO_BRIDGE_ENDPOINT") {
+        Some(endpoint) => {
+            info!("Studio: the device's bridge endpoint is {endpoint} (STUDIO_BRIDGE_ENDPOINT)");
+            studio_device.with_endpoint(endpoint)
+        }
+        None => studio_device,
+    }
+}
+
+/// What a run does through its Studio bridge's `handle`, for as long as the
+/// run runs: it enrolls the device while it is not enrolled, as the
+/// [module docs](self#enrollment) say, the device described by its name and
+/// the model `description` completes; it shows each code that enrolls the
+/// device, and the device's id once its bridge connects. `operator`, under
+/// the terminal UI, names the device when `DEVICE_NAME` does not and is
+/// shown the codes and the id; headless, nobody is asked.
 ///
-/// Fails when the enrollment is refused. Enroll a device only while no
-/// client [`StudioDevice::connect`] returned for it runs: its credentials
-/// have one writer at a time.
-pub async fn enroll(
-    studio_device: &StudioDevice,
+/// Returns only when the run fails: the error a refused enrollment gives.
+pub(crate) async fn follow(
+    handle: StudioHandle,
+    description: &HalDescription,
+    operator: Option<&dyn Operator>,
+) -> anyhow::Error {
+    info!("Studio: the device's bridge is Semio Studio's");
+    let status = handle.status();
+    let handle = &handle;
+    follow_status(
+        status,
+        || enroll(handle, description, operator),
+        operator,
+        &mut std::io::stderr(),
+    )
+    .await
+}
+
+/// [`follow`], over the bridge's `status` as it changes, enrolling the device
+/// with `enroll`. A code nothing else shows goes to `console`.
+async fn follow_status<Enrolled>(
+    mut status: watch::Receiver<StudioStatus>,
+    mut enroll: impl FnMut() -> Enrolled,
+    operator: Option<&dyn Operator>,
+    console: &mut (dyn std::io::Write + Send),
+) -> anyhow::Error
+where
+    Enrolled: Future<Output = Result<String>>,
+{
+    let mut codes = Codes {
+        operator,
+        shown: None,
+    };
+    let enrollment = Fuse::terminated();
+    futures::pin_mut!(enrollment);
+    // The device enrolled in this run, and its bridge has not connected
+    // since: Studio refusing it now refuses the device it has just enrolled.
+    let mut just_enrolled = false;
+    let mut followed = true;
+    loop {
+        let current = status.borrow_and_update().clone();
+        match &current {
+            StudioStatus::NotEnrolled if enrollment.is_terminated() => {
+                if just_enrolled {
+                    return anyhow!(
+                        "Semio Studio refuses the device it has just enrolled: its bridge finds \
+                         it not enrolled"
+                    );
+                }
+                info!("Studio: this device is not enrolled with Semio Studio; enrolling it");
+                enrollment.set(enroll().fuse());
+            }
+            StudioStatus::Connected { device_id } => {
+                just_enrolled = false;
+                info!("Studio: connected to Semio Studio as device {device_id}");
+                if let Some(operator) = operator {
+                    operator.show_device_id(device_id);
+                }
+            }
+            _ => {}
+        }
+        codes.follow(&current, log::log_enabled!(log::Level::Info), &mut *console);
+        tokio::select! {
+            changed = status.changed(), if followed => {
+                // The bridge was dropped: its status changes no more.
+                followed = changed.is_ok();
+            }
+            enrolled = &mut enrollment, if !enrollment.is_terminated() => match enrolled {
+                Ok(_) => just_enrolled = true,
+                Err(error) => return error,
+            },
+            () = std::future::pending(), if !followed && enrollment.is_terminated() => {}
+        }
+    }
+}
+
+/// Enrolls the device of the Studio bridge `handle` follows, as the
+/// [module docs](self#enrollment) say, and returns its id: with the
+/// enrollment token `STUDIO_ENROLLMENT_TOKEN` holds, else by code, which the
+/// bridge's status shows. The device is described by its name —
+/// `DEVICE_NAME`, else what `operator` answers, else generated — and its
+/// model as `description` completes it, `operator` asked its family when
+/// nothing gives one.
+async fn enroll(
+    handle: &StudioHandle,
     description: &HalDescription,
     operator: Option<&dyn Operator>,
 ) -> Result<String> {
@@ -508,221 +456,88 @@ pub async fn enroll(
         operator,
     )
     .await;
-    let enrolled = match EnrollWith::token_from_env() {
+    let how = match EnrollWith::token_from_env() {
         Some(token) => {
             info!(
                 "Studio: enrolling this device as {} with the enrollment token in \
                  {ENROLLMENT_TOKEN_VAR}",
                 device.name
             );
-            studio_device.enroll(&device, token).await
+            token
         }
         None => {
-            let codes = Codes { operator };
-            let origin = enrollment::origin();
-            let show = |pending: &PendingSignIn| {
-                codes.show(&enrollment_code(pending, origin.as_deref()));
-            };
-            studio_device
-                .enroll(&device, EnrollWith::Code(Box::new(show)))
-                .await
+            info!("Studio: enrolling this device as {} by code", device.name);
+            EnrollWith::Code(Box::new(|_| {}))
         }
     };
-    let device_id = enrolled.context("failed to enroll the device with Semio Studio")?;
+    let device_id = handle
+        .enroll(&device, how)
+        .await
+        .context("failed to enroll the device with Semio Studio")?;
     info!("Studio: enrolled as device {device_id}");
     Ok(device_id)
 }
 
-// The connection futures are `Send`, so an embedder can await them in a spawned
-// task: whatever they hold across an await is `Send`, and a reference to it
-// `Sync`. So is the Studio side an embedder keeps, which it shares with the
-// tasks connecting and enrolling the device.
-const _: () = {
-    fn send<T: Send>(_: &T) {}
-    fn shared<T: Send + Sync>(_: &T) {}
-    #[allow(dead_code)]
-    fn connection_futures_are_send(
-        operator: &dyn Operator,
-        description: &HalDescription,
-        device_dir: &Path,
-        studio_device: &StudioDevice,
-    ) {
-        send(&connect());
-        send(&connect_with_description(description));
-        send(&connect_with_device_dir(device_dir, "bench"));
-        send(&connect_in_device_dir(
-            device_dir,
-            "bench",
-            Some(device_dir),
-            description,
-            Some(operator),
-        ));
-        send(&connect_with_operator(operator));
-        send(&connect_with_operator_and_description(
-            operator,
-            description,
-        ));
-        shared(studio_device);
-        send(&enroll(studio_device, description, Some(operator)));
-        send(&studio_device.connect(reported_model(description)));
-    }
-};
-
-/// The Studio side of the device whose Studio credentials are
-/// `credentials`, of the Studio the environment configures
-/// ([configuration](self#configuration)).
-fn studio_device(credentials: DeviceCredentials) -> StudioDevice {
-    // The Zenoh and Firebase TLS stacks need a default crypto provider,
-    // whoever connects the device: a run, or an embedder through
-    // `StudioDevice::connect`.
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-    let studio_device = StudioDevice::new(FirebaseOptions::from_env(), credentials)
-        .with_emulators(FirebaseEmulatorOptions::from_env());
-    match bridge_endpoint() {
-        Some(endpoint) => studio_device.with_endpoint(endpoint),
-        None => studio_device,
-    }
-}
-
-/// `STUDIO_BRIDGE_ENDPOINT`: the bridge endpoint, overriding the one baked
-/// into `arora-studio-bridge-client` to target a local or preproduction
-/// bridge (e.g. `tcp/localhost:7447`) without a rebuild.
-fn bridge_endpoint() -> Option<String> {
-    env_nonempty("STUDIO_BRIDGE_ENDPOINT")
-}
-
-/// Build the Studio bridge of the device `studio_device` is the Studio side
-/// of, reporting its model as `description` completes it, and enrolling it
-/// first through `operator`, if any, when it is not enrolled.
-///
-/// The client signs the device in with the refresh token its credentials
-/// hold and saves each rotation there; over a TLS endpoint it also keeps
-/// there the key and certificate the bridge knows the device by, obtained
-/// from Studio and renewed while it runs.
-async fn connect_device(
-    studio_device: StudioDevice,
-    description: &HalDescription,
-    operator: Option<&dyn Operator>,
-) -> Result<Box<dyn Bridge>> {
-    let studio_device = &studio_device;
-    let endpoint = bridge_endpoint();
-    let model = &Model::of(&env_nonempty, description);
-    let client = enrolled(
-        studio_device.credentials().path(),
-        || {
-            match &endpoint {
-                Some(endpoint) => {
-                    info!("Connecting to Semio Studio via Zenoh (endpoint: {endpoint})")
-                }
-                None => info!("Connecting to Semio Studio via the baked-in bridge endpoint"),
-            }
-            studio_device.connect(model.reported())
-        },
-        |why| async move {
-            info!("Studio: this device is not enrolled with Semio Studio ({why}); enrolling it");
-            enroll(studio_device, description, operator).await?;
-            Ok(())
-        },
-    )
-    .await?;
-    Ok(Box::new(client))
-}
-
-/// The client of the enrolled device whose Studio credentials are in
-/// `credentials`: `connect`'s when the device is enrolled; otherwise
-/// `connect`'s once `enroll`, told why the device is not enrolled, has
-/// enrolled it.
-///
-/// Only a device the client finds not enrolled enrolls. Studio failing
-/// otherwise says nothing of the device's enrollment, and a credential of
-/// another Firebase project than the run's means the two disagree on which
-/// Studio the device belongs to: enrolling would replace a credential that
-/// may be good.
-async fn enrolled<C, Connected, Enrolled>(
-    credentials: &Path,
-    mut connect: impl FnMut() -> Connected,
-    enroll: impl FnOnce(String) -> Enrolled,
-) -> Result<C>
-where
-    Connected: Future<Output = Result<C, Error>>,
-    Enrolled: Future<Output = Result<()>>,
-{
-    let failed = |error| connection_error(error, credentials);
-    match connect().await {
-        Err(Error::NotEnrolled(why)) => {
-            enroll(why).await?;
-            connect().await.map_err(failed)
-        }
-        connected => connected.map_err(failed),
-    }
-}
-
-/// `error`, connecting the device whose Studio credentials are in
-/// `credentials`, with what to do when the credential is another Firebase
-/// project's.
-fn connection_error(error: Error, credentials: &Path) -> anyhow::Error {
-    let context = match &error {
-        Error::Studio(AuthError::WrongProject { .. }) => format!(
-            "the device's Studio credential in {} is another Firebase project's than the one \
-             this run reaches, so the device does not enroll again over it: point the run at \
-             that project (the FIREBASE_* variables), or delete that directory to enroll the \
-             device with this one",
-            credentials.display()
-        ),
-        _ => "failed to connect to Semio Studio".to_string(),
-    };
-    anyhow::Error::new(error).context(context)
-}
-
-/// The code `pending` asks a person to approve, with its approval page on the
-/// Studio served at `origin`, when it is known.
-fn enrollment_code(pending: &PendingSignIn, origin: Option<&str>) -> EnrollmentCode {
-    EnrollmentCode {
-        code: pending.user_code().to_string(),
-        approval_url: origin.map(|origin| pending.approval_url(origin)),
-    }
-}
-
 /// Shows the codes of an enrollment by code: each in the log, and to the
-/// operator, if any, whose code is cleared once the enrollment ends — or once
-/// it is dropped, which would otherwise leave the operator showing a code
-/// nobody waits on.
+/// operator, if any, whose code is cleared once the bridge's status shows
+/// none — or once this is dropped, which would otherwise leave the operator
+/// showing a code nobody waits on.
 struct Codes<'a> {
     operator: Option<&'a dyn Operator>,
+    /// The code shown last, until it is cleared.
+    shown: Option<EnrollmentCode>,
 }
 
 impl Codes<'_> {
-    fn show(&self, code: &EnrollmentCode) {
-        self.show_on(
-            code,
-            log::log_enabled!(log::Level::Info),
-            &mut std::io::stderr(),
-        );
+    /// Shows the code `status` asks a person to enter, when it is another
+    /// than the one shown, and clears the operator's once `status` asks
+    /// none. `logged` is whether the log shows info lines, and `console`
+    /// where a code goes that nothing else shows: someone must see it to
+    /// enroll the device, so when no operator shows it and the log shows no
+    /// info lines — the headless log's default without `RUST_LOG` — it goes
+    /// there.
+    fn follow(&mut self, status: &StudioStatus, logged: bool, console: &mut dyn std::io::Write) {
+        let asked = match status {
+            StudioStatus::Enrolling {
+                code: Some(code),
+                approval_url,
+            } => Some(EnrollmentCode {
+                code: code.clone(),
+                approval_url: approval_url.clone(),
+            }),
+            _ => None,
+        };
+        if asked == self.shown {
+            return;
+        }
+        match &asked {
+            Some(code) => {
+                let line = code_line(code);
+                info!("{line}");
+                let shown = self
+                    .operator
+                    .is_some_and(|operator| operator.show_enrollment_code(Some(code)));
+                if !shown && !logged {
+                    let _ = writeln!(console, "{line}");
+                }
+            }
+            None => self.clear(),
+        }
+        self.shown = asked;
     }
 
-    /// [`show`](Self::show), with `logged` whether the log shows info lines,
-    /// and `console` where a code goes that nothing else shows. The run waits
-    /// on a person entering the code, so someone must see it: when no
-    /// operator shows it, and the log shows no info lines — the headless
-    /// log's default without `RUST_LOG` — it goes to `console`.
-    fn show_on(&self, code: &EnrollmentCode, logged: bool, console: &mut dyn std::io::Write) {
-        let line = code_line(code);
-        info!("{line}");
-        let shown = self
-            .operator
-            .is_some_and(|operator| operator.show_enrollment_code(Some(code)));
-        if !shown && !logged {
-            let _ = writeln!(console, "{line}");
+    /// Clears the operator's code.
+    fn clear(&self) {
+        if let Some(operator) = self.operator {
+            operator.show_enrollment_code(None);
         }
     }
 }
 
 impl Drop for Codes<'_> {
     fn drop(&mut self) {
-        if let Some(operator) = self.operator {
-            operator.show_enrollment_code(None);
+        if self.shown.is_some() {
+            self.clear();
         }
     }
 }
@@ -884,10 +699,9 @@ fn random_device_suffix() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::path::PathBuf;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use async_trait::async_trait;
 
@@ -897,12 +711,14 @@ mod tests {
     use crate::operator::{AccessRequestSummary, AccessRuling};
 
     /// An operator answering each prompt from a script, keyed by its label,
-    /// and recording the labels it was asked and the codes it was shown.
+    /// and recording the labels it was asked, the codes it was shown and the
+    /// device ids.
     #[derive(Default)]
     struct Scripted {
         answers: HashMap<&'static str, &'static str>,
         asked: Mutex<Vec<String>>,
         shown: Mutex<Vec<Option<EnrollmentCode>>>,
+        device_ids: Mutex<Vec<String>>,
     }
 
     impl Scripted {
@@ -919,6 +735,10 @@ mod tests {
 
         fn shown(&self) -> Vec<Option<EnrollmentCode>> {
             self.shown.lock().unwrap().clone()
+        }
+
+        fn device_ids(&self) -> Vec<String> {
+            self.device_ids.lock().unwrap().clone()
         }
     }
 
@@ -939,6 +759,10 @@ mod tests {
         fn show_enrollment_code(&self, code: Option<&EnrollmentCode>) -> bool {
             self.shown.lock().unwrap().push(code.cloned());
             true
+        }
+
+        fn show_device_id(&self, device_id: &str) {
+            self.device_ids.lock().unwrap().push(device_id.to_string());
         }
     }
 
@@ -966,166 +790,249 @@ mod tests {
         }
     }
 
-    /// Where the enrollment tests' device keeps its Studio credentials.
-    fn credentials_dir() -> PathBuf {
-        PathBuf::from("/devices/bench/studio")
+    fn enrolling(code: Option<&str>, approval_url: Option<&str>) -> StudioStatus {
+        StudioStatus::Enrolling {
+            code: code.map(str::to_string),
+            approval_url: approval_url.map(str::to_string),
+        }
     }
 
-    /// What [`enrolled`] gives when the client's connections answer
-    /// `connections`, in turn, and its enrollment answers `enrollment`; with
-    /// the reasons the enrollment was given, and how many connections were
-    /// made.
-    fn enrolled_with(
-        connections: Vec<Result<&'static str, Error>>,
-        enrollment: Result<()>,
-    ) -> (Result<&'static str>, Vec<String>, usize) {
-        let connections = RefCell::new(connections.into_iter());
-        let made = RefCell::new(0);
-        let reasons = RefCell::new(Vec::new());
-        let client = futures::executor::block_on(enrolled(
-            &credentials_dir(),
-            || {
-                *made.borrow_mut() += 1;
-                let connection = connections.borrow_mut().next();
-                async move { connection.expect("no connection is made past those scripted") }
-            },
-            |why| {
-                reasons.borrow_mut().push(why);
-                async move { enrollment }
-            },
+    fn connected(device_id: &str) -> StudioStatus {
+        StudioStatus::Connected {
+            device_id: device_id.to_string(),
+        }
+    }
+
+    /// How long a test waits for what it expects before it fails.
+    const WAIT: Duration = Duration::from_secs(10);
+
+    /// A Studio bridge's status as a test drives it, and a run following it
+    /// whose enrollments the test answers, one at a time.
+    struct Followed {
+        status: watch::Sender<StudioStatus>,
+        /// Each enrollment the run starts asks for its answer here.
+        enrollments:
+            tokio::sync::mpsc::UnboundedReceiver<tokio::sync::oneshot::Sender<Result<String>>>,
+        /// The error the run ended with, once it ends.
+        ended: tokio::task::JoinHandle<String>,
+        operator: Arc<Scripted>,
+        console: Arc<Mutex<Vec<u8>>>,
+    }
+
+    /// A console a test reads back.
+    struct Console(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Console {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Followed {
+        /// A run following a bridge whose status starts as `initial`, with an
+        /// operator under the terminal UI when `interactive`.
+        fn start(initial: StudioStatus, interactive: bool) -> Self {
+            let (status, receiver) = watch::channel(initial);
+            let (asks, enrollments) = tokio::sync::mpsc::unbounded_channel();
+            let operator = Arc::new(Scripted::default());
+            let console = Arc::new(Mutex::new(Vec::new()));
+            let ended = tokio::spawn({
+                let operator = operator.clone();
+                let mut console = Console(console.clone());
+                async move {
+                    let enroll = || {
+                        let (answer, answered) = tokio::sync::oneshot::channel();
+                        asks.send(answer).unwrap();
+                        async move { answered.await.unwrap() }
+                    };
+                    let operator = interactive.then_some(&*operator as &dyn Operator);
+                    format!(
+                        "{:#}",
+                        follow_status(receiver, enroll, operator, &mut console).await
+                    )
+                }
+            });
+            Followed {
+                status,
+                enrollments,
+                ended,
+                operator,
+                console,
+            }
+        }
+
+        /// The next enrollment the run starts.
+        async fn enrollment(&mut self) -> tokio::sync::oneshot::Sender<Result<String>> {
+            tokio::time::timeout(WAIT, self.enrollments.recv())
+                .await
+                .expect("the run enrolls the device")
+                .expect("the run is following")
+        }
+
+        /// Whether the run starts an enrollment, given the time to.
+        async fn enrolls(&mut self) -> bool {
+            settle().await;
+            self.enrollments.try_recv().is_ok()
+        }
+
+        /// The error the run ends with.
+        async fn ended(self) -> String {
+            tokio::time::timeout(WAIT, self.ended)
+                .await
+                .expect("the run ends")
+                .unwrap()
+        }
+
+        fn console(&self) -> String {
+            String::from_utf8(self.console.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    /// Lets the run take in what the test sent it.
+    async fn settle() {
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    #[tokio::test]
+    async fn a_device_not_enrolled_enrolls_shows_its_code_then_its_id() {
+        let mut run = Followed::start(StudioStatus::NotEnrolled, true);
+        let enrollment = run.enrollment().await;
+        run.status.send_replace(enrolling(None, None));
+        run.status.send_replace(enrolling(Some("BCDF-GHJK"), None));
+        settle().await;
+        run.status.send_replace(enrolling(
+            Some("LMNP-QRST"),
+            Some("https://studio.example/approve"),
         ));
-        (client, reasons.into_inner(), made.into_inner())
-    }
+        settle().await;
+        enrollment.send(Ok("device-1".to_string())).unwrap();
+        run.status.send_replace(StudioStatus::Connecting);
+        settle().await;
+        run.status.send_replace(connected("device-1"));
+        settle().await;
 
-    #[test]
-    fn an_enrolled_device_connects_without_enrolling() {
-        let (client, reasons, made) = enrolled_with(vec![Ok("client")], Ok(()));
-        assert_eq!(client.unwrap(), "client");
-        assert!(reasons.is_empty(), "enrolled for {reasons:?}");
-        assert_eq!(made, 1);
-    }
-
-    #[test]
-    fn a_device_not_enrolled_enrolls_then_connects() {
-        let (client, reasons, made) = enrolled_with(
-            vec![
-                Err(Error::NotEnrolled("it holds no credential".to_string())),
-                Ok("client"),
-            ],
-            Ok(()),
-        );
-        assert_eq!(client.unwrap(), "client");
-        assert_eq!(reasons, ["it holds no credential"]);
-        assert_eq!(made, 2);
-    }
-
-    #[test]
-    fn a_refused_enrollment_fails_and_does_not_connect_again() {
-        let (client, _, made) = enrolled_with(
-            vec![Err(Error::NotEnrolled("anonymous".to_string()))],
-            Err(anyhow::Error::new(Error::EnrollmentDenied)),
-        );
-        let error = format!("{:#}", client.unwrap_err());
-        assert!(error.contains("refused"), "{error}");
-        assert_eq!(made, 1);
-    }
-
-    #[test]
-    fn a_device_its_enrollment_leaves_unenrolled_fails() {
-        let (client, reasons, made) = enrolled_with(
-            vec![
-                Err(Error::NotEnrolled("it holds no credential".to_string())),
-                Err(Error::NotEnrolled("Studio refuses it".to_string())),
-            ],
-            Ok(()),
-        );
-        let error = format!("{:#}", client.unwrap_err());
-        assert!(error.contains("Studio refuses it"), "{error}");
-        assert_eq!(reasons.len(), 1, "a device enrolls once per run");
-        assert_eq!(made, 2);
-    }
-
-    #[test]
-    fn studio_failing_otherwise_fails_without_enrolling() {
-        // Firebase down or a bridge out of reach says nothing of the device's
-        // enrollment: enrolling again would replace a credential that is good.
-        let (client, reasons, _) =
-            enrolled_with(vec![Err(Error::Zenoh("no route".to_string()))], Ok(()));
-        let error = format!("{:#}", client.unwrap_err());
-        assert!(error.contains("no route"), "{error}");
-        assert!(reasons.is_empty(), "enrolled for {reasons:?}");
-    }
-
-    #[test]
-    fn a_credential_of_another_project_fails_without_enrolling() {
-        let wrong_project = AuthError::WrongProject {
-            project: "studio".to_string(),
-            audience: "studio-staging".to_string(),
-        };
-        let (client, reasons, made) =
-            enrolled_with(vec![Err(Error::Studio(wrong_project))], Ok(()));
-        let error = client.unwrap_err();
-        assert!(
-            matches!(
-                error.downcast_ref::<Error>(),
-                Some(Error::Studio(AuthError::WrongProject { .. }))
-            ),
-            "{error:?}"
-        );
-        let said = format!("{error:#}");
-        assert!(said.contains("another Firebase project's"), "{said}");
-        assert!(
-            said.contains(&credentials_dir().display().to_string()),
-            "{said}"
-        );
-        assert!(said.contains("studio-staging"), "{said}");
-        assert!(reasons.is_empty(), "enrolled for {reasons:?}");
-        assert_eq!(made, 1);
-    }
-
-    #[test]
-    fn each_code_is_shown_then_cleared_once_the_enrollment_ends() {
-        let operator = Scripted::default();
-        let codes = Codes {
-            operator: Some(&operator),
-        };
-        codes.show(&code("BCDF-GHJK", None));
-        codes.show(&code("LMNP-QRST", Some("https://studio.example/approve")));
-        assert_eq!(operator.shown().len(), 2);
-        drop(codes);
         assert_eq!(
-            operator.shown(),
+            run.operator.shown(),
             [
                 Some(code("BCDF-GHJK", None)),
                 Some(code("LMNP-QRST", Some("https://studio.example/approve"))),
                 None
             ]
         );
+        assert_eq!(run.operator.device_ids(), ["device-1"]);
+        assert!(!run.enrolls().await, "the device enrolls once");
+        assert!(run.console().is_empty(), "{}", run.console());
+        assert!(!run.ended.is_finished());
+    }
+
+    #[tokio::test]
+    async fn an_enrolled_device_connects_without_enrolling() {
+        let mut run = Followed::start(StudioStatus::Connecting, true);
+        run.status
+            .send_replace(StudioStatus::Failed("no route".to_string()));
+        settle().await;
+        run.status.send_replace(StudioStatus::Connecting);
+        run.status.send_replace(connected("device-1"));
+        settle().await;
+        assert!(
+            !run.enrolls().await,
+            "a device Studio did not refuse enrolls"
+        );
+        assert_eq!(run.operator.device_ids(), ["device-1"]);
+        assert!(run.operator.shown().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_refused_enrollment_fails_the_run() {
+        let mut run = Followed::start(StudioStatus::NotEnrolled, false);
+        let enrollment = run.enrollment().await;
+        run.status.send_replace(enrolling(Some("BCDF-GHJK"), None));
+        settle().await;
+        enrollment
+            .send(Err(anyhow::Error::new(Error::EnrollmentDenied)))
+            .unwrap();
+        run.status.send_replace(StudioStatus::NotEnrolled);
+        let error = run.ended().await;
+        assert!(error.contains("refused"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_device_studio_refuses_once_enrolled_fails_the_run() {
+        let mut run = Followed::start(StudioStatus::NotEnrolled, false);
+        let enrollment = run.enrollment().await;
+        enrollment.send(Ok("device-1".to_string())).unwrap();
+        settle().await;
+        run.status.send_replace(StudioStatus::Connecting);
+        run.status.send_replace(StudioStatus::NotEnrolled);
+        let error = run.ended().await;
+        assert!(error.contains("just enrolled"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_device_revoked_after_it_connected_enrolls_again() {
+        let mut run = Followed::start(StudioStatus::NotEnrolled, false);
+        let enrollment = run.enrollment().await;
+        enrollment.send(Ok("device-1".to_string())).unwrap();
+        settle().await;
+        run.status.send_replace(StudioStatus::Connecting);
+        settle().await;
+        run.status.send_replace(connected("device-1"));
+        settle().await;
+        run.status.send_replace(StudioStatus::NotEnrolled);
+        let enrollment = run.enrollment().await;
+        enrollment.send(Ok("device-2".to_string())).unwrap();
+        run.status.send_replace(StudioStatus::Connecting);
+        run.status.send_replace(connected("device-2"));
+        settle().await;
+        assert!(!run.ended.is_finished());
+    }
+
+    #[tokio::test]
+    async fn a_code_nothing_else_shows_goes_to_the_console() {
+        // Headless, with no log showing info lines (no logger in tests).
+        let mut run = Followed::start(StudioStatus::NotEnrolled, false);
+        let _enrollment = run.enrollment().await;
+        run.status.send_replace(enrolling(Some("BCDF-GHJK"), None));
+        settle().await;
+        run.status.send_replace(enrolling(Some("BCDF-GHJK"), None));
+        settle().await;
+        assert_eq!(
+            run.console(),
+            "Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio\n",
+            "each code once"
+        );
+        assert!(run.operator.shown().is_empty(), "headless, nobody is shown");
     }
 
     #[test]
-    fn a_code_nothing_else_shows_goes_to_the_console() {
-        // The headless front end's log shows errors alone without RUST_LOG.
+    fn a_code_the_log_or_the_operator_shows_is_not_repeated_on_the_console() {
+        let status = enrolling(Some("BCDF-GHJK"), None);
         let mut console = Vec::new();
-        Codes { operator: None }.show_on(&code("BCDF-GHJK", None), false, &mut console);
-        assert_eq!(
-            String::from_utf8(console).unwrap(),
-            "Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio\n"
-        );
-
-        // Shown by the log, or by the operator, it is not repeated there.
-        let mut console = Vec::new();
-        Codes { operator: None }.show_on(&code("BCDF-GHJK", None), true, &mut console);
+        let mut codes = Codes {
+            operator: None,
+            shown: None,
+        };
+        codes.follow(&status, true, &mut console);
         let operator = Scripted::default();
-        Codes {
+        let mut codes = Codes {
             operator: Some(&operator),
-        }
-        .show_on(&code("BCDF-GHJK", None), false, &mut console);
+            shown: None,
+        };
+        codes.follow(&status, false, &mut console);
         assert!(console.is_empty(), "{:?}", String::from_utf8(console));
-        assert_eq!(
-            operator.shown().first(),
-            Some(&Some(code("BCDF-GHJK", None)))
-        );
+        assert_eq!(operator.shown(), [Some(code("BCDF-GHJK", None))]);
+
+        // The operator's code is cleared when the codes are dropped.
+        drop(codes);
+        assert_eq!(operator.shown(), [Some(code("BCDF-GHJK", None)), None]);
     }
 
     #[test]
@@ -1150,8 +1057,9 @@ mod tests {
         let mut console = Vec::new();
         Codes {
             operator: Some(&Silent),
+            shown: None,
         }
-        .show_on(&code("BCDF-GHJK", None), false, &mut console);
+        .follow(&enrolling(Some("BCDF-GHJK"), None), false, &mut console);
         assert_eq!(
             String::from_utf8(console).unwrap(),
             "Studio: to enroll this device, enter the code BCDF-GHJK in Semio Studio\n"
@@ -1282,51 +1190,117 @@ mod tests {
         studio: StudioArgs,
     }
 
-    /// What a run passing `args` does.
-    fn choice_of(args: &[&str]) -> Choice {
-        use clap::Parser;
-        Runner::try_parse_from(std::iter::once("runner").chain(args.iter().copied()))
-            .expect("the Studio option parses")
-            .studio
-            .choice()
-    }
-
     #[test]
     fn a_run_connects_unless_it_passes_no_studio() {
-        assert_eq!(choice_of(&[]), Choice::Studio);
-        assert_eq!(choice_of(&["--no-studio"]), Choice::Local);
-    }
-
-    #[test]
-    fn studio_is_no_option() {
         use clap::Parser;
+        let connects = |args: &[&str]| {
+            Runner::try_parse_from(std::iter::once("runner").chain(args.iter().copied()))
+                .expect("the Studio option parses")
+                .studio
+                .connects()
+        };
+        assert!(connects(&[]));
+        assert!(!connects(&["--no-studio"]));
         let error =
             Runner::try_parse_from(["runner", "--studio"]).expect_err("--studio is refused");
         assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
-    #[test]
-    fn a_builder_connects_only_when_a_runner_says_so() {
-        assert_eq!(crate::Arora::builder().studio, None);
-        let builder = crate::Arora::builder().with_studio(Choice::Studio);
-        assert_eq!(builder.studio, Some(Choice::Studio));
-    }
+    /// A run whose device is not enrolled runs at once: its runtime steps
+    /// while the device enrolls, through the handle the run was given. The
+    /// device's Studio is a socket that accepts and never answers, so the
+    /// enrollment waits on it for as long as the test watches.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_run_whose_device_is_not_enrolled_runs_while_it_enrolls() {
+        use std::net::TcpListener;
 
-    /// The bridge [`bridge_for`] serves for `choice`: `"studio"` or
-    /// `"local"`, as the future it ran says.
-    fn bridge_for_(choice: Choice) -> String {
-        let studio = async { Err(anyhow::anyhow!("studio")) };
-        let local = async { Err(anyhow::anyhow!("local")) };
-        let ran = futures::executor::block_on(bridge_for(choice, studio, local));
-        ran.err()
-            .expect("the futures fail, naming themselves")
-            .to_string()
-    }
+        let root = std::env::temp_dir().join(format!("arora-studio-run-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+        silent.set_nonblocking(true).unwrap();
+        let address = silent.local_addr().unwrap().to_string();
+        let studio = StudioDevice::new(
+            FirebaseOptions {
+                api_key: None,
+                auth_domain: None,
+                database_url: None,
+                project_id: Some("studio".to_string()),
+                storage_bucket: None,
+                messaging_sender_id: None,
+                app_id: None,
+                measurement_id: None,
+            },
+            DeviceCredentials::in_dir(root.join("credentials")).unwrap(),
+        )
+        .with_emulators(FirebaseEmulatorOptions {
+            auth_url: Some(format!("http://{address}")),
+            firestore_url: Some(format!("http://{address}")),
+            storage_url: None,
+            database_url: None,
+            functions_url: Some(format!("http://{address}")),
+        })
+        .with_endpoint(format!("tcp/{address}"));
+        let (bridge, handle) = studio.bridge(None);
+        let status = handle.status();
+        let builder = crate::Arora::builder()
+            .with_bridge(Box::new(bridge))
+            .with_studio_handle(handle.clone());
+        let (ready_tx, ready) = std::sync::mpsc::channel();
+        let frontend = crate::operator::Frontend {
+            operator: Arc::new(Scripted::default()),
+            interactive: false,
+            on_ready: Box::new(move |state, _, _| {
+                let _ = ready_tx.send(state);
+            }),
+        };
 
-    #[test]
-    fn only_studio_runs_the_studio_connection() {
-        assert_eq!(bridge_for_(Choice::Studio), "studio");
-        assert_eq!(bridge_for_(Choice::Local), "local");
+        let watched = async {
+            let state = loop {
+                if let Ok(state) = ready.try_recv() {
+                    break state;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            };
+            // The device starts enrolling: Studio is contacted.
+            let mut contacts = Vec::new();
+            while contacts.is_empty() {
+                if let Ok((stream, _)) = silent.accept() {
+                    contacts.push(stream);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            // And the runtime steps meanwhile, its clock moving on.
+            let mut times = Vec::new();
+            while times.len() < 2 {
+                while let Some(change) = state.try_recv() {
+                    if let Some(Some(time)) = change.set.get(&arora_types::data::Key::from(
+                        arora_behavior::built_in::TIME,
+                    )) {
+                        times.push(time.clone());
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert_ne!(times[0], times[1], "the clock moves");
+            let status = status.borrow().clone();
+            status
+        };
+        let outcome = tokio::time::timeout(Duration::from_secs(60), async {
+            tokio::select! {
+                ended = crate::run::run_builder_with_frontend(builder, frontend) => {
+                    panic!("the run ended: {ended:?}")
+                }
+                status = watched => status,
+            }
+        })
+        .await
+        .expect("within 60 s, the device starts enrolling and its runtime steps");
+        assert!(
+            matches!(outcome, StudioStatus::Enrolling { .. }),
+            "{outcome:?}"
+        );
+        drop(handle);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// The variable handing the process
@@ -1335,9 +1309,9 @@ mod tests {
     const STUDIO_SIDE_CASE_DIR: &str = "ARORA_TEST_STUDIO_SIDE_CASE_DIR";
 
     /// The Studio side an embedder gets is a run's — the credentials a run
-    /// connecting as the device uses, a device directory's older one moved
-    /// in, and the model it reports — and getting it, then asking whether
-    /// it holds a credential, contacts nobody. The test runs itself again as
+    /// as the device uses, a device directory's older one moved in, and the
+    /// model it reports — and getting it, asking whether it holds a
+    /// credential, and the bridge of a device holding none contact nobody. The test runs itself again as
     /// a process whose environment configures the device and points Firebase
     /// and the bridge at a socket the test watches.
     #[test]
@@ -1355,7 +1329,6 @@ mod tests {
     fn watch_studio_sides_got() {
         use std::net::TcpListener;
         use std::process::Command;
-        use std::time::Duration;
 
         let root = std::env::temp_dir().join(format!("arora-studio-side-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1444,7 +1417,7 @@ mod tests {
     }
 
     /// In the process the test starts: the Studio side of the device the
-    /// environment configures, and of a device given its directory and
+    /// environment configures, and of devices given their directory and
     /// store, as an Android app gives them.
     fn get_studio_sides(root: &Path) {
         let bench = of(&Device::from_env().unwrap()).unwrap();
@@ -1470,6 +1443,17 @@ mod tests {
 
         let fresh = in_device_dir(&root.join("fresh"), "fresh", Some(&store)).unwrap();
         assert!(!fresh.holds_credential(), "nothing was kept for it");
+        // Its bridge, which a runtime carries from its start, stays offline.
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let (bridge, handle) = fresh.bridge(None);
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                assert_eq!(*handle.status().borrow(), StudioStatus::NotEnrolled);
+                drop(bridge);
+            });
 
         assert_eq!(
             reported_model(&description(Some("nao"), Some("6"))),

@@ -11,9 +11,9 @@ name = "arora-microduck"
 path = "src/main.rs"
 
 [features]
-# Serve through Semio Studio instead of the open local bridge (the `arora`
-# crate's Studio connection: enrollment, sign-in, the Zenoh link), unless the
-# run passes --no-studio.
+# Serve the device's Semio Studio bridge instead of the open local bridge (the
+# `arora` crate's Studio connection: enrollment, sign-in, the Zenoh link),
+# unless the run passes --no-studio.
 studio = ["arora/studio-bridge"]
 # Speak on board with Piper. libpiper and espeak-ng are GPLv3: a binary built
 # with this feature is GPL-affected, so it is opt-in.

@@ -4,8 +4,9 @@
 //! It reads its configuration from its options and the environment (the
 //! device's name, directory and local bridge port, Firebase options, Zenoh
 //! endpoints), loads the modules in its device directory and those `--module`
-//! names, serves the open local bridge, and runs the arora runtime. A `studio-bridge` build connects to Semio Studio
-//! over Zenoh instead, unless the run passes `--no-studio`. [`arora::RunnerArgs`]
+//! names, serves the open local bridge, and runs the arora runtime. A
+//! `studio-bridge` build serves the device's Semio Studio bridge instead,
+//! unless the run passes `--no-studio`. [`arora::RunnerArgs`]
 //! documents the device options and their variables, `arora::studio` the
 //! Studio connection's.
 //!
@@ -52,12 +53,18 @@ async fn main() -> anyhow::Result<()> {
     // the record does not match it.
     builder = builder
         .with_module_dirs(device.dir(), &cli.runner.module)
-        .await?
-        .with_device(device);
+        .await?;
+    // Built with Studio, the run's bridge is the device's Studio bridge,
+    // reporting the fake HAL's model, unless the run passes `--no-studio`.
     #[cfg(feature = "studio-bridge")]
-    {
-        builder = builder.with_studio(cli.studio.choice());
+    if cli.studio.connects() {
+        let model = arora::studio::reported_model(&arora_hal::HalDescription::default());
+        let (bridge, handle) = arora::studio::of(&device)?.bridge(model);
+        builder = builder
+            .with_bridge(Box::new(bridge))
+            .with_studio_handle(handle);
     }
+    builder = builder.with_device(device);
     // A Groot file is the device's behavior: the build resolves its tags
     // against the method index it assembles — the native nodes and the
     // functions of every module the device carries — and fails when the tree

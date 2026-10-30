@@ -187,6 +187,12 @@ impl Operator for Tui {
             Err(_) => false,
         }
     }
+
+    fn show_device_id(&self, device_id: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.identity.device_id = Some(device_id.to_string());
+        }
+    }
 }
 
 impl Drop for Tui {

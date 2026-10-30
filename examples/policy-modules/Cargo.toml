@@ -36,12 +36,11 @@ serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 # The arora crates this workspace builds on.
-# 16: `studio::StudioArgs` and `AroraBuilder::with_studio`, what a run does
-# about Semio Studio, a run of a build with Studio connecting unless it passes
-# `--no-studio`, a device that is not enrolled enrolling first; the component
-# executor registered, which the policy guest, a `wasm-component` module,
-# loads through.
-arora = { path = "../../crates/arora", version = "16" }
+# 17: the device's Studio bridge (`studio::of`, `StudioArgs::connects`) and
+# `AroraBuilder::with_studio_handle`, a device that is not enrolled enrolling
+# while it runs; the component executor registered, which the policy guest, a
+# `wasm-component` module, loads through.
+arora = { path = "../../crates/arora", version = "17" }
 arora-behavior = { path = "../../crates/arora-behavior", version = "9" }
 arora-behavior-tree = { path = "../../crates/arora-behavior-tree", version = "8.2" }
 arora-bridge = { path = "../../crates/arora-bridge", version = "6" }
