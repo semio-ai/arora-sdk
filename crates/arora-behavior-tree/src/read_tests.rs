@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::behavior::{graph_type, BehaviorTreeInterpreter};
 use crate::call_expression_tests::{index, Engine, ADD, ADD_A, ADD_B, MATH, MUL, MUL_A, MUL_B};
-use crate::nodes::{RUN_FUNCTION_ID, SEQ_FUNCTION_ID};
+use crate::nodes::{RUN_FUNCTION_ID, SEQ_FUNCTION_ID, SUCCEED_FUNCTION_ID};
 use crate::schema::_RET_PARAM_ID;
 use crate::trace_tests::{behavior, key, value, Device, SUM};
 
@@ -485,6 +485,21 @@ fn a_node_held_with_a_run_reads_and_loads_back() {
     let again = read(&device.interpreter);
     assert_eq!(again.graph, shared.graph);
     assert_eq!(again.revision, 2);
+
+    // The shared root loaded again with no child: the nodes it let go of,
+    // which no run holds, leave with the behavior they were part of.
+    let leaf = Graph {
+        root: Some(crate::trace_tests::ROOT),
+        nodes: vec![Node {
+            id: crate::trace_tests::ROOT,
+            function: SUCCEED_FUNCTION_ID,
+            ..Node::default()
+        }],
+    };
+    device.interpreter.load(leaf.clone()).unwrap();
+    device.tick();
+    assert_eq!(read(&device.interpreter).graph, leaf);
+    device.interpreter.load(shared.graph.clone()).unwrap();
 
     // A node only the run holds is still refused.
     let mut taken = shared.graph;

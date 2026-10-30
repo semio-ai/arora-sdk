@@ -992,13 +992,28 @@ impl BehaviorInterpreter for BehaviorTreeInterpreter {
                 node.id
             )));
         }
-        let run_nodes = self.run_nodes();
+        // The previous main behavior leaves but for the nodes the runs hold
+        // once the new nodes are set: a node shared with a run and set again
+        // with other children lets go of the ones it no longer has.
+        let mut after = self.graph.clone();
+        after
+            .apply(GraphDiff {
+                set: graph.nodes.clone(),
+                ..GraphDiff::default()
+            })
+            .map_err(|e| behavior_error(format!("graph diff: {e}")))?;
+        let held: HashSet<Uuid> = {
+            let nodes = by_id(&after);
+            self.all_runs()
+                .flat_map(|run| Self::nodes_of(&nodes, run))
+                .collect()
+        };
         let remove = self
             .graph
             .nodes
             .iter()
             .map(|node| node.id)
-            .filter(|id| *id != self.runner && !run_nodes.contains(id))
+            .filter(|id| *id != self.runner && !held.contains(id))
             .collect();
         // The loaded root becomes the runner's main child: the scaffold root
         // stays the runner. A refused load leaves the main root as it was.
