@@ -48,6 +48,7 @@ pub mod graph;
 pub mod interpreter_module;
 pub mod status;
 pub mod task;
+pub mod trace;
 
 pub use graph::{Graph, GraphDiff, GraphType};
 pub use status::{
@@ -55,6 +56,7 @@ pub use status::{
     STATUS_FAILURE_VARIANT_ID, STATUS_RUNNING_VARIANT_ID, STATUS_SUCCESS_VARIANT_ID,
 };
 pub use task::{RunPolicy, TaskHandle, TaskId};
+pub use trace::{Activity, NodeStatus, TraceOptions, TraceReport};
 
 /// Whether an interpreter wants to be ticked again — and, when it does not, how
 /// it ended.
@@ -251,10 +253,38 @@ pub trait BehaviorInterpreter {
         })
     }
 
+    /// Start a trace of the running behavior under `options`, returning the
+    /// [`TaskHandle`] a spawned run answers: a trace is a task run, followed
+    /// and stopped like one. Its keys live under
+    /// `arora/tasks/<interpreter module>/<trace function>/<run>/`
+    /// ([`interpreter_module::ID`], [`interpreter_module::TRACE`]).
+    ///
+    /// While the trace runs, its status key holds
+    /// [`Status::Running`], and at the end of each tick that changed
+    /// something it follows, its feedback key holds a
+    /// [`TraceReport`](trace::TraceReport): the tick, the nodes whose status
+    /// changed, the detached nodes whose activity changed, and the watched
+    /// nodes' outputs that changed. The first report states everything the
+    /// tick reached. [`halt`](Self::halt) ends a trace: its status key goes
+    /// [`Status::Failure`] at the next tick, as a halted run's does, and its
+    /// keys change no more. Several traces may run at once, each with its own
+    /// options; a trace survives [`apply`](Self::apply) and
+    /// [`load`](Self::load).
+    ///
+    /// The default rejects tracing — override it in interpreters that can
+    /// report what their ticks do.
+    fn trace(&mut self, options: trace::TraceOptions) -> Result<TaskHandle, BehaviorError> {
+        let _ = options;
+        Err(BehaviorError {
+            message: "this interpreter does not support tracing".to_string(),
+        })
+    }
+
     /// Halt the run identified by `task` (idempotent): a clean stop that may run
     /// compensation, not a hard kill. On reaching a terminal state the run is
     /// dropped and its status key reflects the outcome. It stops a run started
-    /// by [`spawn`](Self::spawn) or by [`spawn_graph`](Self::spawn_graph).
+    /// by [`spawn`](Self::spawn), by [`spawn_graph`](Self::spawn_graph) or by
+    /// [`trace`](Self::trace).
     ///
     /// The default rejects halting — override it alongside [`spawn`](Self::spawn).
     fn halt(&mut self, task: TaskId) -> Result<(), BehaviorError> {
@@ -283,7 +313,7 @@ mod tests {
     use super::*;
 
     /// A minimal interpreter that only ticks, so it keeps the default `spawn`,
-    /// `spawn_graph` and `halt` — the ones under test.
+    /// `spawn_graph`, `trace` and `halt` — the ones under test.
     struct Idle;
     impl BehaviorInterpreter for Idle {
         fn tick(&mut self, _ctx: &mut BehaviorContext) -> Result<BehaviorStatus, BehaviorError> {
@@ -316,5 +346,11 @@ mod tests {
             )
             .is_err());
         assert!(idle.halt(TaskId(uuid::Uuid::nil())).is_err());
+    }
+
+    #[test]
+    fn tracing_rejects_by_default() {
+        let refused = Idle.trace(TraceOptions::default()).unwrap_err();
+        assert!(refused.message.contains("tracing"), "{}", refused.message);
     }
 }
