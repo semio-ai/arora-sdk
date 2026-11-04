@@ -125,4 +125,5 @@
     "__availability": "cpp",
     "ranges": "cpp"
   },
+  "cmake.sourceDirectory": "${workspaceFolder}/libs",
 }
