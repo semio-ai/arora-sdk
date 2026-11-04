@@ -1,0 +1,45 @@
+{
+ "keys": [
+  {
+   "name": "clock",
+   "initial": 0.0
+  },
+  {
+   "name": "k",
+   "initial": 0.0
+  }
+ ],
+ "text": "sequence\n  {seen} = add(node: \"s\", operand_0: {k})\n  @reader.a = add(node: \"c\", operand_0: 5f32)\n  running\n  reader: equal(a: {k}, b: 1f64)",
+ "ticks": 4,
+ "warmUp": 0,
+ "clock": "clock",
+ "dt": 0.016666666666666666,
+ "events": [
+  [
+   0,
+   "k",
+   1.0
+  ],
+  [
+   1,
+   "k",
+   1.0
+  ],
+  [
+   2,
+   "k",
+   1.0
+  ],
+  [
+   3,
+   "k",
+   1.0
+  ]
+ ],
+ "phases": {
+  "names": [
+   "one"
+  ],
+  "runs": []
+ }
+}

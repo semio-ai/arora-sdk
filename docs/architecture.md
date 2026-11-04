@@ -61,8 +61,14 @@ Two seams keep the layers apart:
 
 [Building](building.md#releasing) lists which crates are published to
 crates.io. The robot HALs and their runners, `arora-cli`, `arora-module-cli`,
-`arora-module-cpp`, `arora-registry-remote` and the modules built for tests
-are not.
+`arora-module-cpp`, `arora-registry-remote`, `arora-behavior-tree-bench` and
+the modules built for tests are not.
+
+[`arora-behavior-tree-bench`](../crates/arora-behavior-tree-bench/readme.md)
+stands outside the layers: it measures behavior-tree executor forms over
+`arora-dataflow-nodes` and in-process modules, natively and under WASI, and
+checks tick for tick that each form leaves the store as the reference form
+does.
 
 ## Repository layout
 

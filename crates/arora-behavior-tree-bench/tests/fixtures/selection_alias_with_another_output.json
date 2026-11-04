@@ -1,0 +1,20 @@
+{
+ "keys": [
+  {
+   "name": "clock",
+   "initial": 0.0
+  }
+ ],
+ "text": "sequence\n  {other} = add(node: \"x\", operand_0: 1f32)\n  {.t} = add(node: \"w\", operand_0: {clock})\n  @reader.a = add(node: \"c\", operand_0: @g)\n  running\n  reader: equal(a: {k}[/0], b: 1f64)\n\ng: add(node: \"g\", operand_0: {.t})",
+ "ticks": 300,
+ "warmUp": 100,
+ "clock": "clock",
+ "dt": 0.016666666666666666,
+ "events": [],
+ "phases": {
+  "names": [
+   "one"
+  ],
+  "runs": []
+ }
+}

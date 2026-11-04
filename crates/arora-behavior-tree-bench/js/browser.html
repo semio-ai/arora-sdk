@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arora behavior-tree benchmarks</title>
+<style>body { font: 16px system-ui; margin: 2rem; max-width: 90rem } pre { overflow: auto; font-size: 13px } button, input { font: inherit; margin: .5rem } </style>
+<h1>Behavior-tree benchmarks</h1>
+<p>Runs the synthetic and conversation workloads and six scale scenarios at N=100. Choose a workload JSON to include it. Each form must agree with detached before its times are compared.</p>
+<label for="workload">Additional workload JSON (optional)</label>
+<input type="file" id="workload" accept=".json"><button id="run">Run benchmarks</button>
+<button id="save" disabled>Save raw results</button>
+<p id="status" role="status" aria-live="polite"></p>
+<pre id="output" tabindex="0" aria-label="Benchmark results">Serve the workspace root over HTTP. See the crate README for build commands.</pre>
+<script type="module">
+import { loadBenchWasm, workloadTable, scaleHeader, scaleRow } from './bench-wasm.mjs';
+const output = document.querySelector('#output'), run = document.querySelector('#run'), save = document.querySelector('#save');
+// The status line announces progress and the outcome; the results stay in the
+// table below, which is not announced as it grows.
+const status = document.querySelector('#status');
+let results;
+const yieldBetween = () => new Promise(resolve => setTimeout(resolve, 0));
+run.onclick = async () => {
+  run.disabled = true; save.disabled = true; output.textContent = 'Loading…'; status.textContent = 'Running benchmarks…';
+  try {
+    const wasm = await loadBenchWasm(await (await fetch('../../../target/wasm32-wasip1/bench-wasm/arora_behavior_tree_bench.wasm')).arrayBuffer());
+    output.textContent = JSON.stringify(wasm.clock, null, 2) + '\n';
+    const file = document.querySelector('#workload').files[0];
+    results = { schema: 1, clock: wasm.clock, tests: {} };
+    const workloads = wasm.defaults.workloads.map(name => [name, () => wasm.loadBuiltin(name)]);
+    if (file) {
+      const text = await file.text();
+      const name = file.name.replace(/\.json$/, '');
+      if (wasm.defaults.workloads.includes(name)) throw new Error('duplicate workload name');
+      workloads.push([name, () => wasm.loadWorkload(text)]);
+    }
+    for (const [name, load] of workloads) {
+      status.textContent = `Running ${name}…`;
+      const record = await load().measureAll({ samples: 7, yieldBetween });
+      results.tests[name] = { kind: 'workload', size: 0, record };
+      if (Object.values(record.forms).some(r => r.differing)) throw new Error(`${name}: workload forms disagree`);
+      output.textContent += name + '\n' + workloadTable(record) + '\n\n';
+    }
+    output.textContent += scaleHeader + '\n';
+    for (const scenario of wasm.scenarios) {
+      status.textContent = `Running ${scenario}…`;
+      const record = await wasm.loadScale(100, scenario).measureAll({ samples: 7, yieldBetween });
+      results.tests[wasm.scaleName(100, scenario)] = { kind: 'scale', size: 100, record };
+      for (const [form, row] of Object.entries(record.forms)) {
+        if (row.differing) throw new Error(`${scenario}/${form}: writes differ from detached`);
+        output.textContent += scaleRow(100, scenario, form, row) + '\n';
+      }
+    }
+    save.disabled = false;
+    status.textContent = 'Finished: every form agrees with detached. Results are below.';
+  } catch (error) { output.textContent += '\n' + error.stack; status.textContent = `Failed: ${error.message}`; }
+  finally { run.disabled = false; }
+};
+save.onclick = () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(results)], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'bench-browser.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+</script>

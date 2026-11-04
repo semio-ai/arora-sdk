@@ -1,0 +1,20 @@
+{
+ "keys": [
+  {
+   "name": "clock",
+   "initial": 0.0
+  }
+ ],
+ "text": "scatter(keys: str[\"S\"], values: f64[7])\n\ng: {S} = add(node: \"g\", operand_0: 1f32)",
+ "ticks": 5,
+ "warmUp": 0,
+ "clock": "clock",
+ "dt": 0.016666666666666666,
+ "events": [],
+ "phases": {
+  "names": [
+   "one"
+  ],
+  "runs": []
+ }
+}

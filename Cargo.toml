@@ -15,6 +15,7 @@ members = [
   "crates/arora-behavior-tree-types-yaml",
   "crates/arora-behavior-tree-types",
   "crates/arora-behavior-tree",
+  "crates/arora-behavior-tree-bench",
   "crates/arora-types",
   "crates/arora-types-derive",
   "crates/arora-module-macros",
@@ -58,6 +59,7 @@ default-members = [
   "crates/arora-behavior-tree-types-yaml",
   "crates/arora-behavior-tree-types",
   "crates/arora-behavior-tree",
+  "crates/arora-behavior-tree-bench",
   "crates/arora-types",
   "crates/arora-types-derive",
   "crates/arora-module-macros",
@@ -90,6 +92,12 @@ default-members = [
 [profile.release]
 lto = "thin"
 debug = 1
+
+# Small distributable benchmark module; other release builds retain debug info.
+[profile.bench-wasm]
+inherits = "release"
+debug = 0
+strip = "symbols"
 
 # arora-studio-bridge-client (crates.io) depends on arora-types and arora-bridge;
 # patching them to these crates keeps one copy of each, so their traits match.

@@ -1,0 +1,20 @@
+{
+ "keys": [
+  {
+   "name": "clock",
+   "initial": 0.0
+  }
+ ],
+ "text": "@g.operand_0 = add(node: \"w\", operand_0: {clock})\n\ng: {S} = add(node: \"g\", operand_0: 0f32)",
+ "ticks": 5,
+ "warmUp": 0,
+ "clock": "clock",
+ "dt": 0.016666666666666666,
+ "events": [],
+ "phases": {
+  "names": [
+   "one"
+  ],
+  "runs": []
+ }
+}
