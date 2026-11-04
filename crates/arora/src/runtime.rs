@@ -87,6 +87,7 @@ impl Arora {
     pub async fn run(&mut self, period: Duration) -> Result<(), RuntimeError> {
         let mut metronome = Metronome::new(period);
         // Wall-clock delta between steps, fed to `step` as the frame `dt`.
+        // TODO: consider using monotonic time for native runtimes
         let mut last_step = Instant::now();
         loop {
             // Wait out the period, buffering what the seams deliver meanwhile —
