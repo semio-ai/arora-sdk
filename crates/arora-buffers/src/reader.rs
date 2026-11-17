@@ -49,6 +49,11 @@ impl<'a> BufferReader<'a> {
     /// `get_*`), so a following field reads from the right place.
     fn take_aligned_bytes(&mut self, bytes: usize) -> &'a [u8] {
         self.align();
+        self.take_bytes(bytes)
+    }
+
+    /// Takes `bytes` raw bytes where the cursor is, and advances past them.
+    pub(crate) fn take_bytes(&mut self, bytes: usize) -> &'a [u8] {
         let block = &self.backing[0..bytes];
         self.backing = &self.backing[bytes..];
         block

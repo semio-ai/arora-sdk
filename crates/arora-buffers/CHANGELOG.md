@@ -12,6 +12,9 @@ All notable changes to `arora-buffers`. The format follows
   `add_u8_raw_bulk` copies its slice whole: a large array is copied into the
   buffer once, rather than through every doubling of the buffer. The wire
   format is unchanged.
+- `froto_value::deserialize` reads an array of primitives as one slice
+  converted chunk by chunk, rather than element by element: an `ArrayU8` is
+  one copy. The wire format is unchanged.
 
 ## [3.3.1] - 2026-10-30
 

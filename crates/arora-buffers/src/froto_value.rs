@@ -192,13 +192,20 @@ pub fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
             let (ty, count) = reader.get_array();
             let count = count as usize;
             // Primitive elements are raw little-endian payloads after one
-            // alignment skip; they are read one by one — a bulk transmute
-            // would need the slice aligned for the element type (UB
-            // otherwise) and a little-endian host. String, structure,
+            // alignment skip, taken as one slice and converted chunk by chunk:
+            // a transmute would need the slice aligned for the element type
+            // (UB otherwise) and a little-endian host. String, structure,
             // enumeration and value elements are unaligned self-describing
             // entries.
-            fn each<T>(count: usize, mut read: impl FnMut() -> T) -> Vec<T> {
-                (0..count).map(|_| read()).collect()
+            macro_rules! bulk {
+                ($t:ty) => {{
+                    const SIZE: usize = std::mem::size_of::<$t>();
+                    reader
+                        .take_bytes(count * SIZE)
+                        .chunks_exact(SIZE)
+                        .map(|c| <$t>::from_le_bytes(c.try_into().expect("chunks of SIZE")))
+                        .collect()
+                }};
             }
             if matches!(
                 ty,
@@ -218,17 +225,19 @@ pub fn deserialize_from_reader(reader: &mut BufferReader) -> Value {
             }
             {
                 match ty {
-                    TYPE_BOOLEAN => Value::ArrayBoolean(each(count, || reader.get_boolean())),
-                    TYPE_U8 => Value::ArrayU8(each(count, || reader.get_u8())),
-                    TYPE_U16 => Value::ArrayU16(each(count, || reader.get_u16())),
-                    TYPE_U32 => Value::ArrayU32(each(count, || reader.get_u32())),
-                    TYPE_U64 => Value::ArrayU64(each(count, || reader.get_u64())),
-                    TYPE_I8 => Value::ArrayI8(each(count, || reader.get_i8())),
-                    TYPE_I16 => Value::ArrayI16(each(count, || reader.get_i16())),
-                    TYPE_I32 => Value::ArrayI32(each(count, || reader.get_i32())),
-                    TYPE_I64 => Value::ArrayI64(each(count, || reader.get_i64())),
-                    TYPE_F32 => Value::ArrayF32(each(count, || reader.get_f32())),
-                    TYPE_F64 => Value::ArrayF64(each(count, || reader.get_f64())),
+                    TYPE_BOOLEAN => Value::ArrayBoolean(
+                        reader.take_bytes(count).iter().map(|b| *b != 0).collect(),
+                    ),
+                    TYPE_U8 => Value::ArrayU8(reader.take_bytes(count).to_vec()),
+                    TYPE_U16 => Value::ArrayU16(bulk!(u16)),
+                    TYPE_U32 => Value::ArrayU32(bulk!(u32)),
+                    TYPE_U64 => Value::ArrayU64(bulk!(u64)),
+                    TYPE_I8 => Value::ArrayI8(bulk!(i8)),
+                    TYPE_I16 => Value::ArrayI16(bulk!(i16)),
+                    TYPE_I32 => Value::ArrayI32(bulk!(i32)),
+                    TYPE_I64 => Value::ArrayI64(bulk!(i64)),
+                    TYPE_F32 => Value::ArrayF32(bulk!(f32)),
+                    TYPE_F64 => Value::ArrayF64(bulk!(f64)),
                     TYPE_STRING => Value::ArrayString({
                         let mut strings = Vec::with_capacity(count);
                         for _ in 0..count {
