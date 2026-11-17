@@ -251,6 +251,7 @@ tests:
   | --- | --- |
   | the local WebSocket bridge over a running device | `crates/arora/tests/local_ws_bridge.rs` |
   | the WebSocket wire against a fake runtime | `crates/arora-bridge-ws/tests/wire.rs` |
+  | the Unix bridge over a running device | `crates/arora-bridge-unix/tests/device.rs` |
   | the ROS 2 bridge over live DDS | `crates/arora-bridge-ros2/tests/tests.rs` |
   | the ROS 2 bridge over a running device, on both backends | `crates/arora-bridge-ros2/tests/device.rs` |
   | the ROS 2 bridge to a native subscriber (`#[ignore]`d, Docker) | `crates/arora-bridge-ros2/tests/zenoh_native.rs` |

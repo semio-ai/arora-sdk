@@ -1,0 +1,29 @@
+[package]
+name = "arora-bridge-unix"
+version = "0.1.0"
+edition = "2021"
+description = "A bridge for Arora over a Unix socket file, in Arora Buffers: an arora-bridge implementation and its client, for local and ssh-forwarded clients."
+license = "Apache-2.0"
+repository = "https://github.com/semio-ai/arora-sdk"
+
+[dependencies]
+arora-types = { path = "../arora-types", version = "3.10" }
+# 6.3: `CallFuture` and `Caller`, which the client implements.
+arora-bridge = { path = "../arora-bridge", version = "6.3" }
+# 3.3: `well_formed`, checked before decoding what a peer sent.
+arora-buffers = { path = "../arora-buffers", version = "3.3" }
+async-trait = "0.1"
+futures = "0.3"
+log = "0.4"
+tokio = { version = "1", features = ["net", "rt", "sync", "macros", "io-util", "time"] }
+# The length-prefixed framing: an Arora Buffer counts its own length.
+tokio-util = { version = "0.7", features = ["codec"] }
+
+[dev-dependencies]
+# A device behind the bridge (tests/device.rs), without the wasm engine.
+arora = { path = "../arora", version = "18", default-features = false }
+arora-hal = { path = "../arora-hal", version = "4.3" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.2" }
+env_logger = "0.11"
+tokio = { version = "1", features = ["full"] }
+bytes = "1"
