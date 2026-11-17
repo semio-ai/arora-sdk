@@ -94,10 +94,31 @@ impl UnixClient {
     /// covers every key. No prefix stops the changes, which is where a
     /// connection starts.
     pub async fn subscribe(&self, prefixes: Vec<String>) -> Result<(), String> {
+        self.subscribe_latest(prefixes, Vec::new()).await
+    }
+
+    /// [`subscribe`](Self::subscribe) to `prefixes`, and receive only the
+    /// newest value of the keys one of `latest` covers: while this client
+    /// reads slower than the device changes them, their values are replaced
+    /// rather than queued, and the other keys do not fall behind for them
+    /// ([newest only](crate#newest-only)). For large values a client may skip,
+    /// such as camera frames.
+    pub async fn subscribe_latest(
+        &self,
+        prefixes: Vec<String>,
+        latest: Vec<String>,
+    ) -> Result<(), String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.request(Request::Subscribe { id, prefixes }, id)
-            .await
-            .map(|_| ())
+        self.request(
+            Request::Subscribe {
+                id,
+                prefixes,
+                latest,
+            },
+            id,
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn request(&self, request: Request, id: u32) -> Result<CallResult, String> {

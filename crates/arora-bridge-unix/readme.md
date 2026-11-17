@@ -19,6 +19,10 @@ forward of the file.
 - **Access is the file's.** The socket is created `0600`: only its owner
   connects, locally or through `ssh`. A device's writes are then checked like
   every bridge's: a key is closed to remote writers unless its meta opens it.
+- **A slow client skips what it may.** A connection queues the changes it
+  has not written, up to 64 MiB of values, and is closed beyond. Keys a
+  client subscribes to newest only (`subscribe_latest`: camera frames) are
+  never queued: it is sent their newest value, and every step's other keys.
 - **Nothing on the step's thread but a copy.** The step hands each change to
   the connections' tasks, which encode and write it.
 

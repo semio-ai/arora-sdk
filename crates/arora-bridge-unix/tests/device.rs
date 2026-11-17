@@ -559,3 +559,82 @@ async fn the_socket_file_s_lifecycle() {
     drop(third);
     assert!(!path.exists());
 }
+
+/// Read one message off a raw connection.
+async fn read_message(stream: &mut tokio::net::UnixStream) -> arora_bridge_unix::wire::Message {
+    let mut len = [0; 4];
+    stream.read_exact(&mut len).await.expect("a length");
+    let mut bytes = vec![0; u32::from_le_bytes(len) as usize];
+    bytes[..4].copy_from_slice(&len);
+    stream.read_exact(&mut bytes[4..]).await.expect("a message");
+    arora_bridge_unix::wire::decode_message(&bytes).expect("a message")
+}
+
+/// A client reading slower than the device changes keys it pushes newest
+/// only (camera frames) is sent every step's other keys and the newest frame,
+/// and stays connected: frames are replaced, not queued, so the backlog never
+/// reaches its cap.
+#[tokio::test]
+async fn a_slow_client_skips_frames_and_keeps_every_record() {
+    use arora_bridge::Bridge;
+    use arora_bridge_unix::wire::{encode_request, Message, Request};
+
+    let path = socket_dir("slow").join("device.sock");
+    let mut bridge = UnixBridge::bind(&path).expect("bind the bridge");
+    let mut stream = tokio::net::UnixStream::connect(&path)
+        .await
+        .expect("connect");
+    let subscribe = Request::Subscribe {
+        id: 7,
+        prefixes: vec!["".into()],
+        latest: vec!["camera".into()],
+    };
+    stream
+        .write_all(&encode_request(&subscribe).unwrap())
+        .await
+        .expect("subscribe");
+    assert!(matches!(
+        read_message(&mut stream).await,
+        Message::Answer {
+            id: 7,
+            result: Ok(_)
+        }
+    ));
+
+    // 400 steps of a 256 KiB frame, 100 MiB in all, with the client not
+    // reading: more than the backlog's cap, had the frames been queued.
+    let frame = 256 << 10;
+    for i in 0..400u32 {
+        let mut change = StateChange::new();
+        change
+            .set
+            .insert(Key::from("dcm/stamp"), Some(Value::U32(i)));
+        change.set.insert(
+            Key::from("camera/frame"),
+            Some(Value::ArrayU8(vec![i as u8; frame])),
+        );
+        bridge.try_send(&change);
+        tokio::task::yield_now().await;
+    }
+
+    let mut stamps = Vec::new();
+    let mut frames = Vec::new();
+    while stamps.last() != Some(&399) {
+        let Message::Changed(change) = read_message(&mut stream).await else {
+            panic!("a change");
+        };
+        if let Some(Some(Value::U32(stamp))) = change.set.get(&Key::from("dcm/stamp")) {
+            stamps.push(*stamp);
+        }
+        if let Some(Some(Value::ArrayU8(bytes))) = change.set.get(&Key::from("camera/frame")) {
+            frames.push(bytes[0]);
+        }
+    }
+    assert_eq!(
+        stamps,
+        (0..400).collect::<Vec<_>>(),
+        "every record, in order"
+    );
+    assert!(frames.len() < 100, "frames skipped: {} sent", frames.len());
+    assert_eq!(frames.last(), Some(&(399u32 as u8)), "the newest frame");
+}

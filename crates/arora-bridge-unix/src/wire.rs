@@ -69,6 +69,11 @@ pub enum Request {
         id: u32,
         /// The key prefixes, replacing the connection's previous ones.
         prefixes: Vec<String>,
+        /// Among the subscribed keys, those to push only the newest value of
+        /// (camera frames, for instance), replacing the previous ones. While
+        /// the client reads slower than the device changes them, the values
+        /// it has not been sent yet are replaced rather than queued.
+        latest: Vec<String>,
     },
 }
 
@@ -92,9 +97,22 @@ pub enum Message {
 pub fn encode_request(request: &Request) -> Result<Box<[u8]>, String> {
     let mut w = BufferWriter::new();
     match request {
-        Request::Subscribe { id, prefixes } => {
-            head(&mut w, SUBSCRIBE, *id, 1);
+        Request::Subscribe {
+            id,
+            prefixes,
+            latest,
+        } => {
+            // `latest` is omitted when empty, as a client that has none sends it.
+            head(
+                &mut w,
+                SUBSCRIBE,
+                *id,
+                if latest.is_empty() { 1 } else { 2 },
+            );
             strings(&mut w, prefixes.iter().map(String::as_str), prefixes.len());
+            if !latest.is_empty() {
+                strings(&mut w, latest.iter().map(String::as_str), latest.len());
+            }
         }
         Request::Op { id, op } => match op {
             BridgeOp::Get(keys) => {
@@ -103,7 +121,13 @@ pub fn encode_request(request: &Request) -> Result<Box<[u8]>, String> {
             }
             BridgeOp::Update(change) => {
                 head(&mut w, UPDATE, *id, 3);
-                state_change(&mut w, change, |_| true);
+                let set: Vec<_> = change
+                    .set
+                    .iter()
+                    .map(|(k, v)| (k.path.as_str(), v.as_ref()))
+                    .collect();
+                let unset: Vec<_> = change.unset.iter().map(|k| k.path.as_str()).collect();
+                change_parts(&mut w, &set, &unset);
             }
             BridgeOp::Call(call) => {
                 head(&mut w, CALL, *id, 4);
@@ -138,7 +162,15 @@ pub fn encode_request(request: &Request) -> Result<Box<[u8]>, String> {
 pub fn encode_message(message: &Message) -> Box<[u8]> {
     match message {
         Message::Answer { id, result } => encode_answer(*id, result),
-        Message::Changed(change) => encode_changed(change, |_| true),
+        Message::Changed(change) => {
+            let set: Vec<_> = change
+                .set
+                .iter()
+                .map(|(k, v)| (k.path.as_str(), v.as_ref()))
+                .collect();
+            let unset: Vec<_> = change.unset.iter().map(|k| k.path.as_str()).collect();
+            encode_changed(&set, &unset)
+        }
     }
 }
 
@@ -159,12 +191,13 @@ pub(crate) fn encode_answer(id: u32, result: &Result<CallResult, String>) -> Box
     w.finalize()
 }
 
-/// Encode the part of `change` whose keys `keep` holds.
-pub(crate) fn encode_changed(change: &StateChange, keep: impl Fn(&Key) -> bool) -> Box<[u8]> {
+/// Encode a `changed` message: the keys `set` sets, by path, to their value
+/// (none setting a key to no value), and the paths `unset` unsets.
+pub(crate) fn encode_changed(set: &[(&str, Option<&Value>)], unset: &[&str]) -> Box<[u8]> {
     let mut w = BufferWriter::new();
     w.add_array_primitive(TYPE_VALUE, 4);
     w.add_u8(CHANGED);
-    state_change(&mut w, change, keep);
+    change_parts(&mut w, set, unset);
     w.finalize()
 }
 
@@ -194,12 +227,11 @@ fn optional_string(w: &mut BufferWriter, s: Option<&str>) {
 }
 
 /// A change as three elements: the set keys' paths, their values as options in
-/// the same order, the unset keys' paths. Only the keys `keep` holds.
-fn state_change(w: &mut BufferWriter, change: &StateChange, keep: impl Fn(&Key) -> bool) {
-    let set: Vec<(&Key, &Option<Value>)> = change.set.iter().filter(|(k, _)| keep(k)).collect();
-    strings(w, set.iter().map(|(k, _)| k.path.as_str()), set.len());
+/// the same order, the unset keys' paths.
+fn change_parts(w: &mut BufferWriter, set: &[(&str, Option<&Value>)], unset: &[&str]) {
+    strings(w, set.iter().map(|(path, _)| *path), set.len());
     w.add_array_primitive(TYPE_VALUE, set.len() as u32);
-    for (_, value) in &set {
+    for (_, value) in set {
         match value {
             Some(value) => {
                 w.add_option_some();
@@ -208,12 +240,6 @@ fn state_change(w: &mut BufferWriter, change: &StateChange, keep: impl Fn(&Key) 
             None => w.add_option_none(),
         }
     }
-    let unset: Vec<&str> = change
-        .unset
-        .iter()
-        .filter(|k| keep(k))
-        .map(|k| k.path.as_str())
-        .collect();
     strings(w, unset.iter().copied(), unset.len());
 }
 
@@ -240,6 +266,11 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, String> {
         SUBSCRIBE => Request::Subscribe {
             id,
             prefixes: take_strings(&mut items)?,
+            latest: if items.len() > 0 {
+                take_strings(&mut items)?
+            } else {
+                Vec::new()
+            },
         },
         GET => Request::Op {
             id,
@@ -493,10 +524,17 @@ mod tests {
         round_trip(Request::Subscribe {
             id: 1,
             prefixes: vec!["".into(), "joints/".into()],
+            latest: vec![],
         });
         round_trip(Request::Subscribe {
             id: 2,
             prefixes: vec![],
+            latest: vec![],
+        });
+        round_trip(Request::Subscribe {
+            id: 2,
+            prefixes: vec!["".into()],
+            latest: vec!["camera".into()],
         });
         round_trip(Request::Op {
             id: 3,
@@ -580,9 +618,15 @@ mod tests {
     }
 
     #[test]
-    fn a_change_keeps_only_the_subscribed_keys() {
+    fn a_change_holds_the_keys_given() {
         let change = change();
-        let bytes = encode_changed(&change, |k| k.path.starts_with("k/1"));
+        let set: Vec<_> = change
+            .set
+            .iter()
+            .filter(|(k, _)| k.path.starts_with("k/1"))
+            .map(|(k, v)| (k.path.as_str(), v.as_ref()))
+            .collect();
+        let bytes = encode_changed(&set, &[]);
         let Message::Changed(back) = decode_message(&bytes).unwrap() else {
             panic!("a change");
         };

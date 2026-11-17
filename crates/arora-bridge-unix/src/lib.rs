@@ -27,7 +27,7 @@
 //! | 3 | `call` | `id`, the module id (`uuid` option), the function id (`uuid`), [the arguments](#fields) |
 //! | 4 | `list_keys` | `id`, a path prefix (`string` option) |
 //! | 5 | `describe_methods` | `id`, a name prefix (`string` option) |
-//! | 6 | `subscribe` | `id`, the key prefixes (`string[]`) |
+//! | 6 | `subscribe` | `id`, the key prefixes (`string[]`), optionally the prefixes [pushed newest only](#newest-only) (`string[]`) |
 //!
 //! | Kind | Message | Elements after the kind |
 //! |---|---|---|
@@ -47,6 +47,24 @@
 //! `joints/head_yaw` but not `joints_extra`. The empty prefix covers every
 //! key; a connection starts with none, so a client that only commands is sent
 //! nothing.
+//!
+//! ## A slow client
+//!
+//! The device queues for each connection the changes it has not written yet.
+//! A connection whose queue holds more than
+//! [`UnixBridge::BACKLOG_BYTES`] of values is closed: a client missing a
+//! change would hold a stale state with no sign of it, so it reconnects and
+//! reads again.
+//!
+//! ### Newest only
+//!
+//! A `subscribe`'s optional second list names prefixes, among the subscribed
+//! keys, whose keys are pushed newest value only: a key one of them covers is
+//! never queued, and a `changed` carries the newest value it has not sent,
+//! beside the queued keys of an older step. A client too slow for a stream of
+//! large values (camera frames) then skips values of those keys instead of
+//! falling behind on the others. Such a key holds no intermediate value: use it
+//! for a state, not for a series every value of which matters.
 //!
 //! ## A change
 //!
@@ -107,6 +125,7 @@ mod tests {
         let one = wire::encode_request(&wire::Request::Subscribe {
             id: 1,
             prefixes: vec!["a".into()],
+            latest: vec![],
         })
         .unwrap();
         let two = wire::encode_message(&wire::Message::Changed(Default::default()));
