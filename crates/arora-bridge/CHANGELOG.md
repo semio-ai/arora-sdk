@@ -4,6 +4,15 @@ All notable changes to `arora-bridge`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.4.0] - 2026-11-18
+
+### Added
+
+- `Bridge::try_send_shared`: `try_send` with the change in an `Arc`, so a
+  bridge that hands changes to another task keeps the `Arc` rather than
+  copying the change. The default calls `try_send`; the runtime sends through
+  it.
+
 ## [6.3.0] - 2026-10-30
 
 ### Changed

@@ -46,6 +46,7 @@
 //! remote over a bridge and an in-process caller speak them alike.
 
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_channel::oneshot;
@@ -323,6 +324,14 @@ pub trait Bridge: Send + Sync {
     /// The implementation enqueues it onto its own outbound channel/transport;
     /// it must not block the caller's step.
     fn try_send(&mut self, change: &StateChange);
+
+    /// [`try_send`](Self::try_send) a change the caller shares: a bridge that
+    /// hands changes to another task keeps the `Arc` instead of copying the
+    /// change, which matters for large values such as camera frames. The
+    /// runtime sends through this method; the default calls `try_send`.
+    fn try_send_shared(&mut self, change: &Arc<StateChange>) {
+        self.try_send(change);
+    }
 
     /// The device's current info, if registered.
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>>;
