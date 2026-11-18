@@ -352,6 +352,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-bridge-unix-bench"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "arora",
+ "arora-bridge",
+ "arora-bridge-unix",
+ "arora-bridge-zenoh",
+ "arora-buffers",
+ "arora-hal",
+ "arora-simple-data-store",
+ "arora-types",
+ "async-trait",
+ "clap 4.6.7",
+ "env_logger",
+ "futures",
+ "log",
+ "serde_json",
+ "tokio",
+ "zenoh",
+]
+
+[[package]]
 name = "arora-bridge-ws"
 version = "7.3.0"
 dependencies = [

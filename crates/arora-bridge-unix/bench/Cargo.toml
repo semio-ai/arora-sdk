@@ -1,0 +1,32 @@
+[package]
+name = "arora-bridge-unix-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Checks and measures arora-bridge-unix against arora-bridge-zenoh, locally and through ssh forwards."
+license = "Apache-2.0"
+
+[[bin]]
+name = "bridge-bench"
+path = "src/main.rs"
+
+[dependencies]
+arora = { path = "../../arora", default-features = false }
+arora-bridge = { path = "../../arora-bridge" }
+arora-bridge-unix = { path = ".." }
+arora-bridge-zenoh = { path = "../../arora-bridge-zenoh" }
+arora-buffers = { path = "../../arora-buffers" }
+arora-hal = { path = "../../arora-hal" }
+arora-simple-data-store = { path = "../../arora-simple-data-store" }
+arora-types = { path = "../../arora-types" }
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+futures = "0.3"
+log = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+# The sessions the bridge and its clients are given: only the two transports
+# compared here.
+zenoh = { version = "1.10", default-features = false, features = ["transport_tcp", "transport_unixsock-stream"] }

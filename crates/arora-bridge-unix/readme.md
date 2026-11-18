@@ -98,3 +98,17 @@ let (client, changes) = arora_bridge_unix::UnixClient::over(
 A client in another language does the same with its own process API, and
 `socat UNIX-LISTEN:/tmp/robot.sock,fork EXEC:'ssh robot python relay.py …'`
 gives such a robot a local socket file again.
+
+## Compared with the Zenoh bridge
+
+[`bench/`](bench) holds `bridge-bench`, which serves a device over this bridge
+or [`arora-bridge-zenoh`](../arora-bridge-zenoh/readme.md) (a query per
+request, a put per changed key, in the same messages), checks what a client counts on, and measures round
+trips, pushes and CPU through a shared volume, `ssh -L` and `ssh -J`, between
+containers and from the host. It is an opt-in member of the workspace:
+
+```sh
+cargo build --release -p arora-bridge-unix-bench
+target/release/bridge-bench serve --unix /tmp/dev.sock --mode device &
+target/release/bridge-bench check --unix /tmp/dev.sock
+```

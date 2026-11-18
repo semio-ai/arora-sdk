@@ -35,6 +35,7 @@ jobs:
       test-arora-bridge-ros2: ${{ steps.affected.outputs.test-arora-bridge-ros2 }}
       test-arora-msgs-ros2: ${{ steps.affected.outputs.test-arora-msgs-ros2 }}
       test-arora-bridge-zenoh: ${{ steps.affected.outputs.test-arora-bridge-zenoh }}
+      build-arora-bridge-unix-bench: ${{ steps.affected.outputs.build-arora-bridge-unix-bench }}
       test-arora-hal-ros2: ${{ steps.affected.outputs.test-arora-hal-ros2 }}
       test-arora-hal-restful: ${{ steps.affected.outputs.test-arora-hal-restful }}
     steps:
@@ -186,7 +187,7 @@ jobs:
 
   lint:
     needs: select
-    if: needs.select.outputs.any == 'true' || needs.select.outputs.test-polly || needs.select.outputs.test-arora-bridge-zenoh
+    if: needs.select.outputs.any == 'true' || needs.select.outputs.test-polly || needs.select.outputs.test-arora-bridge-zenoh || needs.select.outputs.build-arora-bridge-unix-bench
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -233,6 +234,14 @@ jobs:
         run: |
           cargo clippy -p arora-bridge-zenoh --all-targets -- -D warnings
           cargo fmt --check -p arora-bridge-zenoh
+
+      # The bridges' benchmark, out of the default members, is linted (and so
+      # built) whenever a change reaches it; ssh-matrix.sh runs it by hand.
+      - name: Clippy and formatting (arora-bridge-unix-bench)
+        if: needs.select.outputs.build-arora-bridge-unix-bench
+        run: |
+          cargo clippy -p arora-bridge-unix-bench --all-targets -- -D warnings
+          cargo fmt --check -p arora-bridge-unix-bench
 
   # The engine's web host (executor::browser) and the run loop's JS-timer
   # cadence only compile for wasm32, so the native jobs never exercise them.

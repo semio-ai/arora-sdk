@@ -63,3 +63,12 @@ while let Some(change) = changes.next().await {
 
 A subscription receives changes only; read the current values with a `get`
 once subscribed.
+
+## Compared with the Unix bridge
+
+[`arora-bridge-unix`](../arora-bridge-unix/readme.md)'s `bridge-bench`
+serves a device over either bridge and measures both, locally and through
+`ssh` forwards.
+The Unix bridge needs no session and no router, and reaches a robot through
+`ssh` alone; the Zenoh bridge reaches clients across a network and routes each
+the keys it subscribes to.
