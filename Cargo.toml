@@ -38,6 +38,7 @@ members = [
   "crates/arora-vfs",
   "crates/arora-bridge-ws",
   "crates/arora-bridge-unix",
+  "crates/arora-bridge-zenoh",
   "crates/arora-bridge-ros2",
   "crates/arora-msgs-ros2",
   "crates/wasi-sdk",

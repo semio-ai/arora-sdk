@@ -370,6 +370,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-bridge-zenoh"
+version = "0.1.0"
+dependencies = [
+ "arora",
+ "arora-bridge",
+ "arora-buffers",
+ "arora-hal",
+ "arora-simple-data-store",
+ "arora-types",
+ "async-trait",
+ "futures",
+ "log",
+ "tokio",
+ "zenoh",
+]
+
+[[package]]
 name = "arora-buffers"
 version = "3.4.0"
 dependencies = [

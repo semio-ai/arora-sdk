@@ -34,6 +34,7 @@ jobs:
       test-polly: ${{ steps.affected.outputs.test-polly }}
       test-arora-bridge-ros2: ${{ steps.affected.outputs.test-arora-bridge-ros2 }}
       test-arora-msgs-ros2: ${{ steps.affected.outputs.test-arora-msgs-ros2 }}
+      test-arora-bridge-zenoh: ${{ steps.affected.outputs.test-arora-bridge-zenoh }}
       test-arora-hal-ros2: ${{ steps.affected.outputs.test-arora-hal-ros2 }}
       test-arora-hal-restful: ${{ steps.affected.outputs.test-arora-hal-restful }}
     steps:
@@ -100,7 +101,7 @@ jobs:
   # native ROS 2 subscriber is `#[ignore]`d and documented.
   zenoh:
     needs: select
-    if: needs.select.outputs.test-arora-bridge-ros2 || needs.select.outputs.test-arora-msgs-ros2
+    if: needs.select.outputs.test-arora-bridge-ros2 || needs.select.outputs.test-arora-msgs-ros2 || needs.select.outputs.test-arora-bridge-zenoh
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -118,7 +119,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test the ROS 2 bridge on the Zenoh backend
+        if: needs.select.outputs.test-arora-bridge-ros2 || needs.select.outputs.test-arora-msgs-ros2
         run: cargo test --release -p arora-bridge-ros2 -p arora-msgs-ros2 --no-default-features --features zenoh
+
+      # arora-bridge-zenoh stays out of the default members so the default
+      # build skips Zenoh; its tests run here whenever a change reaches it.
+      - name: Test the Zenoh bridge
+        if: needs.select.outputs.test-arora-bridge-zenoh
+        run: cargo test --release -p arora-bridge-zenoh
 
   # The robot runners (arora-ros2, arora-restful) build only with their
   # crates' `runner` feature, with or without their `studio` feature (arora's
@@ -178,7 +186,7 @@ jobs:
 
   lint:
     needs: select
-    if: needs.select.outputs.any == 'true' || needs.select.outputs.test-polly
+    if: needs.select.outputs.any == 'true' || needs.select.outputs.test-polly || needs.select.outputs.test-arora-bridge-zenoh
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -217,6 +225,14 @@ jobs:
         run: |
           cargo clippy -p polly --all-targets -- -D warnings
           cargo fmt --check -p polly
+
+      # Out of the default members too (Zenoh), linted whenever a change
+      # reaches it.
+      - name: Clippy and formatting (arora-bridge-zenoh)
+        if: needs.select.outputs.test-arora-bridge-zenoh
+        run: |
+          cargo clippy -p arora-bridge-zenoh --all-targets -- -D warnings
+          cargo fmt --check -p arora-bridge-zenoh
 
   # The engine's web host (executor::browser) and the run loop's JS-timer
   # cadence only compile for wasm32, so the native jobs never exercise them.

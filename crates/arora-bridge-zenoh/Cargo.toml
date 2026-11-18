@@ -1,0 +1,31 @@
+[package]
+name = "arora-bridge-zenoh"
+version = "0.1.0"
+edition = "2021"
+description = "A bridge for Arora over Zenoh, in Arora Buffers: requests as queries, each key's value put on its own key expression; an arora-bridge implementation and its client."
+license = "Apache-2.0"
+repository = "https://github.com/semio-ai/arora-sdk"
+
+[dependencies]
+arora-types = { path = "../arora-types", version = "3.10" }
+# 6.4: `try_send_shared`, which hands the step's change to the publishing
+# thread without a copy.
+arora-bridge = { path = "../arora-bridge", version = "6.4" }
+# 3.4: `well_formed_within`, checked before decoding what a peer sent.
+arora-buffers = { path = "../arora-buffers", version = "3.4" }
+async-trait = "0.1"
+futures = "0.3"
+log = "0.4"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+# No transport of its own: the application's session chooses them, with the
+# features of its own `zenoh` dependency. The version the ROS 2 bridge's Zenoh
+# backend locks.
+zenoh = { version = "1.10", default-features = false }
+
+[dev-dependencies]
+# A device behind the bridge (tests/device.rs), without the wasm engine.
+arora = { path = "../arora", version = "18", default-features = false }
+arora-hal = { path = "../arora-hal", version = "4.3" }
+arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.2" }
+tokio = { version = "1", features = ["full"] }
+zenoh = { version = "1.10", default-features = false, features = ["transport_unixsock-stream"] }

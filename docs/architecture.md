@@ -19,7 +19,7 @@ crates of its own layer or of the layers above it in this list:
 | Modules | `arora-module` (+ `arora-module-macros`), `arora-module-authoring/*` | declaring a module in Rust; generating one from a `module.yaml` |
 | Behaviors | `arora-behavior-tree` (+ `-types`, `-types-yaml`) | the behavior-tree interpreter |
 | Runtime | `arora` | the device: the step, the builder, the runner |
-| Edges | `arora-bridge-ws`, `arora-bridge-unix`, `arora-bridge-ros2`, `arora-msgs-ros2`, `arora-hal-ros2`, `arora-hal-restful` | bridges, ROS 2 messages, robot HALs and their runners |
+| Edges | `arora-bridge-ws`, `arora-bridge-unix`, `arora-bridge-zenoh`, `arora-bridge-ros2`, `arora-msgs-ros2`, `arora-hal-ros2`, `arora-hal-restful` | bridges, ROS 2 messages, robot HALs and their runners |
 | Front ends | `arora-web`, `arora-cli` | the device in a browser; a command line that loads a module and calls it |
 | Libraries | `arora-animation` (+ `arora-animation-module`), `arora-geometry`, `arora-graphics-types`, `arora-dataflow-nodes` | computation on `Value`s, usable inside or outside a device |
 
@@ -40,6 +40,8 @@ graph BT
     ws["arora-bridge-ws"] --> bridge
     unix["arora-bridge-unix"] --> bridge
     unix --> buffers
+    zenoh["arora-bridge-zenoh"] --> bridge
+    zenoh --> buffers
     arora["arora"] --> engine
     arora --> bt
     arora --> hal

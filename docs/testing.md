@@ -184,9 +184,9 @@ line to add.
 | --- | --- | --- |
 | `select` | always | The selection above. |
 | `test` | a default member | `cargo test --release` over the selected default members, as [above](#running-the-tests), then `verify`. |
-| `zenoh` | `arora-bridge-ros2` or `arora-msgs-ros2` | [The Zenoh backend](#the-zenoh-backend). |
+| `zenoh` | `arora-bridge-ros2`, `arora-msgs-ros2` or `arora-bridge-zenoh` | [The Zenoh backend](#the-zenoh-backend) when one of the first two is selected; `arora-bridge-zenoh`'s tests when it is. |
 | `runners` | `arora`, `arora-hal-ros2` or `arora-hal-restful` | [The runners](#robot-runners-and-semio-studio), with clippy over each feature set. |
-| `lint` | a default member, or `polly` | `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` over the selected default members; the same over `polly` when it is selected. |
+| `lint` | a default member, `polly` or `arora-bridge-zenoh` | `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` over the selected default members; the same over `polly` and `arora-bridge-zenoh` when selected. |
 | `browser` | `arora-engine`, `arora` or `arora-web` | [The browser tests](#browser-tests), and `cargo build -p arora-web --target wasm32-unknown-unknown`. |
 | `coverage` | pushes to `main` only | [Coverage](#coverage). |
 | `markdown-link-check` | always | Checks the links of every Markdown file. |
@@ -252,6 +252,7 @@ tests:
   | the local WebSocket bridge over a running device | `crates/arora/tests/local_ws_bridge.rs` |
   | the WebSocket wire against a fake runtime | `crates/arora-bridge-ws/tests/wire.rs` |
   | the Unix bridge over a running device | `crates/arora-bridge-unix/tests/device.rs` |
+  | the Zenoh bridge over a running device | `crates/arora-bridge-zenoh/tests/device.rs` |
   | the ROS 2 bridge over live DDS | `crates/arora-bridge-ros2/tests/tests.rs` |
   | the ROS 2 bridge over a running device, on both backends | `crates/arora-bridge-ros2/tests/device.rs` |
   | the ROS 2 bridge to a native subscriber (`#[ignore]`d, Docker) | `crates/arora-bridge-ros2/tests/zenoh_native.rs` |
