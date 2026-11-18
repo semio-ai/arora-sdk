@@ -219,6 +219,9 @@ pub struct Arora {
     // as a remote's.
     pub(crate) caller_tx: mpsc::UnboundedSender<Inbound>,
     pub(crate) store_changes: Subscription,
+    // What a failed step drained from `store_changes` and did not send: the
+    // next step sends it, as though it had never been drained.
+    pub(crate) unsent: StateChange,
     // The built-in clock: monotonic nanoseconds since start, advanced by each
     // step's `dt`. Published into the store's built-in keys each step, before any
     // behavior ticks; those writes travel outbound like any other change, so a
@@ -1665,6 +1668,7 @@ impl AroraBuilder {
             data_requested: vec![false; endpoints],
             caller_tx,
             store_changes,
+            unsent: StateChange::new(),
             clock: Clock::starting_at(self.start_time),
             behavior_error: watch::Sender::new(None),
             task_runs,

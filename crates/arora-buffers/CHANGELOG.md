@@ -4,6 +4,15 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.3.2] - 2026-11-18
+
+### Changed
+
+- `BufferWriter`'s bulk writers make room for their payload at once, and
+  `add_u8_raw_bulk` copies its slice whole: a large array is copied into the
+  buffer once, rather than through every doubling of the buffer. The wire
+  format is unchanged.
+
 ## [3.3.1] - 2026-10-30
 
 ### Changed

@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "arora"
-version = "18.0.0"
+version = "18.0.1"
 dependencies = [
  "anyhow",
  "arora-behavior",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "arora-bridge"
-version = "6.3.0"
+version = "6.4.0"
 dependencies = [
  "arora-behavior",
  "arora-types",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "3.3.1"
+version = "3.3.2"
 dependencies = [
  "anyhow",
  "arora-types",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "arora-simple-data-store"
-version = "3.2.0"
+version = "3.2.1"
 dependencies = [
  "arora-types",
 ]

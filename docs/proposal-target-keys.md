@@ -211,7 +211,7 @@ current one. The rule:
    neither set, into both. A client sees both keys move together, whichever
    form it wrote, and the write to the form it did not use is the device's
    own. Every HAL arora's runtime feeds reads its targets from the store's
-   notifications, the step's changes the runtime hands it (`write_hal`), so
+   notifications, the step's changes the runtime hands it (`Hal::try_send`), so
    for those HALs the runtime applies the rule, and keeps a whole target and
    its fields in agreement the same way (§5). It does not yet
    ([ARORA-187](https://linear.app/semio-ai/issue/ARORA-187)).

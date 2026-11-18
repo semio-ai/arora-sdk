@@ -4,6 +4,20 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [18.0.1] - 2026-11-18
+
+### Changed
+
+- A step copies no value on its way out. The HAL's readings are moved into
+  the store, and kept from being written back to the HAL by the keys read
+  rather than by a copy compared with the frame's change. The frame's change
+  is built once and shared with every bridge through
+  `Bridge::try_send_shared` (`arora-bridge` 6.4).
+- Since the writer is told from the step's phase, a write from another thread
+  holding the store that lands while the readings apply, to a key the HAL
+  read, counts as a reading and is not sent to the HAL. A write between steps
+  is unaffected.
+
 ## [18.0.0] - 2026-10-30
 
 A runtime built with Semio Studio carries the device's Studio bridge from its
