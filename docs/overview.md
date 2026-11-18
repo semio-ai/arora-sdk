@@ -156,6 +156,9 @@ device's modules say. A device holds any number of bridges, or none.
 - The **open local bridge** ([`arora-bridge-ws`](../crates/arora-bridge-ws/README.md))
   serves JSON messages over a WebSocket on the local machine. It is what a
   device serves when no other bridge is given.
+- The **Unix bridge** ([`arora-bridge-unix`](../crates/arora-bridge-unix/readme.md))
+  serves Arora Buffers over a Unix socket file, for clients on the machine
+  or at the end of an `ssh` forward of the file.
 - The **ROS 2 bridge** ([`arora-bridge-ros2`](../crates/arora-bridge-ros2/README.md))
   exposes keys as topics, functions as services and task runs as actions, with
   exposure profiles such as ROS4HRI.

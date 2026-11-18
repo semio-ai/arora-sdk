@@ -105,6 +105,8 @@ yields none.
 
 - [`arora-bridge-ws`](https://docs.rs/arora-bridge-ws): the open local bridge,
   a WebSocket server for apps on the same machine — the device's default.
+- [`arora-bridge-unix`](../arora-bridge-unix/readme.md): a Unix socket file
+  in Arora Buffers, for clients on the machine or through an `ssh` forward.
 - [`arora-bridge-ros2`](https://docs.rs/arora-bridge-ros2): a ROS 2 graph as
   the remote.
 - The Semio Studio connector, which `arora` includes only in a build with its

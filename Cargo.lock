@@ -331,6 +331,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "arora-bridge-unix"
+version = "0.1.0"
+dependencies = [
+ "arora",
+ "arora-bridge",
+ "arora-buffers",
+ "arora-hal",
+ "arora-simple-data-store",
+ "arora-types",
+ "async-trait",
+ "bytes",
+ "env_logger",
+ "futures",
+ "libc",
+ "log",
+ "socket2 0.6.5",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "arora-bridge-ws"
 version = "7.3.0"
 dependencies = [
@@ -350,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "arora-buffers"
-version = "3.3.2"
+version = "3.4.0"
 dependencies = [
  "anyhow",
  "arora-types",
