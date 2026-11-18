@@ -4,6 +4,14 @@ All notable changes to `arora-simple-data-store`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.2.1] - 2026-11-18
+
+### Changed
+
+- A write copies each changed value once, into its cell: the written change
+  itself becomes the notification, and the last subscriber notified takes it
+  rather than a copy. `NamespacedStore::write` moves the values it prefixes.
+
 ## [3.2.0] - 2026-10-06
 
 ### Added

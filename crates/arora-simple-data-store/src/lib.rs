@@ -68,6 +68,15 @@ impl Subscriber {
                 .collect(),
         }
     }
+
+    /// What `change` holds of this subscriber's keys, moved out of it: the
+    /// last subscriber served takes the change rather than a copy.
+    fn take_part(&self, mut change: StateChange) -> StateChange {
+        let covered = |key: &Key| prefix_covers(&self.prefix, &key.path);
+        change.set.retain(|key, _| covered(key));
+        change.unset.retain(|key| covered(key));
+        change
+    }
 }
 
 impl Inner {
@@ -78,11 +87,20 @@ impl Inner {
             return;
         }
         let mut subs = self.subscribers.lock().unwrap();
+        subs.retain(|sub| sub.alive.strong_count() != 0);
+        // Every subscriber but the last is sent a copy of its part; the last
+        // takes the change itself, so a store with one subscriber (a device's
+        // runtime) copies no value to notify it.
+        let mut change = Some(change);
+        let last = subs.len().saturating_sub(1);
+        let mut index = 0;
         subs.retain(|sub| {
-            if sub.alive.strong_count() == 0 {
-                return false;
-            }
-            let part = sub.part_of(&change);
+            let part = if index == last {
+                sub.take_part(change.take().expect("taken by the last subscriber only"))
+            } else {
+                sub.part_of(change.as_ref().expect("taken by the last subscriber only"))
+            };
+            index += 1;
             part.is_empty() || sub.tx.send(part).is_ok()
         });
     }
@@ -129,22 +147,24 @@ impl DataStore for SimpleDataStore {
         // HAL that mirrors actuation back as state produces one change, not a
         // feedback loop. (`f32`/`f64` NaNs compare unequal, so NaN writes
         // always notify.)
+        // The value is copied once, into its cell; the written change itself
+        // becomes the notification.
         let mut effective = StateChange::new();
-        for (key, value) in &changes.set {
-            let cell = self.cell(key);
+        for (key, value) in changes.set {
+            let cell = self.cell(&key);
             let mut current = cell.write().unwrap();
-            if current.as_ref() != value.as_ref() {
-                *current = value.clone();
-                effective.set.insert(key.clone(), value.clone());
+            if *current != value {
+                current.clone_from(&value);
+                effective.set.insert(key, value);
             }
         }
-        for key in &changes.unset {
+        for key in changes.unset {
             // Keep the cell (so any outstanding Slot stays valid); clear its value.
-            let cell = self.cell(key);
+            let cell = self.cell(&key);
             let mut current = cell.write().unwrap();
             if current.is_some() {
                 *current = None;
-                effective.unset.insert(key.clone());
+                effective.unset.insert(key);
             }
         }
         if !effective.is_empty() {

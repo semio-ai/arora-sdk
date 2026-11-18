@@ -146,8 +146,8 @@ impl DataStore for NamespacedStore {
     fn write(&self, changes: StateChange) -> Result<(), DataError> {
         let set = changes
             .set
-            .iter()
-            .map(|(k, v)| (self.prefixed(k), v.clone()))
+            .into_iter()
+            .map(|(k, v)| (self.prefixed(&k), v))
             .collect();
         let unset = changes.unset.iter().map(|k| self.prefixed(k)).collect();
         self.inner.write(StateChange { set, unset })
