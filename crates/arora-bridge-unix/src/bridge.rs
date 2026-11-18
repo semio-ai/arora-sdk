@@ -1,8 +1,9 @@
 //! [`UnixBridge`]: a socket file as an Arora [`Bridge`].
 
 use std::collections::{HashMap, VecDeque};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -43,7 +44,9 @@ const IN_FLIGHT: usize = 1024;
 ///
 /// The connections are served by tasks of the Tokio runtime the bridge is
 /// bound in; dropping the bridge stops them and removes the file, unless
-/// another device has replaced it since.
+/// another device has replaced it since, or another process holds the lock
+/// on its directory at that moment: the file is then left, for the next bind
+/// to find stale and replace.
 pub struct UnixBridge {
     path: PathBuf,
     /// The file's identity as bound (device and inode), so the bridge removes
@@ -95,29 +98,47 @@ impl UnixBridge {
     pub const BACKLOG_BYTES: usize = 64 << 20;
 
     /// Listen on the socket file `path`, creating its directory if missing.
-    /// A file there that no device answers on (one a crashed device left) is
-    /// replaced; one a device answers on fails with
-    /// [`AddrInUse`](std::io::ErrorKind::AddrInUse).
+    /// A socket file there that no device answers on (one a crashed device
+    /// left) is replaced; one a device answers on fails with
+    /// [`AddrInUse`](std::io::ErrorKind::AddrInUse), and any other file with
+    /// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists), and is left as
+    /// it is.
+    ///
+    /// The socket is bound in a private directory beside `path`, given mode
+    /// `0600` there, and only then linked at `path`, which a link never
+    /// replaces: no one connects to it before its mode is set, and of two
+    /// devices binding one path at once, one fails.
+    ///
+    /// Binding takes a lock on the file's directory, which bridges hold for
+    /// a few system calls; one held by another process for more than two
+    /// seconds fails the bind with
+    /// [`WouldBlock`](std::io::ErrorKind::WouldBlock). In a directory others
+    /// can open, such as `/tmp`, anyone can hold it: the device user's own
+    /// (`$XDG_RUNTIME_DIR`) is the place for a device's socket.
     ///
     /// Must be called within a Tokio runtime with I/O enabled, which serves
     /// the connections.
     pub fn bind(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
-        if path.exists() {
-            if std::os::unix::net::UnixStream::connect(&path).is_ok() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AddrInUse,
-                    format!("a device already listens on {}", path.display()),
-                ));
-            }
-            std::fs::remove_file(&path)?;
-        }
-        if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        // A path a client cannot connect to is refused here, not served.
+        std::os::unix::net::SocketAddr::from_pathname(&path)?;
+        let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty());
+        if let Some(dir) = dir {
             std::fs::create_dir_all(dir)?;
         }
-        let listener = UnixListener::bind(&path)?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        let metadata = std::fs::metadata(&path)?;
+        let private = private_dir(dir.unwrap_or(Path::new(".")))?;
+        let bound = (|| {
+            let listener = bind_in(&private, "s")?;
+            let unplaced = private.join("s");
+            std::fs::set_permissions(&unplaced, std::fs::Permissions::from_mode(0o600))?;
+            // The socket's own identity, before anyone else can reach it.
+            let metadata = std::fs::metadata(&unplaced)?;
+            install(&unplaced, &path)?;
+            listener.set_nonblocking(true)?;
+            Ok::<_, std::io::Error>((UnixListener::from_std(listener)?, metadata))
+        })();
+        let _ = std::fs::remove_dir_all(&private);
+        let (listener, metadata) = bound?;
 
         let (inbound_tx, inbound) = mpsc::unbounded();
         let shared = Arc::new(Shared {
@@ -148,10 +169,153 @@ impl UnixBridge {
     }
 }
 
+/// Numbers the binds of this process, naming each its own private directory.
+static BINDS: AtomicU64 = AtomicU64::new(0);
+
+/// Create a directory of mode `0700` in `dir`, under a name no one else
+/// holds: one taken (by another process with this PID, in another container
+/// sharing `dir`) is skipped, never removed.
+fn private_dir(dir: &Path) -> std::io::Result<PathBuf> {
+    loop {
+        let private = dir.join(format!(
+            ".arora-bridge-unix.{}.{}",
+            std::process::id(),
+            BINDS.fetch_add(1, Ordering::Relaxed)
+        ));
+        match std::fs::DirBuilder::new().mode(0o700).create(&private) {
+            Ok(()) => return Ok(private),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Bind a socket named `name` in `dir`. A path longer than a socket address
+/// holds is reached, on Linux, through the directory's file descriptor, so
+/// the private directory takes nothing from the length `path` may have.
+fn bind_in(dir: &Path, name: &str) -> std::io::Result<std::os::unix::net::UnixListener> {
+    match std::os::unix::net::UnixListener::bind(dir.join(name)) {
+        #[cfg(target_os = "linux")]
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+            use std::os::fd::AsRawFd;
+            let dir = std::fs::File::open(dir)?;
+            std::os::unix::net::UnixListener::bind(format!(
+                "/proc/self/fd/{}/{name}",
+                dir.as_raw_fd()
+            ))
+        }
+        bound => bound,
+    }
+}
+
+/// Give the socket file `unplaced` the name `path` too, never replacing
+/// what is there: a stale socket file is removed and the link tried again,
+/// anything else is an error (see [`remove_stale`]). A link either creates
+/// the name or fails, so two devices binding one path at once never both
+/// succeed; and they do it holding their directory's lock, so the stale file
+/// one of them probed is the one it removes, never a socket the other
+/// installed since.
+fn install(unplaced: &Path, path: &Path) -> std::io::Result<()> {
+    let _locked = lock_dir_of(path, LOCK_WAIT)?;
+    match std::fs::hard_link(unplaced, path) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            remove_stale(path)?;
+            std::fs::hard_link(unplaced, path)
+        }
+        linked => linked,
+    }
+}
+
+/// How long a bind waits for its directory's lock. A bridge holds it for
+/// the few system calls of an install; one held longer is someone else's.
+const LOCK_WAIT: Duration = Duration::from_secs(2);
+
+/// An exclusive lock on the directory holding `path`, released when the
+/// returned file is dropped: the bridges binding, replacing or removing a
+/// socket file there take it, so they do so one at a time. Waits up to
+/// `wait`, then fails with [`WouldBlock`](std::io::ErrorKind::WouldBlock):
+/// in a directory others can open (`/tmp`), anyone can hold the lock, so it
+/// is never waited for without bound.
+fn lock_dir_of(path: &Path, wait: Duration) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty());
+    let dir = std::fs::File::open(dir.unwrap_or(Path::new(".")))?;
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        // SAFETY: `dir` is an open file descriptor for the call's duration.
+        if unsafe { libc::flock(dir.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(dir);
+        }
+        let error = std::io::Error::last_os_error();
+        match error.kind() {
+            std::io::ErrorKind::Interrupted => {}
+            std::io::ErrorKind::WouldBlock if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::io::ErrorKind::WouldBlock => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    format!(
+                        "the directory of {} stays locked by another process",
+                        path.display()
+                    ),
+                ))
+            }
+            _ => return Err(error),
+        }
+    }
+}
+
+/// Remove the socket file a crashed device left at `path`: one that refuses
+/// connections. Nothing there is fine; a live socket or any other file is an
+/// error, and is left.
+fn remove_stale(path: &Path) -> std::io::Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if !metadata.file_type().is_socket() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} exists and is not a socket file", path.display()),
+        ));
+    }
+    // Nonblocking, so a live device with a full backlog answers at once
+    // rather than holding the bind until it accepts.
+    let probe = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)?;
+    probe.set_nonblocking(true)?;
+    let in_use = || {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!("a device already listens on {}", path.display()),
+        ))
+    };
+    match probe.connect(&socket2::SockAddr::unix(path)?) {
+        Ok(()) => in_use(),
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => std::fs::remove_file(path),
+        // A backlog full, or a connection under way: someone listens.
+        Err(e)
+            if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.raw_os_error() == Some(libc::EINPROGRESS) =>
+        {
+            in_use()
+        }
+        Err(e) => Err(e),
+    }
+}
+
 impl Drop for UnixBridge {
     fn drop(&mut self) {
         // Ending the accept task drops its connections' tasks with it.
         self.accept.abort();
+        // Without waiting: a drop never blocks on someone else's lock. Held
+        // by another, the file is left, and the next bind finds it stale and
+        // replaces it: removing it unlocked could remove a replacement
+        // installed between the identity check and the removal.
+        let Ok(_locked) = lock_dir_of(&self.path, Duration::ZERO) else {
+            return;
+        };
         if std::fs::metadata(&self.path).is_ok_and(|m| (m.dev(), m.ino()) == self.identity) {
             let _ = std::fs::remove_file(&self.path);
         }

@@ -524,9 +524,9 @@ async fn a_stopped_device_ends_its_clients_connections() {
     assert!(!path.exists(), "the device removes its socket file");
 }
 
-/// The socket file is its owner's alone; a file no device answers on is
-/// replaced, one a device answers on is not; a bridge removes its own file,
-/// never one that replaced it.
+/// The socket file is its owner's alone; a socket file no device answers on
+/// is replaced, one a device answers on is not, nor is a file of another
+/// kind; a bridge removes its own file, never one that replaced it.
 #[tokio::test]
 async fn the_socket_file_s_lifecycle() {
     let dir = socket_dir("file");
@@ -538,6 +538,11 @@ async fn the_socket_file_s_lifecycle() {
         .permissions()
         .mode();
     assert_eq!(mode & 0o777, 0o600);
+    let beside: Vec<_> = std::fs::read_dir(path.parent().expect("a directory"))
+        .expect("the directory")
+        .map(|entry| entry.expect("an entry").file_name())
+        .collect();
+    assert_eq!(beside, ["device.sock"], "the private directory is gone");
     let error = UnixBridge::bind(&path)
         .err()
         .expect("a device answers there");
@@ -551,6 +556,32 @@ async fn the_socket_file_s_lifecycle() {
     assert!(path.exists());
     let second = UnixBridge::bind(&path).expect("replaces a stale file");
 
+    // A path at the length a socket address holds on Linux binds, although
+    // the private directory beside it makes a longer one.
+    #[cfg(target_os = "linux")]
+    {
+        let room = 107 - dir.as_os_str().len() - "/device.sock".len() - 1;
+        let long = dir.join("d".repeat(room)).join("device.sock");
+        assert_eq!(long.as_os_str().len(), 107);
+        let near_limit = UnixBridge::bind(&long).expect("a path at the limit binds");
+        std::os::unix::net::UnixStream::connect(&long).expect("and is reached");
+        drop(near_limit);
+    }
+
+    // A path too long for a client to connect to is refused.
+    let too_long = dir.join("d".repeat(200)).join("device.sock");
+    let error = UnixBridge::bind(&too_long)
+        .err()
+        .expect("too long to reach");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+
+    // A file of another kind, at a mistyped path, is not a device's.
+    let other = dir.join("notes.txt");
+    std::fs::write(&other, "kept").expect("a file");
+    let error = UnixBridge::bind(&other).err().expect("not a socket file");
+    assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read_to_string(&other).expect("kept"), "kept");
+
     // A bridge whose file was replaced leaves the replacement alone.
     std::fs::remove_file(&path).expect("remove");
     let third = UnixBridge::bind(&path).expect("bind again");
@@ -558,6 +589,23 @@ async fn the_socket_file_s_lifecycle() {
     assert!(path.exists(), "the replacement stays");
     drop(third);
     assert!(!path.exists());
+}
+
+/// A lock on the socket's directory held by someone else fails the bind
+/// after a bounded wait, never hangs it.
+#[tokio::test]
+async fn a_directory_locked_by_another_fails_the_bind() {
+    use std::os::fd::AsRawFd;
+    let dir = socket_dir("locked");
+    let held = std::fs::File::open(&dir).expect("the directory");
+    // SAFETY: `held` is an open file descriptor for the call's duration.
+    assert_eq!(unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) }, 0);
+    let error = UnixBridge::bind(dir.join("device.sock"))
+        .err()
+        .expect("the lock stays held");
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    drop(held);
+    UnixBridge::bind(dir.join("device.sock")).expect("binds once released");
 }
 
 /// Read one message off a raw connection.

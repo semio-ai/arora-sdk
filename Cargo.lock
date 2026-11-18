@@ -344,7 +344,9 @@ dependencies = [
  "bytes",
  "env_logger",
  "futures",
+ "libc",
  "log",
+ "socket2 0.6.5",
  "tokio",
  "tokio-util",
 ]
