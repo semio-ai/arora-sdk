@@ -20,6 +20,15 @@ pub const MAX_DEPTH: usize = 128;
 /// [`froto_value::deserialize`](crate::froto_value::deserialize) reads. Says
 /// why not.
 pub fn well_formed(buffer: &[u8]) -> Result<(), String> {
+    well_formed_within(buffer, usize::MAX)
+}
+
+/// As [`well_formed`], and whether the value would take no more than about
+/// `max_decoded` bytes of memory once decoded. A buffer's size bounds what it
+/// decodes to only loosely: a value of an array of values takes a byte on the
+/// wire and a whole [`Value`](arora_types::value::Value) decoded, so a
+/// receiver of untrusted buffers checks this before decoding one.
+pub fn well_formed_within(buffer: &[u8], max_decoded: usize) -> Result<(), String> {
     let size = buffer
         .get(..BUFFER_SIZE_SIZE)
         .map(|prefix| u32::from_le_bytes(prefix.try_into().expect("4 bytes")) as usize)
@@ -33,6 +42,8 @@ pub fn well_formed(buffer: &[u8]) -> Result<(), String> {
     let mut walk = Walk {
         buffer: &buffer[..size],
         at: BUFFER_SIZE_SIZE,
+        budget: max_decoded,
+        max_decoded,
     };
     walk.value(0)
 }
@@ -45,7 +56,12 @@ pub fn well_formed(buffer: &[u8]) -> Result<(), String> {
 /// alignment counts from its start. Fails as [`well_formed`] does, on a value
 /// that runs past `buffer`, nests deeper than [`MAX_DEPTH`] or is not one.
 pub fn value_end(buffer: &[u8], at: usize) -> Result<usize, String> {
-    let mut walk = Walk { buffer, at };
+    let mut walk = Walk {
+        buffer,
+        at,
+        budget: usize::MAX,
+        max_decoded: usize::MAX,
+    };
     walk.value(0)?;
     Ok(walk.at)
 }
@@ -53,7 +69,15 @@ pub fn value_end(buffer: &[u8], at: usize) -> Result<usize, String> {
 struct Walk<'a> {
     buffer: &'a [u8],
     at: usize,
+    /// What the value may still take decoded, in bytes, out of `max_decoded`.
+    budget: usize,
+    max_decoded: usize,
 }
+
+/// What a decoded value takes in memory, before what it points to.
+const VALUE: usize = std::mem::size_of::<arora_types::value::Value>();
+/// What a decoded string takes, before its bytes.
+const STRING: usize = std::mem::size_of::<String>();
 
 impl<'a> Walk<'a> {
     fn take(&mut self, len: usize) -> Result<&'a [u8], String> {
@@ -64,6 +88,15 @@ impl<'a> Walk<'a> {
             .ok_or_else(|| format!("a value runs past the end, at byte {}", self.at))?;
         self.at += len;
         Ok(bytes)
+    }
+
+    /// Count `bytes` of the decoded value against the budget.
+    fn spend(&mut self, bytes: usize) -> Result<(), String> {
+        self.budget = self
+            .budget
+            .checked_sub(bytes)
+            .ok_or_else(|| format!("it decodes to more than {} bytes", self.max_decoded))?;
+        Ok(())
     }
 
     fn skip(&mut self, len: usize) -> Result<(), String> {
@@ -87,8 +120,11 @@ impl<'a> Walk<'a> {
 
     fn string(&mut self) -> Result<(), String> {
         let len = self.u32()?;
+        self.spend(STRING)?;
         let at = self.at;
-        std::str::from_utf8(self.take(len)?)
+        let bytes = self.take(len)?;
+        self.spend(len)?;
+        std::str::from_utf8(bytes)
             .map(drop)
             .map_err(|_| format!("a string is not UTF-8, at byte {at}"))
     }
@@ -96,6 +132,7 @@ impl<'a> Walk<'a> {
     /// A structure's fields: each an id, then a value.
     fn fields(&mut self, depth: usize) -> Result<(), String> {
         for _ in 0..self.u32()? {
+            self.spend(16)?;
             self.skip(16)?;
             self.value(depth)?;
         }
@@ -107,6 +144,7 @@ impl<'a> Walk<'a> {
             return Err(format!("its values nest deeper than {MAX_DEPTH}"));
         }
         let depth = depth + 1;
+        self.spend(VALUE)?;
         let at = self.at;
         match self.u8()? {
             TYPE_UNIT => Ok(()),
@@ -160,19 +198,24 @@ impl<'a> Walk<'a> {
             let len = count
                 .checked_mul(size)
                 .ok_or("an array is longer than a buffer can be")?;
-            return self.skip(len);
+            self.skip(len)?;
+            return self.spend(len);
         }
         match ty {
             TYPE_STRING => (0..count).try_for_each(|_| self.string()),
             // The structures' id, then each one's fields.
             TYPE_STRUCTURE => {
                 self.skip(16)?;
-                (0..count).try_for_each(|_| self.fields(depth))
+                (0..count).try_for_each(|_| {
+                    self.spend(VALUE)?;
+                    self.fields(depth)
+                })
             }
             // The enumeration's id, then each one's variant and value.
             TYPE_ENUMERATION => {
                 self.skip(16)?;
                 (0..count).try_for_each(|_| {
+                    self.spend(16)?;
                     self.skip(16)?;
                     self.value(depth)
                 })
@@ -369,5 +412,22 @@ mod tests {
         let last = buffer.len() - 1;
         buffer[last] = 0xff;
         assert!(well_formed(&buffer).unwrap_err().contains("not UTF-8"));
+    }
+
+    /// A buffer within its size limit can decode to far more: an array of
+    /// units takes a byte each on the wire and a whole value each decoded.
+    #[test]
+    fn what_a_buffer_decodes_to_is_bounded() {
+        let units = serialize(&Value::ArrayValue(vec![Value::Unit; 1 << 16]));
+        assert!(units.len() < 1 << 18, "{} bytes on the wire", units.len());
+        well_formed(&units).expect("well formed");
+        let error = well_formed_within(&units, 1 << 20).expect_err("decodes past 1 MiB");
+        assert!(error.contains("decodes to more than"), "{error}");
+        well_formed_within(&units, VALUE * ((1 << 16) + 1)).expect("fits the budget");
+
+        // A bulk array decodes to about its size.
+        let bytes = serialize(&Value::ArrayU8(vec![7; 1 << 20]));
+        well_formed_within(&bytes, (1 << 20) + VALUE).expect("about its size");
+        assert_eq!(deserialize(&bytes), Value::ArrayU8(vec![7; 1 << 20]));
     }
 }

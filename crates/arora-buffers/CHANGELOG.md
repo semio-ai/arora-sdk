@@ -4,6 +4,16 @@ All notable changes to `arora-buffers`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.4.0] - 2026-11-18
+
+### Added
+
+- `well_formed_within(buffer, max_decoded)`: `well_formed`, and whether the
+  value would take no more than about `max_decoded` bytes once decoded. A
+  buffer's size bounds that only loosely (a unit in an array of values is a
+  byte on the wire and a whole `Value` decoded), so a receiver of untrusted
+  buffers checks it before decoding.
+
 ## [3.3.2] - 2026-11-18
 
 ### Changed
