@@ -425,6 +425,47 @@ async fn a_client_leaving_with_requests_in_flight_harms_nothing() {
     .await;
 }
 
+/// A client that stops sending, closing its writing half as the relay does
+/// when its input ends, is still written the answers it waits for, and the
+/// connection then ends.
+#[tokio::test]
+async fn a_client_that_stops_sending_still_gets_its_answers() {
+    use arora_bridge_unix::wire::{encode_request, Message, Request};
+
+    let path = socket_dir("half").join("device.sock");
+    let mut device = device_at(builder_with_math(), &path);
+    with_device(&mut device, async {
+        let mut stream = tokio::net::UnixStream::connect(&path)
+            .await
+            .expect("connect");
+        for id in 0..20u32 {
+            let ask = Request::Op {
+                id,
+                op: BridgeOp::Call(double(id as f64)),
+            };
+            stream
+                .write_all(&encode_request(&ask).unwrap())
+                .await
+                .expect("a request");
+        }
+        stream.shutdown().await.expect("stop sending");
+        let mut answered = Vec::new();
+        for _ in 0..20 {
+            let Message::Answer { id, result } = read_message(&mut stream).await else {
+                panic!("an answer");
+            };
+            assert_eq!(result.expect("answered").ret, Value::F64(2.0 * id as f64));
+            answered.push(id);
+        }
+        answered.sort();
+        assert_eq!(answered, (0..20).collect::<Vec<_>>());
+        let mut rest = Vec::new();
+        stream.read_to_end(&mut rest).await.expect("the end");
+        assert!(rest.is_empty());
+    })
+    .await;
+}
+
 /// A client reaches the device over a relay's standard streams, as through
 /// an ssh server that runs a command but forwards no socket file.
 #[tokio::test]

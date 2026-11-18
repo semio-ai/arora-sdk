@@ -54,7 +54,13 @@
 //! A connection whose queue holds more than
 //! [`UnixBridge::BACKLOG_BYTES`] of values is closed: a client missing a
 //! change would hold a stale state with no sign of it, so it reconnects and
-//! reads again.
+//! reads again. The answers it has not written have a cap of the same size,
+//! and a [`UnixClient`] closes the connection the same way when its
+//! [`Changes`] are read too slowly.
+//!
+//! A client that closes its writing half (as the relay does when its input
+//! ends) is still written the answers it waits for; the device then closes
+//! the connection.
 //!
 //! ### Newest only
 //!

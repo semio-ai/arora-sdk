@@ -1,9 +1,10 @@
 //! [`UnixClient`]: a connection to a [`UnixBridge`](crate::UnixBridge).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use arora_bridge::{BridgeOp, CallFuture, Caller};
@@ -16,6 +17,7 @@ use tokio::net::UnixStream;
 use tokio_util::codec::FramedRead;
 
 use crate::wire::{self, Message, Request};
+use crate::UnixBridge;
 
 type Pending = oneshot::Sender<Result<CallResult, String>>;
 
@@ -39,13 +41,27 @@ pub struct UnixClient {
 /// The changes a [`UnixClient`] subscribed to, in the order the device made
 /// them; each holds the subscribed keys of one step. Ends when the connection
 /// closes.
-pub struct Changes(tokio::sync::mpsc::UnboundedReceiver<StateChange>);
+///
+/// The changes received and not read yet are held for it, up to
+/// [`UnixBridge::BACKLOG_BYTES`](crate::UnixBridge::BACKLOG_BYTES) of them
+/// beyond the first, as received: a client that reads its changes slower
+/// than they come is then closed, as the device closes one that reads its
+/// socket too slowly, so it reconnects and reads the state again.
+pub struct Changes {
+    changes: tokio::sync::mpsc::UnboundedReceiver<(StateChange, usize)>,
+    held: Arc<AtomicUsize>,
+}
 
 impl Stream for Changes {
     type Item = StateChange;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<StateChange>> {
-        self.0.poll_recv(cx)
+        self.changes.poll_recv(cx).map(|change| {
+            change.map(|(change, size)| {
+                self.held.fetch_sub(size, Ordering::Relaxed);
+                change
+            })
+        })
     }
 }
 
@@ -69,13 +85,17 @@ impl UnixClient {
     {
         let (requests, outgoing) = mpsc::unbounded();
         let (changes, incoming) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(run(read, write, outgoing, changes));
+        let held = Arc::new(AtomicUsize::new(0));
+        tokio::spawn(run(read, write, outgoing, changes, held.clone()));
         (
             Self {
                 requests,
                 next_id: AtomicU32::new(0),
             },
-            Changes(incoming),
+            Changes {
+                changes: incoming,
+                held,
+            },
         )
     }
 
@@ -144,56 +164,89 @@ impl Caller for UnixClient {
 }
 
 /// Own the socket: write each request, and route what the device sends — an
-/// answer to its request's sender, a change to `changes`.
+/// answer to its request's sender, a change to `changes`. Reading goes on
+/// while a request is written, so a large request and a large answer cross
+/// without either side waiting on the other.
 async fn run(
     read: impl AsyncRead + Unpin,
     mut write: impl AsyncWrite + Unpin,
     mut outgoing: mpsc::UnboundedReceiver<(Box<[u8]>, u32, Pending)>,
-    changes: tokio::sync::mpsc::UnboundedSender<StateChange>,
+    changes: tokio::sync::mpsc::UnboundedSender<(StateChange, usize)>,
+    held: Arc<AtomicUsize>,
 ) {
     let mut incoming = FramedRead::new(read, crate::codec());
     let mut pending: HashMap<u32, Pending> = HashMap::new();
     let mut client_open = true;
-    loop {
+    // The requests to write, the first partly written up to its offset.
+    let mut unwritten: VecDeque<Box<[u8]>> = VecDeque::new();
+    let mut at = 0;
+    // Whether a written request may sit in the writer's buffer.
+    let mut unflushed = false;
+    let reason = loop {
         tokio::select! {
             request = outgoing.next(), if client_open => match request {
                 Some((bytes, id, reply)) => {
-                    // A pipe's writer may buffer: flush each request.
-                    let written = match write.write_all(&bytes).await {
-                        Ok(()) => write.flush().await,
-                        Err(e) => Err(e),
-                    };
-                    if let Err(e) = written {
-                        let _ = reply.send(Err(format!("the connection failed: {e}")));
-                        break;
-                    }
                     pending.insert(id, reply);
+                    unwritten.push_back(bytes);
                 }
                 // The client is gone: serve the changes while they are read.
                 None => client_open = false,
             },
-            _ = changes.closed(), if !client_open => break,
+            _ = changes.closed(), if !client_open => break None,
+            // Write the first request, or flush once all are written (a
+            // pipe's writer may buffer). Both are cancel safe: `write` writes
+            // nothing unless it completes.
+            written = async {
+                match unwritten.front() {
+                    Some(request) => write.write(&request[at..]).await.map(Some),
+                    None => write.flush().await.map(|()| None),
+                }
+            }, if !unwritten.is_empty() || unflushed => match written {
+                Ok(Some(0)) => break Some("writing failed: the device closed".to_string()),
+                Ok(Some(n)) => {
+                    at += n;
+                    if at == unwritten.front().map_or(0, |m| m.len()) {
+                        unwritten.pop_front();
+                        at = 0;
+                        unflushed = true;
+                    }
+                }
+                Ok(None) => unflushed = false,
+                Err(e) => break Some(format!("writing failed: {e}")),
+            },
             message = incoming.next() => {
                 let message = match message {
-                    Some(Ok(bytes)) => wire::decode_message(&bytes),
+                    Some(Ok(bytes)) => wire::decode_message(&bytes).map(|m| (m, bytes.len())),
                     Some(Err(e)) => Err(format!("reading failed: {e}")),
-                    None => break,
+                    None => break None,
                 };
                 match message {
-                    Ok(Message::Answer { id, result }) => {
+                    Ok((Message::Answer { id, result }, _)) => {
                         if let Some(reply) = pending.remove(&id) {
                             let _ = reply.send(result);
                         }
                     }
-                    Ok(Message::Changed(change)) => {
-                        let _ = changes.send(change);
+                    // Nobody reads the changes any more: drop them uncounted.
+                    Ok((Message::Changed(_), _)) if changes.is_closed() => {}
+                    Ok((Message::Changed(change), size)) => {
+                        let before = held.fetch_add(size, Ordering::Relaxed);
+                        if before > 0 && before + size > UnixBridge::BACKLOG_BYTES {
+                            break Some(format!(
+                                "the changes not read went past {} bytes",
+                                UnixBridge::BACKLOG_BYTES
+                            ));
+                        }
+                        let _ = changes.send((change, size));
                     }
-                    Err(e) => {
-                        log::warn!("unix bridge client: closing the connection: {e}");
-                        break;
-                    }
+                    Err(e) => break Some(e),
                 }
             }
         }
+    };
+    if let Some(reason) = reason {
+        log::warn!("unix bridge client: closing the connection: {reason}");
+    }
+    for (_, reply) in pending {
+        let _ = reply.send(Err("the connection closed before the answer".into()));
     }
 }

@@ -94,7 +94,13 @@ impl UnixBridge {
     /// is a difference from the previous one, so a client that misses one would
     /// hold a stale state with no sign of it; closing it tells the client to
     /// read again. Keys pushed [newest only](crate#newest-only) are not queued
-    /// and do not count.
+    /// and do not count. The answers a connection has to write have a cap of
+    /// the same size, apart.
+    ///
+    /// A queued change holds the step's other keys too only while they weigh
+    /// less than its queued ones; heavier, they are left out, at the cost of
+    /// a copy of the queued ones. So a connection holds at most twice the cap,
+    /// and a newest-only frame it replaced is freed.
     pub const BACKLOG_BYTES: usize = 64 << 20;
 
     /// Listen on the socket file `path`, creating its directory if missing.
@@ -352,8 +358,11 @@ async fn accept(
 
 /// Serve one connection: its requests go to the device and their answers
 /// back, in the order the device answers; the changes it subscribed to are
-/// pushed as they come. Ends when the client closes, sends something that is
-/// not a request, or falls [`UnixBridge::BACKLOG_BYTES`] behind.
+/// pushed as they come. Ends when the client sends something that is not a
+/// request, or falls [`UnixBridge::BACKLOG_BYTES`] behind in answers or in
+/// pushes. A client that stops sending (closing its writing half, as the
+/// relay does) is written the answers it waits for, then the connection
+/// ends.
 async fn serve(
     stream: UnixStream,
     shared: Arc<Shared>,
@@ -362,21 +371,35 @@ async fn serve(
     let (read, mut write) = stream.into_split();
     let mut requests = FramedRead::new(read, crate::codec());
     let mut pending = FuturesUnordered::new();
-    let mut answers: VecDeque<Box<[u8]>> = VecDeque::new();
+    let mut answers = Answers::default();
     let mut pushes = Pushes::default();
+    // Whether the client may still send requests.
+    let mut reading = true;
     // The message being written, and how much of it is.
     let mut out: Option<(Box<[u8]>, usize)> = None;
     let reason = loop {
         if out.is_none() {
             out = answers
-                .pop_front()
-                .or_else(|| pushes.next_message())
+                .pop()
+                .or_else(|| reading.then(|| pushes.next_message()).flatten())
                 .map(|m| (m, 0));
         }
+        if !reading && out.is_none() && pending.is_empty() {
+            break None;
+        }
         tokio::select! {
-            request = requests.next(), if pending.len() + answers.len() < IN_FLIGHT => {
+            request = requests.next(), if reading && pending.len() + answers.len() < IN_FLIGHT => {
                 let bytes = match request {
-                    None => break None,
+                    // The client sends no more: stop pushing to it, freeing
+                    // what waits, and write the answers it waits for.
+                    None => {
+                        reading = false;
+                        if !pushes.prefixes.is_empty() {
+                            shared.count(false);
+                        }
+                        pushes = Pushes::default();
+                        continue;
+                    }
                     Some(Err(e)) => break Some(format!("reading failed: {e}")),
                     Some(Ok(bytes)) => bytes,
                 };
@@ -387,7 +410,7 @@ async fn serve(
                             shared.count(!prefixes.is_empty());
                         }
                         pushes.subscribe(prefixes, latest, &changes);
-                        answers.push_back(wire::encode_answer(id, &Ok(CallResult { ret: arora_types::value::Value::Unit, mutated: vec![] })));
+                        answers.push(wire::encode_answer(id, &Ok(CallResult { ret: arora_types::value::Value::Unit, mutated: vec![] })));
                     }
                     Ok(Request::Op { id, op }) => {
                         let (reply, answer) = oneshot::channel();
@@ -401,9 +424,14 @@ async fn serve(
                 }
             }
             Some((id, result)) = pending.next(), if !pending.is_empty() => {
-                answers.push_back(wire::encode_answer(id, &result));
+                if answers.push(wire::encode_answer(id, &result)) {
+                    break Some(format!(
+                        "the client fell more than {} bytes of answers behind",
+                        UnixBridge::BACKLOG_BYTES
+                    ));
+                }
             }
-            change = next_change(&mut pushes.changes) => match change {
+            change = next_change(&mut pushes.changes), if reading => match change {
                 Ok(change) => {
                     if pushes.queue(change) {
                         break Some(format!(
@@ -420,6 +448,8 @@ async fn serve(
             // `write` is cancel safe: it writes nothing unless it completes.
             written = write.write(out.as_ref().map_or(&[][..], |(m, at)| &m[*at..])), if out.is_some() => {
                 match written {
+                    // A client that stopped sending may close without reading.
+                    Ok(0) | Err(_) if !reading => break None,
                     Ok(0) => break Some("writing failed: the client closed".into()),
                     Ok(n) => {
                         let (message, at) = out.as_mut().expect("written only while set");
@@ -438,6 +468,34 @@ async fn serve(
     }
     if let Some(reason) = reason {
         log::warn!("unix bridge: closing a connection: {reason}");
+    }
+}
+
+/// The answers a connection has to write, oldest first, and their size.
+#[derive(Default)]
+struct Answers {
+    queue: VecDeque<Box<[u8]>>,
+    bytes: usize,
+}
+
+impl Answers {
+    /// Queue `answer`, and tell whether the connection fell more than
+    /// [`UnixBridge::BACKLOG_BYTES`] behind: one answer larger than the cap
+    /// alone still goes through.
+    fn push(&mut self, answer: Box<[u8]>) -> bool {
+        self.bytes += answer.len();
+        self.queue.push_back(answer);
+        self.queue.len() > 1 && self.bytes > UnixBridge::BACKLOG_BYTES
+    }
+
+    fn pop(&mut self) -> Option<Box<[u8]>> {
+        let answer = self.queue.pop_front()?;
+        self.bytes -= answer.len();
+        Some(answer)
+    }
+
+    fn len(&self) -> usize {
+        self.queue.len()
     }
 }
 
@@ -465,7 +523,9 @@ struct Pushes {
     /// none of them back from being freed.
     changes: Option<broadcast::Receiver<Arc<StateChange>>>,
     /// The changes holding queued keys, oldest first, each with its number
-    /// and the size of its queued values.
+    /// and the size of its queued values. A change keeps keys not queued (not
+    /// subscribed, or newest only) only while they weigh less than its queued
+    /// ones, and none a subscription stopped queueing since.
     queue: VecDeque<(u64, Arc<StateChange>, usize)>,
     /// The size of the queued values.
     queued: usize,
@@ -481,9 +541,16 @@ impl Pushes {
         prefixes.iter().any(|p| prefix_covers(p, &key.path))
     }
 
+    /// Whether `key` is queued under the subscription: covered, and not
+    /// newest only.
+    fn queued_under(prefixes: &[String], latest: &[String], key: &Key) -> bool {
+        Self::covered(prefixes, key) && !Self::covered(latest, key)
+    }
+
     /// Replace the subscription. Values already waiting stay, sent under the
-    /// new one: a key it no longer covers is dropped, and one it now pushes
-    /// newest only takes its newest waiting value.
+    /// new one: a key it no longer covers is dropped, one it now pushes
+    /// newest only takes its newest waiting value, and one it now queues has
+    /// only its newest waiting value sent, before the values that follow it.
     fn subscribe(
         &mut self,
         prefixes: Vec<String>,
@@ -497,17 +564,33 @@ impl Pushes {
         if self.changes.is_none() {
             self.changes = Some(changes.subscribe());
         }
-        self.prefixes = prefixes;
-        self.latest = latest;
-        for (number, change, _) in &self.queue {
+        let was_prefixes = std::mem::replace(&mut self.prefixes, prefixes);
+        let was_latest = std::mem::replace(&mut self.latest, latest);
+        let was_queued = |key: &Key| Self::queued_under(&was_prefixes, &was_latest, key);
+        let queued = |key: &Key| Self::queued_under(&self.prefixes, &self.latest, key);
+        let mut kept = VecDeque::new();
+        self.queued = 0;
+        for (number, change, _) in std::mem::take(&mut self.queue) {
+            let whole = size(&change, |_| true);
             for key in change.set.keys().chain(&change.unset) {
-                if Self::covered(&self.latest, key)
-                    && self.newest.get(key).is_none_or(|(n, _)| n < number)
+                if was_queued(key)
+                    && Self::covered(&self.prefixes, key)
+                    && Self::covered(&self.latest, key)
+                    && self.newest.get(key).is_none_or(|(n, _)| *n < number)
                 {
-                    self.newest.insert(key.clone(), (*number, change.clone()));
+                    self.newest
+                        .insert(key.clone(), (number, held_for(&change, key, whole)));
                 }
             }
+            if let Some(change) = only(change, |key| was_queued(key) && queued(key)) {
+                let weighs = size(&change, queued);
+                self.queued += weighs;
+                kept.push_back((number, change, weighs));
+            }
         }
+        self.queue = kept;
+        self.newest
+            .retain(|key, _| Self::covered(&self.prefixes, key));
     }
 
     /// Take in a change of the device, and tell whether the connection fell
@@ -515,25 +598,23 @@ impl Pushes {
     fn queue(&mut self, change: Arc<StateChange>) -> bool {
         let number = self.received;
         self.received += 1;
-        let mut size = 0;
+        let queued = |key: &Key| Self::queued_under(&self.prefixes, &self.latest, key);
+        let whole = size(&change, |_| true);
         for key in change.set.keys().chain(&change.unset) {
-            if !Self::covered(&self.prefixes, key) {
-                continue;
-            }
-            if Self::covered(&self.latest, key) {
-                self.newest.insert(key.clone(), (number, change.clone()));
-            } else {
-                size += key.path.len()
-                    + change
-                        .set
-                        .get(key)
-                        .and_then(Option::as_ref)
-                        .map_or(1, weight);
+            if Self::covered(&self.prefixes, key) && Self::covered(&self.latest, key) {
+                self.newest
+                    .insert(key.clone(), (number, held_for(&change, key, whole)));
             }
         }
-        if size > 0 {
-            self.queue.push_back((number, change, size));
-            self.queued += size;
+        let weighs = size(&change, queued);
+        if weighs > 0 {
+            let change = if size(&change, |key| !queued(key)) > weighs {
+                only(change, queued).expect("holds a queued key")
+            } else {
+                change
+            };
+            self.queue.push_back((number, change, weighs));
+            self.queued += weighs;
         }
         // One change larger than the cap alone still goes through.
         self.queue.len() > 1 && self.queued > UnixBridge::BACKLOG_BYTES
@@ -549,20 +630,24 @@ impl Pushes {
                 return None;
             }
             let newest: Vec<(Key, (u64, Arc<StateChange>))> = self.newest.drain().collect();
-            let pushed =
-                |key: &Key| Self::covered(&self.prefixes, key) && !Self::covered(&self.latest, key);
+            let queued = |key: &Key| Self::queued_under(&self.prefixes, &self.latest, key);
             let mut set = Vec::new();
             let mut unset = Vec::new();
             if let Some((_, change, _)) = &oldest {
-                for (key, value) in change.set.iter().filter(|(key, _)| pushed(key)) {
+                for (key, value) in change.set.iter().filter(|(key, _)| queued(key)) {
                     set.push((key.path.as_str(), value.as_ref()));
                 }
-                for key in change.unset.iter().filter(|key| pushed(key)) {
+                for key in change.unset.iter().filter(|key| queued(key)) {
                     unset.push(key.path.as_str());
                 }
             }
             for (key, (_, change)) in &newest {
-                if Self::covered(&self.prefixes, key) {
+                // A key a new subscription queues: a queued value of it is
+                // newer than the one kept from before.
+                let superseded = oldest.as_ref().is_some_and(|(_, change, _)| {
+                    queued(key) && (change.set.contains_key(key) || change.unset.contains(key))
+                });
+                if Self::covered(&self.prefixes, key) && !superseded {
                     match change.set.get(key) {
                         Some(value) => set.push((key.path.as_str(), value.as_ref())),
                         None => unset.push(key.path.as_str()),
@@ -578,6 +663,52 @@ impl Pushes {
             }
         }
     }
+}
+
+/// `change` with only the keys `keep` holds, or none when it holds none:
+/// `change` itself when it holds no other, so a change is copied only when
+/// it has keys to leave out.
+fn only(change: Arc<StateChange>, keep: impl Fn(&Key) -> bool) -> Option<Arc<StateChange>> {
+    if change.set.keys().chain(&change.unset).all(&keep) {
+        return (!change.is_empty()).then_some(change);
+    }
+    let mut kept = StateChange::new();
+    for (key, value) in change.set.iter().filter(|(key, _)| keep(key)) {
+        kept.set.insert(key.clone(), value.clone());
+    }
+    for key in change.unset.iter().filter(|key| keep(key)) {
+        kept.unset.insert(key.clone());
+    }
+    (!kept.is_empty()).then(|| Arc::new(kept))
+}
+
+/// What a newest-only `key` keeps of `change`, which weighs `whole`: the
+/// change itself while the key weighs at least as much as the rest (a frame
+/// beside small records), or else a copy of the key alone, so a small value
+/// never keeps a step's large ones alive. A key so holds at most twice its
+/// own weight.
+fn held_for(change: &Arc<StateChange>, key: &Key, whole: usize) -> Arc<StateChange> {
+    let own = size(change, |k| k == key);
+    if whole - own <= own {
+        return change.clone();
+    }
+    only(change.clone(), |k| k == key).expect("holds the key")
+}
+
+/// About how many bytes the keys of `change` that `counted` holds take on
+/// the wire.
+fn size(change: &StateChange, counted: impl Fn(&Key) -> bool) -> usize {
+    let set = change
+        .set
+        .iter()
+        .filter(|(key, _)| counted(key))
+        .map(|(key, value)| key.path.len() + value.as_ref().map_or(1, weight));
+    let unset = change
+        .unset
+        .iter()
+        .filter(|key| counted(key))
+        .map(|key| key.path.len() + 1);
+    set.chain(unset).sum()
 }
 
 /// About how many bytes `value` takes on the wire, for the backlog's cap.
@@ -596,10 +727,42 @@ fn weight(value: &Value) -> usize {
         Value::ArrayI64(a) => a.len() * 8,
         Value::ArrayF64(a) => a.len() * 8,
         Value::ArrayString(a) => a.iter().map(|s| s.len() + 4).sum(),
-        Value::ArrayValue(a) => a.iter().map(weight).sum(),
+        Value::ArrayValue(a) => 8 + a.iter().map(weight).sum::<usize>(),
         Value::Option(Some(v)) => 1 + weight(v),
-        Value::Structure(s) => s.fields.iter().map(|f| 16 + weight(&f.value)).sum(),
+        Value::Structure(s) => {
+            24 + s
+                .fields
+                .iter()
+                .map(|f| 16 + weight(&f.value))
+                .sum::<usize>()
+        }
         Value::Enumeration(e) => 32 + weight(&e.value),
+        // Each element its header (a field count), then its fields.
+        Value::ArrayStructure { elements, .. } => {
+            24 + elements
+                .iter()
+                .map(|e| {
+                    4 + e
+                        .fields
+                        .iter()
+                        .map(|f| 16 + weight(&f.value))
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
+        }
+        Value::ArrayEnumeration { elements, .. } => {
+            24 + elements
+                .iter()
+                .map(|e| 16 + weight(&e.value))
+                .sum::<usize>()
+        }
+        Value::KeyValue(kv) => {
+            24 + kv
+                .fields
+                .values()
+                .map(|f| 32 + f.name.len() + f.value.as_deref().map_or(1, weight))
+                .sum::<usize>()
+        }
         _ => 16,
     }
 }
@@ -751,5 +914,161 @@ mod tests {
             sent[0].set,
             [(Key::from("camera/frame"), Some(Value::ArrayU8(vec![2; 4])))].into()
         );
+    }
+
+    fn frames(sent: &[StateChange]) -> Vec<u8> {
+        sent.iter()
+            .filter_map(|c| match c.set.get(&Key::from("camera/frame")) {
+                Some(Some(Value::ArrayU8(frame))) => Some(frame[0]),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A waiting change keeps no newest-only frame alive: the frames it
+    /// would hold outweigh its queued stamp, so it holds the stamp alone.
+    #[test]
+    fn a_waiting_change_holds_no_replaced_frame() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec!["camera".into()], &changes);
+        for i in 0..3 {
+            pushes.queue(step(i, 1 << 20));
+        }
+        for (_, change, _) in &pushes.queue {
+            assert_eq!(
+                change.set.keys().collect::<Vec<_>>(),
+                [&Key::from("dcm/stamp")]
+            );
+        }
+        let held = pushes.newest.values().map(|(_, change)| change);
+        assert!(held
+            .into_iter()
+            .all(|change| change.set[&Key::from("dcm/stamp")] == Some(Value::U32(2))));
+    }
+
+    /// A key a new subscription queues rather than pushes newest only sends
+    /// its newest waiting value once, then the values that follow it: never
+    /// an older one.
+    #[test]
+    fn a_key_queued_again_sends_no_older_value() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec!["camera".into()], &changes);
+        for i in 0..3 {
+            pushes.queue(step(i, 4));
+        }
+        pushes.subscribe(vec!["".into()], vec![], &changes);
+        assert_eq!(frames(&drain(&mut pushes)), [2]);
+
+        for i in 0..3 {
+            pushes.queue(step(i, 4));
+        }
+        pushes.subscribe(vec!["".into()], vec![], &changes);
+        pushes.queue(step(3, 4));
+        pushes.subscribe(vec!["".into()], vec!["camera".into()], &changes);
+        pushes.queue(step(4, 4));
+        pushes.subscribe(vec!["".into()], vec![], &changes);
+        pushes.queue(step(5, 4));
+        let sent = drain(&mut pushes);
+        let mut seen = frames(&sent);
+        let sorted = {
+            let mut sorted = seen.clone();
+            sorted.sort();
+            sorted
+        };
+        assert_eq!(seen, sorted, "frames never go back: {seen:?}");
+        seen.dedup();
+        assert_eq!(seen.last(), Some(&5));
+    }
+
+    /// A queued key keeps its values, sent once each, in order, when a new
+    /// subscription leaves its delivery as it was.
+    #[test]
+    fn queued_values_survive_an_unrelated_subscription() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec![], &changes);
+        for i in 0..3 {
+            pushes.queue(step(i, 4));
+        }
+        pushes.subscribe(vec!["".into()], vec!["face".into()], &changes);
+        assert_eq!(frames(&drain(&mut pushes)), [0, 1, 2]);
+        assert_eq!(pushes.queued, 0);
+    }
+
+    /// Composite values weigh what they hold, so a large one counts toward
+    /// the backlog.
+    #[test]
+    fn a_composite_value_weighs_what_it_holds() {
+        use arora_types::keyvalue::{KeyValue, KeyValueField};
+        let field = KeyValueField {
+            id: Default::default(),
+            name: "frame".into(),
+            value: Some(Box::new(Value::ArrayU8(vec![0; 1 << 20]))),
+        };
+        let kv = KeyValue {
+            id: Default::default(),
+            fields: [("frame".to_string(), field)].into(),
+        };
+        assert!(weight(&Value::KeyValue(kv)) > 1 << 20);
+    }
+
+    /// A small newest-only value keeps none of its step's large values alive:
+    /// it holds a copy of itself alone, while a frame outweighing the rest of
+    /// its step keeps the step, uncopied.
+    #[test]
+    fn a_newest_value_holds_only_what_it_outweighs() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(
+            vec!["".into()],
+            vec!["status".into(), "camera".into()],
+            &changes,
+        );
+        for i in 0..100u32 {
+            let mut change = StateChange::new();
+            change.set.insert(
+                Key::from(format!("status/{i}").as_str()),
+                Some(Value::U32(i)),
+            );
+            change.set.insert(
+                Key::from("camera/frame"),
+                Some(Value::ArrayU8(vec![i as u8; 1 << 20])),
+            );
+            let change = Arc::new(change);
+            pushes.queue(change.clone());
+            let (_, held) = &pushes.newest[&Key::from("camera/frame")];
+            assert!(Arc::ptr_eq(held, &change), "the frame is not copied");
+        }
+        for (key, (_, held)) in &pushes.newest {
+            if key.path.starts_with("status/") {
+                assert_eq!(held.set.len(), 1, "{key:?} holds {:?}", held.set.keys());
+            }
+        }
+    }
+
+    /// An array of empty structures weighs its elements' headers.
+    #[test]
+    fn empty_elements_weigh_their_headers() {
+        let elements = vec![arora_types::value::StructureWithoutId { fields: vec![] }; 1 << 20];
+        let array = Value::ArrayStructure {
+            id: Default::default(),
+            elements,
+        };
+        assert!(weight(&array) >= 4 << 20);
+    }
+
+    /// Answers count in bytes too: past the cap, with more than one waiting,
+    /// the connection is closed.
+    #[test]
+    fn answers_are_counted_in_bytes() {
+        let mut answers = Answers::default();
+        assert!(!answers.push(vec![0; UnixBridge::BACKLOG_BYTES + 1].into()));
+        assert!(answers.pop().is_some());
+        assert_eq!(answers.bytes, 0);
+        assert!(!answers.push(vec![0; UnixBridge::BACKLOG_BYTES / 2].into()));
+        assert!(!answers.push(vec![0; UnixBridge::BACKLOG_BYTES / 2].into()));
+        assert!(answers.push(vec![0; 1].into()));
     }
 }
