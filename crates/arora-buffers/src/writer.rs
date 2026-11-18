@@ -24,6 +24,18 @@ impl BufferWriter {
         Self { backing }
     }
 
+    /// Align for a bulk payload of `bytes` bytes, and make room for it at
+    /// once if it does not fit, with some to spare for the elements that
+    /// usually follow it, so a large array is copied into the buffer once
+    /// rather than through every doubling of the buffer. One that fits grows
+    /// nothing.
+    fn begin_bulk(&mut self, bytes: usize) {
+        self.align();
+        if self.backing.capacity() - self.backing.len() < bytes {
+            self.backing.reserve(bytes + 1024);
+        }
+    }
+
     fn align(&mut self) {
         let alignment_buffer = ALIGNMENT - self.backing.len() % ALIGNMENT;
         for _ in 0..alignment_buffer {
@@ -73,7 +85,7 @@ impl BufferWriter {
     }
 
     pub fn add_boolean_raw_bulk(&mut self, values: &[bool]) {
-        self.align();
+        self.begin_bulk(values.len());
         for value in values {
             self.add_boolean_raw(*value);
         }
@@ -89,10 +101,8 @@ impl BufferWriter {
     }
 
     pub fn add_u8_raw_bulk(&mut self, values: &[u8]) {
-        self.align();
-        for value in values {
-            self.add_u8_raw(*value);
-        }
+        self.begin_bulk(values.len());
+        self.backing.extend_from_slice(values);
     }
 
     pub fn add_u16_raw(&mut self, value: u16) {
@@ -105,7 +115,7 @@ impl BufferWriter {
     }
 
     pub fn add_u16_raw_bulk(&mut self, values: &[u16]) {
-        self.align();
+        self.begin_bulk(values.len() * 2);
         for value in values {
             self.add_u16_raw(*value);
         }
@@ -121,7 +131,7 @@ impl BufferWriter {
     }
 
     pub fn add_u32_raw_bulk(&mut self, values: &[u32]) {
-        self.align();
+        self.begin_bulk(values.len() * 4);
         for value in values {
             self.add_u32_raw(*value);
         }
@@ -137,7 +147,7 @@ impl BufferWriter {
     }
 
     pub fn add_u64_raw_bulk(&mut self, values: &[u64]) {
-        self.align();
+        self.begin_bulk(values.len() * 8);
         for value in values {
             self.add_u64_raw(*value);
         }
@@ -153,7 +163,7 @@ impl BufferWriter {
     }
 
     pub fn add_i8_raw_bulk(&mut self, values: &[i8]) {
-        self.align();
+        self.begin_bulk(values.len());
         for value in values {
             self.add_i8_raw(*value);
         }
@@ -169,7 +179,7 @@ impl BufferWriter {
     }
 
     pub fn add_i16_raw_bulk(&mut self, values: &[i16]) {
-        self.align();
+        self.begin_bulk(values.len() * 2);
         for value in values {
             self.add_i16_raw(*value);
         }
@@ -185,7 +195,7 @@ impl BufferWriter {
     }
 
     pub fn add_i32_raw_bulk(&mut self, values: &[i32]) {
-        self.align();
+        self.begin_bulk(values.len() * 4);
         for value in values {
             self.add_i32_raw(*value);
         }
@@ -201,7 +211,7 @@ impl BufferWriter {
     }
 
     pub fn add_i64_raw_bulk(&mut self, values: &[i64]) {
-        self.align();
+        self.begin_bulk(values.len() * 8);
         for value in values {
             self.add_i64_raw(*value);
         }
@@ -217,7 +227,7 @@ impl BufferWriter {
     }
 
     pub fn add_f32_raw_bulk(&mut self, values: &[f32]) {
-        self.align();
+        self.begin_bulk(values.len() * 4);
         for value in values {
             self.add_f32_raw(*value);
         }
@@ -233,7 +243,7 @@ impl BufferWriter {
     }
 
     pub fn add_f64_raw_bulk(&mut self, values: &[f64]) {
-        self.align();
+        self.begin_bulk(values.len() * 8);
         for value in values {
             self.add_f64_raw(*value);
         }
