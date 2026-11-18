@@ -159,6 +159,9 @@ device's modules say. A device holds any number of bridges, or none.
 - The **Unix bridge** ([`arora-bridge-unix`](../crates/arora-bridge-unix/readme.md))
   serves Arora Buffers over a Unix socket file, for clients on the machine
   or at the end of an `ssh` forward of the file.
+- The **Zenoh bridge** ([`arora-bridge-zenoh`](../crates/arora-bridge-zenoh/readme.md))
+  serves requests as Zenoh queries and publishes each key on a key expression
+  of its own, in Arora Buffers, for clients a Zenoh session reaches.
 - The **ROS 2 bridge** ([`arora-bridge-ros2`](../crates/arora-bridge-ros2/README.md))
   exposes keys as topics, functions as services and task runs as actions, with
   exposure profiles such as ROS4HRI.

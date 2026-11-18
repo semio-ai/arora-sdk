@@ -1,0 +1,7 @@
+# A robot's ssh for ssh-matrix.sh: an OpenSSH before 6.7, which forwards no socket file, and python 2.7 at
+# /usr/bin/python, as on a NAO.
+ARG BASE=ubuntu:14.04
+FROM ${BASE}
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server python-minimal >/dev/null \
+ && rm -rf /var/lib/apt/lists/* && mkdir -p /var/run/sshd \
+ && sed -i 's/^PermitRootLogin .*/PermitRootLogin without-password/' /etc/ssh/sshd_config

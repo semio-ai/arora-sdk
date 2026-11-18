@@ -53,6 +53,7 @@ ignored.
 | --- | --- | --- |
 | The live DDS tests: `arora-hal-ros2`'s in `src/ros2_hal.rs` and `src/configs/nao.rs`, `arora-bridge-ros2`'s `tests/tests.rs`, `tests/device.rs` and `tests/refusal_log.rs` | Ignored on macOS, where DDS discovery over multicast is unreliable on loopback. They run on Linux, CI included. | `--ignored`, on a machine with an active multicast-capable interface |
 | `crates/arora-bridge-ros2/tests/zenoh_native.rs` | Needs Docker and an image with ROS 2 Jazzy and `rmw_zenoh`; the file's documentation shows one. | `ROS2_ZENOH_IMAGE=<image> cargo test -p arora-bridge-ros2 --no-default-features --features zenoh --test zenoh_native -- --ignored` |
+| `crates/arora-bridge-unix/bench/ssh-matrix.sh` | Needs Docker: it runs a device in a container and its clients beside it, in another container and on the host, through a shared volume, `ssh -L` and `ssh -J`, for the Unix bridge and the Zenoh bridge. | `crates/arora-bridge-unix/bench/ssh-matrix.sh`, after `cargo build --release -p arora-bridge-unix-bench` |
 | `modules/polly/tests/polly_tests.rs` | Calls AWS Polly. | `cargo test -p polly -- --ignored`, with AWS credentials |
 | `arora`'s `module_reload_tests::measure` (macOS) | A measurement of reload cost, not a check. | `cargo test -p arora --lib module_reload_tests::measure -- --ignored --nocapture --test-threads=1` |
 
@@ -184,9 +185,9 @@ line to add.
 | --- | --- | --- |
 | `select` | always | The selection above. |
 | `test` | a default member | `cargo test --release` over the selected default members, as [above](#running-the-tests), then `verify`. |
-| `zenoh` | `arora-bridge-ros2` or `arora-msgs-ros2` | [The Zenoh backend](#the-zenoh-backend). |
+| `zenoh` | `arora-bridge-ros2`, `arora-msgs-ros2` or `arora-bridge-zenoh` | [The Zenoh backend](#the-zenoh-backend) when one of the first two is selected; `arora-bridge-zenoh`'s tests when it is. |
 | `runners` | `arora`, `arora-hal-ros2` or `arora-hal-restful` | [The runners](#robot-runners-and-semio-studio), with clippy over each feature set. |
-| `lint` | a default member, or `polly` | `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` over the selected default members; the same over `polly` when it is selected. |
+| `lint` | a default member, `polly`, `arora-bridge-zenoh` or `arora-bridge-unix-bench` | `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` over the selected default members; the same over each of the other three when selected. |
 | `browser` | `arora-engine`, `arora` or `arora-web` | [The browser tests](#browser-tests), and `cargo build -p arora-web --target wasm32-unknown-unknown`. |
 | `coverage` | pushes to `main` only | [Coverage](#coverage). |
 | `markdown-link-check` | always | Checks the links of every Markdown file. |
@@ -252,6 +253,7 @@ tests:
   | the local WebSocket bridge over a running device | `crates/arora/tests/local_ws_bridge.rs` |
   | the WebSocket wire against a fake runtime | `crates/arora-bridge-ws/tests/wire.rs` |
   | the Unix bridge over a running device | `crates/arora-bridge-unix/tests/device.rs` |
+  | the Zenoh bridge over a running device | `crates/arora-bridge-zenoh/tests/device.rs` |
   | the ROS 2 bridge over live DDS | `crates/arora-bridge-ros2/tests/tests.rs` |
   | the ROS 2 bridge over a running device, on both backends | `crates/arora-bridge-ros2/tests/device.rs` |
   | the ROS 2 bridge to a native subscriber (`#[ignore]`d, Docker) | `crates/arora-bridge-ros2/tests/zenoh_native.rs` |

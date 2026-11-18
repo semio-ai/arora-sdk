@@ -346,6 +346,7 @@ the rules.
 | `arora` | The device runtime, its builder, and the `arora` runner |
 | `arora-bridge-ws` | The open local bridge: JSON messages over a local WebSocket |
 | `arora-bridge-unix` | A bridge over a Unix socket file in Arora Buffers, for local and ssh-forwarded clients, and its client |
+| `arora-bridge-zenoh` | A bridge over Zenoh in Arora Buffers: requests as queries, a key expression per key; and its client |
 | `arora-bridge-ros2`, `arora-msgs-ros2` | The ROS 2 bridge; ROS 2 messages, their CDR codec and type hashes |
 | `arora-hal-ros2`, `arora-hal-restful` | Robot HALs and their runners `arora-ros2`, `arora-restful` (unpublished) |
 | `arora-web` | The device in a browser, for JavaScript |
