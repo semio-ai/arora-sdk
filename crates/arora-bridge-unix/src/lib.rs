@@ -13,8 +13,9 @@
 //! A connection carries messages back to back, each one Arora Buffer: a
 //! little-endian `u32` counting the whole buffer, then one value, an array of
 //! values whose first element, a `u8`, is the message's kind. A message longer
-//! than [`wire::MAX_MESSAGE_LEN`], or one that is not a buffer of the shapes
-//! below, closes the connection.
+//! than [`wire::MAX_MESSAGE_LEN`], one that would take more than
+//! [`wire::MAX_DECODED_LEN`] decoded, or one that is not a buffer of the
+//! shapes below, closes the connection.
 //!
 //! A client sends requests; each carries an `id: u32` of the client's choice,
 //! which the device's answer echoes. The device answers in the order its
@@ -41,7 +42,9 @@
 //! `list_keys` and `describe_methods` their lists on the value plane. A
 //! `subscribe` replaces the connection's prefixes and returns unit: from then
 //! on, each step that changes a key one of them covers sends one `changed`
-//! holding those of its keys. A prefix covers the key itself and the subtree
+//! holding those of its keys, or several in a row when those keys are too
+//! large for one message (more than about half of
+//! [`wire::MAX_MESSAGE_LEN`]). A prefix covers the key itself and the subtree
 //! under it, on a `/` boundary, as a store's prefix does
 //! ([`prefix_covers`](arora_types::data::prefix_covers)): `joints` covers
 //! `joints/head_yaw` but not `joints_extra`. The empty prefix covers every

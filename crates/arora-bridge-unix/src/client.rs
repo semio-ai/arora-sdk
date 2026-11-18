@@ -39,14 +39,16 @@ pub struct UnixClient {
 }
 
 /// The changes a [`UnixClient`] subscribed to, in the order the device made
-/// them; each holds the subscribed keys of one step. Ends when the connection
+/// them; each holds the subscribed keys of one step, or part of them when
+/// they are too large for one message. Ends when the connection
 /// closes.
 ///
 /// The changes received and not read yet are held for it, up to
 /// [`UnixBridge::BACKLOG_BYTES`](crate::UnixBridge::BACKLOG_BYTES) of them
-/// beyond the first, as received: a client that reads its changes slower
-/// than they come is then closed, as the device closes one that reads its
-/// socket too slowly, so it reconnects and reads the state again.
+/// beyond the first, counted as they take decoded: a client that reads its
+/// changes slower than they come is then closed, as the device closes one
+/// that reads its socket too slowly, so it reconnects and reads the state
+/// again.
 pub struct Changes {
     changes: tokio::sync::mpsc::UnboundedReceiver<(StateChange, usize)>,
     held: Arc<AtomicUsize>,
@@ -216,7 +218,18 @@ async fn run(
             },
             message = incoming.next() => {
                 let message = match message {
-                    Some(Ok(bytes)) => wire::decode_message(&bytes).map(|m| (m, bytes.len())),
+                    Some(Ok(bytes)) => wire::decode_message(&bytes).map(|m| {
+                        // What a change holds decoded, which is what waits.
+                        let size = match &m {
+                            // An empty change still takes its own room.
+                            Message::Changed(change) => {
+                                std::mem::size_of::<StateChange>()
+                                    + wire::decoded_size(change, |_| true)
+                            }
+                            Message::Answer { .. } => 0,
+                        };
+                        (m, size)
+                    }),
                     Some(Err(e)) => Err(format!("reading failed: {e}")),
                     None => break None,
                 };

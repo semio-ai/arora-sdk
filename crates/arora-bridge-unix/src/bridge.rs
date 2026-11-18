@@ -1,6 +1,6 @@
 //! [`UnixBridge`]: a socket file as an Arora [`Bridge`].
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,6 +27,13 @@ use crate::wire::{self, Request};
 /// subscribed connection's task moves them into its own queue as they come,
 /// so only a task starved this long falls behind it, and is closed.
 const BROADCAST: usize = 1024;
+
+/// About the most a `changed` gathering waiting values may weigh: half the
+/// largest message, the other half a margin for what [`weight`] estimates.
+const BATCH: usize = wire::MAX_MESSAGE_LEN / 2;
+
+/// The same for what it takes decoded, against [`wire::MAX_DECODED_LEN`].
+const DECODED_BATCH: usize = wire::MAX_DECODED_LEN / 2;
 
 /// A connection's cap on the requests it reads ahead of the answers it writes,
 /// so a client that sends without reading stops being read.
@@ -89,16 +96,16 @@ impl Shared {
 }
 
 impl UnixBridge {
-    /// The size of the values a connection may have queued and not yet
-    /// written, beyond the change it is writing, before it is closed. A change
+    /// The memory the values a connection has queued and not yet written may
+    /// take, beyond the change it is writing, before it is closed. A change
     /// is a difference from the previous one, so a client that misses one would
     /// hold a stale state with no sign of it; closing it tells the client to
     /// read again. Keys pushed [newest only](crate#newest-only) are not queued
-    /// and do not count. The answers a connection has to write have a cap of
-    /// the same size, apart.
+    /// and do not count. The answers a connection has to write, held encoded,
+    /// have a cap of the same size on their bytes, apart.
     ///
-    /// A queued change holds the step's other keys too only while they weigh
-    /// less than its queued ones; heavier, they are left out, at the cost of
+    /// A queued change holds the step's other keys too only while they take
+    /// less than its queued ones; more, they are left out, at the cost of
     /// a copy of the queued ones. So a connection holds at most twice the cap,
     /// and a newest-only frame it replaced is freed.
     pub const BACKLOG_BYTES: usize = 64 << 20;
@@ -522,12 +529,12 @@ struct Pushes {
     /// the first subscription, so a connection that never subscribes holds
     /// none of them back from being freed.
     changes: Option<broadcast::Receiver<Arc<StateChange>>>,
-    /// The changes holding queued keys, oldest first, each with its number
-    /// and the size of its queued values. A change keeps keys not queued (not
+    /// The changes holding queued keys, oldest first, each with its number,
+    /// what its queued keys weigh on the wire and what they take decoded. A change keeps keys not queued (not
     /// subscribed, or newest only) only while they weigh less than its queued
     /// ones, and none a subscription stopped queueing since.
-    queue: VecDeque<(u64, Arc<StateChange>, usize)>,
-    /// The size of the queued values.
+    queue: VecDeque<(u64, Arc<StateChange>, usize, usize)>,
+    /// What the queued values take decoded, which is what the queue holds.
     queued: usize,
     /// For each key pushed newest only with a value not sent yet, the number
     /// of the change holding it, and that change.
@@ -570,8 +577,8 @@ impl Pushes {
         let queued = |key: &Key| Self::queued_under(&self.prefixes, &self.latest, key);
         let mut kept = VecDeque::new();
         self.queued = 0;
-        for (number, change, _) in std::mem::take(&mut self.queue) {
-            let whole = size(&change, |_| true);
+        for (number, change, _, _) in std::mem::take(&mut self.queue) {
+            let whole = wire::decoded_size(&change, |_| true);
             for key in change.set.keys().chain(&change.unset) {
                 if was_queued(key)
                     && Self::covered(&self.prefixes, key)
@@ -583,9 +590,10 @@ impl Pushes {
                 }
             }
             if let Some(change) = only(change, |key| was_queued(key) && queued(key)) {
-                let weighs = size(&change, queued);
-                self.queued += weighs;
-                kept.push_back((number, change, weighs));
+                let held = wire::decoded_size(&change, queued);
+                self.queued += held;
+                let wire = size(&change, queued);
+                kept.push_back((number, change, wire, held));
             }
         }
         self.queue = kept;
@@ -599,63 +607,140 @@ impl Pushes {
         let number = self.received;
         self.received += 1;
         let queued = |key: &Key| Self::queued_under(&self.prefixes, &self.latest, key);
-        let whole = size(&change, |_| true);
+        let whole = wire::decoded_size(&change, |_| true);
         for key in change.set.keys().chain(&change.unset) {
             if Self::covered(&self.prefixes, key) && Self::covered(&self.latest, key) {
                 self.newest
                     .insert(key.clone(), (number, held_for(&change, key, whole)));
             }
         }
-        let weighs = size(&change, queued);
-        if weighs > 0 {
-            let change = if size(&change, |key| !queued(key)) > weighs {
+        let held = wire::decoded_size(&change, queued);
+        if held > 0 {
+            let change = if whole - held > held {
                 only(change, queued).expect("holds a queued key")
             } else {
                 change
             };
-            self.queue.push_back((number, change, weighs));
-            self.queued += weighs;
+            let wire = size(&change, queued);
+            self.queue.push_back((number, change, wire, held));
+            self.queued += held;
         }
         // One change larger than the cap alone still goes through.
         self.queue.len() > 1 && self.queued > UnixBridge::BACKLOG_BYTES
     }
 
     /// The next `changed` to write: the queued keys of the oldest queued
-    /// change and the newest values of the keys pushed newest only, or none
-    /// when nothing waits.
+    /// change and the newest values of the keys pushed newest only, as many
+    /// as fit in about [`BATCH`] bytes, or none when nothing waits.
     fn next_message(&mut self) -> Option<Box<[u8]>> {
         loop {
+            // A key a new subscription queues rather than pushes newest only:
+            // a queued value of it is newer than the one kept from before,
+            // which is dropped.
+            let queue = &self.queue;
+            self.newest.retain(|key, _| {
+                !(Self::queued_under(&self.prefixes, &self.latest, key)
+                    && queue.iter().any(|(_, change, _, _)| {
+                        change.set.contains_key(key) || change.unset.contains(key)
+                    }))
+            });
             let oldest = self.queue.pop_front();
             if oldest.is_none() && self.newest.is_empty() {
                 return None;
             }
-            let newest: Vec<(Key, (u64, Arc<StateChange>))> = self.newest.drain().collect();
             let queued = |key: &Key| Self::queued_under(&self.prefixes, &self.latest, key);
+            // A step too large for one message goes in several, in order: the
+            // keys that fit now, the rest back at the front of the queue.
+            let mut part: Option<HashSet<Key>> = None;
+            if let Some((number, change, wire, held)) = &oldest {
+                if *wire > BATCH || *held > DECODED_BATCH {
+                    let (mut wire, mut held) = (0, 0);
+                    let mut now = HashSet::new();
+                    for key in change
+                        .set
+                        .keys()
+                        .chain(&change.unset)
+                        .filter(|key| queued(key))
+                    {
+                        let (key_wire, key_held) = key_cost(change, key);
+                        if !now.is_empty()
+                            && (wire + key_wire > BATCH || held + key_held > DECODED_BATCH)
+                        {
+                            continue;
+                        }
+                        wire += key_wire;
+                        held += key_held;
+                        now.insert(key.clone());
+                    }
+                    if let Some(rest) =
+                        only(change.clone(), |key| queued(key) && !now.contains(key))
+                    {
+                        let rest_wire = size(&rest, queued);
+                        let rest_held = wire::decoded_size(&rest, queued);
+                        self.queued += rest_held;
+                        self.queue.push_front((*number, rest, rest_wire, rest_held));
+                    }
+                    part = Some(now);
+                }
+            }
+            let in_part = |key: &Key| part.as_ref().is_none_or(|now| now.contains(key));
+            // The newest values that fit beside it, on the wire and decoded,
+            // the others left for the next messages; one always goes,
+            // whatever its size.
+            let (mut wire, mut unpacked) = match (&oldest, &part) {
+                (Some((_, change, _, _)), Some(now)) => now.iter().fold((0, 0), |(w, h), key| {
+                    let (key_wire, key_held) = key_cost(change, key);
+                    (w + key_wire, h + key_held)
+                }),
+                (Some((_, _, wire, held)), None) => (*wire, *held),
+                (None, _) => (0, 0),
+            };
+            let mut taken = Vec::new();
+            for (key, (_, change)) in &self.newest {
+                let (own, own_unpacked) = key_cost(change, key);
+                let first = wire == 0 && unpacked == 0;
+                if !first && (wire + own > BATCH || unpacked + own_unpacked > DECODED_BATCH) {
+                    continue;
+                }
+                wire += own;
+                unpacked += own_unpacked;
+                taken.push(key.clone());
+            }
+            let newest: Vec<(Key, (u64, Arc<StateChange>))> = taken
+                .into_iter()
+                .map(|key| {
+                    let held = self.newest.remove(&key).expect("taken from it");
+                    (key, held)
+                })
+                .collect();
             let mut set = Vec::new();
             let mut unset = Vec::new();
-            if let Some((_, change, _)) = &oldest {
-                for (key, value) in change.set.iter().filter(|(key, _)| queued(key)) {
+            if let Some((_, change, _, _)) = &oldest {
+                for (key, value) in change
+                    .set
+                    .iter()
+                    .filter(|(key, _)| queued(key) && in_part(key))
+                {
                     set.push((key.path.as_str(), value.as_ref()));
                 }
-                for key in change.unset.iter().filter(|key| queued(key)) {
+                for key in change
+                    .unset
+                    .iter()
+                    .filter(|key| queued(key) && in_part(key))
+                {
                     unset.push(key.path.as_str());
                 }
             }
             for (key, (_, change)) in &newest {
-                // A key a new subscription queues: a queued value of it is
-                // newer than the one kept from before.
-                let superseded = oldest.as_ref().is_some_and(|(_, change, _)| {
-                    queued(key) && (change.set.contains_key(key) || change.unset.contains(key))
-                });
-                if Self::covered(&self.prefixes, key) && !superseded {
+                if Self::covered(&self.prefixes, key) {
                     match change.set.get(key) {
                         Some(value) => set.push((key.path.as_str(), value.as_ref())),
                         None => unset.push(key.path.as_str()),
                     }
                 }
             }
-            if let Some((_, _, size)) = oldest {
-                self.queued -= size;
+            if let Some((_, _, _, held)) = oldest {
+                self.queued -= held;
             }
             // Empty when a new subscription dropped every key waiting there.
             if !set.is_empty() || !unset.is_empty() {
@@ -682,17 +767,34 @@ fn only(change: Arc<StateChange>, keep: impl Fn(&Key) -> bool) -> Option<Arc<Sta
     (!kept.is_empty()).then(|| Arc::new(kept))
 }
 
-/// What a newest-only `key` keeps of `change`, which weighs `whole`: the
-/// change itself while the key weighs at least as much as the rest (a frame
-/// beside small records), or else a copy of the key alone, so a small value
-/// never keeps a step's large ones alive. A key so holds at most twice its
-/// own weight.
+/// What a newest-only `key` keeps of `change`, which takes `whole` decoded:
+/// the change itself while the key takes at least as much as the rest (a
+/// frame beside small records), or else a copy of the key alone, so a small
+/// value never keeps a step's large ones alive. A key so holds at most twice
+/// its own size. The key is found by lookup, so a step with many such keys
+/// costs one pass, not one per key.
 fn held_for(change: &Arc<StateChange>, key: &Key, whole: usize) -> Arc<StateChange> {
-    let own = size(change, |k| k == key);
+    let (_, own) = key_cost(change, key);
     if whole - own <= own {
         return change.clone();
     }
-    only(change.clone(), |k| k == key).expect("holds the key")
+    let mut alone = StateChange::new();
+    match change.set.get(key) {
+        Some(value) => {
+            alone.set.insert(key.clone(), value.clone());
+        }
+        None => {
+            alone.unset.insert(key.clone());
+        }
+    }
+    Arc::new(alone)
+}
+
+/// What `key` of `change` weighs on the wire, and takes decoded.
+fn key_cost(change: &StateChange, key: &Key) -> (usize, usize) {
+    let value = change.set.get(key);
+    let wire = key.path.len() + value.and_then(Option::as_ref).map_or(1, weight);
+    (wire, wire::decoded_key(key, value))
 }
 
 /// About how many bytes the keys of `change` that `counted` holds take on
@@ -711,23 +813,27 @@ fn size(change: &StateChange, counted: impl Fn(&Key) -> bool) -> usize {
     set.chain(unset).sum()
 }
 
+/// What an array takes on the wire before its elements: its tag, its
+/// elements' type, their count and up to a whole alignment.
+const ARRAY: usize = 16;
+
 /// About how many bytes `value` takes on the wire, for the backlog's cap.
 fn weight(value: &Value) -> usize {
     match value {
         Value::String(s) => s.len() + 4,
-        Value::ArrayBoolean(a) => a.len(),
-        Value::ArrayU8(a) => a.len(),
-        Value::ArrayI8(a) => a.len(),
-        Value::ArrayU16(a) => a.len() * 2,
-        Value::ArrayI16(a) => a.len() * 2,
-        Value::ArrayU32(a) => a.len() * 4,
-        Value::ArrayI32(a) => a.len() * 4,
-        Value::ArrayF32(a) => a.len() * 4,
-        Value::ArrayU64(a) => a.len() * 8,
-        Value::ArrayI64(a) => a.len() * 8,
-        Value::ArrayF64(a) => a.len() * 8,
-        Value::ArrayString(a) => a.iter().map(|s| s.len() + 4).sum(),
-        Value::ArrayValue(a) => 8 + a.iter().map(weight).sum::<usize>(),
+        Value::ArrayBoolean(a) => ARRAY + a.len(),
+        Value::ArrayU8(a) => ARRAY + a.len(),
+        Value::ArrayI8(a) => ARRAY + a.len(),
+        Value::ArrayU16(a) => ARRAY + a.len() * 2,
+        Value::ArrayI16(a) => ARRAY + a.len() * 2,
+        Value::ArrayU32(a) => ARRAY + a.len() * 4,
+        Value::ArrayI32(a) => ARRAY + a.len() * 4,
+        Value::ArrayF32(a) => ARRAY + a.len() * 4,
+        Value::ArrayU64(a) => ARRAY + a.len() * 8,
+        Value::ArrayI64(a) => ARRAY + a.len() * 8,
+        Value::ArrayF64(a) => ARRAY + a.len() * 8,
+        Value::ArrayString(a) => ARRAY + a.iter().map(|s| s.len() + 4).sum::<usize>(),
+        Value::ArrayValue(a) => ARRAY + a.iter().map(weight).sum::<usize>(),
         Value::Option(Some(v)) => 1 + weight(v),
         Value::Structure(s) => {
             24 + s
@@ -861,7 +967,7 @@ mod tests {
             assert!(!pushes.queue(step(i, 1 << 20)), "frames are not counted");
         }
         assert!(
-            pushes.queued < 100 * 64,
+            pushes.queued < 100 * 256,
             "only the stamps queued: {}",
             pushes.queued
         );
@@ -888,7 +994,13 @@ mod tests {
         let mut pushes = Pushes::default();
         pushes.subscribe(vec!["".into()], vec![], &changes);
         assert!(!pushes.queue(step(0, UnixBridge::BACKLOG_BYTES + 1)));
-        assert_eq!(drain(&mut pushes).len(), 1);
+        let sent = drain(&mut pushes);
+        assert_eq!(
+            sent.iter().map(|c| c.set.len()).sum::<usize>(),
+            2,
+            "the whole step"
+        );
+        assert_eq!(pushes.queued, 0);
         let frame = 1 << 20;
         let fits = UnixBridge::BACKLOG_BYTES / (frame + 64);
         for i in 0..fits as u32 {
@@ -935,7 +1047,7 @@ mod tests {
         for i in 0..3 {
             pushes.queue(step(i, 1 << 20));
         }
-        for (_, change, _) in &pushes.queue {
+        for (_, change, _, _) in &pushes.queue {
             assert_eq!(
                 change.set.keys().collect::<Vec<_>>(),
                 [&Key::from("dcm/stamp")]
@@ -1046,6 +1158,136 @@ mod tests {
                 assert_eq!(held.set.len(), 1, "{key:?} holds {:?}", held.set.keys());
             }
         }
+    }
+
+    /// Newest values waiting together go out in as many messages as keep
+    /// each within the largest a client accepts.
+    #[test]
+    fn waiting_values_are_split_to_fit_a_message() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec!["camera".into()], &changes);
+        let mut change = StateChange::new();
+        for eye in ["left", "right"] {
+            change.set.insert(
+                Key::from(format!("camera/{eye}").as_str()),
+                Some(Value::ArrayU8(vec![1; BATCH / 2 + 1])),
+            );
+        }
+        pushes.queue(Arc::new(change));
+        let sent: Vec<_> = std::iter::from_fn(|| pushes.next_message()).collect();
+        assert_eq!(sent.len(), 2, "one frame each");
+        assert!(sent.iter().all(|m| m.len() <= wire::MAX_MESSAGE_LEN));
+    }
+
+    /// Waiting values are split by what they take decoded too: arrays of
+    /// empty strings, small on the wire, large once decoded.
+    #[test]
+    fn waiting_values_are_split_to_fit_decoded() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec!["log".into()], &changes);
+        let strings = DECODED_BATCH / std::mem::size_of::<String>() / 2 + 1;
+        for side in ["a", "b"] {
+            let mut change = StateChange::new();
+            change.set.insert(
+                Key::from(format!("log/{side}").as_str()),
+                Some(Value::ArrayString(vec![String::new(); strings])),
+            );
+            pushes.queue(Arc::new(change));
+        }
+        let sent: Vec<_> = std::iter::from_fn(|| pushes.next_message()).collect();
+        assert_eq!(sent.len(), 2, "one array each");
+        for message in &sent {
+            arora_buffers::well_formed_within(message, wire::MAX_DECODED_LEN)
+                .expect("each decodes within the limit");
+        }
+    }
+
+    /// The queue counts what its values take decoded, which is what it
+    /// holds: an array of units, small on the wire, counts its values.
+    #[test]
+    fn the_queue_counts_what_it_holds() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec![], &changes);
+        let mut change = StateChange::new();
+        change.set.insert(
+            Key::from("units"),
+            Some(Value::ArrayValue(vec![Value::Unit; 1 << 16])),
+        );
+        pushes.queue(Arc::new(change));
+        assert!(pushes.queued >= (1 << 16) * std::mem::size_of::<Value>());
+    }
+
+    /// A step whose queued keys are too large for one message goes in
+    /// several, in order, each within the largest a client accepts.
+    #[test]
+    fn a_step_too_large_for_a_message_is_split() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec![], &changes);
+        let mut change = StateChange::new();
+        for eye in ["left", "right"] {
+            change.set.insert(
+                Key::from(format!("camera/{eye}").as_str()),
+                Some(Value::ArrayU8(vec![1; BATCH / 2 + 1])),
+            );
+        }
+        pushes.queue(Arc::new(change));
+        pushes.queue(step(7, 4));
+        let sent: Vec<_> = std::iter::from_fn(|| pushes.next_message()).collect();
+        assert!(sent.iter().all(|m| m.len() <= wire::MAX_MESSAGE_LEN));
+        let decoded: Vec<StateChange> = sent
+            .iter()
+            .map(|bytes| match decode_message(bytes).unwrap() {
+                Message::Changed(change) => change,
+                other => panic!("a change, not {other:?}"),
+            })
+            .collect();
+        assert_eq!(decoded.len(), 3, "the large step in two, then the next");
+        let eyes: usize = decoded[..2].iter().map(|c| c.set.len()).sum();
+        assert_eq!(eyes, 2, "both keys of the large step");
+        assert!(
+            decoded[2].set.contains_key(&Key::from("dcm/stamp")),
+            "then the next step"
+        );
+        assert_eq!(pushes.queued, 0);
+    }
+
+    /// Empty arrays weigh their headers: a million of them is megabytes.
+    #[test]
+    fn empty_arrays_weigh_their_headers() {
+        let empties = Value::ArrayValue(vec![Value::ArrayU8(vec![]); 1 << 20]);
+        assert!(weight(&empties) >= 8 << 20);
+        let bytes = arora_buffers::froto_value::serialize(&empties);
+        assert!(
+            weight(&empties) >= bytes.len(),
+            "{} on the wire",
+            bytes.len()
+        );
+    }
+
+    /// A key queued again after newest only never goes back, however the
+    /// waiting values split into messages: its kept value, superseded by a
+    /// queued one, is dropped before the split.
+    #[test]
+    fn a_superseded_value_is_dropped_before_the_split() {
+        let (changes, _) = broadcast::channel(BROADCAST);
+        let mut pushes = Pushes::default();
+        pushes.subscribe(vec!["".into()], vec!["camera".into()], &changes);
+        let frame = |i: u8| {
+            let mut change = StateChange::new();
+            change.set.insert(
+                Key::from("camera/frame"),
+                Some(Value::ArrayU8(vec![i; BATCH / 2 + 1])),
+            );
+            Arc::new(change)
+        };
+        pushes.queue(frame(1));
+        pushes.subscribe(vec!["".into()], vec![], &changes);
+        pushes.queue(frame(2));
+        assert_eq!(frames(&drain(&mut pushes)), [2]);
     }
 
     /// An array of empty structures weighs its elements' headers.

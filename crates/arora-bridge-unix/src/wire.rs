@@ -9,14 +9,15 @@
 //!
 //! Encoding writes through [`BufferWriter`] straight from the borrowed message,
 //! so pushing a change copies no value; decoding checks the buffer with
-//! [`well_formed`](fn@arora_buffers::well_formed) before reading it, so bytes that
-//! are not a buffer are refused, never a panic.
+//! [`well_formed_within`] before reading it, so bytes that are not a buffer,
+//! or one that would decode to more than [`MAX_DECODED_LEN`], are refused,
+//! never a panic.
 
 use std::collections::{HashMap, HashSet};
 
 use arora_bridge::BridgeOp;
 use arora_buffers::froto_value::{deserialize, serialize_to_writer};
-use arora_buffers::{well_formed, BufferWriter, TYPE_STRING, TYPE_VALUE};
+use arora_buffers::{well_formed_within, BufferWriter, TYPE_STRING, TYPE_VALUE};
 use arora_types::call::{Call, CallResult};
 use arora_types::data::{Key, StateChange};
 use arora_types::value::{StructureField, Value};
@@ -26,6 +27,12 @@ use arora_types::Uuid;
 /// longer message closes the connection: its sender is not speaking this wire
 /// format, or is sending more than one step's worth of state.
 pub const MAX_MESSAGE_LEN: usize = 64 << 20;
+
+/// The most memory a message may take decoded, in bytes, about: a message
+/// that would take more is refused before it is decoded, so a small one
+/// cannot expand into gigabytes (an array of units takes a byte each on the
+/// wire and a whole value each decoded).
+pub const MAX_DECODED_LEN: usize = 2 * MAX_MESSAGE_LEN;
 
 /// `get`: read keys.
 const GET: u8 = 1;
@@ -290,9 +297,19 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request, String> {
                 Some(Value::Option(None)) => None,
                 Some(Value::Option(Some(module))) => match *module {
                     Value::Uuid(module) => Some(module),
-                    other => return Err(format!("a module id is a uuid, not {other}")),
+                    other => {
+                        return Err(format!(
+                            "a module id is a uuid, not {}",
+                            shape(Some(&other))
+                        ))
+                    }
                 },
-                other => return Err(format!("a call's module id is an option, not {other:?}")),
+                other => {
+                    return Err(format!(
+                        "a call's module id is an option, not {}",
+                        shape(other.as_ref())
+                    ))
+                }
             };
             let function = take_uuid(&mut items)?;
             Request::Op {
@@ -344,7 +361,12 @@ pub fn decode_message(bytes: &[u8]) -> Result<Message, String> {
                     id,
                     result: Err(message),
                 },
-                other => return Err(format!("a refusal carries a string, not {other:?}")),
+                other => {
+                    return Err(format!(
+                        "a refusal carries a string, not {}",
+                        shape(other.as_ref())
+                    ))
+                }
             }
         }
         CHANGED => Message::Changed(take_state_change(&mut items)?),
@@ -354,12 +376,80 @@ pub fn decode_message(bytes: &[u8]) -> Result<Message, String> {
     Ok(message)
 }
 
+/// About how much memory the keys of `change` that `counted` holds take
+/// once decoded: what [`MAX_DECODED_LEN`] limits, and what a queue of
+/// changes holds.
+pub(crate) fn decoded_size(change: &StateChange, counted: impl Fn(&Key) -> bool) -> usize {
+    let set = change
+        .set
+        .iter()
+        .filter(|(key, _)| counted(key))
+        .map(|(key, value)| decoded_key(key, Some(value)));
+    let unset = change
+        .unset
+        .iter()
+        .filter(|key| counted(key))
+        .map(|key| decoded_key(key, None));
+    set.chain(unset).sum()
+}
+
+/// About how much memory `key` takes decoded in a change, set to `value`,
+/// or unset (`None`).
+pub(crate) fn decoded_key(key: &Key, value: Option<&Option<Value>>) -> usize {
+    STRING + key.path.len() + value.map_or(0, |value| VALUE + value.as_ref().map_or(0, decoded))
+}
+
+const VALUE: usize = std::mem::size_of::<Value>();
+const STRING: usize = std::mem::size_of::<String>();
+
+fn decoded(value: &Value) -> usize {
+    VALUE
+        + match value {
+            Value::String(s) => s.len(),
+            Value::ArrayBoolean(a) => a.len(),
+            Value::ArrayU8(a) => a.len(),
+            Value::ArrayI8(a) => a.len(),
+            Value::ArrayU16(a) => a.len() * 2,
+            Value::ArrayI16(a) => a.len() * 2,
+            Value::ArrayU32(a) => a.len() * 4,
+            Value::ArrayI32(a) => a.len() * 4,
+            Value::ArrayF32(a) => a.len() * 4,
+            Value::ArrayU64(a) => a.len() * 8,
+            Value::ArrayI64(a) => a.len() * 8,
+            Value::ArrayF64(a) => a.len() * 8,
+            Value::ArrayString(a) => a.iter().map(|s| STRING + s.len()).sum(),
+            Value::ArrayValue(a) => a.iter().map(decoded).sum(),
+            Value::Option(Some(v)) => decoded(v),
+            Value::Structure(s) => s.fields.iter().map(|f| 16 + decoded(&f.value)).sum(),
+            Value::Enumeration(e) => decoded(&e.value),
+            Value::ArrayStructure { elements, .. } => elements
+                .iter()
+                .map(|e| {
+                    VALUE
+                        + e.fields
+                            .iter()
+                            .map(|f| 16 + decoded(&f.value))
+                            .sum::<usize>()
+                })
+                .sum(),
+            Value::ArrayEnumeration { elements, .. } => {
+                elements.iter().map(|e| 16 + decoded(&e.value)).sum()
+            }
+            Value::KeyValue(kv) => kv
+                .fields
+                .values()
+                .map(|f| STRING + f.name.len() + 16 + f.value.as_deref().map_or(0, decoded))
+                .sum(),
+            _ => 0,
+        }
+}
+
 type Items = std::vec::IntoIter<Value>;
 
 /// Check `bytes` and open the array it holds: its kind and the elements after
 /// it.
 fn open(bytes: &[u8]) -> Result<(u8, Items), String> {
-    well_formed(bytes).map_err(|e| format!("not an Arora Buffer: {e}"))?;
+    well_formed_within(bytes, MAX_DECODED_LEN).map_err(|e| format!("not an Arora Buffer: {e}"))?;
     let Value::ArrayValue(items) = deserialize(bytes) else {
         return Err("a message is an array of values".into());
     };
@@ -367,7 +457,8 @@ fn open(bytes: &[u8]) -> Result<(u8, Items), String> {
     match items.next() {
         Some(Value::U8(kind)) => Ok((kind, items)),
         other => Err(format!(
-            "a message starts with its kind, a u8, not {other:?}"
+            "a message starts with its kind, a u8, not {}",
+            shape(other.as_ref())
         )),
     }
 }
@@ -376,36 +467,49 @@ fn done(mut items: Items) -> Result<(), String> {
     match items.next() {
         None => Ok(()),
         Some(extra) => Err(format!(
-            "the message ends with an element too many: {extra}"
+            "the message ends with an element too many: {}",
+            shape(Some(&extra))
         )),
     }
+}
+
+/// What a value is, by its type alone: an error never formats the value
+/// itself, which may be megabytes.
+fn shape(value: Option<&Value>) -> String {
+    value.map_or_else(|| "nothing".into(), |value| value.kind().to_string())
 }
 
 fn take_u32(items: &mut Items) -> Result<u32, String> {
     match items.next() {
         Some(Value::U32(id)) => Ok(id),
-        other => Err(format!("expected a u32 id, got {other:?}")),
+        other => Err(format!("expected a u32 id, got {}", shape(other.as_ref()))),
     }
 }
 
 fn take_uuid(items: &mut Items) -> Result<Uuid, String> {
     match items.next() {
         Some(Value::Uuid(id)) => Ok(id),
-        other => Err(format!("expected a uuid, got {other:?}")),
+        other => Err(format!("expected a uuid, got {}", shape(other.as_ref()))),
     }
 }
 
 fn take_strings(items: &mut Items) -> Result<Vec<String>, String> {
     match items.next() {
         Some(Value::ArrayString(strings)) => Ok(strings),
-        other => Err(format!("expected an array of strings, got {other:?}")),
+        other => Err(format!(
+            "expected an array of strings, got {}",
+            shape(other.as_ref())
+        )),
     }
 }
 
 fn take_values(items: &mut Items) -> Result<Vec<Value>, String> {
     match items.next() {
         Some(Value::ArrayValue(values)) => Ok(values),
-        other => Err(format!("expected an array of values, got {other:?}")),
+        other => Err(format!(
+            "expected an array of values, got {}",
+            shape(other.as_ref())
+        )),
     }
 }
 
@@ -414,9 +518,12 @@ fn take_optional_string(items: &mut Items) -> Result<Option<String>, String> {
         Some(Value::Option(None)) => Ok(None),
         Some(Value::Option(Some(s))) => match *s {
             Value::String(s) => Ok(Some(s)),
-            other => Err(format!("expected a string, got {other}")),
+            other => Err(format!("expected a string, got {}", shape(Some(&other)))),
         },
-        other => Err(format!("expected an optional string, got {other:?}")),
+        other => Err(format!(
+            "expected an optional string, got {}",
+            shape(other.as_ref())
+        )),
     }
 }
 
@@ -435,7 +542,10 @@ fn take_state_change(items: &mut Items) -> Result<StateChange, String> {
         .zip(values)
         .map(|(path, value)| match value {
             Value::Option(value) => Ok((Key::from(path), value.map(|v| *v))),
-            other => Err(format!("a set key's value is an option, not {other}")),
+            other => Err(format!(
+                "a set key's value is an option, not {}",
+                shape(Some(&other))
+            )),
         })
         .collect::<Result<_, String>>()?;
     let unset: HashSet<Key> = take_strings(items)?.into_iter().map(Key::from).collect();
@@ -459,7 +569,7 @@ fn take_fields(items: &mut Items) -> Result<Vec<StructureField>, String> {
                 id,
                 value: Box::new(value),
             }),
-            other => Err(format!("a field id is a uuid, not {other}")),
+            other => Err(format!("a field id is a uuid, not {}", shape(Some(&other)))),
         })
         .collect()
 }
@@ -662,6 +772,71 @@ mod tests {
         ]);
         let bytes = arora_buffers::froto_value::serialize(&extra);
         assert!(decode_request(&bytes).unwrap_err().contains("too many"));
+    }
+
+    /// A message small on the wire that would expand past
+    /// [`MAX_DECODED_LEN`] once decoded is refused before it is decoded.
+    #[test]
+    fn a_message_that_would_decode_too_large_is_refused() {
+        let units = 8 << 20;
+        let mut w = BufferWriter::new();
+        w.add_array_primitive(TYPE_VALUE, 2);
+        w.add_u8(LIST_KEYS);
+        w.add_array_primitive(TYPE_VALUE, units);
+        for _ in 0..units {
+            w.add_unit();
+        }
+        let bytes = w.finalize();
+        assert!(
+            bytes.len() < MAX_MESSAGE_LEN,
+            "{} bytes on the wire",
+            bytes.len()
+        );
+        let error = decode_request(&bytes).unwrap_err();
+        assert!(error.contains("decodes to more than"), "{error}");
+    }
+
+    /// A change counts what it takes decoded, far more than its bytes for an
+    /// array of units.
+    #[test]
+    fn a_change_counts_what_it_takes_decoded() {
+        let mut change = StateChange::new();
+        change.set.insert(
+            Key::from("units"),
+            Some(Value::ArrayValue(vec![Value::Unit; 1 << 18])),
+        );
+        let bytes = encode_message(&Message::Changed(change.clone()));
+        let decoded = decoded_size(&change, |_| true);
+        assert!(
+            decoded >= 16 * bytes.len(),
+            "{decoded} decoded, {} on the wire",
+            bytes.len()
+        );
+    }
+
+    /// An error names a misplaced value by its type, never by its contents,
+    /// which may be megabytes.
+    #[test]
+    fn an_error_names_a_value_by_its_type() {
+        let large = || Value::ArrayU8(vec![255; 1 << 20]);
+        // Where the kind belongs, and after a whole request.
+        let misplaced = Value::ArrayValue(vec![large()]);
+        let trailing = Value::ArrayValue(vec![
+            Value::U8(LIST_KEYS),
+            Value::U32(1),
+            Value::Option(None),
+            large(),
+        ]);
+        for wrong in [misplaced, trailing] {
+            let bytes = arora_buffers::froto_value::serialize(&wrong);
+            let error = decode_request(&bytes).unwrap_err();
+            assert!(
+                error.len() < 200,
+                "{} bytes of error: {}",
+                error.len(),
+                &error[..200.min(error.len())]
+            );
+        }
     }
 
     /// Every truncation and every single-byte corruption of valid messages is
