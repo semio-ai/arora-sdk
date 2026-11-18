@@ -9,7 +9,7 @@ repository = "https://github.com/semio-ai/arora-sdk"
 [dependencies]
 arora-types = { path = "../arora-types", version = "3.10" }
 # 6.3: `CallFuture` and `Caller`, which the client implements.
-arora-bridge = { path = "../arora-bridge", version = "6.3" }
+arora-bridge = { path = "../arora-bridge", version = "6.4" }
 # 3.3: `well_formed`, checked before decoding what a peer sent.
 arora-buffers = { path = "../arora-buffers", version = "3.3" }
 async-trait = "0.1"

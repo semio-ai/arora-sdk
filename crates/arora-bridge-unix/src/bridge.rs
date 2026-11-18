@@ -462,6 +462,13 @@ impl Bridge for UnixBridge {
         let _ = self.changes.send(Arc::new(change.clone()));
     }
 
+    /// As [`try_send`](Self::try_send), sharing the change rather than
+    /// copying it: the runtime's way, so a step copies no value for the
+    /// bridge.
+    fn try_send_shared(&mut self, change: &Arc<StateChange>) {
+        let _ = self.changes.send(change.clone());
+    }
+
     async fn get_device_info(&self) -> BridgeResult<Option<DeviceInfo>> {
         Ok(None)
     }
