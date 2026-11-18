@@ -10,8 +10,9 @@
 //! or on an embedder calling [`step`](Arora::step) from its own clock.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use arora_behavior::{
@@ -19,7 +20,6 @@ use arora_behavior::{
 };
 use arora_behavior::{interpreter_module, FunctionIndex, RunPolicy, TaskHandle};
 use arora_bridge::{Bridge, BridgeCommand, BridgeOp, Inbound, MethodSignature};
-use arora_hal::Hal;
 use arora_types::call::{Call, CallBridge, CallError, CallResult};
 use arora_types::data::{DataStore, Key, KeyMeta, StateChange, Subscription};
 use arora_types::value::Value;
@@ -286,28 +286,21 @@ fn publish_clock(store: &dyn DataStore, clock: &ClockValues) -> Result<(), Runti
 }
 
 /// Phase 2 — apply the HAL's sensor readings, oldest first: within the frame,
-/// a later reading of the same key wins. Returns the coalesced readings it
-/// applied, so phase 6 can keep the hardware's own reports from being written
-/// back to it ([`write_hal`]).
+/// a later reading of the same key wins. Returns the keys read, so phase 5 can
+/// keep the hardware's own reports from being written back to it
+/// ([`split_outbound`]); the values are moved into the store, not copied.
 fn apply_sensors(
     store: &dyn DataStore,
     sensors: Vec<StateChange>,
-) -> Result<StateChange, RuntimeError> {
-    let mut applied = StateChange::new();
+) -> Result<HashSet<Key>, RuntimeError> {
+    let mut read = HashSet::new();
     for change in sensors {
-        for (key, value) in &change.set {
-            applied.unset.remove(key);
-            applied.set.insert(key.clone(), value.clone());
-        }
-        for key in &change.unset {
-            applied.set.remove(key);
-            applied.unset.insert(key.clone());
-        }
+        read.extend(change.set.keys().chain(&change.unset).cloned());
         store
             .write(change)
             .map_err(|e| RuntimeError::Store(e.to_string()))?;
     }
-    Ok(applied)
+    Ok(read)
 }
 
 /// Phase 3 — apply the bridge events, in arrival order, **after** the sensors:
@@ -794,73 +787,110 @@ fn tick_behavior(
     }
 }
 
-/// Phase 5 — coalesce everything drained from the store's change feed this step
-/// into ONE [`StateChange`], so the remote/hardware see a single, consistent
-/// update per step. Changes are drained in order, so later ones win: a set
+/// Coalesce everything drained from the store's change feed so far into one
+/// [`StateChange`]. Changes are drained in order, so later ones win: a set
 /// overrides an earlier unset of the same key (and vice versa).
 fn flush(changes: &Subscription) -> StateChange {
     let mut merged = StateChange::new();
     while let Some(change) = changes.try_recv() {
-        for (key, value) in change.set {
-            merged.unset.remove(&key);
-            merged.set.insert(key, value);
-        }
-        for key in change.unset {
-            merged.set.remove(&key);
-            merged.unset.insert(key);
-        }
+        merge(&mut merged, change);
     }
     merged
 }
 
-/// Phase 6a — hand the coalesced outbound change to the hardware, through its
-/// non-blocking push seam — **minus the keys whose frame-final value came from
-/// the hardware itself** (`sensor_applied`, from [`apply_sensors`]): the HAL is
-/// not told what it just reported. The bridges are (a remote wants sensor
-/// state); and a key the behavior overwrote after the reading goes to the HAL
-/// with the behavior's value, since that no longer matches the reading.
-///
-/// The HAL is lent `out` itself when no reading is a frame-final value — always
-/// the case for a HAL that reports nothing — so such a frame copies nothing;
-/// only a frame with keys to leave out builds the HAL a change of its own.
-/// Telling the two apart costs a lookup per reading, not per outbound key.
-fn write_hal(hal: &dyn Hal, out: &StateChange, sensor_applied: &StateChange) {
-    let reported_back = sensor_applied
-        .set
-        .iter()
-        .any(|(key, value)| out.set.get(key) == Some(value))
-        || sensor_applied
-            .unset
-            .iter()
-            .any(|key| out.unset.contains(key));
-    if !reported_back {
-        hal.try_send(out);
-        return;
+/// Apply `later` over `into`, moving its values: a key `later` sets or unsets
+/// takes that state, whatever `into` held for it.
+fn merge(into: &mut StateChange, later: StateChange) {
+    for (key, value) in later.set {
+        into.unset.remove(&key);
+        into.set.insert(key, value);
     }
-    let mut for_hal = StateChange::new();
-    for (key, value) in &out.set {
-        if sensor_applied.set.get(key) == Some(value) {
-            continue;
-        }
-        for_hal.set.insert(key.clone(), value.clone());
-    }
-    for key in &out.unset {
-        if sensor_applied.unset.contains(key) {
-            continue;
-        }
-        for_hal.unset.insert(key.clone());
-    }
-    if !for_hal.is_empty() {
-        hal.try_send(&for_hal);
+    for key in later.unset {
+        into.set.remove(&key);
+        into.unset.insert(key);
     }
 }
 
-/// Phase 6b — fan the same change out to every bridge endpoint. Each buffers
-/// onto its own transport; none blocks the step.
-fn write_bridges(bridges: &mut [Box<dyn Bridge>], asked: &[bool], out: &StateChange) {
+/// Phase 5 — what this frame changed, from the store's changes drained before
+/// the readings (`before`), while they were applied (`during`) and after them
+/// (`after`), as two changes with no key in common: everything the HAL is
+/// sent, and the HAL's own reports that are still frame-final.
+///
+/// The HAL is not told what it just reported; the bridges are sent both (a
+/// remote wants sensor state). A key in `read` counts as a report only while
+/// nothing changed it afterwards: a key the behavior changed after the
+/// reading goes to the HAL with the behavior's value. A write of the value the
+/// key holds is no change, so a behavior writing back the reading leaves it a
+/// report. A key in `read` that `during`
+/// lacks was reported with the value it already held, so what `before` holds
+/// for it is the report. The split moves values and compares none, so a large
+/// reading (a camera frame) costs no copy and no comparison here.
+///
+/// The writer of a change is told from the phase it was drained in, not from
+/// the value: a write from another thread holding the store (a clone of a
+/// [`SimpleDataStore`](arora_simple_data_store::SimpleDataStore)) that lands
+/// while the readings apply, to a key the HAL read, counts as a report. Such a
+/// writer is outside the step's order; one writing between steps, on the
+/// step's thread, lands in `before`.
+fn split_outbound(
+    mut before: StateChange,
+    during: StateChange,
+    read: &HashSet<Key>,
+    after: StateChange,
+) -> (StateChange, StateChange) {
+    let mut reported = StateChange::new();
+    for key in read {
+        if let Some(value) = before.set.remove(key) {
+            reported.set.insert(key.clone(), value);
+        } else if before.unset.remove(key) {
+            reported.unset.insert(key.clone());
+        }
+    }
+    for (key, value) in during.set {
+        if read.contains(&key) {
+            reported.unset.remove(&key);
+            reported.set.insert(key, value);
+        } else {
+            before.unset.remove(&key);
+            before.set.insert(key, value);
+        }
+    }
+    for key in during.unset {
+        if read.contains(&key) {
+            reported.set.remove(&key);
+            reported.unset.insert(key);
+        } else {
+            before.set.remove(&key);
+            before.unset.insert(key);
+        }
+    }
+    for key in after.set.keys().chain(&after.unset) {
+        reported.set.remove(key);
+        reported.unset.remove(key);
+    }
+    merge(&mut before, after);
+    (before, reported)
+}
+
+/// Phase 6b — fan the frame's change, `out` with the HAL's `reported`
+/// readings, out to every bridge endpoint that asked for data. The change is
+/// built and shared once, whatever the number of endpoints; each buffers it
+/// onto its own transport, and none blocks the step.
+fn write_bridges(
+    bridges: &mut [Box<dyn Bridge>],
+    asked: &[bool],
+    mut out: StateChange,
+    reported: StateChange,
+) {
+    let asked = |endpoint: usize| asked.get(endpoint).copied().unwrap_or(false);
+    if !(0..bridges.len()).any(asked) {
+        return;
+    }
+    merge(&mut out, reported);
+    let out = Arc::new(out);
     for (endpoint, bridge) in bridges.iter_mut().enumerate() {
-        if asked.get(endpoint).copied().unwrap_or(false) {
-            bridge.try_send(out);
+        if asked(endpoint) {
+            bridge.try_send_shared(&out);
         }
     }
 }
@@ -902,17 +932,33 @@ impl Arora {
         let clock = tick_clock(&mut self.clock, dt);
         publish_clock(&*self.store, &clock)?;
         // 2. HAL readings — oldest first; per key, the newest wins.
-        let sensor_applied =
-            apply_sensors(&*self.store, std::mem::take(&mut self.pending.sensors))?;
+        //    What changed before the readings (the clock among it, and what
+        //    a failed step left unsent), then the readings, drained apart so
+        //    phase 5 tells them apart. A step failing from here keeps what it
+        //    drained for the next one: no change is lost to a failed step.
+        let mut before = std::mem::take(&mut self.unsent);
+        merge(&mut before, flush(&self.store_changes));
+        let read = match apply_sensors(&*self.store, std::mem::take(&mut self.pending.sensors)) {
+            Ok(read) => read,
+            Err(e) => {
+                self.unsent = before;
+                return Err(e);
+            }
+        };
+        let during = flush(&self.store_changes);
         // 3. bridge readings — after the HAL: a remote update beats this
         //    frame's sensor value. Commands dispatch and reply here.
-        apply_events(
+        if let Err(e) = apply_events(
             &*self.store,
             &self.function_index,
             &mut self.engine,
             std::mem::take(&mut self.pending.events),
             &mut self.data_requested,
-        )?;
+        ) {
+            merge(&mut before, during);
+            self.unsent = before;
+            return Err(e);
+        }
         // 4. behavior — the frame's last writer: its intent wins, and it saw
         //    what it overrode. The cell borrow spans exactly this phase; a
         //    tick-time built-in edit through the engine finds it held and fails
@@ -927,13 +973,17 @@ impl Arora {
         //    The task runs started since the previous step, and those this
         //    tick ended, said once each.
         report_task_runs(&*self.store, &self.task_runs, &self.function_index);
-        // 5. flush — everything this frame changed, as one change.
-        let out = flush(&self.store_changes);
-        // 6. writings — the hardware first (its own readings subtracted), then
+        // 5. flush — everything this frame changed: the HAL's readings still
+        //    frame-final, and the rest.
+        let after = flush(&self.store_changes);
+        let (out, reported) = split_outbound(before, during, &read, after);
+        // 6. writings — the hardware first (its own readings left out), then
         //    every remote.
         if !out.is_empty() {
-            write_hal(&*self.hal, &out, &sensor_applied);
-            write_bridges(&mut self.bridges, &self.data_requested, &out);
+            self.hal.try_send(&out);
+        }
+        if !(out.is_empty() && reported.is_empty()) {
+            write_bridges(&mut self.bridges, &self.data_requested, out, reported);
         }
         Ok(())
     }
@@ -2623,36 +2673,6 @@ exports:
         );
     }
 
-    /// A HAL that forwards, for each push, the address of the change it was
-    /// handed and a copy of it — so a test can tell a lent change from one
-    /// built for the HAL, and read what reached it.
-    struct LendingProbe {
-        sent: mpsc::UnboundedSender<(usize, StateChange)>,
-    }
-
-    #[async_trait]
-    impl Hal for LendingProbe {
-        async fn describe(&self) -> arora_hal::HalDescription {
-            arora_hal::HalDescription::default()
-        }
-        async fn read(&self, keys: &[Key]) -> arora_hal::HalResult<Vec<Option<Value>>> {
-            Ok(vec![None; keys.len()])
-        }
-        async fn read_all(&self) -> arora_hal::HalResult<arora_types::data::State> {
-            Ok(Default::default())
-        }
-        async fn write(&self, _changes: StateChange) -> arora_hal::HalResult<()> {
-            Ok(())
-        }
-        fn try_send(&self, changes: &StateChange) {
-            let address = changes as *const StateChange as usize;
-            let _ = self.sent.unbounded_send((address, changes.clone()));
-        }
-        fn updates(&self) -> arora_hal::UpdatesStream {
-            Box::pin(stream::pending())
-        }
-    }
-
     fn change(set: &[(&str, f64)], unset: &[&str]) -> StateChange {
         StateChange {
             set: set
@@ -2663,72 +2683,79 @@ exports:
         }
     }
 
-    /// A frame where the HAL reported nothing hands the HAL the outbound change
-    /// itself: the HAL receives the very change the frame flushed, not a copy.
-    #[test]
-    fn a_hal_that_reported_nothing_is_lent_the_outbound_change() {
-        let (sent, mut received) = mpsc::unbounded();
-        let hal = LendingProbe { sent };
-        let out = change(&[("face/mouth", 0.5), ("face/eyes", 0.1)], &["face/brow"]);
-
-        write_hal(&hal, &out, &StateChange::new());
-
-        let (address, got) = received.try_recv().expect("the HAL was written to");
-        assert_eq!(
-            address, &out as *const StateChange as usize,
-            "lent, not copied"
-        );
-        assert_eq!(got, out);
+    fn keys(keys: &[&str]) -> HashSet<Key> {
+        keys.iter().map(|key| Key::from(*key)).collect()
     }
 
-    /// A reading the behavior overwrote is no longer the HAL's own report, so
-    /// there is nothing to leave out and the change is lent as well.
+    /// A frame where the HAL reported nothing sends the HAL everything.
     #[test]
-    fn a_reading_overwritten_this_frame_leaves_the_change_lent() {
-        let (sent, mut received) = mpsc::unbounded();
-        let hal = LendingProbe { sent };
-        let out = change(&[("arm/target", 0.8), ("face/mouth", 0.5)], &[]);
-        let reported = change(&[("arm/target", 0.2)], &[]);
-
-        write_hal(&hal, &out, &reported);
-
-        let (address, got) = received.try_recv().expect("the HAL was written to");
+    fn a_hal_that_reported_nothing_is_sent_everything() {
+        let before = change(&[("face/mouth", 0.5)], &["face/brow"]);
+        let after = change(&[("face/eyes", 0.1)], &[]);
+        let (out, reported) = split_outbound(before, StateChange::new(), &HashSet::new(), after);
         assert_eq!(
-            address, &out as *const StateChange as usize,
-            "lent, not copied"
+            out,
+            change(&[("face/mouth", 0.5), ("face/eyes", 0.1)], &["face/brow"])
         );
-        assert_eq!(got, out);
+        assert!(reported.is_empty());
+    }
+
+    /// A reading the behavior overwrote is no longer the HAL's own report: it
+    /// goes to the HAL with the behavior's value.
+    #[test]
+    fn a_reading_overwritten_this_frame_goes_to_the_hal() {
+        let during = change(&[("arm/target", 0.2)], &[]);
+        let after = change(&[("arm/target", 0.8), ("face/mouth", 0.5)], &[]);
+        let (out, reported) =
+            split_outbound(StateChange::new(), during, &keys(&["arm/target"]), after);
+        assert_eq!(
+            out,
+            change(&[("arm/target", 0.8), ("face/mouth", 0.5)], &[])
+        );
+        assert!(reported.is_empty());
     }
 
     /// The HAL is not told what it just reported: a reading that is still the
-    /// frame-final value — set or unset — is left out of what the HAL receives,
-    /// and every other key reaches it.
+    /// frame-final value — set or unset — is kept apart, for the bridges, and
+    /// overrides what the frame held for the key before it.
     #[test]
     fn the_hal_is_not_told_what_it_reported() {
-        let (sent, mut received) = mpsc::unbounded();
-        let hal = LendingProbe { sent };
-        let out = change(
+        let before = change(&[("arm/position", 0.1)], &[]);
+        let during = change(&[("arm/position", 0.2)], &["arm/fault"]);
+        let after = change(&[("face/mouth", 0.5)], &[]);
+        let read = keys(&["arm/position", "arm/fault"]);
+        let (out, reported) = split_outbound(before, during, &read, after);
+        assert_eq!(out, change(&[("face/mouth", 0.5)], &[]));
+        assert_eq!(reported, change(&[("arm/position", 0.2)], &["arm/fault"]));
+    }
+
+    /// A reading equal to the value the key held is no change to the store, so
+    /// `during` lacks it; what the frame set before it is still the HAL's own
+    /// value, and not sent back.
+    #[test]
+    fn a_reading_that_changed_nothing_is_still_a_report() {
+        let before = change(
             &[("arm/position", 0.2), ("face/mouth", 0.5)],
             &["arm/fault"],
         );
-        let reported = change(&[("arm/position", 0.2)], &["arm/fault"]);
-
-        write_hal(&hal, &out, &reported);
-
-        let (_, got) = received.try_recv().expect("the HAL was written to");
-        assert_eq!(got, change(&[("face/mouth", 0.5)], &[]));
+        let read = keys(&["arm/position", "arm/fault"]);
+        let (out, reported) = split_outbound(before, StateChange::new(), &read, StateChange::new());
+        assert_eq!(out, change(&[("face/mouth", 0.5)], &[]));
+        assert_eq!(reported, change(&[("arm/position", 0.2)], &["arm/fault"]));
     }
 
-    /// When the frame changed nothing but the HAL's own reports, the HAL is
-    /// not written to at all.
+    /// A change the store fed while the readings were applied, to a key the HAL
+    /// did not read (another thread's write), is not a report.
     #[test]
-    fn a_frame_of_only_readings_is_not_written_back() {
-        let (sent, mut received) = mpsc::unbounded();
-        let hal = LendingProbe { sent };
-        let out = change(&[("arm/position", 0.2)], &[]);
-
-        write_hal(&hal, &out, &out.clone());
-
-        assert!(received.try_recv().is_err(), "nothing to tell the HAL");
+    fn only_the_keys_read_are_reports() {
+        let during = change(&[("arm/position", 0.2), ("other/thread", 1.0)], &[]);
+        let (out, reported) = split_outbound(
+            StateChange::new(),
+            during,
+            &keys(&["arm/position"]),
+            StateChange::new(),
+        );
+        assert_eq!(out, change(&[("other/thread", 1.0)], &[]));
+        assert_eq!(reported, change(&[("arm/position", 0.2)], &[]));
     }
 }

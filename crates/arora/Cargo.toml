@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "18.0.0"
+version = "18.0.1"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -69,7 +69,7 @@ web-time = "1"
 arora-hal = { path = "../arora-hal", version = "4.3" }
 # 6.1: `client`, the conventions `LocalCaller` speaks. 6.3: on arora-behavior
 # 10, the one this crate's run handles are of.
-arora-bridge = { path = "../arora-bridge", version = "6.3" }
+arora-bridge = { path = "../arora-bridge", version = "6.4" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 futures = "0.3"
 # Sync primitives only: the runtime-bearing tokio is native-only (below).
