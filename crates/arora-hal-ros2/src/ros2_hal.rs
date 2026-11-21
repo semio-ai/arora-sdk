@@ -207,12 +207,20 @@ impl Ros2Hal {
                 TopicDirection::Publish | TopicDirection::Both
             ) {
                 debug!("Configuring publisher for topic: {}", topic_config.name);
-                Self::setup_publisher(
+                // A topic of a type the HAL cannot publish yet is skipped, so
+                // the rest of the robot still starts.
+                match Self::setup_publisher(
                     &mut node,
                     &mut publishers,
                     &topic_config.name,
                     &topic_config.message_type,
-                )?;
+                ) {
+                    Err(ROS2RobotError::UnsupportedMessageType(msg_type)) => warn!(
+                        "Skipping publisher for topic {}: {msg_type} is not supported",
+                        topic_config.name
+                    ),
+                    result => result?,
+                }
             }
         }
 
@@ -464,7 +472,6 @@ impl Ros2Hal {
             Self::setup_typed_publisher::<msgs::String>(node, publishers, topic_name)?;
         // Add more message types as needed
         } else {
-            error!("Unsupported message type for publisher: {}", msg_type);
             return Err(ROS2RobotError::UnsupportedMessageType(msg_type.to_owned()));
         }
 
@@ -1818,6 +1825,23 @@ mod keys_tests {
             ]
         );
         assert_eq!(keys[&Key::from("data")], output(Type::String));
+    }
+
+    /// The built-in configurations that declare a topic of a type the HAL
+    /// cannot publish (UR3 and G1 a `Twist`, Pepper an `Image` and a `Twist`)
+    /// still start; the HAL skips that topic. The HAL's node needs no peer.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_configuration_with_an_unsupported_publisher_starts() {
+        for (name, mut config) in [
+            ("ur3", configs::ur3::create_config()),
+            ("g1", configs::unitree_g1::create_config()),
+            ("pepper", configs::pepper::create_config()),
+        ] {
+            config.domain_id = Some(rand::random_range(1..=200));
+            config.model_glb_path = Some(crate::test_fixture::fixture_glb_path());
+            let hal = Ros2Hal::new(config).await;
+            assert!(hal.is_ok(), "{name}: {:?}", hal.err());
+        }
     }
 
     /// Through an Arora device: it lists the HAL's keys with their meta, takes

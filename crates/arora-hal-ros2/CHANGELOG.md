@@ -4,6 +4,15 @@ All notable changes to `arora-hal-ros2`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [7.0.1] - Unreleased
+
+### Fixed
+
+- A configured `Publish` topic of a message type the HAL cannot publish is
+  skipped with a warning, so the HAL starts. The built-in `ur3`, `g1` and
+  `pepper` configurations declare such topics (`geometry_msgs/Twist`,
+  `sensor_msgs/Image`), and `arora-ros2` refused to start them.
+
 ## [7.0.0] - 2026-10-30
 
 ### Changed
