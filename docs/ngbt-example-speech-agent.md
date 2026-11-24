@@ -40,7 +40,7 @@ a screen with two eyes and a mouth. Nine channels:
 vad, asr, face ─▶ STATECHART ── states, emotion, gesture ──▶ MOTION GRAPH ─▶ 9 channels
                    │      ▲                                   ▲
      start, hold,  │      │ sentence, audio ready,            │
-     resume, drop  ▼      │ playing, done                     │
+     resume, halt  ▼      │ playing, done                     │
                   SPEECH PIPELINE ──── viseme, playing ───────┘
 ```
 
@@ -49,7 +49,7 @@ vad, asr, face ─▶ STATECHART ── states, emotion, gesture ──▶ MOTIO
 - **The motion graph transforms and blends, every tick.** It turns the states,
   the live input and the assets into the nine channels (§4).
 - **The speech pipeline transforms text and speech, asynchronously.** One run
-  per turn, started, held, resumed and dropped by the statechart (§5).
+  per turn, started, held, resumed and halted by the statechart (§5).
 
 What passes between them:
 
@@ -58,7 +58,7 @@ What passes between them:
 | inputs → statechart | voice activity (`vad`), recognized words (`asr`), face visible |
 | inputs → motion graph | face position |
 | statechart → motion graph | the states and when each started; the active emotions and their trigger times; the gesture |
-| statechart → pipeline | start a run, hold, resume, drop; start a judge |
+| statechart → pipeline | start a run, hold, resume, halt; start a judge |
 | pipeline → statechart | a sentence arrived (with its emotion and gesture), audio ready, playback started and ended, a tool call started, the reply ended, a verdict |
 | pipeline → motion graph | the viseme the speech reports at its playhead, whether speech is playing |
 
@@ -77,12 +77,12 @@ interaction: utterances and replies since the last reset.
 | Listening | VAD off with words, from Idle | Thinking | A run starts on the round and the words |
 | Listening | VAD off with words, from Thinking or Speaking | Judging | The judge runs on the round, the reply so far and the new words |
 | Judging | verdict `continue` | the state Listening came from | The run, and the audio, resume. The judge's follow-up sentences are added after the reply's last sentence |
-| Judging | verdict `invalidated` | Thinking | The held run is dropped. A run starts on the round and the new words |
-| Judging | VAD on | Listening | The judge is dropped |
+| Judging | verdict `invalidated` | Thinking | The held run is halted. A run starts on the round and the new words |
+| Judging | VAD on | Listening | The judge is halted |
 | Thinking | sentence 1 arrives | Thinking (preparing) | Its emotion triggers; the thinking expression fades out |
 | Thinking (preparing) | its audio starts | Speaking | |
 | Speaking | the last sentence ends, follow-ups included | Idle | The turn is remembered |
-| any | attention enters Nobody | Idle | The interaction resets: a run is dropped, the round is cleared |
+| any | attention enters Nobody | Idle | The interaction resets: a run is halted, the round is cleared |
 
 - **Entering Thinking:** the thinking expression fades in and the eyes glance
   up for 1.2 s. Judging shows the thinking expression too.
@@ -227,11 +227,11 @@ reply end ─ remember
 - **Fillers:** when a tool call starts in a run that is not held, a stored
   filler line plays through the lipsync path.
 - **Held runs** may call info tools. Playback, filler lines, emotions and
-  action tools wait until the run is handed back, so a dropped run leaves no
+  action tools wait until the run is handed back, so a halted run leaves no
   effects.
 - **The judge** decides whether the reply can continue after the user adds
   words, and writes what to add if it can.
-- **Remember** records the turn when the reply ends or is dropped, partial
+- **Remember** records the turn when the reply ends or is halted, partial
   replies included.
 - **The mocks are deterministic.** The mock LLM's reply depends on which facts
   reached its prompt (§6), so a design that builds the prompt before the facts
@@ -322,7 +322,7 @@ user        5.0–7.0    "Will it be nice for our picnic on Saturday?"
             23.8–24.1  a cough: voice activity, no words
 
 run 1       llm   → weather(here, Saturday)
-            llm   → {happy} "Sunny all day, twenty-four degrees!"        dropped: never heard
+            llm   → {happy} "Sunny all day, twenty-four degrees!"        halted: never heard
 judge 1     invalidated
 run 2       llm   → weather(Riverside, Saturday)
             llm   → {happy} "Sunny at Riverside all day!"
@@ -348,7 +348,7 @@ times are rounded; the reference computes them from the TTS rule (§6).
    - 9.0: run 1's LLM calls `weather`. The call runs, but no filler line plays:
      the run is held.
    - 9.6: Judging.
-   - 10.6: `invalidated`. Run 1 is dropped, its second LLM round in flight.
+   - 10.6: `invalidated`. Run 1 is halted, its second LLM round in flight.
      Thinking, run 2; the eyes glance up again.
 5. **10.6–15.6 s, run 2.**
    - 11.6: the prompt; the LLM.
@@ -393,7 +393,7 @@ times are rounded; the reference computes them from the TTS rule (§6).
   tool call; one TTS per sentence. One judge per confirmed interruption. One
   filler line, from run 2.
 - **Stale output.** No words, emotion, filler line or action tool from a held
-  or dropped run.
+  or halted run.
 - **Barge-in.** Ticks from the VAD to the audio pausing.
 - **Resume.** A resumed sentence continues from its paused playhead, or is
   counted as starting over.
@@ -554,7 +554,7 @@ download it and open it in a browser.
   side: the postures showing, the prompts built, the memory written.
 - **The implementations.** The reference, the spec as bespoke code, which
   every design is checked against, under the call contract; a naive foil, the reference's code with
-  three rules broken for the scorecard to catch (it drops the reply on any
+  three rules broken for the scorecard to catch (it halts the reply on any
   cut-in, replaces emotions and reads the previous tick's head); and the five
   designs of §10.
 - **Not there yet:** live controls (a face toggle and slider, buttons for the
@@ -596,7 +596,7 @@ The four tree designs (#396, #409, #404, #405) share these parts:
 
 - **The reply run is a task run** the conversation spawns, with Arora's spawn
   and halt. It outlives the branch that started it. The tree writes
-  `{reply/held}` to gate what it shows, and halts the run to drop it.
+  `{reply/held}` to gate what it shows, and halts the run to discard it.
 - **Its stages are module-call leaves,** returning `Running` until done and
   polled at every tick. This is Arora's call contract (§5), and the way
   arora-dataflow-nodes places external calls and task runs.
@@ -736,8 +736,8 @@ comparison here (9.5 ns) costs less than the version write that marks a reader
 (38 ns), and 28 of the 75 needed nodes change at every tick. For #257 it saves
 its input and output nodes' visits, and pays.
 
-Two candidates were tried and dropped. Versions instead of value comparison
-(#396's proposal, §9), tried before invalidation, cost 0.7 µs more: nearly
+Two alternatives cost more. Versions instead of value comparison (#396's
+proposal, §9), measured against invalidation, cost 0.7 µs more: nearly
 every value here is a number, cheaper to compare than to version. #405's
 `WITH[ PARALLEL[ leaf × N ], RUN ]` shape for #404's groups cost 0.2 µs more:
 every group but the mouth's changes at every tick, so few answer settled.
@@ -871,7 +871,7 @@ motion graph over the run:
   while it has readers. The dirty bit and the statuses are private
   (`incremental.rs:49-58`), and nothing reaches an observer outside the tree.
 - **#405 shows less than #404.** A placed node is an `_on_change` leaf with a
-  private port, which `observe_detached` and `detached_outputs` no longer reach
+  private port, which `observe_detached` and `detached_outputs` do not reach
   (`docs/proposal-placing-detached-nodes.md:264-270` on #405). Unplaced nodes
   keep #396's cache, so one file has two regimes. Its groups run before the
   tree, so at 8.6% of ticks the graph and the store hold different values of

@@ -583,11 +583,11 @@ const MOCK = {
 
 // ============================================================================
 // A reply run: the async pipeline of one turn. It computes while held, and its
-// in-flight calls end, marked dropped, when the run is dropped.
+// in-flight calls end, marked halted, when the run is halted.
 // ============================================================================
 class Run {
   constructor(sim, id, t, utterance) {
-    Object.assign(this, { sim, id, utterance, held: false, dropped: false, docs: null, memories: null, toolResults: [], prompts: [], llmRounds: 0, toolCalls: 0, llmDone: false, tts: null, fillerOwed: false, toolInFlight: false });
+    Object.assign(this, { sim, id, utterance, held: false, halted: false, docs: null, memories: null, toolResults: [], prompts: [], llmRounds: 0, toolCalls: 0, llmDone: false, tts: null, fillerOwed: false, toolInFlight: false });
     this.sentences = []; this.follow = []; this.pending = [];
     this.at(t + LATENCY.rag, 'rag', sim.lane('rag', id, t, t + LATENCY.rag, 'documents'));
     this.at(t + LATENCY.recall, 'recall', sim.lane('recall', id, t, t + LATENCY.recall, 'memories'));
@@ -602,7 +602,7 @@ class Run {
     for (;;) {
       this.pending.sort((a, b) => a.when - b.when);
       const p = this.pending[0];
-      if (!p || p.when > t + 1e-9 || this.dropped) break;
+      if (!p || p.when > t + 1e-9 || this.halted) break;
       this.pending.shift();
       this.complete(p);
     }
@@ -652,7 +652,7 @@ class Run {
     this.pumpTts(when);
   }
   pumpTts(when) {
-    if (this.tts || this.dropped) return;
+    if (this.tts || this.halted) return;
     const next = this.order().find((s) => s.ready === undefined && s.ttsStarted === undefined);
     if (!next) return;
     next.ttsStarted = when; this.tts = next;
@@ -661,16 +661,16 @@ class Run {
   }
   hold() { this.held = true; }
   resume(when) { this.held = false; if (this.fillerOwed && this.toolInFlight) { this.fillerOwed = false; this.sim.filler(this, when); } }
-  drop(when) {
-    this.dropped = true;
-    for (const p of this.pending) if (p.rec && p.rec.t1 > when) { p.rec.t1 = when; p.rec.outcome = 'dropped'; }
+  halt(when) {
+    this.halted = true;
+    for (const p of this.pending) if (p.rec && p.rec.t1 > when) { p.rec.t1 = when; p.rec.outcome = 'halted'; }
     this.pending = [];
   }
 }
 
 // ============================================================================
 // An implementation of the statechart, the motion graph and the speech player.
-// flags: halts (drop the run on a cut-in), replaceEmotion, staleEyes (the foil).
+// flags: halts (halt the run on a cut-in), replaceEmotion, staleEyes (the foil).
 // ============================================================================
 class Sim {
   constructor(flags = {}) {
@@ -713,19 +713,19 @@ class Sim {
     this.setConv(t, 'thinking', 'pondering');
     this.log(t, 'run', `run ${run.id}: ${quote(utterance)}`, { run: run.id });
   }
-  dropRun(t, run) { if (run && !run.dropped) { run.drop(t); this.log(t, 'drop', `run ${run.id} dropped`, { run: run.id }); } }
+  haltRun(t, run) { if (run && !run.halted) { run.halt(t); this.log(t, 'halt', `run ${run.id} halted`, { run: run.id }); } }
   onVadOn(t) {
     const C = this.conv;
     if (C.state === 'listening') return;
     let from = C.state;
-    if (C.state === 'judging') { this.dropJudge(t); from = C.from; }
+    if (C.state === 'judging') { this.haltJudge(t); from = C.from; }
     else C.subBefore = C.sub;
-    if ((from === 'thinking' || from === 'speaking') && C.run && !C.run.dropped) {
+    if ((from === 'thinking' || from === 'speaking') && C.run && !C.run.halted) {
       if (this.player) { if (this.player.kind === 'filler') this.stopItem(t, 'stopped'); else this.pauseItem(t); }
       C.prevUtterance = C.run.utterance;
       if (this.flags.halts) {
         if (from === 'speaking') this.rememberTurn(t, C.run, true);
-        this.dropRun(t, C.run);
+        this.haltRun(t, C.run);
         if (this.player) this.stopItem(t, 'cut');
       } else C.run.hold();
     }
@@ -739,7 +739,7 @@ class Sim {
     C.vadOff = true;
     if (!seg || !seg.text) { this.log(t, 'asr', 'no words'); return; }
     C.words = seg.text;
-    const live = C.run && !C.run.dropped, cutIn = C.from === 'thinking' || C.from === 'speaking';
+    const live = C.run && !C.run.halted, cutIn = C.from === 'thinking' || C.from === 'speaking';
     this.log(t, 'asr', quote(seg.text), { cutIn });
     if (C.from === 'idle' || !live) this.startRun(t, C.from === 'thinking' && C.prevUtterance ? `${C.prevUtterance} ${seg.text}` : seg.text);
     else { this.setConv(t, 'judging'); this.startJudge(t, seg.text); }
@@ -747,7 +747,7 @@ class Sim {
   falseAlarm(t) {
     const C = this.conv;
     this.log(t, 'false alarm', 'no words in 1.5 s');
-    if (C.from !== 'idle' && C.run && !C.run.dropped) this.handBack(t);
+    if (C.from !== 'idle' && C.run && !C.run.halted) this.handBack(t);
     else { C.run = null; this.setConv(t, 'idle'); }
   }
   handBack(t) {
@@ -765,11 +765,11 @@ class Sim {
   }
   onSentence(run, s, at) {
     const C = this.conv;
-    if (run !== C.run || run.held || run.dropped) return;
+    if (run !== C.run || run.held || run.halted) return;
     if (C.state === 'thinking' && s === run.order()[0] && !s.applied && s.emotion) { this.applyEmotion(s, at, run); this.setConv(at, 'thinking', 'preparing'); }
   }
   applyEmotion(s, t, run) {
-    if (run.held || run.dropped) this.violations.stale++;
+    if (run.held || run.halted) this.violations.stale++;
     this.trigger(s.emotion, t, 'reply'); s.applied = true;
   }
   filler(run, t) {
@@ -802,15 +802,15 @@ class Sim {
     if (this.judge === J && J.verdictDone && t >= J.t0 + LATENCY.followUps - 1e-9) {
       this.tr('polls', 0, 1);
       this.judge = null;
-      if (!J.run.dropped) J.run.addFollowUps(J.out.follow, t);
+      if (!J.run.halted) J.run.addFollowUps(J.out.follow, t);
     }
   }
-  dropJudge(t) { const J = this.judge; if (!J) return; J.rec.t1 = t; J.rec.outcome = 'dropped'; this.judge = null; }
+  haltJudge(t) { const J = this.judge; if (!J) return; J.rec.t1 = t; J.rec.outcome = 'halted'; this.judge = null; }
   invalidate(t, J) {
     const C = this.conv, old = C.run, from = C.from;
     if (from === 'speaking') this.rememberTurn(t, old, true);
-    this.dropRun(t, old);
-    if (this.player) this.stopItem(t, 'dropped');
+    this.haltRun(t, old);
+    if (this.player) this.stopItem(t, 'halted');
     this.startRun(t, from === 'thinking' ? `${old.utterance} ${J.words}` : J.words);
   }
   rememberTurn(t, run, partial) {
@@ -827,8 +827,8 @@ class Sim {
   }
   reset(t) {
     const C = this.conv;
-    if (this.judge) this.dropJudge(t);
-    if (C.run && !C.run.dropped) { if (C.state === 'speaking') this.rememberTurn(t, C.run, true); this.dropRun(t, C.run); }
+    if (this.judge) this.haltJudge(t);
+    if (C.run && !C.run.halted) { if (C.state === 'speaking') this.rememberTurn(t, C.run, true); this.haltRun(t, C.run); }
     if (this.player) this.stopItem(t, 'stopped');
     this.round = []; C.run = null; this.resets++; this.roundAfterReset = this.round.length;
     if (C.state !== 'idle') this.setConv(t, 'idle');
@@ -839,7 +839,7 @@ class Sim {
   sentenceItem(s) { return { kind: 'sentence', run: s.run, s, text: s.say, track: s.track, length: s.length, words: s.words }; }
   startItem(t, item) {
     const run = this.runs.find((r) => r.id === item.run);
-    if (run && (run.held || run.dropped)) this.violations.stale++;
+    if (run && (run.held || run.halted)) this.violations.stale++;
     Object.assign(item, { playhead: 0, paused: false, uid: ++this.itemCount });
     this.items[item.uid] = { track: item.track, length: item.length, text: item.text };
     item.seg = this.lane('audio', item.run, t, t + item.length, item.kind === 'filler' ? `filler ${quote(item.text)}` : quote(item.text));
@@ -902,7 +902,7 @@ class Sim {
   }
   advanceSpeech(t) {
     const C = this.conv, run = C.run;
-    if (!run || run.held || run.dropped || this.player) return;
+    if (!run || run.held || run.halted || this.player) return;
     if (C.state !== 'thinking' && C.state !== 'speaking') return;
     if (!this.flags.opt) { this.tr('polls', 1, 0, 1); this.polled.push('await'); }   // await: is the next sentence's audio ready? Bespoke, an event.
     const next = run.order().find((s) => !s.played);
@@ -1013,7 +1013,7 @@ class Sim {
       if (!O) { this.tr('polls', 1, 0, C.vadOff ? 2 : 1); this.polled.push('listen'); }   // listen: words yet, and after the voice, 1.5 s without them?
       if (C.vadOff && C.words === undefined && t - C.vadOnAt >= 1.5 - 1e-9) this.falseAlarm(t);
     }
-    for (const run of this.runs) if (!run.dropped) run.step(t);
+    for (const run of this.runs) if (!run.halted) run.step(t);
     this.stepJudge(t);
     this.stepPlayer(t);
     this.advanceSpeech(t);
@@ -1177,7 +1177,7 @@ class Sim {
     return {
       frames: this.frames, lanes: this.lanes, events: this.events, spoken: this.spoken, triggers: this.triggers, violations: this.violations,
       judges: this.judges, resets: this.resets, roundAfterReset: this.roundAfterReset, memoryLog: this.memoryLog, items: this.items, cost: this.costs, polls: this.pollLog, optimized: !!this.flags.opt,
-      runs: this.runs.map((r) => ({ id: r.id, utterance: r.utterance, prompts: r.prompts, dropped: r.dropped, toolCalls: r.toolCalls, llmRounds: r.llmRounds })),
+      runs: this.runs.map((r) => ({ id: r.id, utterance: r.utterance, prompts: r.prompts, halted: r.halted, toolCalls: r.toolCalls, llmRounds: r.llmRounds })),
     };
   }
 }
@@ -1213,7 +1213,7 @@ function score(rec, lag = 0) {
   const ids = Object.keys(counts).map(Number).sort((a, b) => a - b);
   const extra = ids.filter((id) => (counts[id].rag || 0) > 1 || (counts[id].recall || 0) > 1 || (counts[id].prompt || 0) !== (counts[id].llm || 0));
   items.push({ ok: !extra.length, title: 'One call per step', detail: ids.map((id) => `run ${id}: ${['rag', 'recall', 'prompt', 'llm', 'tool', 'tts', 'filler'].filter((k) => counts[id][k]).map((k) => `${k} ${counts[id][k]}`).join(' · ')}`).join('\n') });
-  items.push({ ok: rec.violations.stale === 0, title: 'Nothing shown from a held or dropped run', detail: `${rec.violations.stale} words, emotions or filler lines` });
+  items.push({ ok: rec.violations.stale === 0, title: 'Nothing shown from a held or halted run', detail: `${rec.violations.stale} words, emotions or filler lines` });
   const lags = [];
   for (const e of rec.events.filter((x) => x.kind === 'vad')) {
     const a = rec.lanes.find((r) => r.lane === 'audio' && r.t0 < e.t - 1e-6 && r.t1 >= e.t - 1e-6);
@@ -1251,9 +1251,9 @@ function score(rec, lag = 0) {
   const reset = rec.events.find((e) => e.kind === 'reset');
   const surprisedAfter = reset ? rec.triggers.filter((x) => x.t > reset.t && x.name === 'surprised' && x.source === 'attention').length : 0;
   items.push({ ok: !!reset && rec.roundAfterReset === 0 && !surprisedAfter, title: 'Nobody resets the interaction', detail: reset ? `reset at ${reset.t.toFixed(1)} s, the round emptied` : 'no reset' });
-  const dropped = rec.lanes.filter((r) => r.outcome === 'dropped' && r.run && !/^(audio|state|attention)$/.test(r.lane));
-  const secs = dropped.reduce((s, r) => s + (r.t1 - r.t0), 0);
-  items.push({ ok: null, title: 'Work dropped with its run', detail: dropped.length ? `${secs.toFixed(1)} s of service time: ${dropped.map((r) => `${r.lane} ${(r.t1 - r.t0).toFixed(1)} s`).join(', ')}` : 'none' });
+  const halted = rec.lanes.filter((r) => r.outcome === 'halted' && r.run && !/^(audio|state|attention)$/.test(r.lane));
+  const secs = halted.reduce((s, r) => s + (r.t1 - r.t0), 0);
+  items.push({ ok: null, title: 'Work halted with its run', detail: halted.length ? `${secs.toFixed(1)} s of service time: ${halted.map((r) => `${r.lane} ${(r.t1 - r.t0).toFixed(1)} s`).join(', ')}` : 'none' });
   if (rec.cost) {
     const avg = rec.cost.reduce((s, c) => s + c.us, 0) / rec.cost.length, peak = rec.cost.reduce((p, c, i) => (c.us > p.us ? { us: c.us, i } : p), { us: 0, i: 0 });
     items.push({ ok: null, title: 'Modeled cost', detail: `${avg.toFixed(0)} µs a tick on average, ${peak.us.toFixed(0)} µs at ${rec.frames[peak.i].t.toFixed(2)} s`, at: rec.frames[peak.i].t });
@@ -2839,7 +2839,7 @@ const sv = (tag, attrs = {}, text) => { const e = document.createElementNS(SVGNS
 
 const IMPLS = [
   { id: 'reference', name: 'Reference', note: 'The spec as bespoke code: an explicit state machine on an event loop, where the voice, the words, every call’s result and every deadline come through one queue, checked once a tick; and motion that computes a value only when what it follows from changed, taking from the script when a blink, the wave, an emotion’s fade, the thinking glance or a viseme next changes. Every design is checked against it, and tracer calls count its work the way the designs count theirs.', flags: {} },
-  { id: 'foil', name: 'Naive foil', note: 'The reference’s code with three rules broken for the scorecard to catch: it drops the reply on any cut-in, replaces emotions instead of blending them, and reads the previous tick’s head for the eyes.', flags: { halts: true, replaceEmotion: true, staleEyes: true } },
+  { id: 'foil', name: 'Naive foil', note: 'The reference’s code with three rules broken for the scorecard to catch: it halts the reply on any cut-in, replaces emotions instead of blending them, and reads the previous tick’s head for the eyes.', flags: { halts: true, replaceEmotion: true, staleEyes: true } },
   ...DESIGNS.map((d) => ({ id: d.id, name: d.name, note: `${d.note} With ${OPTIMIZATIONS[d.strategy].map((k) => OPT_INFO[k].label).join(', ')}.`, design: d })),
 ];
 const BEATS = [[1.2, 'face'], [5, 'asks'], [8.6, 'adds'], [10.6, 'invalidated'], [12.6, 'tool'], [14, 'lost'], [15, 'back'], [17.2, 'shade?'], [19.2, 'continue'], [23.8, 'cough'], [25.3, 'resumes'], [28, 'leaves'], [29.5, 'reset']];
@@ -3025,7 +3025,7 @@ function buildTranscript(side) {
     if (s.kind === 'filler') status.push('filler line, while a tool runs');
     for (const [a, b] of s.pauses) status.push(b === null ? `paused at ${a.toFixed(1)} s` : `paused ${a.toFixed(1)}–${b.toFixed(1)} s`);
     if (s.outcome === 'finished') status.push(`finished at ${s.end.toFixed(1)} s`);
-    else if (s.outcome === 'dropped') status.push(`dropped at ${s.end.toFixed(1)} s by the judge`);
+    else if (s.outcome === 'halted') status.push(`halted at ${s.end.toFixed(1)} s by the judge`);
     else if (s.outcome === 'cut') status.push(`cut at ${s.end.toFixed(1)} s, never resumed`);
     else if (s.outcome === 'stopped') status.push(`stopped at ${s.end.toFixed(1)} s`);
     const li = el('li', { class: s.outcome === 'cut' ? 'cut' : '' }, el('span', { class: 't', text: `${s.t0.toFixed(1)} s` }), el('span', { class: 'what' }, el('span', { class: `text ${s.kind === 'filler' ? 'filler' : ''}`, text: quote(s.text) }), el('span', { class: 'status', text: status.join(' · ') })));
@@ -3645,7 +3645,7 @@ function buildStrip(side) {
       const rect = sv('rect', { x: x0, y: y + 3, width: w, height: 10, rx: 2 });
       if (neutral) rect.setAttribute('class', alt++ % 2 ? 'state-b' : 'state-a'); else if (lane === 'user') rect.setAttribute('class', 'user'); else rect.style.fill = runColor(r.run);
       const g = sv('g', { tabindex: 0 }); g.append(rect);
-      if (r.outcome === 'dropped' || r.outcome === 'cut' || r.outcome === 'stopped') { g.append(sv('rect', { x: x0, y: y + 3, width: w, height: 10, fill: `url(#${hatchId})` })); g.append(sv('text', { class: 'mark-x', x: x0 + w + 2, y: y + 12 }, '×')); }
+      if (r.outcome === 'halted' || r.outcome === 'cut' || r.outcome === 'stopped') { g.append(sv('rect', { x: x0, y: y + 3, width: w, height: 10, fill: `url(#${hatchId})` })); g.append(sv('text', { class: 'mark-x', x: x0 + w + 2, y: y + 12 }, '×')); }
       if (neutral && w > r.label.length * 6 + 6) g.append(sv('text', { class: 'seg-label', x: x0 + 3, y: y + 11.5 }, r.label));
       const describe = () => `<b>${lane === 'state' ? 'conversation' : lane}</b>${r.run ? ` · run ${r.run}` : ''}<br>${r.t0.toFixed(2)}–${Math.min(r.t1, RUN_END).toFixed(2)} s · ${escapeHtml(r.label)}${r.outcome !== 'done' ? ` · <b>${r.outcome}</b>` : ''}`;
       const show = (ev) => showTip(describe(), ev);
@@ -3658,7 +3658,7 @@ function buildStrip(side) {
   side.stripNow = sv('line', { class: 'now', x1: left, x2: left, y1: top, y2: top + LANES.length * rowH }); svg.append(side.stripNow);
   side.stripX = x;
   side.stripBox.replaceChildren(svg);
-  side.stripLegend.replaceChildren(...side.rec.runs.map((r) => el('span', { title: r.utterance }, el('i', { style: `background:${runColor(r.id)}` }), `run ${r.id}${r.dropped ? ' (dropped)' : ''}`)), el('span', {}, el('i', { style: 'background:var(--faint)' }), 'Sam speaking'), el('span', {}, '× ended early'));
+  side.stripLegend.replaceChildren(...side.rec.runs.map((r) => el('span', { title: r.utterance }, el('i', { style: `background:${runColor(r.id)}` }), `run ${r.id}${r.halted ? ' (halted)' : ''}`)), el('span', {}, el('i', { style: 'background:var(--faint)' }), 'Sam speaking'), el('span', {}, '× ended early'));
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function showTip(html, ev) {
