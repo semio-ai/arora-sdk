@@ -203,6 +203,8 @@ struct TestBridge {
     next_id: u64,
     leaf_statuses: LeafStatuses,
     leaf_ticks: LeafTicks,
+    /// Every call made, in order.
+    calls: Rc<RefCell<Vec<Call>>>,
 }
 
 impl TestBridge {
@@ -212,6 +214,7 @@ impl TestBridge {
             next_id: 0,
             leaf_statuses,
             leaf_ticks,
+            calls: Rc::default(),
         }
     }
 
@@ -226,6 +229,7 @@ impl TestBridge {
 impl CallBridge for TestBridge {
     fn arora_call(&mut self, call: Call) -> Result<CallResult, CallError> {
         *self.leaf_ticks.borrow_mut().entry(call.id).or_insert(0) += 1;
+        self.calls.borrow_mut().push(call.clone());
         let status = self
             .leaf_statuses
             .borrow()
@@ -1729,6 +1733,52 @@ mod task_runs {
             );
         }
         graph
+    }
+
+    /// A main behavior that fails beside a run does not halt it: the runner
+    /// is the root, ticked every tick, and keeps each run going.
+    #[test]
+    fn a_failing_main_behavior_halts_no_run() {
+        use arora_behavior::graph::{Graph, Node as GraphNode};
+        let [a1, a2] = [0x95, 0x96].map(Uuid::from_u128);
+        let statuses: LeafStatuses = Rc::new(RefCell::new(HashMap::from([
+            (a1, Status::Success),
+            (a2, Status::Running),
+        ])));
+        let ticks: LeafTicks = Rc::new(RefCell::new(HashMap::new()));
+        let mut bridge = TestBridge::new(statuses, ticks.clone());
+        let store = SimpleDataStore::new();
+        let mut interp = BehaviorTreeInterpreter::new();
+        let failing = Uuid::from_u128(0x97);
+        let mut main = Graph::empty();
+        main.root = Some(failing);
+        main.nodes.push(GraphNode {
+            id: failing,
+            function: nodes::FAIL_FUNCTION_ID,
+            ..GraphNode::default()
+        });
+        interp.load(main).expect("the behavior loads");
+        interp
+            .spawn_graph(
+                &graph_type(),
+                seq_star_graph([0x98, 0x99, 0x9A], [a1, a2]),
+                RunPolicy::Concurrent,
+            )
+            .unwrap();
+        let mut ctx = BehaviorContext {
+            functions: &arora_behavior::FunctionIndex::new(),
+            store: &store,
+            call_bridge: &mut bridge,
+        };
+        for _ in 0..3 {
+            interp.tick(&mut ctx).unwrap();
+        }
+        assert_eq!(
+            ticks.borrow().get(&a1),
+            Some(&1),
+            "the run was not restarted"
+        );
+        assert_eq!(ticks.borrow().get(&a2), Some(&3));
     }
 
     /// A graph spawned again as a live run runs it answers that run's handle
@@ -4177,5 +4227,325 @@ mod tree_locals {
             assert_eq!(read(&store, &["a"]), vec![Some(Value::F64(1.0))]);
             assert_eq!(read(&store, &["b"]), vec![expected], "{name}");
         }
+    }
+}
+
+/// Halting the nodes a tick leaves, `retry`, `inverter`, and the `activated`
+/// flag (`activity`).
+mod halting {
+    use super::*;
+    use crate::schema::Expression;
+    use crate::variable::VariableCell;
+    use arora_types::record::module::frozen::Parameter;
+
+    /// Scripted leaves, each its own function, and a bridge answering them.
+    struct Leaves {
+        statuses: LeafStatuses,
+        ticks: LeafTicks,
+        functions: crate::FunctionIndex,
+    }
+
+    impl Leaves {
+        fn new(leaves: &[(Uuid, Status)]) -> Self {
+            Self {
+                statuses: Rc::new(RefCell::new(leaves.iter().copied().collect())),
+                ticks: Rc::default(),
+                functions: leaves
+                    .iter()
+                    .map(|(id, _)| (*id, scripted_leaf_function(*id)))
+                    .collect(),
+            }
+        }
+
+        fn set(&self, leaf: Uuid, status: Status) {
+            self.statuses.borrow_mut().insert(leaf, status);
+        }
+
+        fn ticks(&self, leaf: Uuid) -> u32 {
+            self.ticks.borrow().get(&leaf).copied().unwrap_or(0)
+        }
+
+        fn bridge(&self) -> TestBridge {
+            TestBridge::new(self.statuses.clone(), self.ticks.clone())
+        }
+    }
+
+    const LYING: Uuid = Uuid::from_u128(0x10);
+    const STAGE_1: Uuid = Uuid::from_u128(0x11);
+    const STAGE_2: Uuid = Uuid::from_u128(0x12);
+    const STAGE_3: Uuid = Uuid::from_u128(0x13);
+
+    /// The stages of a get-up, a `sequence_star`, with the first done and the
+    /// second running.
+    fn stages() -> TreeNode {
+        nodes::seq_star(vec![
+            scripted_leaf(STAGE_1),
+            scripted_leaf(STAGE_2),
+            scripted_leaf(STAGE_3),
+        ])
+    }
+
+    fn leaves() -> Leaves {
+        Leaves::new(&[
+            (LYING, Status::Success),
+            (STAGE_1, Status::Success),
+            (STAGE_2, Status::Running),
+            (STAGE_3, Status::Success),
+        ])
+    }
+
+    /// A fallback whose earlier child now succeeds halts the later one that
+    /// ran: its `sequence_star` starts again at its first stage.
+    #[test]
+    fn a_fallback_whose_earlier_child_succeeds_halts_the_later_one() {
+        let leaves = leaves();
+        let standing = Uuid::from_u128(0x20);
+        leaves.set(standing, Status::Failure);
+        let mut functions = leaves.functions.clone();
+        functions.insert(standing, scripted_leaf_function(standing));
+        let tree = build(nodes::fallback(vec![scripted_leaf(standing), stages()]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &functions, &mut bridge, false).unwrap();
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(
+            (leaves.ticks(STAGE_1), leaves.ticks(STAGE_2)),
+            (1, 2),
+            "resumed"
+        );
+
+        leaves.set(standing, Status::Success);
+        assert_eq!(runtime.tick().unwrap(), Status::Success);
+        leaves.set(standing, Status::Failure);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(
+            leaves.ticks(STAGE_1),
+            2,
+            "the stages start again at the first"
+        );
+    }
+
+    /// A sequence whose earlier child now fails halts the later one that ran.
+    #[test]
+    fn a_sequence_whose_earlier_child_fails_halts_the_later_one() {
+        let leaves = leaves();
+        let tree = build(nodes::seq(vec![scripted_leaf(LYING), stages()]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        leaves.set(LYING, Status::Failure);
+        assert_eq!(runtime.tick().unwrap(), Status::Failure);
+        leaves.set(LYING, Status::Success);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(
+            leaves.ticks(STAGE_1),
+            2,
+            "the stages start again at the first"
+        );
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(leaves.ticks(STAGE_1), 2, "and resume while they run");
+    }
+
+    /// A node halted with its parent is reset too: the stages under a halted
+    /// subtree start again.
+    #[test]
+    fn a_halted_subtree_is_reset_whole() {
+        let leaves = leaves();
+        let tree = build(nodes::seq(vec![
+            scripted_leaf(LYING),
+            nodes::seq(vec![nodes::succeed(), stages()]),
+        ]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        runtime.tick().unwrap();
+        leaves.set(LYING, Status::Failure);
+        runtime.tick().unwrap();
+        leaves.set(LYING, Status::Success);
+        runtime.tick().unwrap();
+        assert_eq!(leaves.ticks(STAGE_1), 2);
+    }
+
+    /// A retry bound to a cell, to read its attempts.
+    fn retry(child: TreeNode, num_attempts: i32, attempts: &VariableCell) -> TreeNode {
+        let mut node = nodes::retry(child, num_attempts);
+        node.parameters.insert(
+            nodes::RETRY_ATTEMPTS_PARAM_ID,
+            Expression::Variable(attempts.clone()),
+        );
+        node
+    }
+
+    /// A retry ticks its failed child afresh at the next tick, counts its
+    /// attempts, and fails once they are spent.
+    #[test]
+    fn a_retry_ticks_its_failed_child_afresh_at_the_next_tick() {
+        let leaves = leaves();
+        leaves.set(STAGE_2, Status::Failure);
+        let attempts = VariableCell::local_with(Value::U32(0));
+        let tree = build(retry(stages(), 2, &attempts));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(leaves.ticks(STAGE_1), 1, "not retried in the same tick");
+        assert_eq!(attempts.get_or_unit(), Value::U32(1));
+        assert_eq!(runtime.tick().unwrap(), Status::Failure);
+        assert_eq!(leaves.ticks(STAGE_1), 2, "retried from its first stage");
+        assert_eq!(attempts.get_or_unit(), Value::U32(0), "spent, and reset");
+    }
+
+    /// A retry of no bound retries until its child succeeds.
+    #[test]
+    fn a_retry_of_no_bound_retries_until_its_child_succeeds() {
+        let leaves = leaves();
+        leaves.set(STAGE_2, Status::Failure);
+        let attempts = VariableCell::local_with(Value::U32(0));
+        let tree = build(retry(stages(), -1, &attempts));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        for _ in 0..5 {
+            assert_eq!(runtime.tick().unwrap(), Status::Running);
+        }
+        assert_eq!(attempts.get_or_unit(), Value::U32(5));
+        leaves.set(STAGE_2, Status::Success);
+        assert_eq!(runtime.tick().unwrap(), Status::Success);
+        assert_eq!(attempts.get_or_unit(), Value::U32(0));
+    }
+
+    /// A halted retry has made no attempt.
+    #[test]
+    fn a_halted_retry_has_made_no_attempt() {
+        let leaves = leaves();
+        leaves.set(STAGE_2, Status::Failure);
+        let attempts = VariableCell::local_with(Value::U32(0));
+        let tree = build(nodes::seq(vec![
+            scripted_leaf(LYING),
+            retry(stages(), -1, &attempts),
+        ]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        runtime.tick().unwrap();
+        runtime.tick().unwrap();
+        assert_eq!(attempts.get_or_unit(), Value::U32(2));
+        leaves.set(LYING, Status::Failure);
+        runtime.tick().unwrap();
+        assert_eq!(attempts.get_or_unit(), Value::U32(0));
+    }
+
+    /// An inverter turns success and failure round, and keeps running.
+    #[test]
+    fn an_inverter_turns_success_and_failure_round() {
+        for (child, inverted) in [
+            (nodes::succeed(), Status::Failure),
+            (nodes::fail(), Status::Success),
+            (nodes::run(), Status::Running),
+        ] {
+            assert_eq!(tick_once(&build(nodes::inverter(child))), inverted);
+        }
+    }
+
+    /// A retry bound to no attempt fails without ticking its child.
+    #[test]
+    fn a_retry_of_no_attempt_fails_without_ticking_its_child() {
+        for child in [nodes::succeed(), nodes::run()] {
+            assert_eq!(tick_once(&build(nodes::retry(child, 0))), Status::Failure);
+        }
+    }
+
+    /// A retry or an inverter of more than one child is refused as it ticks,
+    /// rather than leaving a child unticked.
+    #[test]
+    fn a_decorator_of_two_children_is_refused() {
+        for mut decorator in [
+            nodes::retry(nodes::succeed(), 2),
+            nodes::inverter(nodes::succeed()),
+        ] {
+            decorator.children.as_mut().unwrap().push(nodes::fail());
+            let tree = build(decorator);
+            let mut bridge = TestBridge::empty();
+            let mut runtime =
+                BehaviorTreeRuntime::setup(&tree, &HashMap::new(), &mut bridge, false).unwrap();
+            // The root is ticked as a callable: its error comes back as a call's.
+            let error = runtime.tick().expect_err("refused").to_string();
+            assert!(error.contains("needs exactly one child"), "{error}");
+        }
+    }
+
+    /// A leaf whose function declares `activated: bool`.
+    fn activated_leaf(function: Uuid, parameter: Uuid) -> crate::ModuleFunction {
+        let mut leaf = scripted_leaf_function(function);
+        leaf.function.parameter_ordering.push(parameter);
+        leaf.function.parameters.insert(
+            parameter,
+            Parameter {
+                name: "activated".to_string(),
+                ty: FrozenTy::from(PrimitiveKind::Boolean),
+                mutable: false,
+            },
+        );
+        leaf
+    }
+
+    /// A module leaf declaring `activated` is told the first tick of each
+    /// activation: the first, and the first after it stopped running.
+    #[test]
+    fn a_leaf_is_told_the_first_tick_of_each_activation() {
+        let (hold, parameter) = (Uuid::from_u128(0x30), Uuid::from_u128(0x31));
+        let leaves = Leaves::new(&[(hold, Status::Running)]);
+        let functions = HashMap::from([(hold, activated_leaf(hold, parameter))]);
+        let tree = build(nodes::seq(vec![nodes::succeed(), scripted_leaf(hold)]));
+        let mut bridge = leaves.bridge();
+        let calls = bridge.calls.clone();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &functions, &mut bridge, false).unwrap();
+        runtime.tick().unwrap();
+        runtime.tick().unwrap();
+        leaves.set(hold, Status::Success);
+        runtime.tick().unwrap();
+        leaves.set(hold, Status::Running);
+        runtime.tick().unwrap();
+        let told: Vec<Value> = calls
+            .borrow()
+            .iter()
+            .map(|call| {
+                let field = call
+                    .args
+                    .iter()
+                    .find(|arg| arg.id == parameter)
+                    .expect("passed");
+                (*field.value).clone()
+            })
+            .collect();
+        assert_eq!(
+            told,
+            [true, false, false, true].map(Value::Boolean),
+            "first, running on, running on, first again"
+        );
+    }
+
+    /// A node binding `activated` itself gets what it binds.
+    #[test]
+    fn a_bound_activated_is_not_filled() {
+        let (hold, parameter) = (Uuid::from_u128(0x30), Uuid::from_u128(0x31));
+        let leaves = Leaves::new(&[(hold, Status::Running)]);
+        let functions = HashMap::from([(hold, activated_leaf(hold, parameter))]);
+        let mut leaf = scripted_leaf(hold);
+        leaf.parameters
+            .insert(parameter, Expression::Value(Value::Boolean(false)));
+        let tree = build(leaf);
+        let mut bridge = leaves.bridge();
+        let calls = bridge.calls.clone();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &functions, &mut bridge, false).unwrap();
+        runtime.tick().unwrap();
+        let call = calls.borrow()[0].clone();
+        let passed: Vec<_> = call.args.iter().filter(|arg| arg.id == parameter).collect();
+        assert_eq!(passed.len(), 1);
+        assert_eq!(*passed[0].value, Value::Boolean(false));
     }
 }

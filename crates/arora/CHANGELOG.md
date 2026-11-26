@@ -4,6 +4,16 @@ All notable changes to `arora`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [19.0.0] - Unreleased
+
+### Changed
+
+- **Breaking:** requires arora-behavior-tree 11, whose `BehaviorTreeInterpreter`
+  arora re-exports: a node a tick stops ticking while it runs is halted, and
+  starts its next activation afresh (a `sequence_star` at its first child);
+  `retry` and `inverter` are native; a module function may declare
+  `activated: bool` to be told the first tick of each activation.
+
 ## [18.0.0] - 2026-10-30
 
 A runtime built with Semio Studio carries the device's Studio bridge from its

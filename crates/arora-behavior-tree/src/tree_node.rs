@@ -149,6 +149,7 @@ impl TreeNode {
             detached: Rc::new(crate::detached::Detached::empty(record.clone())),
             variable_names: names.clone(),
             record,
+            activity: Rc::default(),
         })
     }
 }

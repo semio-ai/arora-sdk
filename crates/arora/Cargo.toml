@@ -1,6 +1,6 @@
 [package]
 name = "arora"
-version = "18.0.0"
+version = "19.0.0"
 edition = "2021"
 description = "The Arora device runtime: a data store, a HAL, bridges, modules and a behavior, advanced together one step at a time; and the `arora` device runner."
 license = "Apache-2.0"
@@ -52,7 +52,7 @@ tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 [dependencies]
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
 # 10.1: the interpreter answers `read` and writes the behavior's revision.
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "10.1" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "11" }
 # 10.1: `interpreter_module::READ`, `LoadedBehavior`.
 arora-behavior = { path = "../arora-behavior", version = "10.1" }
 # 3.8: `PrimitiveKind::from_id`.
