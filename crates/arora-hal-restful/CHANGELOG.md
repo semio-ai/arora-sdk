@@ -4,6 +4,14 @@ All notable changes to `arora-hal-restful`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - Unreleased
+
+### Changed
+
+- The `arora-restful` runner requires arora 19: its device halts the nodes a tick
+  stops ticking while they run, so a `sequence_star` cut off starts again at
+  its first child; `retry` and `inverter` are native nodes.
+
 ## [6.0.0] - 2026-10-30
 
 ### Changed

@@ -23,7 +23,7 @@ urdf-rs = { version = "0.9", optional = true }
 uuid = { version = "1", features = ["serde", "v5"] }
 
 [dev-dependencies]
-arora-behavior-tree = { path = "../arora-behavior-tree", version = "10" }
+arora-behavior-tree = { path = "../arora-behavior-tree", version = "11" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3" }
 
 [features]

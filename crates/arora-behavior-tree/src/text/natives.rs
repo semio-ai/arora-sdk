@@ -47,6 +47,26 @@ static NATIVES: LazyLock<Vec<Native>> = LazyLock::new(|| {
         ),
         declare("fallback", FALLBACK_FUNCTION_ID, true, &[]),
         declare("parallel", PARALLEL_FUNCTION_ID, true, &[]),
+        declare(
+            "retry",
+            RETRY_FUNCTION_ID,
+            true,
+            &[
+                (
+                    "num_attempts",
+                    RETRY_NUM_ATTEMPTS_PARAM_ID,
+                    Primitive(PrimitiveKind::I32),
+                    Read,
+                ),
+                (
+                    "attempts",
+                    RETRY_ATTEMPTS_PARAM_ID,
+                    Primitive(PrimitiveKind::U32),
+                    Written,
+                ),
+            ],
+        ),
+        declare("inverter", INVERTER_FUNCTION_ID, true, &[]),
         declare("succeed", SUCCEED_FUNCTION_ID, false, &[]),
         declare("fail", FAIL_FUNCTION_ID, false, &[]),
         declare("running", RUN_FUNCTION_ID, false, &[]),
@@ -304,11 +324,12 @@ fn add_parameter(function: &mut Function, id: Uuid, name: &str, ty: FrozenTy, mu
 }
 
 /// The value a native's own state starts from when a node leaves it out:
-/// `sequence_star`'s index and `run_status`'s latch.
+/// `sequence_star`'s index, `retry`'s attempts and `run_status`'s latch.
 pub(crate) fn seed(function: Uuid) -> Option<(Uuid, arora_types::value::Value)> {
     use arora_types::value::Value;
     match function {
         SEQ_STAR_FUNCTION_ID => Some((SEQ_STAR_CURRENT_INDEX_PARAM_ID, Value::U16(0))),
+        RETRY_FUNCTION_ID => Some((RETRY_ATTEMPTS_PARAM_ID, Value::U32(0))),
         RUN_STATUS_FUNCTION_ID => Some((RUN_STATUS_LATCH_PARAM_ID, Value::Unit)),
         _ => None,
     }

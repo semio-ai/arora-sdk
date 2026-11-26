@@ -24,7 +24,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 
 [dev-dependencies]
 # A device behind the bridge (tests/device.rs), without the wasm engine.
-arora = { path = "../arora", version = "18", default-features = false }
+arora = { path = "../arora", version = "19", default-features = false }
 arora-hal = { path = "../arora-hal", version = "4.3" }
 arora-simple-data-store = { path = "../arora-simple-data-store", version = "3.2" }
 env_logger = "0.11"

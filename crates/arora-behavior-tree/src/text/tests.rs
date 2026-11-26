@@ -19,8 +19,9 @@ use crate::call_expression_tests::{
 use crate::display::Names;
 use crate::graph::build_behavior_tree;
 use crate::nodes::{
-    EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID, SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-    SET_STR_VALUE_PARAM_ID, SET_STR_VARIABLE_PARAM_ID,
+    EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID, RETRY_ATTEMPTS_PARAM_ID, RETRY_NUM_ATTEMPTS_PARAM_ID,
+    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SET_STR_VALUE_PARAM_ID,
+    SET_STR_VARIABLE_PARAM_ID,
 };
 use crate::schema::_RET_PARAM_ID;
 use crate::{load_behavior_tree_nodes, load_behavior_tree_text, BehaviorTree, BehaviorTreeRuntime};
@@ -720,6 +721,29 @@ fn natives_are_seeded_and_omissions_warned() {
     assert_eq!(warnings, ["equal(a: 1u8)", "fallback"]);
 }
 
+/// A retry's attempts are its own state, seeded when left out; a key bound to
+/// them keeps them there, and its bound is read as an `i32`.
+#[test]
+fn a_retry_is_seeded_and_reads_its_bound() {
+    let text = "retry(num_attempts: 3)\n  succeed\n";
+    let loaded = resolve(&parsed(text), &index());
+    assert_eq!(
+        *link(&loaded.graph, v5("root"), RETRY_ATTEMPTS_PARAM_ID),
+        Source::Value(Value::U32(0))
+    );
+    assert_eq!(
+        *link(&loaded.graph, v5("root"), RETRY_NUM_ATTEMPTS_PARAM_ID),
+        Source::Value(Value::I32(3))
+    );
+    let text = "retry(attempts: {nao/staged_restarts})\n  inverter\n    fail\n";
+    let loaded = resolve(&parsed(text), &index());
+    assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+    assert!(matches!(
+        link(&loaded.graph, v5("root"), RETRY_ATTEMPTS_PARAM_ID),
+        Source::Key(_)
+    ));
+}
+
 /// The natives list their names, parameters and types, for a palette.
 #[test]
 fn natives_describe_their_signatures() {
@@ -733,6 +757,8 @@ fn natives_describe_their_signatures() {
             "sequence_star",
             "fallback",
             "parallel",
+            "retry",
+            "inverter",
             "succeed",
             "fail",
             "running",

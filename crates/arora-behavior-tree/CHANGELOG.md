@@ -4,6 +4,36 @@ All notable changes to `arora-behavior-tree`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [11.0.0] - Unreleased
+
+A node a tick stops ticking while it runs is halted, and starts its next
+activation afresh, as BehaviorTree.CPP halts it.
+
+### Added
+
+- `retry` (Groot `RetryUntilSuccessful`, builder `nodes::retry`): ticks its
+  one child, and retries it from scratch at the next tick after each failure
+  while its attempts are fewer than `num_attempts` (`-1`, or left out: no
+  bound; `0` fails without ticking it); its `attempts: u32` are its state,
+  or a key a tree binds to log them.
+- `inverter` (Groot `Inverter`, builder `nodes::inverter`): its child's
+  `Success` and `Failure` swapped. Either decorator of more than one child
+  fails its tick with an inconsistent-tree error.
+- A module function declaring `activated: bool`, left unbound by its node,
+  is passed `true` on the first tick of each of the node's activations and
+  `false` on the next (`ACTIVATED_PARAM_NAME`).
+
+### Changed
+
+- **Breaking:** a node active after a tick (it returned `Running`, under an
+  active parent; the root always is) that a later tick leaves is halted, with
+  its subtree: a fallback whose earlier child now succeeds, a sequence whose
+  earlier child now fails, a parallel ending while a child runs. A halted
+  `sequence_star` starts again at its first child, where it resumed at the
+  child it had reached; a halted `retry` has made no attempt. An edit keeps
+  which nodes are active for the nodes it leaves in place.
+- Groot reads a native's optional ports when it has no required one.
+
 ## [10.1.0] - 2026-10-30
 
 ### Added

@@ -4,6 +4,16 @@ All notable changes to `arora-web`. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [16.0.0] - Unreleased
+
+### Changed
+
+- **Breaking:** depends on arora 19, whose `Arora` and `AroraBuilder` this
+  crate's surface carries. A behavior run in the browser halts the nodes a
+  tick stops ticking while they run (arora-behavior-tree 11): a
+  `sequence_star` cut off starts again at its first child, and `retry` and
+  `inverter` are native nodes.
+
 ## [15.0.0] - 2026-10-30
 
 ### Changed
