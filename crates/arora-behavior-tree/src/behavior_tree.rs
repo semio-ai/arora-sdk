@@ -1,3 +1,4 @@
+mod activity;
 pub mod behavior;
 #[cfg(test)]
 mod call_expression_tests;
@@ -34,6 +35,7 @@ use arora_behavior::Status;
 use arora_behavior_tree_types::TickId;
 use arora_types::call::{CallBridge, CallError, Callable, CallableId};
 use arora_types::record::module::frozen::Function;
+use arora_types::record::ty::{FrozenTy, PrimitiveKind};
 use arora_types::AroraType;
 use arora_types::{
     call::Call,
@@ -50,7 +52,8 @@ use uuid::Uuid;
 
 use crate::nodes::{
     EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
-    PARALLEL_FUNCTION_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
+    INVERTER_FUNCTION_ID, PARALLEL_FUNCTION_ID, RETRY_ATTEMPTS_PARAM_ID, RETRY_FUNCTION_ID,
+    RETRY_NUM_ATTEMPTS_PARAM_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
     RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
     SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SEQ_FUNCTION_ID,
     SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
@@ -78,6 +81,8 @@ pub struct BehaviorTree {
     variable_names: HashMap<Uuid, String>,
     /// What each tick does, recorded while a trace runs.
     record: Rc<trace::TickRecord>,
+    /// Which nodes are active, to halt the ones a tick leaves.
+    activity: Rc<activity::Activity>,
 }
 
 /// Where a data node writes, bound when the tree is loaded.
@@ -240,6 +245,9 @@ impl BehaviorTree {
     ) -> Result<Status, BehaviorTreeError> {
         self.detached.begin_tick();
         let status = root.tick(caller);
+        for halted in self.activity.end_tick(&self.root, &self.node_index) {
+            self.halt(halted);
+        }
         let variables = self.variables.borrow();
         let calls = FunctionIndex::new();
         let sinks = self.detached.tick_sinks(
@@ -253,6 +261,31 @@ impl BehaviorTree {
         let status = status?;
         sinks?;
         Ok(status)
+    }
+
+    /// Reset what `node` holds for an activation, as it is halted: a
+    /// `sequence_star` starts again at its first child, and a `retry` has
+    /// made no attempt, which a key bound to its `attempts` says.
+    fn halt(&self, node: Uuid) {
+        let Some(function) = self.node_index.get(&node).map(|node| node.function) else {
+            return;
+        };
+        let state = match function {
+            SEQ_STAR_FUNCTION_ID => SEQ_STAR_CURRENT_INDEX_PARAM_ID,
+            RETRY_FUNCTION_ID => RETRY_ATTEMPTS_PARAM_ID,
+            _ => return,
+        };
+        let at = NodeParameterId {
+            node,
+            parameter: state,
+        };
+        if let Some(cell) = self.node_arg_variables.get(&at) {
+            cell.set(if state == RETRY_ATTEMPTS_PARAM_ID {
+                Value::U32(0)
+            } else {
+                Value::U16(0)
+            });
+        }
     }
 
     /// Take over the state `previous` holds for every node of this tree that
@@ -304,6 +337,9 @@ impl BehaviorTree {
                 }
             }
         }
+        self.activity.keep(&previous.activity, |id| {
+            !fresh.contains(id) && self.node_index.contains_key(id)
+        });
         let (cells, held) = (self.variables.borrow(), previous.variables.borrow());
         for variable in read {
             if let (Some(cell), Some(held)) = (cells.get(&variable), held.get(&variable)) {
@@ -452,6 +488,7 @@ fn register_ticks(
         tree.detached.clone(),
         &tree.outputs,
         &tree.record,
+        &tree.activity,
         caller,
         if trace {
             TraceTick::YesAll
@@ -507,6 +544,7 @@ fn setup_tick_function(
     detached: Rc<Detached>,
     outputs: &HashMap<Uuid, Outputs>,
     record: &Rc<trace::TickRecord>,
+    activity: &Rc<activity::Activity>,
     caller: &mut dyn CallBridge,
     trace: TraceTick,
     // Every callable registered on behalf of this (sub)tree, collected so the
@@ -537,6 +575,7 @@ fn setup_tick_function(
                 detached.clone(),
                 outputs,
                 record,
+                activity,
                 caller,
                 trace,
                 callables,
@@ -559,6 +598,10 @@ fn setup_tick_function(
         outputs: outputs.get(&node.id).cloned(),
         children: children_ticks,
         record: record.clone(),
+        activated: functions
+            .get(&node.function)
+            .and_then(|function| activated_parameter(&node, &function.function)),
+        activity: activity.clone(),
         trace,
     });
     let callable_id = caller.arora_register_callable(tick_function);
@@ -582,6 +625,8 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | SEQ_STAR_FUNCTION_ID
             | FALLBACK_FUNCTION_ID
             | PARALLEL_FUNCTION_ID
+            | RETRY_FUNCTION_ID
+            | INVERTER_FUNCTION_ID
             | RUN_CALL_FUNCTION_ID
             | RUN_STATUS_FUNCTION_ID
             | EQUAL_FUNCTION_ID
@@ -806,6 +851,68 @@ fn tick_builtin(
             }
             status
         }
+        RETRY_FUNCTION_ID => {
+            // The failures so far persist in the node's own cell, or a key
+            // bound to it; halting the node clears them (`halt`).
+            let [child] = child_tick_ids else {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("retry {} needs exactly one child", node.id),
+                });
+            };
+            let attempts_variable = get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: RETRY_ATTEMPTS_PARAM_ID,
+                },
+                scope.node_parameters_variables,
+            )?;
+            let bound = if node.arguments.contains_key(&RETRY_NUM_ATTEMPTS_PARAM_ID) {
+                attempts_bound(&argument(caller, RETRY_NUM_ATTEMPTS_PARAM_ID)?)
+            } else {
+                None
+            };
+            let attempts = match attempts_variable.get_or_unit() {
+                Value::U32(attempts) => attempts,
+                _ => 0,
+            };
+            // A bound of no attempt fails without ticking the child.
+            if bound == Some(0) {
+                attempts_variable.set(Value::U32(0));
+                return Ok(Some(Status::Failure));
+            }
+            // The child, ticked afresh at the next tick after a failure:
+            // having failed, it is not active, and the tick's end halts what
+            // it left running.
+            match child.tick(caller)? {
+                Status::Success => {
+                    attempts_variable.set(Value::U32(0));
+                    Status::Success
+                }
+                Status::Running => Status::Running,
+                Status::Failure => {
+                    let attempts = attempts.saturating_add(1);
+                    if bound.is_none_or(|bound| i64::from(attempts) < bound) {
+                        attempts_variable.set(Value::U32(attempts));
+                        Status::Running
+                    } else {
+                        attempts_variable.set(Value::U32(0));
+                        Status::Failure
+                    }
+                }
+            }
+        }
+        INVERTER_FUNCTION_ID => {
+            let [child] = child_tick_ids else {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("inverter {} needs exactly one child", node.id),
+                });
+            };
+            match child.tick(caller)? {
+                Status::Success => Status::Failure,
+                Status::Failure => Status::Success,
+                Status::Running => Status::Running,
+            }
+        }
         SEQ_STAR_FUNCTION_ID => {
             // The current index persists in the node's parameter variable, so
             // a Running tree resumes past the children that already succeeded.
@@ -891,6 +998,7 @@ fn tick(
     child_tick_ids: &[TickId],
     node: Rc<Node>,
     record: &trace::TickRecord,
+    activated: Option<(Uuid, bool)>,
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
     let trace_line = |status: Status| {
@@ -1055,6 +1163,12 @@ fn tick(
             });
         }
     }
+    if let Some((parameter, first)) = activated {
+        call.args.push(StructureField {
+            id: parameter,
+            value: Box::new(Value::Boolean(first)),
+        });
+    }
 
     let result = caller
         .arora_call(call)
@@ -1090,6 +1204,30 @@ fn tick(
     trace_line(status);
     Ok(status)
 }
+
+/// The parameter of `function` the interpreter fills with whether a tick is
+/// the first of the node's activation: one named `activated`, a `bool`
+/// passed by value, that `node` leaves unbound.
+fn activated_parameter(node: &Node, function: &Function) -> Option<Uuid> {
+    function
+        .parameter_ordering
+        .iter()
+        .find(|id| {
+            function.parameters.get(id).is_some_and(|parameter| {
+                parameter.name == ACTIVATED_PARAM_NAME
+                    && !parameter.mutable
+                    && parameter.ty == FrozenTy::from(PrimitiveKind::Boolean)
+            })
+        })
+        .filter(|id| !node.arguments.contains_key(id))
+        .copied()
+}
+
+/// The name of a module function's parameter the interpreter fills with
+/// whether a tick is the first of the node's activation
+/// ([`activity`](crate::activity)): a function declaring `activated: bool`
+/// drops what it holds for the last activation when it is `true`.
+pub const ACTIVATED_PARAM_NAME: &str = "activated";
 
 /// Whether `function` declares its parameter `parameter` as an optional.
 pub(crate) fn is_optional(function: &Function, parameter: &Uuid) -> bool {
@@ -1129,6 +1267,25 @@ pub(crate) fn write_back(variable: &VariableCell, value: Value, optional: bool) 
         }
         value => variable.set(value),
     }
+}
+
+/// A retry's bound on its attempts, read from its `num_attempts`: any
+/// integer, or a string of one (Groot's form); a negative one, or anything
+/// else, is no bound.
+fn attempts_bound(value: &Value) -> Option<i64> {
+    let bound = match value {
+        Value::I8(n) => i64::from(*n),
+        Value::I16(n) => i64::from(*n),
+        Value::I32(n) => i64::from(*n),
+        Value::I64(n) => *n,
+        Value::U8(n) => i64::from(*n),
+        Value::U16(n) => i64::from(*n),
+        Value::U32(n) => i64::from(*n),
+        Value::U64(n) => i64::try_from(*n).unwrap_or(i64::MAX),
+        Value::String(text) => text.trim().parse().ok()?,
+        _ => return None,
+    };
+    (bound >= 0).then_some(bound)
 }
 
 /// Specialization of Callable that returns a Status.
@@ -1181,6 +1338,11 @@ struct TickFunction {
     children: Vec<TickId>,
     /// Where the node records the status it returns, while a trace runs.
     record: Rc<trace::TickRecord>,
+    /// The module function's `activated` parameter, which the node leaves
+    /// unbound: told whether this tick is the first of an activation.
+    activated: Option<Uuid>,
+    /// Where the node records the status it returns, every tick.
+    activity: Rc<activity::Activity>,
     trace: TraceTick,
 }
 
@@ -1198,11 +1360,14 @@ impl Tickable for TickFunction {
             &self.children,
             self.node.clone(),
             &self.record,
+            self.activated
+                .map(|parameter| (parameter, !self.activity.was_active(self.node.id))),
             self.trace,
         );
+        let status = *ticked.as_ref().unwrap_or(&Status::Failure);
+        self.activity.ticked(self.node.id, status);
         if self.record.is_on() {
-            self.record
-                .status(self.node.id, *ticked.as_ref().unwrap_or(&Status::Failure));
+            self.record.status(self.node.id, status);
         }
         ticked
     }
@@ -1444,6 +1609,7 @@ pub fn load_behavior_tree_nodes_with(
         detached: Rc::new(detached),
         variable_names: names.clone(),
         record,
+        activity: Rc::default(),
     })
 }
 

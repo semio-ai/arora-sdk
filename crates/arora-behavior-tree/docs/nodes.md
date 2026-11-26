@@ -59,6 +59,8 @@ language, a tag in Groot, and a builder in [`nodes`](../src/nodes.rs).
 | `sequence_star` | `SequenceStar` | `seq_star` | as `sequence`, but a `Running` child is resumed at the next tick, past the children that succeeded; its `current_index: u16` holds where. |
 | `fallback` | `Fallback` | `fallback` | each child in turn; stops at the first that does not fail, with its status. `Success` with no child. |
 | `parallel` | `Parallel` | `parallel` | every child, every tick; `Success` if all succeeded, `Failure` if any failed, `Running` otherwise. |
+| `retry` | `RetryUntilSuccessful` | `retry` | its one child; `Success` when it succeeds. A failure counts one more attempt in `attempts: u32` and, while fewer than `num_attempts: i32` (`-1`, or left out: no bound), is `Running`, the child ticked afresh at the next tick, not in this one; otherwise `Failure`. A bound of `0` fails without ticking the child. `attempts` is back at 0 once the child succeeds, the attempts are spent, or the node is [halted](#halting). |
+| `inverter` | `Inverter` | `inverter` | its one child; `Failure` for its `Success`, `Success` for its `Failure`, `Running` for its `Running`. |
 | `succeed`, `fail`, `running` | `Succeed`, `Fail`, `Run` | `succeed`, `fail`, `run` | their status. |
 | `equal` | `Equal` | | `Success` when `a` and `b` are equal (the same type and value: `U64(1)` and `U32(1)` differ, and NaN equals nothing), `Failure` otherwise. |
 | `unpack` | `Unpack` | | writes element `i` of the array `values` to the variable bound to `out_i`, `out_0` … `out_63`; `Success`, or `Failure` for a table that does not fit (below). |
@@ -72,8 +74,34 @@ language, a tag in Groot, and a builder in [`nodes`](../src/nodes.rs).
 | `run_status` | `RunStatus` | | ticks its one child and writes the child's status to `status`; latches the first terminal status in `latch`, and reports it from then on without ticking the child. A child's error ends it `Failure`. |
 
 `succeed`, `fail` and `running` are leaves, and so are the data, string and
-task-run nodes but `run_status`, a decorator. A text or Groot tree leaves out
-a native's state (`current_index`, `latch`) and the tree seeds it.
+task-run nodes but `run_status`, a decorator, as `retry` and `inverter` are.
+A text or Groot tree leaves out a native's state (`current_index`,
+`attempts`, `latch`) and the tree seeds it; a tree may bind `retry`'s
+`attempts` to a key, to log the restarts. In Groot, `num_attempts` is read
+from its text: `<RetryUntilSuccessful num_attempts="3">`.
+
+### Halting
+
+A node is **active** after a tick when it returned `Running` and its parent
+is active; the root, ticked at every tick, is always active, so the
+interpreter's runner keeps each run going whatever the others return. A node
+that was active after the last tick and is not after this one, or that
+returned `Running` this tick but is not active, is **halted**, with its whole
+subtree:
+
+- a fallback whose earlier child now succeeds halts the later child that ran;
+- a sequence whose earlier child now fails halts the later child that ran;
+- a parallel that ends while a child runs, or a `retry` whose child failed,
+  halts what that child left running.
+
+A halted node starts its next activation afresh: a `sequence_star` at its
+first child, a `retry` with no attempt made. A module function keeps its
+state in its own parameters and the keys it writes: one declaring the
+parameter `activated: bool` (by value), which the node leaves unbound, is
+told `true` on the first tick of each activation, the node not having been
+active after the last tick, and `false` on the next ones, and drops then
+what it held for the last activation. Halting happens as the tick ends: a
+halted node is one the tick did not tick again.
 
 ### The string nodes
 
@@ -190,7 +218,9 @@ A node whose function is not native ([`tick`](../src/behavior_tree.rs)):
    reads its `Status`;
 4. passes each argument, in the function's parameter order: a call in an
    argument is called first, a selection is read out of its source, and any
-   other argument is read from its cell;
+   other argument is read from its cell; a parameter `activated: bool` the
+   node leaves unbound is passed whether the tick is the first of the node's
+   activation ([halting](#halting));
 5. calls `arora_call` on the [`CallBridge`](../../arora-types/src/call.rs);
 6. writes each parameter the function reports mutated back to the cell its
    argument reads (a selection is read-only: the interpreter refuses one on a

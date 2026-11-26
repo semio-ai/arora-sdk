@@ -142,6 +142,29 @@ pub fn parallel(children: Vec<TreeNode>) -> TreeNode {
     TreeNode::control_node(PARALLEL_FUNCTION_ID, children)
 }
 
+/// A [`RETRY_FUNCTION_ID`] decorator over `child`: `num_attempts` attempts,
+/// `-1` for no bound.
+#[allow(unused)]
+pub fn retry(child: TreeNode, num_attempts: i32) -> TreeNode {
+    TreeNode {
+        function: RETRY_FUNCTION_ID,
+        children: Some(vec![child]),
+        parameters: HashMap::from([
+            (
+                RETRY_NUM_ATTEMPTS_PARAM_ID,
+                Expression::Value(Value::I32(num_attempts)),
+            ),
+            (RETRY_ATTEMPTS_PARAM_ID, Expression::Value(Value::U32(0))),
+        ]),
+    }
+}
+
+/// An [`INVERTER_FUNCTION_ID`] decorator over `child`.
+#[allow(unused)]
+pub fn inverter(child: TreeNode) -> TreeNode {
+    TreeNode::control_node(INVERTER_FUNCTION_ID, vec![child])
+}
+
 // Other functions from other modules
 //================================================================
 #[allow(unused)]
@@ -350,6 +373,20 @@ pub const SEQ_STAR_FUNCTION_ID: Uuid = Uuid::from_bytes([
 pub const SEQ_STAR_CURRENT_INDEX_PARAM_ID: Uuid = Uuid::from_bytes([
     0x4d, 0xe5, 0x02, 0xdf, 0x3f, 0x48, 0x45, 0x41, 0x94, 0xd8, 0xdd, 0x68, 0xfe, 0x92, 0xbc, 0x8e,
 ]);
+/// Retry: ticks its one child; a child's failure is retried from scratch at
+/// the next tick, while the attempts made are fewer than `num_attempts`
+/// (`-1`, or left out: no bound). `Success` when the child succeeds,
+/// `Running` while it runs or is retried, `Failure` once the attempts are
+/// spent.
+pub const RETRY_FUNCTION_ID: Uuid = uuid::uuid!("f645efab-ad4f-4d0d-8a78-a18af2e104d3");
+/// [`RETRY_FUNCTION_ID`]'s bound on its attempts, an `i32`: `-1` for none.
+pub const RETRY_NUM_ATTEMPTS_PARAM_ID: Uuid = uuid::uuid!("4f886543-5074-4757-ac62-0f34580bf40f");
+/// [`RETRY_FUNCTION_ID`]'s failures since its child last succeeded or the node
+/// was halted, a `u32`: its own state, or a key a tree binds to log it.
+pub const RETRY_ATTEMPTS_PARAM_ID: Uuid = uuid::uuid!("7f7ccf18-1328-480c-95ec-28b13005fcff");
+/// Inverter: ticks its one child, and turns its `Success` into `Failure` and
+/// its `Failure` into `Success`; `Running` stays.
+pub const INVERTER_FUNCTION_ID: Uuid = uuid::uuid!("6d74ccae-0939-4a29-ac5a-9ad7da3195fc");
 pub const FALLBACK_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0xbf, 0xa8, 0x9a, 0x4e, 0xc3, 0x69, 0x43, 0x0e, 0xbe, 0x78, 0x0d, 0xc0, 0x73, 0x11, 0x39, 0x1c,
 ]);
