@@ -176,11 +176,6 @@ jobs:
       - name: Test arora's Studio connection
         run: "cargo test -p arora --features studio-bridge --lib -- studio:: run::"
 
-      - name: Clippy and test arora's dataflow nodes
-        run: |
-          cargo clippy -p arora --features dataflow --all-targets -- -D warnings
-          cargo test -p arora --features dataflow --lib -- dataflow_tests::
-
   lint:
     needs: select
     if: needs.select.outputs.any == 'true' || needs.select.outputs.test-polly

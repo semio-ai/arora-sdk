@@ -1,5 +1,5 @@
-//! Arora's dataflow nodes as host modules of the device
-//! ([`AroraBuilder::with_dataflow_nodes`](crate::AroraBuilder::with_dataflow_nodes)):
+//! Arora's dataflow nodes as host modules of every device, like the native
+//! behavior-tree nodes:
 //! the arithmetic, logic, comparisons, vectors, smoothing and records of
 //! [`arora_dataflow_nodes`], which a tree calls in a node's arguments
 //! (`is_true(value: greaterthan(lhs: {top}, rhs: 0.006f32))`) or as a leaf.
@@ -22,17 +22,25 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use arora_dataflow_nodes::functions::{function_index, DataflowNodes};
+use arora_dataflow_nodes::functions::{external_function, function_index, kind_of, DataflowNodes};
+use arora_dataflow_nodes::kind::Kind;
 use arora_engine::module::{HostModule, ModuleBuilder};
 use arora_types::call::{Call, CallBridge, CallError, CallResult, Callable, CallableId};
 use arora_types::value::Value;
 
 /// The host modules serving the dataflow nodes, one per module id, sharing
-/// one [`DataflowNodes`].
+/// one [`DataflowNodes`]: the core operations, not the nodes that call another
+/// module (`external`, `taskrun`, `spawn`), which a device would refuse.
 pub(crate) fn modules() -> Vec<HostModule> {
     let nodes = Rc::new(RefCell::new(DataflowNodes::new()));
     let mut by_module = BTreeMap::new();
-    for function in function_index().values() {
+    for function in function_index().values().filter(|function| {
+        function.function_id != external_function()
+            && !matches!(
+                kind_of(function.function_id),
+                Some(Kind::ExternalFunction | Kind::TaskRun | Kind::Spawn)
+            )
+    }) {
         by_module
             .entry(function.module_id)
             .or_insert_with(Vec::new)
