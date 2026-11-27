@@ -52,12 +52,14 @@ use uuid::Uuid;
 
 use crate::nodes::{
     EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID, FALLBACK_FUNCTION_ID,
-    INVERTER_FUNCTION_ID, PARALLEL_FUNCTION_ID, RETRY_ATTEMPTS_PARAM_ID, RETRY_FUNCTION_ID,
-    RETRY_NUM_ATTEMPTS_PARAM_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
-    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
+    FALLBACK_STAR_CURRENT_INDEX_PARAM_ID, FALLBACK_STAR_FUNCTION_ID, INVERTER_FUNCTION_ID,
+    IS_TRUE_FUNCTION_ID, IS_TRUE_VALUE_PARAM_ID, PARALLEL_FUNCTION_ID, RETRY_ATTEMPTS_PARAM_ID,
+    RETRY_FUNCTION_ID, RETRY_NUM_ATTEMPTS_PARAM_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID,
+    RUN_FUNCTION_ID, RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
     SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SEQ_FUNCTION_ID,
-    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
-    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    TIMEOUT_FUNCTION_ID, TIMEOUT_SECONDS_PARAM_ID, TIMEOUT_STARTED_PARAM_ID, TIMEOUT_T_PARAM_ID,
+    UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID,
 };
 
 // Runtime.
@@ -264,27 +266,31 @@ impl BehaviorTree {
     }
 
     /// Reset what `node` holds for an activation, as it is halted: a
-    /// `sequence_star` starts again at its first child, and a `retry` has
-    /// made no attempt, which a key bound to its `attempts` says.
+    /// `sequence_star` or a `fallback_star` starts again at its first child,
+    /// a `retry` has made no attempt, which a key bound to its `attempts`
+    /// says, and a `timeout` has not started. Each takes the value its state
+    /// is seeded with.
     fn halt(&self, node: Uuid) {
         let Some(function) = self.node_index.get(&node).map(|node| node.function) else {
             return;
         };
-        let state = match function {
-            SEQ_STAR_FUNCTION_ID => SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-            RETRY_FUNCTION_ID => RETRY_ATTEMPTS_PARAM_ID,
-            _ => return,
+        if !matches!(
+            function,
+            SEQ_STAR_FUNCTION_ID
+                | FALLBACK_STAR_FUNCTION_ID
+                | RETRY_FUNCTION_ID
+                | TIMEOUT_FUNCTION_ID
+        ) {
+            return;
+        }
+        let Some((parameter, seed)) = crate::text::seed(function) else {
+            return;
         };
-        let at = NodeParameterId {
-            node,
-            parameter: state,
-        };
-        if let Some(cell) = self.node_arg_variables.get(&at) {
-            cell.set(if state == RETRY_ATTEMPTS_PARAM_ID {
-                Value::U32(0)
-            } else {
-                Value::U16(0)
-            });
+        if let Some(cell) = self
+            .node_arg_variables
+            .get(&NodeParameterId { node, parameter })
+        {
+            cell.set(seed);
         }
     }
 
@@ -627,6 +633,9 @@ pub(crate) fn is_native(function: Uuid) -> bool {
             | PARALLEL_FUNCTION_ID
             | RETRY_FUNCTION_ID
             | INVERTER_FUNCTION_ID
+            | FALLBACK_STAR_FUNCTION_ID
+            | TIMEOUT_FUNCTION_ID
+            | IS_TRUE_FUNCTION_ID
             | RUN_CALL_FUNCTION_ID
             | RUN_STATUS_FUNCTION_ID
             | EQUAL_FUNCTION_ID
@@ -647,6 +656,7 @@ fn tick_builtin(
     outputs: Option<&Outputs>,
     child_tick_ids: &[TickId],
     node: &Node,
+    first: bool,
 ) -> Result<Option<Status>, BehaviorTreeError> {
     // An argument's value: a call or a selection is computed, a selection
     // applying its path, and any other argument reads the argument's cell, as
@@ -913,6 +923,98 @@ fn tick_builtin(
                 Status::Running => Status::Running,
             }
         }
+        IS_TRUE_FUNCTION_ID => match argument(caller, IS_TRUE_VALUE_PARAM_ID)? {
+            Value::Boolean(true) => Status::Success,
+            Value::Boolean(false) => Status::Failure,
+            other => {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("is_true {}: {other:?} is not a bool", node.id),
+                })
+            }
+        },
+        FALLBACK_STAR_FUNCTION_ID => {
+            // As `sequence_star`, the other way round: the index persists in
+            // the node's parameter variable, so a Running child is resumed
+            // past the children that already failed.
+            let index_variable = get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: FALLBACK_STAR_CURRENT_INDEX_PARAM_ID,
+                },
+                scope.node_parameters_variables,
+            )?;
+            let mut current_index = match index_variable.get_or_unit() {
+                Value::U16(index) => index,
+                _ => 0,
+            };
+            let mut status = Status::Failure;
+            for child in child_tick_ids.iter().skip(current_index as usize) {
+                match child.tick(caller)? {
+                    Status::Failure => current_index += 1,
+                    Status::Success => {
+                        status = Status::Success;
+                        break;
+                    }
+                    Status::Running => {
+                        status = Status::Running;
+                        break;
+                    }
+                }
+            }
+            if status != Status::Running {
+                current_index = 0;
+            }
+            index_variable.set(Value::U16(current_index));
+            status
+        }
+        TIMEOUT_FUNCTION_ID => {
+            // The clock when the activation began persists in the node's own
+            // cell, or a key bound to it; it is taken again at the first tick
+            // of each activation, and cleared when the node finishes or is
+            // halted (`halt`).
+            let [child] = child_tick_ids else {
+                return Err(BehaviorTreeError::InconsistentTreeError {
+                    message: format!("timeout {} needs exactly one child", node.id),
+                });
+            };
+            let started_variable = get_node_parameter_variable(
+                &NodeParameterId {
+                    node: node.id,
+                    parameter: TIMEOUT_STARTED_PARAM_ID,
+                },
+                scope.node_parameters_variables,
+            )?;
+            let refuse = |what: String| BehaviorTreeError::InconsistentTreeError {
+                message: format!("timeout {}: {what}", node.id),
+            };
+            let limit = argument(caller, TIMEOUT_SECONDS_PARAM_ID)?;
+            let limit = seconds(&limit).ok_or_else(|| refuse(format!("seconds {limit:?}")))?;
+            let now = argument(caller, TIMEOUT_T_PARAM_ID)?;
+            let now_seconds =
+                clock_seconds(&now).ok_or_else(|| refuse(format!("the clock t reads {now:?}")))?;
+            let mut started = started_variable.get_or_unit();
+            if first || clock_seconds(&started).is_none() {
+                started = now.clone();
+            }
+            let elapsed = match (&now, &started) {
+                // Nanoseconds subtract exactly, before they are made seconds.
+                (Value::U64(now), Value::U64(started)) => now.saturating_sub(*started) as f64 / 1e9,
+                _ => now_seconds - clock_seconds(&started).unwrap_or(now_seconds),
+            };
+            // The deadline is checked before the child is ticked: a child
+            // not ticked this tick is halted as it ends.
+            let status = if limit <= 0.0 || elapsed >= limit {
+                Status::Failure
+            } else {
+                child.tick(caller)?
+            };
+            started_variable.set(if status == Status::Running {
+                started
+            } else {
+                Value::Unit
+            });
+            status
+        }
         SEQ_STAR_FUNCTION_ID => {
             // The current index persists in the node's parameter variable, so
             // a Running tree resumes past the children that already succeeded.
@@ -998,7 +1100,7 @@ fn tick(
     child_tick_ids: &[TickId],
     node: Rc<Node>,
     record: &trace::TickRecord,
-    activated: Option<(Uuid, bool)>,
+    activated: (Option<Uuid>, bool),
     trace: TraceTick,
 ) -> Result<Status, BehaviorTreeError> {
     let trace_line = |status: Status| {
@@ -1035,6 +1137,7 @@ fn tick(
         outputs,
         child_tick_ids,
         &node,
+        activated.1,
     )?;
     if let Some(status) = builtin {
         trace_line(status);
@@ -1163,7 +1266,7 @@ fn tick(
             });
         }
     }
-    if let Some((parameter, first)) = activated {
+    if let (Some(parameter), first) = activated {
         call.args.push(StructureField {
             id: parameter,
             value: Box::new(Value::Boolean(first)),
@@ -1272,6 +1375,45 @@ pub(crate) fn write_back(variable: &VariableCell, value: Value, optional: bool) 
 /// A retry's bound on its attempts, read from its `num_attempts`: any
 /// integer, or a string of one (Groot's form); a negative one, or anything
 /// else, is no bound.
+/// A timeout's limit in seconds: a number of any width, or its text, as a
+/// Groot attribute holds it.
+fn seconds(value: &Value) -> Option<f64> {
+    match value {
+        Value::String(text) => text.trim().parse().ok(),
+        value => number(value),
+    }
+}
+
+/// A clock reading in seconds: an unsigned integer in nanoseconds
+/// (`arora/time`), or a float in seconds. `None` for anything else, `()`
+/// included.
+fn clock_seconds(value: &Value) -> Option<f64> {
+    match value {
+        Value::U64(ns) => Some(*ns as f64 / 1e9),
+        Value::U32(ns) => Some(f64::from(*ns) / 1e9),
+        Value::F64(s) => Some(*s),
+        Value::F32(s) => Some(f64::from(*s)),
+        _ => None,
+    }
+}
+
+/// A number of any width as an `f64`.
+fn number(value: &Value) -> Option<f64> {
+    Some(match value {
+        Value::F64(n) => *n,
+        Value::F32(n) => f64::from(*n),
+        Value::I8(n) => f64::from(*n),
+        Value::I16(n) => f64::from(*n),
+        Value::I32(n) => f64::from(*n),
+        Value::I64(n) => *n as f64,
+        Value::U8(n) => f64::from(*n),
+        Value::U16(n) => f64::from(*n),
+        Value::U32(n) => f64::from(*n),
+        Value::U64(n) => *n as f64,
+        _ => return None,
+    })
+}
+
 fn attempts_bound(value: &Value) -> Option<i64> {
     let bound = match value {
         Value::I8(n) => i64::from(*n),
@@ -1360,8 +1502,7 @@ impl Tickable for TickFunction {
             &self.children,
             self.node.clone(),
             &self.record,
-            self.activated
-                .map(|parameter| (parameter, !self.activity.was_active(self.node.id))),
+            (self.activated, !self.activity.was_active(self.node.id)),
             self.trace,
         );
         let status = *ticked.as_ref().unwrap_or(&Status::Failure);
@@ -1696,6 +1837,8 @@ pub(crate) fn bind_data_node(
     };
     let required: &[Uuid] = match node.function {
         EQUAL_FUNCTION_ID => &[EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID],
+        IS_TRUE_FUNCTION_ID => &[IS_TRUE_VALUE_PARAM_ID],
+        TIMEOUT_FUNCTION_ID => &[TIMEOUT_SECONDS_PARAM_ID, TIMEOUT_T_PARAM_ID],
         UNPACK_FUNCTION_ID => &[UNPACK_VALUES_PARAM_ID],
         SCATTER_FUNCTION_ID => &[SCATTER_VALUES_PARAM_ID, SCATTER_KEYS_PARAM_ID],
         _ => return Ok(None),

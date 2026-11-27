@@ -12,6 +12,15 @@
             <input_port name="a"/>
             <input_port name="b"/>
         </Condition>
+        <Condition ID="IsTrue">
+            <input_port name="value"/>
+        </Condition>
+        <Control ID="FallbackStar"/>
+        <Decorator ID="Timeout">
+            <input_port name="seconds"/>
+            <input_port name="t"/>
+            <inout_port name="started"/>
+        </Decorator>
         <Action ID="Unpack">
             <input_port name="values"/>
             <output_port name="out_0"/>
