@@ -48,12 +48,11 @@ studio-bridge = [
 # terminal. An embedder with its own UI builds with default-features = false and
 # "native".
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
-# Arora's dataflow nodes as host modules (`AroraBuilder::with_dataflow_nodes`):
-# comparisons, logic and arithmetic a tree calls in its arguments.
-dataflow = ["dep:arora-dataflow-nodes"]
 
 [dependencies]
-arora-dataflow-nodes = { path = "../arora-dataflow-nodes", version = "3", default-features = false, optional = true }
+# The dataflow nodes every device serves: comparisons, logic and arithmetic a
+# tree calls in its arguments.
+arora-dataflow-nodes = { path = "../arora-dataflow-nodes", version = "3", default-features = false }
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
 # 10.1: the interpreter answers `read` and writes the behavior's revision.
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "11" }

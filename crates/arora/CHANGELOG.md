@@ -8,11 +8,12 @@ All notable changes to `arora`. The format follows
 
 ### Added
 
-- `AroraBuilder::with_dataflow_nodes()`, behind the new `dataflow` feature:
-  Arora's dataflow nodes (`@arora/dataflow`, `@arora/geometry`) as host
-  modules, so a tree's text or Groot names a comparison, logic or arithmetic
-  node, and one in-process `DataflowNodes` answers it. A dataflow function's
-  own calls to other modules (`external`, `taskrun`, `spawn`) are refused.
+- Every device serves Arora's dataflow nodes (`@arora/dataflow`,
+  `@arora/geometry`) as host modules, like the native nodes: a tree's text or
+  Groot names a comparison, logic or arithmetic node with no module loaded,
+  and one in-process `DataflowNodes` answers it. A dataflow function's own
+  calls to other modules (`external`, `taskrun`, `spawn`) are refused; a host
+  module of one of their ids fails the build.
 
 ### Changed
 

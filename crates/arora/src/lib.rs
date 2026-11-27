@@ -6,8 +6,10 @@
 //! bridge I/O seams, one behavior interpreter, and the step loop that drives
 //! them. The core behavior-tree nodes — the control nodes and the string nodes
 //! (`SetString`, `UnsetString`, `IsStringSet`, `WaitStringSet`, `RegexMatch`)
-//! — are wired natively into [`arora_behavior_tree`], so no module needs to be
-//! loaded to run a tree of them.
+//! — are wired natively into [`arora_behavior_tree`], and Arora's dataflow
+//! nodes (comparisons, logic, arithmetic: `@arora/dataflow`, `@arora/geometry`)
+//! are host modules of every device, so no module needs to be loaded to run a
+//! tree of them.
 //!
 //! Build one with the [`builder`](Arora::builder): pick a data store, a HAL,
 //! zero or more bridges, the modules whose functions behaviors may call, and
@@ -17,7 +19,6 @@
 //! drive it with [`step`](Arora::step) (once per frame) or
 //! [`run`](Arora::run) (the visible loop over `step`).
 
-#[cfg(feature = "dataflow")]
 mod dataflow;
 /// The device a run is: its name, its directory, its local bridge's port.
 #[cfg(feature = "native")]
@@ -817,9 +818,6 @@ pub struct AroraBuilder {
     #[cfg(feature = "native")]
     module_dir_records: LocalRegistry,
     host_modules: Vec<HostModule>,
-    /// Whether the dataflow nodes are host modules (`with_dataflow_nodes`).
-    #[cfg(feature = "dataflow")]
-    dataflow: bool,
     guest_limits: GuestLimits,
     module_limits: Vec<(Uuid, GuestLimits)>,
     groot: Option<String>,
@@ -1113,20 +1111,6 @@ impl AroraBuilder {
         self
     }
 
-    /// Serve Arora's dataflow nodes (`@arora/dataflow`, `@arora/geometry`,
-    /// and `@arora/kinematics` when built in) as host modules: their
-    /// functions join the method index, so a tree names them, in text
-    /// (`is_true(value: greaterthan(lhs: {top}, rhs: 0.006f32))`) or Groot,
-    /// and one in-process `DataflowNodes` answers their calls. A dataflow
-    /// function's own calls to other modules (`external`, `taskrun`,
-    /// `spawn`) are refused. A host module of one of their ids fails the
-    /// build. Behind the `dataflow` feature.
-    #[cfg(feature = "dataflow")]
-    pub fn with_dataflow_nodes(mut self) -> Self {
-        self.dataflow = true;
-        self
-    }
-
     /// Install a Groot behavior tree as the device's behavior once it is
     /// built: [`build`](AroraBuilder::build) resolves its tags against the
     /// method index it assembled — the core nodes and every loaded
@@ -1340,12 +1324,10 @@ impl AroraBuilder {
                 .into_iter()
                 .map(|module| (host_module_name(&module), module)),
         );
-        #[cfg(feature = "dataflow")]
+        // Arora's dataflow nodes, served by every device like the native nodes.
         let host_modules = host_modules.chain(
-            self.dataflow
-                .then(dataflow::modules)
+            dataflow::modules()
                 .into_iter()
-                .flatten()
                 .map(|module| ("the dataflow nodes".to_string(), module)),
         );
         for (name, module) in host_modules {
@@ -2008,7 +1990,7 @@ mod module_loading_tests {
 
         let store = SimpleDataStore::new();
         store
-            .write(StateChange::set("angle", Value::F32(0.0)))
+            .write(StateChange::set("length", Value::U32(3)))
             .expect("seed the input");
         let mut arora = Arora::builder()
             .with_data_store(Box::new(store.clone()))
@@ -2025,17 +2007,17 @@ mod module_loading_tests {
         arora
             .load_groot(
                 r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
-                     <cos angle="{angle}" res="{cosine}"/>
+                     <text length="{length}" res="{word}"/>
                    </BehaviorTree></root>"#,
             )
-            .expect("the tree names the guest's cos by its declared name");
+            .expect("the tree names the guest's text by its declared name");
         arora
             .step(std::time::Duration::from_millis(10))
             .expect("one step ticks the tree");
         assert_eq!(
-            store.read(&[Key::from("cosine")]),
-            vec![Some(Value::F32(1.0))],
-            "cos(0) written back to the bound key"
+            store.read(&[Key::from("word")]),
+            vec![Some(Value::String("xxx".into()))],
+            "text(3) written back to the bound key"
         );
     }
 
@@ -2049,7 +2031,7 @@ mod module_loading_tests {
 
         let store = SimpleDataStore::new();
         store
-            .write(StateChange::set("angle", Value::F32(0.0)))
+            .write(StateChange::set("length", Value::U32(3)))
             .expect("seed the input");
         let mut arora = Arora::builder()
             .with_data_store(Box::new(store.clone()))
@@ -2063,7 +2045,7 @@ mod module_loading_tests {
             )
             .with_groot(
                 r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
-                     <cos angle="{angle}" res="{cosine}"/>
+                     <text length="{length}" res="{word}"/>
                    </BehaviorTree></root>"#,
             )
             .build()
@@ -2072,9 +2054,9 @@ mod module_loading_tests {
             .step(std::time::Duration::from_millis(10))
             .expect("one step ticks the tree");
         assert_eq!(
-            store.read(&[Key::from("cosine")]),
-            vec![Some(Value::F32(1.0))],
-            "cos(0) written back to the bound key"
+            store.read(&[Key::from("word")]),
+            vec![Some(Value::String("xxx".into()))],
+            "text(3) written back to the bound key"
         );
     }
 
@@ -2113,7 +2095,7 @@ mod module_loading_tests {
             arora
                 .function_index
                 .values()
-                .find(|f| f.function_name == name)
+                .find(|f| f.module_id == module_id && f.function_name == name)
                 .cloned()
         };
 
@@ -2568,7 +2550,7 @@ mod module_loading_tests {
             arora
                 .function_index
                 .values()
-                .any(|f| f.function_name == "cos"),
+                .any(|f| f.module_id == test_module_header().id && f.function_name == "cos"),
             "the compiled module's exports join the method index"
         );
 
@@ -2988,8 +2970,8 @@ mod host_module_tests {
 #[cfg(all(test, feature = "native"))]
 mod stepping_tests;
 
-/// The dataflow nodes as host modules (`with_dataflow_nodes`).
-#[cfg(all(test, feature = "dataflow"))]
+/// The dataflow nodes, host modules of every device.
+#[cfg(test)]
 mod dataflow_tests {
     use super::*;
     use arora_types::data::{Key, StateChange};
@@ -2997,9 +2979,8 @@ mod dataflow_tests {
     fn device(store: &SimpleDataStore) -> Arora {
         Arora::builder()
             .with_data_store(Box::new(store.clone()))
-            .with_dataflow_nodes()
             .build()
-            .expect("build a device serving the dataflow nodes")
+            .expect("build a device")
     }
 
     /// A Groot tree names a dataflow comparison by its name, and a native
@@ -3054,27 +3035,9 @@ mod dataflow_tests {
     fn a_host_module_of_a_dataflow_id_fails_the_build() {
         let id = arora_dataflow_nodes::functions::DATAFLOW.id;
         let built = Arora::builder()
-            .with_dataflow_nodes()
             .with_host_module(ModuleBuilder::new(id).build())
             .build();
         assert!(built.is_err());
-    }
-
-    /// Without the option, no dataflow function is known.
-    #[test]
-    fn without_the_option_the_device_has_no_dataflow_node() {
-        let store = SimpleDataStore::new();
-        let mut arora = Arora::builder()
-            .with_data_store(Box::new(store))
-            .build()
-            .expect("build a device");
-        assert!(arora
-            .load_groot(
-                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
-                     <greaterthan lhs="{top}" rhs="{limit}"/>
-                   </BehaviorTree></root>"#,
-            )
-            .is_err());
     }
 }
 
