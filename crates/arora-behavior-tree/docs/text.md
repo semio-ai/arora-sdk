@@ -31,6 +31,7 @@ with its id. The [`text`](../src/text/mod.rs) module reads and writes it:
 | `text::parse(text) -> Parsed { document, diagnostics }` | The syntax tree of what is written, every part with its span. A line that does not parse is reported and left out; every other line is in the document. |
 | `text::format(&parsed, &functions) -> Result<String, Vec<Diagnostic>>` | The parsed text in its canonical layout. A text with errors is refused, with its errors: what does not parse is not in its document, and would be lost. |
 | `text::resolve(&document, &functions) -> Loaded { graph, nodes, diagnostics }` | The shared [`Graph`](../../arora-behavior/src/graph.rs) an interpreter runs, and where each of its nodes is written. |
+| `text::load(text, &functions) -> Result<Graph, BehaviorTreeError>` | `parse` then `resolve`: the `Graph`, or every error with its `line:column`. |
 | `text::natives()` | The native nodes as functions — name, parameters, types — for a palette. |
 | `load_behavior_tree_text(text, &functions, &resolver)` | A runnable `BehaviorTree`, or every error with its `line:column`. |
 

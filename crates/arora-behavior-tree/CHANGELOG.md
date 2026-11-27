@@ -33,6 +33,9 @@ activation afresh, as BehaviorTree.CPP halts it.
 - A module function declaring `activated: bool`, left unbound by its node,
   is passed `true` on the first tick of each of the node's activations and
   `false` on the next (`ACTIVATED_PARAM_NAME`).
+- `text::load(text, &functions)`: the `Graph` a text says, or every error
+  at its `line:column`, as `load_behavior_tree_text` reports them; what a
+  runtime loads through its interpreter.
 
 ### Changed
 

@@ -88,6 +88,10 @@ device.load_groot(&tree)?;
 device.step(Duration::from_millis(10))?; // the tree ticks once
 ```
 
+A behavior in Arora's [text language](../arora-behavior-tree/docs/text.md)
+loads the same way, with `load_text` (or `with_text` on the builder); a text
+with an error is refused, each error at its `line:column`.
+
 Or hand the device your HAL and let it pace itself. `AroraBuilder::run` picks
 the operator front end, serves the open local bridge when no bridge was given,
 and steps at `Arora::DEFAULT_STEP_PERIOD` (10 ms):

@@ -180,10 +180,10 @@ pub struct Arora {
     /// The task runs started through the interpreter module that have not yet
     /// ended, each step reading whether they did, to log how.
     pub(crate) task_runs: runtime::TaskRuns,
-    /// Set by [`load_groot`](Arora::load_groot) around its load, so the
-    /// interpreter module's `LOAD` logs that the behavior came from a Groot
-    /// tree.
-    pub(crate) loading_groot: Rc<Cell<bool>>,
+    /// Set by [`load_groot`](Arora::load_groot) and
+    /// [`load_text`](Arora::load_text) around their load, so the interpreter
+    /// module's `LOAD` logs where the behavior came from.
+    pub(crate) loading_from: Rc<Cell<Option<&'static str>>>,
     // The HAL, owned by the device; outbound writes go through its
     // non-blocking `try_send`. An implementation that also feeds an observer
     // (a simulator UI, a test) shares its internals and hands a sibling handle
@@ -281,11 +281,41 @@ impl Arora {
         let graph = tree
             .into_graph(&self.function_index)
             .map_err(|e| anyhow::anyhow!("the Groot tree does not lower: {e:?}"))?;
-        self.loading_groot.set(true);
-        let loaded = self.call(interpreter_module::encode_load(&graph));
-        self.loading_groot.set(false);
+        self.load_graph(&graph, "a Groot tree")
+    }
+
+    /// Install a behavior written in Arora's [text
+    /// language](arora_behavior_tree::text) as the device's behavior, as
+    /// [`load_groot`](Self::load_groot) does a Groot tree: its names resolve
+    /// against the device's own method index, and the graph loads through the
+    /// interpreter module. A text with an error is refused with every error,
+    /// each at its `line:column`.
+    pub fn load_text(&mut self, source: &str) -> Result<()> {
+        let graph = arora_behavior_tree::text::load(source, &self.function_index)
+            .map_err(|e| anyhow::anyhow!("the text does not load: {e}"))?;
+        self.load_graph(&graph, "a text")
+    }
+
+    /// Load `graph` through the interpreter module, logging it came from
+    /// `source`.
+    fn load_graph(
+        &mut self,
+        graph: &arora_behavior::graph::Graph,
+        source: &'static str,
+    ) -> Result<()> {
+        self.loading_from.set(Some(source));
+        let loaded = self.call(interpreter_module::encode_load(graph));
+        self.loading_from.set(None);
         loaded.map_err(|e| anyhow::anyhow!("the behavior did not load: {e}"))?;
         Ok(())
+    }
+
+    /// The device's method index: every function a behavior may name, the
+    /// loaded modules' (host and guest) and the dataflow nodes', by id. What
+    /// [`load_groot`](Self::load_groot) and [`load_text`](Self::load_text)
+    /// resolve names against.
+    pub fn function_index(&self) -> &FunctionIndex {
+        &self.function_index
     }
 
     /// Load a guest module into the running device: its functions dispatch
@@ -824,6 +854,7 @@ pub struct AroraBuilder {
     guest_limits: GuestLimits,
     module_limits: Vec<(Uuid, GuestLimits)>,
     groot: Option<String>,
+    text: Option<String>,
     #[cfg(feature = "native")]
     step_period: Option<std::time::Duration>,
     #[cfg(feature = "native")]
@@ -1125,6 +1156,17 @@ impl AroraBuilder {
     /// index: the default interpreter's is the device's.
     pub fn with_groot(mut self, xml: impl Into<String>) -> Self {
         self.groot = Some(xml.into());
+        self
+    }
+
+    /// Install a behavior written in Arora's [text
+    /// language](arora_behavior_tree::text) once the device is built, as
+    /// [`with_groot`](Self::with_groot) does a Groot tree, loading it as
+    /// [`Arora::load_text`] does: the build fails on a text with an error,
+    /// each reported at its `line:column`, or one that does not load. Given
+    /// with a Groot tree, the text loads after it and replaces it.
+    pub fn with_text(mut self, source: impl Into<String>) -> Self {
+        self.text = Some(source.into());
         self
     }
 
@@ -1475,22 +1517,21 @@ impl AroraBuilder {
         // device now runs is what an operator watching it asks first.
         let interpreter: runtime::InterpreterCell = Rc::new(RefCell::new(Some(interpreter)));
         let task_runs: runtime::TaskRuns = Rc::default();
-        let loading_groot: Rc<Cell<bool>> = Rc::default();
+        let loading_from: Rc<Cell<Option<&'static str>>> = Rc::default();
         let module = ModuleBuilder::new(interpreter_module::ID)
             .function(interpreter_module::LOAD, {
                 let cell = interpreter.clone();
-                let loading_groot = loading_groot.clone();
+                let loading_from = loading_from.clone();
                 move |call| {
                     let graph = interpreter_module::decode_load(&call)
                         .map_err(|message| CallError::Guest { message })?;
                     let nodes = graph.nodes.len();
                     let result =
                         runtime::with_interpreter(&cell, |interpreter| interpreter.load(graph))?;
-                    let source = if loading_groot.get() {
-                        " from a Groot tree"
-                    } else {
-                        ""
-                    };
+                    let source = loading_from
+                        .get()
+                        .map(|source| format!(" from {source}"))
+                        .unwrap_or_default();
                     log::info!(
                         "behavior loaded{source}: {nodes} node(s), running from the next step"
                     );
@@ -1681,10 +1722,13 @@ impl AroraBuilder {
             clock: Clock::starting_at(self.start_time),
             behavior_error: watch::Sender::new(None),
             task_runs,
-            loading_groot,
+            loading_from,
         };
         if let Some(xml) = self.groot {
             arora.load_groot(&xml)?;
+        }
+        if let Some(source) = self.text {
+            arora.load_text(&source)?;
         }
         // The runtime's own keys — its clock, its task runs' — are closed to
         // remote writers whatever wider prefix the host opens: a remote that
@@ -3031,6 +3075,51 @@ mod dataflow_tests {
             vec![Some(Value::String("below".into()))],
             "the condition fails below the limit"
         );
+    }
+
+    /// A behavior's text names the dataflow nodes as any function: here a
+    /// comparison in a native's arguments, and a detached one.
+    #[test]
+    fn a_text_runs_a_dataflow_comparison() {
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("top", Value::F64(0.01)))
+            .expect("seed the input");
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_text(
+                "sequence\n  \
+                   is_true(value: greaterthan(lhs: {top}, rhs: 0.006f64))\n  \
+                   is_true(value: @below._ret)\n  \
+                   set_string(variable: {verdict}, value: \"above\")\n\
+                 \n\
+                 below: lessthan(lhs: {top}, rhs: 0.02f64)\n",
+            )
+            .build()
+            .expect("the text loads at build");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one step ticks the tree");
+        assert_eq!(
+            store.read(&[Key::from("verdict")]),
+            vec![Some(Value::String("above".into()))]
+        );
+        assert!(arora
+            .function_index()
+            .values()
+            .any(|function| function.function_name == "greaterthan"));
+    }
+
+    /// A text with an error fails the build, the error at its line and
+    /// column.
+    #[test]
+    fn with_text_fails_the_build_on_an_unknown_name() {
+        let error = Arora::builder()
+            .with_text("sequence\n  nobody()\n")
+            .build()
+            .err()
+            .expect("an unknown name fails the build");
+        assert!(error.to_string().contains("2:3:"), "{error}");
     }
 
     /// A device's own host module of a dataflow id fails the build, rather

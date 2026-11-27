@@ -22,6 +22,7 @@
 //! - [`resolve`] turns a document into the shared
 //!   [`Graph`](arora_behavior::graph::Graph) an interpreter runs, against the
 //!   device's function index and the [`natives`].
+//! - [`load`] does both, refusing a text with an error.
 //!
 //! The language is described in `docs/text.md`.
 
@@ -45,7 +46,49 @@ pub(crate) use lexer::{is_name, is_parameter_name};
 pub(crate) use natives::{native, native_named, seed};
 pub(crate) use resolve::{node_id, number, Functions, RETURN};
 
+use arora_behavior::graph::Graph;
+use arora_behavior::FunctionIndex;
 use serde::{Deserialize, Serialize};
+
+use crate::error::BehaviorTreeError;
+
+/// The [`Graph`] a text says, its functions found in `functions`: [`parse`]
+/// then [`resolve`]. A text with an error is refused with every error, each
+/// at its `line:column`; warnings do not stop it. A column counts
+/// characters.
+pub fn load(source: &str, functions: &FunctionIndex) -> Result<Graph, BehaviorTreeError> {
+    let parsed = parse(source);
+    let loaded = resolve(&parsed.document, functions);
+    let mut errors = parsed
+        .diagnostics
+        .iter()
+        .chain(&loaded.diagnostics)
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .peekable();
+    if errors.peek().is_none() {
+        return Ok(loaded.graph);
+    }
+    // Where each line starts, found once: a line ends at `\n`, `\r\n` or
+    // `\r`.
+    let starts: Vec<usize> = std::iter::once(0)
+        .chain(source.char_indices().filter_map(|(at, char)| match char {
+            '\n' => Some(at + 1),
+            '\r' if !source[at + 1..].starts_with('\n') => Some(at + 1),
+            _ => None,
+        }))
+        .collect();
+    let errors: Vec<String> = errors
+        .map(|diagnostic| {
+            let offset = diagnostic.span.start.min(source.len());
+            let line = starts.partition_point(|start| *start <= offset);
+            let column = source[starts[line - 1]..offset].chars().count() + 1;
+            format!("{line}:{column}: {}", diagnostic.message)
+        })
+        .collect();
+    Err(BehaviorTreeError::ParsingError {
+        message: errors.join("; "),
+    })
+}
 
 /// How deep expressions nest, and blocks: a call in an argument, a value in
 /// `some(…)` or in an array, and a selection out of a value are each a
