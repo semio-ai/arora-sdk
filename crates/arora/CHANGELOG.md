@@ -6,13 +6,22 @@ All notable changes to `arora`. The format follows
 
 ## [19.0.0] - Unreleased
 
+### Added
+
+- `AroraBuilder::with_dataflow_nodes()`, behind the new `dataflow` feature:
+  Arora's dataflow nodes (`@arora/dataflow`, `@arora/geometry`) as host
+  modules, so a tree's text or Groot names a comparison, logic or arithmetic
+  node, and one in-process `DataflowNodes` answers it. A dataflow function's
+  own calls to other modules (`external`, `taskrun`, `spawn`) are refused.
+
 ### Changed
 
 - **Breaking:** requires arora-behavior-tree 11, whose `BehaviorTreeInterpreter`
   arora re-exports: a node a tick stops ticking while it runs is halted, and
   starts its next activation afresh (a `sequence_star` at its first child);
-  `retry` and `inverter` are native; a module function may declare
-  `activated: bool` to be told the first tick of each activation.
+  `retry`, `inverter`, `fallback_star`, `timeout` and `is_true` are native;
+  a module function may declare `activated: bool` to be told the first tick
+  of each activation.
 
 ## [18.0.1] - 2026-11-18
 

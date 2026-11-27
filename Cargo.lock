@@ -180,6 +180,7 @@ dependencies = [
  "arora-bridge",
  "arora-bridge-ws",
  "arora-buffers",
+ "arora-dataflow-nodes",
  "arora-engine",
  "arora-hal",
  "arora-registry",

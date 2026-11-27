@@ -136,6 +136,7 @@ A device's modules load when it is built, through the builder:
 | `with_compiled_module(&compiled)` | a guest compiled once (`CompiledModule`), shared by several devices |
 | `with_declared_module::<M>(executor, bytes)` | a guest declared in Rust: the header and every export's signature come from the declaration |
 | `with_host_module(module)` | in-process Rust functions under a module id (`ModuleBuilder`, `HostModule`) |
+| `with_dataflow_nodes()` | Arora's [dataflow nodes](../arora-dataflow-nodes) (`@arora/dataflow`, `@arora/geometry`), in process, for a tree to call in its arguments: `is_true(value: greaterthan(lhs: {top}, rhs: 0.006f32))`; their own calls to other modules are refused (feature `dataflow`) |
 | `with_module_dirs(device_dir, dirs)` | every module directory under the device directory's `modules/`, then each of `dirs` |
 
 One module id is one module: a second module under a taken id fails the build,
@@ -253,6 +254,7 @@ credential, the model the device reports and every variable.
 | `native` | yes | the wasmtime component and native-library executors, the device runner and its helpers (`DeviceCli`, `RunnerArgs`, `Device`, `module_dir`, `operator`), the open local bridge ([`arora-bridge-ws`](../arora-bridge-ws)) |
 | `tui` | yes | the terminal operator UI (`tui`); implies `native` |
 | `studio-bridge` | no | the Semio Studio connection (`studio`); implies `native` |
+| `dataflow` | no | `AroraBuilder::with_dataflow_nodes`, Arora's dataflow nodes as host modules |
 
 For the browser, build with `--no-default-features` for `wasm32-unknown-unknown`:
 the engine runs components on the browser's `WebAssembly`, and

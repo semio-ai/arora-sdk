@@ -17,6 +17,8 @@
 //! drive it with [`step`](Arora::step) (once per frame) or
 //! [`run`](Arora::run) (the visible loop over `step`).
 
+#[cfg(feature = "dataflow")]
+mod dataflow;
 /// The device a run is: its name, its directory, its local bridge's port.
 #[cfg(feature = "native")]
 pub mod device;
@@ -818,6 +820,9 @@ pub struct AroraBuilder {
     #[cfg(feature = "native")]
     module_dir_records: LocalRegistry,
     host_modules: Vec<HostModule>,
+    /// Whether the dataflow nodes are host modules (`with_dataflow_nodes`).
+    #[cfg(feature = "dataflow")]
+    dataflow: bool,
     guest_limits: GuestLimits,
     module_limits: Vec<(Uuid, GuestLimits)>,
     groot: Option<String>,
@@ -1111,6 +1116,20 @@ impl AroraBuilder {
         self
     }
 
+    /// Serve Arora's dataflow nodes (`@arora/dataflow`, `@arora/geometry`,
+    /// and `@arora/kinematics` when built in) as host modules: their
+    /// functions join the method index, so a tree names them, in text
+    /// (`is_true(value: greaterthan(lhs: {top}, rhs: 0.006f32))`) or Groot,
+    /// and one in-process `DataflowNodes` answers their calls. A dataflow
+    /// function's own calls to other modules (`external`, `taskrun`,
+    /// `spawn`) are refused. A host module of one of their ids fails the
+    /// build. Behind the `dataflow` feature.
+    #[cfg(feature = "dataflow")]
+    pub fn with_dataflow_nodes(mut self) -> Self {
+        self.dataflow = true;
+        self
+    }
+
     /// Install a Groot behavior tree as the device's behavior once it is
     /// built: [`build`](AroraBuilder::build) resolves its tags against the
     /// method index it assembled — the core nodes and every loaded
@@ -1323,6 +1342,14 @@ impl AroraBuilder {
             self.host_modules
                 .into_iter()
                 .map(|module| (host_module_name(&module), module)),
+        );
+        #[cfg(feature = "dataflow")]
+        let host_modules = host_modules.chain(
+            self.dataflow
+                .then(dataflow::modules)
+                .into_iter()
+                .flatten()
+                .map(|module| ("the dataflow nodes".to_string(), module)),
         );
         for (name, module) in host_modules {
             claim_module_id(&mut module_ids, module.id(), name)?;
@@ -2964,6 +2991,96 @@ mod host_module_tests {
 
 #[cfg(all(test, feature = "native"))]
 mod stepping_tests;
+
+/// The dataflow nodes as host modules (`with_dataflow_nodes`).
+#[cfg(all(test, feature = "dataflow"))]
+mod dataflow_tests {
+    use super::*;
+    use arora_types::data::{Key, StateChange};
+
+    fn device(store: &SimpleDataStore) -> Arora {
+        Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_dataflow_nodes()
+            .build()
+            .expect("build a device serving the dataflow nodes")
+    }
+
+    /// A Groot tree names a dataflow comparison by its name, and a native
+    /// `IsTrue` makes its bool a condition.
+    #[test]
+    fn a_groot_tree_runs_a_dataflow_comparison() {
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("top", Value::F64(0.01)))
+            .expect("seed the input");
+        let mut arora = device(&store);
+        arora
+            .load_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <Sequence>
+                       <greaterthan lhs="{top}" rhs="{limit}" _ret="{.above}"/>
+                       <IsTrue value="{.above}"/>
+                       <SetString variable="{verdict}" value="above"/>
+                     </Sequence>
+                   </BehaviorTree></root>"#,
+            )
+            .expect("the tree names greaterthan");
+        store
+            .write(StateChange::set("limit", Value::F64(0.006)))
+            .expect("seed the limit");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one step ticks the tree");
+        assert_eq!(
+            store.read(&[Key::from("verdict")]),
+            vec![Some(Value::String("above".into()))]
+        );
+        store
+            .write(StateChange::set("top", Value::F64(0.001)))
+            .expect("lower the input");
+        store
+            .write(StateChange::set("verdict", Value::String("below".into())))
+            .expect("reset the verdict");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one more step");
+        assert_eq!(
+            store.read(&[Key::from("verdict")]),
+            vec![Some(Value::String("below".into()))],
+            "the condition fails below the limit"
+        );
+    }
+
+    /// A device's own host module of a dataflow id fails the build, rather
+    /// than one shadowing the other.
+    #[test]
+    fn a_host_module_of_a_dataflow_id_fails_the_build() {
+        let id = arora_dataflow_nodes::functions::DATAFLOW.id;
+        let built = Arora::builder()
+            .with_dataflow_nodes()
+            .with_host_module(ModuleBuilder::new(id).build())
+            .build();
+        assert!(built.is_err());
+    }
+
+    /// Without the option, no dataflow function is known.
+    #[test]
+    fn without_the_option_the_device_has_no_dataflow_node() {
+        let store = SimpleDataStore::new();
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store))
+            .build()
+            .expect("build a device");
+        assert!(arora
+            .load_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <greaterthan lhs="{top}" rhs="{limit}"/>
+                   </BehaviorTree></root>"#,
+            )
+            .is_err());
+    }
+}
 
 #[cfg(all(test, feature = "native"))]
 mod test_components;
