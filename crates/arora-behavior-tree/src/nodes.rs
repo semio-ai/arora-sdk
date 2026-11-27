@@ -165,6 +165,47 @@ pub fn inverter(child: TreeNode) -> TreeNode {
     TreeNode::control_node(INVERTER_FUNCTION_ID, vec![child])
 }
 
+/// A [`FALLBACK_STAR_FUNCTION_ID`] control node over `children`.
+#[allow(unused)]
+pub fn fallback_star(children: Vec<TreeNode>) -> TreeNode {
+    TreeNode {
+        function: FALLBACK_STAR_FUNCTION_ID,
+        children: Some(children),
+        parameters: HashMap::from([(
+            FALLBACK_STAR_CURRENT_INDEX_PARAM_ID,
+            Expression::Value(Value::U16(0)),
+        )]),
+    }
+}
+
+/// A [`TIMEOUT_FUNCTION_ID`] decorator over `child`: `Failure`, the child
+/// halted, once `seconds` have passed by the clock `t` since it started.
+#[allow(unused)]
+pub fn timeout(child: TreeNode, seconds: f64, t: Expression) -> TreeNode {
+    TreeNode {
+        function: TIMEOUT_FUNCTION_ID,
+        children: Some(vec![child]),
+        parameters: HashMap::from([
+            (
+                TIMEOUT_SECONDS_PARAM_ID,
+                Expression::Value(Value::F64(seconds)),
+            ),
+            (TIMEOUT_T_PARAM_ID, t),
+            (TIMEOUT_STARTED_PARAM_ID, Expression::Value(Value::Unit)),
+        ]),
+    }
+}
+
+/// An [`IS_TRUE_FUNCTION_ID`] leaf over `value`.
+#[allow(unused)]
+pub fn is_true(value: Expression) -> TreeNode {
+    TreeNode {
+        function: IS_TRUE_FUNCTION_ID,
+        children: None,
+        parameters: HashMap::from([(IS_TRUE_VALUE_PARAM_ID, value)]),
+    }
+}
+
 // Other functions from other modules
 //================================================================
 #[allow(unused)]
@@ -387,6 +428,31 @@ pub const RETRY_ATTEMPTS_PARAM_ID: Uuid = uuid::uuid!("7f7ccf18-1328-480c-95ec-2
 /// Inverter: ticks its one child, and turns its `Success` into `Failure` and
 /// its `Failure` into `Success`; `Running` stays.
 pub const INVERTER_FUNCTION_ID: Uuid = uuid::uuid!("6d74ccae-0939-4a29-ac5a-9ad7da3195fc");
+/// Fallback star: ticks its children in turn, and stops at the first that
+/// does not fail, with its status; a `Running` child is resumed at the next
+/// tick, past the children that failed. `Failure` with no child.
+pub const FALLBACK_STAR_FUNCTION_ID: Uuid = uuid::uuid!("d2c56226-056e-4e60-8153-8bbe5eb90689");
+/// [`FALLBACK_STAR_FUNCTION_ID`]'s running child, a `u16`: back at `0` once
+/// the node returns `Success` or `Failure`, or is halted.
+pub const FALLBACK_STAR_CURRENT_INDEX_PARAM_ID: Uuid =
+    uuid::uuid!("7128fc2d-f15c-4e9e-b505-014fa315020b");
+/// Timeout: ticks its one child, and is `Failure`, without ticking it, once
+/// `seconds` have passed by the clock `t` since the node's activation began;
+/// the child, no longer ticked, is halted.
+pub const TIMEOUT_FUNCTION_ID: Uuid = uuid::uuid!("8ccd59e7-1527-49f4-8aed-6d53294b58a2");
+/// [`TIMEOUT_FUNCTION_ID`]'s time limit, in seconds.
+pub const TIMEOUT_SECONDS_PARAM_ID: Uuid = uuid::uuid!("b3c83082-7e42-43b7-9e55-1481bbadfa14");
+/// [`TIMEOUT_FUNCTION_ID`]'s clock: an unsigned integer in nanoseconds
+/// (`arora/time`) or a float in seconds.
+pub const TIMEOUT_T_PARAM_ID: Uuid = uuid::uuid!("aed978c8-a74c-46db-aad0-a762aca370e1");
+/// [`TIMEOUT_FUNCTION_ID`]'s clock when its activation began, `()` while it
+/// is not active: its own state, or a key a tree binds to log it.
+pub const TIMEOUT_STARTED_PARAM_ID: Uuid = uuid::uuid!("d14b5934-482f-4847-9035-7c7042fbb52f");
+/// Is true: `Success` when `value` is `true`, `Failure` when it is `false`;
+/// any other value is an error.
+pub const IS_TRUE_FUNCTION_ID: Uuid = uuid::uuid!("69dc38c3-b0b8-41a7-87d2-ab1c1b772333");
+/// [`IS_TRUE_FUNCTION_ID`]'s value.
+pub const IS_TRUE_VALUE_PARAM_ID: Uuid = uuid::uuid!("e764f8b6-5b36-4310-838c-ceeab0e8c6e1");
 pub const FALLBACK_FUNCTION_ID: Uuid = Uuid::from_bytes([
     0xbf, 0xa8, 0x9a, 0x4e, 0xc3, 0x69, 0x43, 0x0e, 0xbe, 0x78, 0x0d, 0xc0, 0x73, 0x11, 0x39, 0x1c,
 ]);

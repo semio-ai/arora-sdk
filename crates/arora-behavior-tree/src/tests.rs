@@ -4457,13 +4457,14 @@ mod halting {
         }
     }
 
-    /// A retry or an inverter of more than one child is refused as it ticks,
-    /// rather than leaving a child unticked.
+    /// A retry, an inverter or a timeout of more than one child is refused as
+    /// it ticks, rather than leaving a child unticked.
     #[test]
     fn a_decorator_of_two_children_is_refused() {
         for mut decorator in [
             nodes::retry(nodes::succeed(), 2),
             nodes::inverter(nodes::succeed()),
+            nodes::timeout(nodes::succeed(), 1.0, Expression::Value(Value::U64(0))),
         ] {
             decorator.children.as_mut().unwrap().push(nodes::fail());
             let tree = build(decorator);
@@ -4474,6 +4475,237 @@ mod halting {
             let error = runtime.tick().expect_err("refused").to_string();
             assert!(error.contains("needs exactly one child"), "{error}");
         }
+    }
+
+    const ABORT: Uuid = Uuid::from_u128(0x14);
+    const OTHER: Uuid = Uuid::from_u128(0x15);
+
+    /// A fallback star resumes its running child, past the children that
+    /// failed, and starts again at its first once it finishes.
+    #[test]
+    fn a_fallback_star_resumes_its_running_child_past_the_failed_ones() {
+        let leaves = Leaves::new(&[(STAGE_1, Status::Failure), (STAGE_2, Status::Running)]);
+        let tree = build(nodes::fallback_star(vec![
+            scripted_leaf(STAGE_1),
+            scripted_leaf(STAGE_2),
+            nodes::succeed(),
+        ]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(
+            (leaves.ticks(STAGE_1), leaves.ticks(STAGE_2)),
+            (1, 2),
+            "resumed past the failed child"
+        );
+        leaves.set(STAGE_2, Status::Failure);
+        assert_eq!(runtime.tick().unwrap(), Status::Success, "the next child");
+        leaves.set(STAGE_2, Status::Running);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(leaves.ticks(STAGE_1), 2, "finished, it starts again");
+    }
+
+    /// A fallback star of no child fails, as a fallback of none does not.
+    #[test]
+    fn a_fallback_star_of_no_child_fails() {
+        assert_eq!(
+            tick_once(&build(nodes::fallback_star(vec![]))),
+            Status::Failure
+        );
+    }
+
+    /// A procedure whose step fails runs its clean-up to its end, and then
+    /// fails: the fallback star does not tick the failed procedure again
+    /// while the clean-up runs.
+    #[test]
+    fn a_fallback_star_runs_a_clean_up_to_its_end() {
+        let leaves = Leaves::new(&[
+            (STAGE_1, Status::Success),
+            (STAGE_2, Status::Failure),
+            (ABORT, Status::Running),
+        ]);
+        let tree = build(nodes::fallback_star(vec![
+            nodes::seq_star(vec![scripted_leaf(STAGE_1), scripted_leaf(STAGE_2)]),
+            nodes::seq_star(vec![scripted_leaf(ABORT), nodes::fail()]),
+        ]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(
+            (leaves.ticks(STAGE_1), leaves.ticks(ABORT)),
+            (1, 2),
+            "the clean-up resumed, the procedure left"
+        );
+        leaves.set(ABORT, Status::Success);
+        assert_eq!(runtime.tick().unwrap(), Status::Failure);
+        leaves.set(ABORT, Status::Running);
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(leaves.ticks(STAGE_1), 2, "the procedure runs again");
+    }
+
+    /// A halted fallback star starts again at its first child.
+    #[test]
+    fn a_halted_fallback_star_starts_again_at_its_first_child() {
+        let leaves = Leaves::new(&[
+            (LYING, Status::Success),
+            (STAGE_1, Status::Failure),
+            (STAGE_2, Status::Running),
+        ]);
+        let tree = build(nodes::seq(vec![
+            scripted_leaf(LYING),
+            nodes::fallback_star(vec![scripted_leaf(STAGE_1), scripted_leaf(STAGE_2)]),
+        ]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        runtime.tick().unwrap();
+        runtime.tick().unwrap();
+        assert_eq!(leaves.ticks(STAGE_1), 1);
+        leaves.set(LYING, Status::Failure);
+        runtime.tick().unwrap();
+        leaves.set(LYING, Status::Success);
+        runtime.tick().unwrap();
+        assert_eq!(leaves.ticks(STAGE_1), 2, "halted, it starts again");
+    }
+
+    /// A timeout over a clock cell, its start bound to a cell to read it.
+    fn timeout(
+        child: TreeNode,
+        seconds: f64,
+        clock: &VariableCell,
+        started: &VariableCell,
+    ) -> TreeNode {
+        let mut node = nodes::timeout(child, seconds, Expression::Variable(clock.clone()));
+        node.parameters.insert(
+            nodes::TIMEOUT_STARTED_PARAM_ID,
+            Expression::Variable(started.clone()),
+        );
+        node
+    }
+
+    /// A timeout fails once its time has passed, without ticking its child,
+    /// which is halted: the next activation starts the child afresh, and
+    /// measures its time from its own start.
+    #[test]
+    fn a_timeout_fails_at_its_deadline_and_halts_its_child() {
+        let leaves = leaves();
+        let clock = VariableCell::local_with(Value::U64(10_000_000_000));
+        let started = VariableCell::local_with(Value::Unit);
+        let tree = build(timeout(stages(), 1.0, &clock, &started));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(started.get_or_unit(), Value::U64(10_000_000_000));
+        clock.set(Value::U64(10_999_999_999));
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(
+            (leaves.ticks(STAGE_1), leaves.ticks(STAGE_2)),
+            (1, 2),
+            "the child resumed"
+        );
+        clock.set(Value::U64(11_000_000_000));
+        assert_eq!(runtime.tick().unwrap(), Status::Failure);
+        assert_eq!(leaves.ticks(STAGE_2), 2, "not ticked at the deadline");
+        assert_eq!(started.get_or_unit(), Value::Unit);
+
+        clock.set(Value::U64(20_000_000_000));
+        assert_eq!(runtime.tick().unwrap(), Status::Running, "a new activation");
+        assert_eq!(leaves.ticks(STAGE_1), 2, "the halted child starts again");
+        assert_eq!(started.get_or_unit(), Value::U64(20_000_000_000));
+    }
+
+    /// A timeout whose child finishes in time reports its status, and the
+    /// next activation measures from its own start; a clock in seconds
+    /// works as one in nanoseconds.
+    #[test]
+    fn a_finished_timeout_measures_its_next_activation_afresh() {
+        let leaves = Leaves::new(&[(OTHER, Status::Running)]);
+        let clock = VariableCell::local_with(Value::F64(0.0));
+        let started = VariableCell::local_with(Value::Unit);
+        let tree = build(timeout(scripted_leaf(OTHER), 2.0, &clock, &started));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        clock.set(Value::F64(1.5));
+        leaves.set(OTHER, Status::Success);
+        assert_eq!(runtime.tick().unwrap(), Status::Success);
+        assert_eq!(started.get_or_unit(), Value::Unit);
+        leaves.set(OTHER, Status::Running);
+        clock.set(Value::F64(3.0));
+        assert_eq!(runtime.tick().unwrap(), Status::Running, "2 s from 3 s");
+        clock.set(Value::F64(4.9));
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        clock.set(Value::F64(5.0));
+        assert_eq!(runtime.tick().unwrap(), Status::Failure);
+    }
+
+    /// A halted timeout has not started: its next activation measures from
+    /// its own first tick.
+    #[test]
+    fn a_halted_timeout_has_not_started() {
+        let leaves = Leaves::new(&[(LYING, Status::Success), (OTHER, Status::Running)]);
+        let clock = VariableCell::local_with(Value::U64(0));
+        let started = VariableCell::local_with(Value::Unit);
+        let tree = build(nodes::seq(vec![
+            scripted_leaf(LYING),
+            timeout(scripted_leaf(OTHER), 1.0, &clock, &started),
+        ]));
+        let mut bridge = leaves.bridge();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &leaves.functions, &mut bridge, false).unwrap();
+        runtime.tick().unwrap();
+        leaves.set(LYING, Status::Failure);
+        clock.set(Value::U64(500_000_000));
+        runtime.tick().unwrap();
+        assert_eq!(started.get_or_unit(), Value::Unit, "reset as it is halted");
+        leaves.set(LYING, Status::Success);
+        clock.set(Value::U64(900_000_000));
+        assert_eq!(runtime.tick().unwrap(), Status::Running);
+        assert_eq!(started.get_or_unit(), Value::U64(900_000_000));
+    }
+
+    /// A timeout of no time fails without ticking its child; one whose
+    /// clock reads no time is an error.
+    #[test]
+    fn a_timeout_of_no_time_fails_and_one_of_no_clock_is_refused() {
+        for child in [nodes::succeed(), nodes::run()] {
+            let tree = build(nodes::timeout(child, 0.0, Expression::Value(Value::U64(0))));
+            assert_eq!(tick_once(&tree), Status::Failure);
+        }
+        let tree = build(nodes::timeout(
+            nodes::run(),
+            1.0,
+            Expression::Value(Value::String("noon".into())),
+        ));
+        let mut bridge = TestBridge::empty();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &HashMap::new(), &mut bridge, false).unwrap();
+        let error = runtime.tick().expect_err("refused").to_string();
+        assert!(error.contains("the clock t reads"), "{error}");
+    }
+
+    /// `is_true` is a condition on a bool: `Success` for `true`, `Failure`
+    /// for `false`, and an error for any other value.
+    #[test]
+    fn is_true_is_a_condition_on_a_bool() {
+        let condition = |value: Value| build(nodes::is_true(Expression::Value(value)));
+        assert_eq!(tick_once(&condition(Value::Boolean(true))), Status::Success);
+        assert_eq!(
+            tick_once(&condition(Value::Boolean(false))),
+            Status::Failure
+        );
+        let tree = condition(Value::F64(1.0));
+        let mut bridge = TestBridge::empty();
+        let mut runtime =
+            BehaviorTreeRuntime::setup(&tree, &HashMap::new(), &mut bridge, false).unwrap();
+        let error = runtime.tick().expect_err("refused").to_string();
+        assert!(error.contains("is not a bool"), "{error}");
     }
 
     /// A leaf whose function declares `activated: bool`.

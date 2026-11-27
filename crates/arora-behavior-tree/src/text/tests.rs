@@ -19,9 +19,10 @@ use crate::call_expression_tests::{
 use crate::display::Names;
 use crate::graph::build_behavior_tree;
 use crate::nodes::{
-    EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID, RETRY_ATTEMPTS_PARAM_ID, RETRY_NUM_ATTEMPTS_PARAM_ID,
-    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SET_STR_VALUE_PARAM_ID,
-    SET_STR_VARIABLE_PARAM_ID,
+    EQUAL_FUNCTION_ID, FALLBACK_FUNCTION_ID, FALLBACK_STAR_CURRENT_INDEX_PARAM_ID,
+    RETRY_ATTEMPTS_PARAM_ID, RETRY_NUM_ATTEMPTS_PARAM_ID, SEQ_FUNCTION_ID,
+    SEQ_STAR_CURRENT_INDEX_PARAM_ID, SET_STR_VALUE_PARAM_ID, SET_STR_VARIABLE_PARAM_ID,
+    TIMEOUT_SECONDS_PARAM_ID, TIMEOUT_STARTED_PARAM_ID, TIMEOUT_T_PARAM_ID,
 };
 use crate::schema::_RET_PARAM_ID;
 use crate::{load_behavior_tree_nodes, load_behavior_tree_text, BehaviorTree, BehaviorTreeRuntime};
@@ -744,6 +745,78 @@ fn a_retry_is_seeded_and_reads_its_bound() {
     ));
 }
 
+/// A fallback star's index and a timeout's start are their own state,
+/// seeded when left out; a timeout's limit is read as an `f64`, and its
+/// clock and `is_true`'s value as whatever they hold.
+#[test]
+fn the_star_and_timeout_are_seeded() {
+    let text = "\
+fallback_star
+  timeout(seconds: 30, t: {arora/time})
+    is_true(value: true)
+";
+    let loaded = resolve(&parsed(text), &index());
+    assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+    assert_eq!(
+        *link(
+            &loaded.graph,
+            v5("root"),
+            FALLBACK_STAR_CURRENT_INDEX_PARAM_ID
+        ),
+        Source::Value(Value::U16(0))
+    );
+    assert_eq!(
+        *link(&loaded.graph, v5("root.0"), TIMEOUT_STARTED_PARAM_ID),
+        Source::Value(Value::Unit)
+    );
+    assert_eq!(
+        *link(&loaded.graph, v5("root.0"), TIMEOUT_SECONDS_PARAM_ID),
+        Source::Value(Value::F64(30.0))
+    );
+    assert!(matches!(
+        link(&loaded.graph, v5("root.0"), TIMEOUT_T_PARAM_ID),
+        Source::Key(_)
+    ));
+}
+
+/// A timeout over the store's clock, in seconds: the tree's text runs.
+#[test]
+fn a_timeout_reads_the_store_s_clock() {
+    let store = store_with(&[("clock", 0.0)]);
+    let tree = tree(&store, "timeout(seconds: 1, t: {clock})\n  running\n");
+    let mut engine = Engine::default();
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index(), &mut engine, false).unwrap();
+    assert_eq!(runtime.tick().unwrap(), Status::Running);
+    set(&store, "clock", 0.5);
+    assert_eq!(runtime.tick().unwrap(), Status::Running);
+    set(&store, "clock", 1.0);
+    assert_eq!(runtime.tick().unwrap(), Status::Failure);
+}
+
+/// A comparison of `@arora/dataflow` is a condition through `is_true`: the
+/// comparison returns a bool, which a node reporting the return of a
+/// module function would take for `Success` whatever it is.
+#[test]
+fn a_dataflow_comparison_is_a_condition_through_is_true() {
+    let mut index = index();
+    index.extend(
+        arora_dataflow_nodes::functions::function_index()
+            .iter()
+            .map(|(id, function)| (*id, function.clone())),
+    );
+    let store = store_with(&[("top", 0.01)]);
+    let resolver = |name: &str| Some(store.slot(&Key::from(name)));
+    let text = "is_true(value: greaterthan(lhs: {top}, rhs: 0.006f32))\n";
+    let tree = load_behavior_tree_text(text, &index, &resolver).expect("the text loads");
+    let mut nodes = arora_dataflow_nodes::functions::DataflowNodes::new();
+    let mut engine = Engine::default();
+    let mut bridge = nodes.bridge(&mut engine);
+    let mut runtime = BehaviorTreeRuntime::setup(&tree, &index, &mut bridge, false).unwrap();
+    assert_eq!(runtime.tick().unwrap(), Status::Success);
+    set(&store, "top", 0.001);
+    assert_eq!(runtime.tick().unwrap(), Status::Failure);
+}
+
 /// The natives list their names, parameters and types, for a palette.
 #[test]
 fn natives_describe_their_signatures() {
@@ -759,10 +832,13 @@ fn natives_describe_their_signatures() {
             "parallel",
             "retry",
             "inverter",
+            "fallback_star",
+            "timeout",
             "succeed",
             "fail",
             "running",
             "equal",
+            "is_true",
             "unpack",
             "scatter",
             "set_string",

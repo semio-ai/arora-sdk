@@ -18,14 +18,16 @@ use crate::core_nodes::core_node_parameters;
 use crate::error::BehaviorTreeError;
 use crate::nodes::{
     COS_FUNCTION_ID, EQUAL_A_PARAM_ID, EQUAL_B_PARAM_ID, EQUAL_FUNCTION_ID, FAIL_FUNCTION_ID,
-    FALLBACK_FUNCTION_ID, INCREASE_FUNCTION_ID, INVERTER_FUNCTION_ID, IS_STR_SET_FUNCTION_ID,
-    PARALLEL_FUNCTION_ID, REGEX_MATCH_FUNCTION_ID, RETRY_ATTEMPTS_PARAM_ID, RETRY_FUNCTION_ID,
+    FALLBACK_FUNCTION_ID, FALLBACK_STAR_FUNCTION_ID, INCREASE_FUNCTION_ID, INVERTER_FUNCTION_ID,
+    IS_STR_SET_FUNCTION_ID, IS_TRUE_FUNCTION_ID, IS_TRUE_VALUE_PARAM_ID, PARALLEL_FUNCTION_ID,
+    REGEX_MATCH_FUNCTION_ID, RETRY_ATTEMPTS_PARAM_ID, RETRY_FUNCTION_ID,
     RETRY_NUM_ATTEMPTS_PARAM_ID, RUN_CALL_FUNCTION_ID, RUN_CALL_PARAM_ID, RUN_FUNCTION_ID,
-    RUN_STATUS_FUNCTION_ID, RUN_STATUS_LATCH_PARAM_ID, RUN_STATUS_OUT_PARAM_ID,
-    SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID, SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID,
-    SEQ_FUNCTION_ID, SEQ_STAR_CURRENT_INDEX_PARAM_ID, SEQ_STAR_FUNCTION_ID, SET_STR_FUNCTION_ID,
-    STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID, UNPACK_FUNCTION_ID,
-    UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, UNSET_STR_FUNCTION_ID, WAIT_STR_SET_FUNCTION_ID,
+    RUN_STATUS_FUNCTION_ID, RUN_STATUS_OUT_PARAM_ID, SCATTER_FUNCTION_ID, SCATTER_KEYS_PARAM_ID,
+    SCATTER_VALUES_PARAM_ID, SCATTER_WITHIN_PARAM_ID, SEQ_FUNCTION_ID, SEQ_STAR_FUNCTION_ID,
+    SET_STR_FUNCTION_ID, STATUS_IDENTITY_FUNCTION_ID, STORE_FUNCTION_ID, SUCCEED_FUNCTION_ID,
+    TIMEOUT_FUNCTION_ID, TIMEOUT_SECONDS_PARAM_ID, TIMEOUT_STARTED_PARAM_ID, TIMEOUT_T_PARAM_ID,
+    UNPACK_FUNCTION_ID, UNPACK_OUT_PARAM_IDS, UNPACK_VALUES_PARAM_ID, UNSET_STR_FUNCTION_ID,
+    WAIT_STR_SET_FUNCTION_ID,
 };
 use crate::schema::{Expression, _RET_PARAM_ID};
 use crate::tree_node::TreeNode;
@@ -70,6 +72,9 @@ impl Node {
             PARALLEL_GROOT_ID => PARALLEL_FUNCTION_ID,
             RETRY_GROOT_ID => RETRY_FUNCTION_ID,
             INVERTER_GROOT_ID => INVERTER_FUNCTION_ID,
+            FALLBACK_STAR_GROOT_ID => FALLBACK_STAR_FUNCTION_ID,
+            TIMEOUT_GROOT_ID => TIMEOUT_FUNCTION_ID,
+            IS_TRUE_GROOT_ID => IS_TRUE_FUNCTION_ID,
             EQUAL_GROOT_ID => EQUAL_FUNCTION_ID,
             UNPACK_GROOT_ID => UNPACK_FUNCTION_ID,
             SCATTER_GROOT_ID => SCATTER_FUNCTION_ID,
@@ -111,26 +116,14 @@ impl Node {
         }
 
         // The native nodes are not in the function index: build their TreeNode
-        // directly, from their ports. seq_star's persistent current-index and a
-        // run-status decorator's latch are seeded.
+        // directly, from their ports. A native's own state (a star's current
+        // index, a retry's attempts, a timeout's start, a run-status
+        // decorator's latch) is seeded, unless a port binds it.
         if crate::is_native(arora_id) {
-            let mut parameters = if arora_id == SEQ_STAR_FUNCTION_ID {
-                HashMap::from([(
-                    SEQ_STAR_CURRENT_INDEX_PARAM_ID,
-                    Expression::Value(Value::U16(0)),
-                )])
-            } else {
-                HashMap::new()
-            };
-            // A retry's attempts are its own state, unless a port binds them.
-            if arora_id == RETRY_FUNCTION_ID {
-                parameters.insert(RETRY_ATTEMPTS_PARAM_ID, Expression::Value(Value::U32(0)));
-            }
-            // A run-status decorator's latch is its own state: it starts
-            // empty.
-            if arora_id == RUN_STATUS_FUNCTION_ID {
-                parameters.insert(RUN_STATUS_LATCH_PARAM_ID, Expression::Value(Value::Unit));
-            }
+            let mut parameters: HashMap<_, _> = crate::text::seed(arora_id)
+                .map(|(parameter, seed)| (parameter, Expression::Value(seed)))
+                .into_iter()
+                .collect();
             // A node with ports reads every one of its required ports, and
             // takes no attribute that is not a port; a control node's
             // attributes are not arguments.
@@ -205,6 +198,9 @@ impl Node {
             PARALLEL_FUNCTION_ID => PARALLEL_GROOT_ID,
             RETRY_FUNCTION_ID => RETRY_GROOT_ID,
             INVERTER_FUNCTION_ID => INVERTER_GROOT_ID,
+            FALLBACK_STAR_FUNCTION_ID => FALLBACK_STAR_GROOT_ID,
+            TIMEOUT_FUNCTION_ID => TIMEOUT_GROOT_ID,
+            IS_TRUE_FUNCTION_ID => IS_TRUE_GROOT_ID,
             EQUAL_FUNCTION_ID => EQUAL_GROOT_ID,
             UNPACK_FUNCTION_ID => UNPACK_GROOT_ID,
             SCATTER_FUNCTION_ID => SCATTER_GROOT_ID,
@@ -265,8 +261,11 @@ impl Node {
                 let Some(port) = builtin_port_name(tree_node.function, *param) else {
                     continue;
                 };
-                // A retry's attempts held as its own state are no port.
-                if *param == RETRY_ATTEMPTS_PARAM_ID && matches!(expression, Expression::Value(_)) {
+                // A retry's attempts or a timeout's start held as its own
+                // state are no port.
+                if matches!(*param, RETRY_ATTEMPTS_PARAM_ID | TIMEOUT_STARTED_PARAM_ID)
+                    && matches!(expression, Expression::Value(_))
+                {
                     continue;
                 }
                 param_args.insert(port, builtin_port_text(expression, variables)?);
@@ -365,6 +364,11 @@ fn pascal_case(name: &str) -> String {
 fn builtin_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
     match function {
         EQUAL_FUNCTION_ID => &[("a", EQUAL_A_PARAM_ID), ("b", EQUAL_B_PARAM_ID)],
+        IS_TRUE_FUNCTION_ID => &[("value", IS_TRUE_VALUE_PARAM_ID)],
+        TIMEOUT_FUNCTION_ID => &[
+            ("seconds", TIMEOUT_SECONDS_PARAM_ID),
+            ("t", TIMEOUT_T_PARAM_ID),
+        ],
         UNPACK_FUNCTION_ID => &[("values", UNPACK_VALUES_PARAM_ID)],
         SCATTER_FUNCTION_ID => &[
             ("values", SCATTER_VALUES_PARAM_ID),
@@ -387,6 +391,7 @@ fn builtin_optional_ports(function: Uuid) -> &'static [(&'static str, Uuid)] {
             ("num_attempts", RETRY_NUM_ATTEMPTS_PARAM_ID),
             ("attempts", RETRY_ATTEMPTS_PARAM_ID),
         ],
+        TIMEOUT_FUNCTION_ID => &[("started", TIMEOUT_STARTED_PARAM_ID)],
         _ => &[],
     }
 }
@@ -534,6 +539,9 @@ const FALLBACK_GROOT_ID: &str = "Fallback";
 const PARALLEL_GROOT_ID: &str = "Parallel";
 const RETRY_GROOT_ID: &str = "RetryUntilSuccessful";
 const INVERTER_GROOT_ID: &str = "Inverter";
+const FALLBACK_STAR_GROOT_ID: &str = "FallbackStar";
+const TIMEOUT_GROOT_ID: &str = "Timeout";
+const IS_TRUE_GROOT_ID: &str = "IsTrue";
 const COS_GROOT_ID: &str = "Cos";
 const EQUAL_GROOT_ID: &str = "Equal";
 const UNPACK_GROOT_ID: &str = "Unpack";
@@ -1484,6 +1492,62 @@ mod tests {
         let exported = Node::try_from_tree_node(&unbound, &HashMap::new(), &mut HashMap::new())
             .expect("exported");
         assert!(!exported.param_args.contains_key("attempts"));
+    }
+
+    /// `FallbackStar`, `Timeout` and `IsTrue` read from Groot with their
+    /// ports, and export back to them; a timeout's start held as its own
+    /// state is no port.
+    #[test]
+    fn fallback_star_timeout_and_is_true_round_trip_through_groot() {
+        let xml = r#"<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <FallbackStar>
+      <Timeout seconds="30" t="{arora/time}">
+        <IsTrue value="{ready}"/>
+      </Timeout>
+    </FallbackStar>
+  </BehaviorTree>
+</root>"#;
+        let groot = BehaviorTree::try_from_groot_xml(xml).expect("parse");
+        let mut names = HashMap::new();
+        let tree = groot
+            .root
+            .try_into_tree_node(&HashMap::new(), &mut names)
+            .expect("the tags resolve");
+        assert_eq!(tree.function, FALLBACK_STAR_FUNCTION_ID);
+        let timeout = &tree.children.as_ref().unwrap()[0];
+        assert_eq!(timeout.function, TIMEOUT_FUNCTION_ID);
+        assert_eq!(
+            timeout.parameters[&TIMEOUT_SECONDS_PARAM_ID],
+            Expression::Value(Value::String("30".into()))
+        );
+        assert_eq!(
+            timeout.parameters[&TIMEOUT_T_PARAM_ID],
+            Expression::VariableId(names["arora/time"])
+        );
+        assert_eq!(
+            timeout.parameters[&TIMEOUT_STARTED_PARAM_ID],
+            Expression::Value(Value::Unit)
+        );
+        let is_true = &timeout.children.as_ref().unwrap()[0];
+        assert_eq!(is_true.function, IS_TRUE_FUNCTION_ID);
+        assert_eq!(
+            is_true.parameters[&IS_TRUE_VALUE_PARAM_ID],
+            Expression::VariableId(names["ready"])
+        );
+
+        let mut by_id: HashMap<Uuid, String> =
+            names.iter().map(|(name, id)| (*id, name.clone())).collect();
+        let exported =
+            Node::try_from_tree_node(&tree, &HashMap::new(), &mut by_id).expect("exported");
+        assert_eq!(exported.id, "FallbackStar");
+        let timeout = &exported.children[0];
+        assert_eq!(timeout.id, "Timeout");
+        assert_eq!(timeout.param_args["seconds"], "30");
+        assert_eq!(timeout.param_args["t"], "{arora/time}");
+        assert!(!timeout.param_args.contains_key("started"));
+        assert_eq!(timeout.children[0].id, "IsTrue");
+        assert_eq!(timeout.children[0].param_args["value"], "{ready}");
     }
 
     #[test]
