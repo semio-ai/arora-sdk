@@ -31,7 +31,8 @@ the command to `last_command` and clears it.
 A node's function is one of three kinds:
 
 - a **native** node, which the tree runs itself: the control nodes
-  (`sequence`, `fallback`, `parallel`, `sequence_star`, `retry`, `inverter`),
+  (`sequence`, `fallback`, `parallel`, `sequence_star`, `fallback_star`,
+  `retry`, `inverter`, `timeout`),
   which halt a child they stop ticking while it runs, the status leaves, the
   data and string nodes, and the task-run nodes. Every device has them, with
   no module loaded ([`docs/nodes.md`](docs/nodes.md) lists them);

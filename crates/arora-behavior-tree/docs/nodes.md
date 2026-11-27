@@ -61,8 +61,11 @@ language, a tag in Groot, and a builder in [`nodes`](../src/nodes.rs).
 | `parallel` | `Parallel` | `parallel` | every child, every tick; `Success` if all succeeded, `Failure` if any failed, `Running` otherwise. |
 | `retry` | `RetryUntilSuccessful` | `retry` | its one child; `Success` when it succeeds. A failure counts one more attempt in `attempts: u32` and, while fewer than `num_attempts: i32` (`-1`, or left out: no bound), is `Running`, the child ticked afresh at the next tick, not in this one; otherwise `Failure`. A bound of `0` fails without ticking the child. `attempts` is back at 0 once the child succeeds, the attempts are spent, or the node is [halted](#halting). |
 | `inverter` | `Inverter` | `inverter` | its one child; `Failure` for its `Success`, `Success` for its `Failure`, `Running` for its `Running`. |
+| `fallback_star` | `FallbackStar` | `fallback_star` | as `fallback`, but a `Running` child is resumed at the next tick, past the children that failed; its `current_index: u16` holds where. `Failure` with no child. |
+| `timeout` | `Timeout` | `timeout` | its one child, while fewer than `seconds` have passed by the clock `t` since the node's activation began; `Failure` from then on, without ticking the child, which is [halted](#halting). See [the timeout](#the-timeout). |
 | `succeed`, `fail`, `running` | `Succeed`, `Fail`, `Run` | `succeed`, `fail`, `run` | their status. |
 | `equal` | `Equal` | | `Success` when `a` and `b` are equal (the same type and value: `U64(1)` and `U32(1)` differ, and NaN equals nothing), `Failure` otherwise. |
+| `is_true` | `IsTrue` | `is_true` | `Success` when `value` is `true`, `Failure` when it is `false`; any other value fails the tick with an error. |
 | `unpack` | `Unpack` | | writes element `i` of the array `values` to the variable bound to `out_i`, `out_0` … `out_63`; `Success`, or `Failure` for a table that does not fit (below). |
 | `scatter` | `Scatter` | | writes element `i` of `values` to the store key named by element `i` of `keys`, every key under `within`; `Success`, or `Failure` for a table that does not match (below). |
 | `set_string` | `SetString` | `set_str` | `variable` takes `value`; an unset `value` unsets it. `Success`. |
@@ -73,12 +76,55 @@ language, a tag in Groot, and a builder in [`nodes`](../src/nodes.rs).
 | `run_call` | `RunCall` | | calls the [`Call`](../../arora-types/src/call.rs) its `call` argument holds, whatever function it names; the call's `Status`, or `Success` for any other return. |
 | `run_status` | `RunStatus` | | ticks its one child and writes the child's status to `status`; latches the first terminal status in `latch`, and reports it from then on without ticking the child. A child's error ends it `Failure`. |
 
-`succeed`, `fail` and `running` are leaves, and so are the data, string and
-task-run nodes but `run_status`, a decorator, as `retry` and `inverter` are.
-A text or Groot tree leaves out a native's state (`current_index`,
-`attempts`, `latch`) and the tree seeds it; a tree may bind `retry`'s
-`attempts` to a key, to log the restarts. In Groot, `num_attempts` is read
-from its text: `<RetryUntilSuccessful num_attempts="3">`.
+`succeed`, `fail` and `running` are leaves, and so are `is_true`, the data,
+string and task-run nodes but `run_status`, a decorator, as `retry`,
+`inverter` and `timeout` are. A text or Groot tree leaves out a native's
+state (`current_index`, `attempts`, `started`, `latch`) and the tree seeds
+it; a tree may bind `retry`'s `attempts` or `timeout`'s `started` to a key,
+to log them. In Groot, `num_attempts` and `seconds` are read from their
+text: `<RetryUntilSuccessful num_attempts="3">`,
+`<Timeout seconds="30" t="{arora/time}">`.
+
+### A procedure and its clean-up
+
+A `fallback` ticks its first child again at every tick, so a clean-up after
+a failed multi-tick procedure is cut off as soon as it runs. A
+`fallback_star` resumes the clean-up, and fails when it does:
+
+```text
+fallback_star
+  sequence_star
+    move_1(...)
+    move_2(...)
+    finish(...)
+  sequence_star
+    abort_move(...)
+    fail
+```
+
+### Conditions on a value
+
+A module function's return value is its node's status only when it is a
+`Status`: a function returning a bool reports `Success` whatever it
+returns. `is_true` makes a bool a condition, such as an
+[`@arora/dataflow`](../../arora-dataflow-nodes/README.md) comparison called
+in its argument, which a host serving those functions runs:
+
+```text
+is_true(value: greaterthan(lhs: {top}, rhs: 0.006f32))
+```
+
+### The timeout
+
+`timeout(seconds, t)` reads its clock from `t`, the step's time
+`{arora/time}` in nanoseconds or a float in seconds, rather than the wall
+clock, so a replay times out where the run did. On the first tick of an
+activation it takes `t` into `started`; each tick, before ticking its
+child, it fails once `t - started` reaches `seconds`, and the child, not
+ticked, is halted as the tick ends. A child that finishes in time gives its
+status. `started` is `()` again once the node finishes or is halted, and
+`seconds` of zero or less fails without ticking the child; a clock that
+reads no time, or a limit that is no number, fails the tick with an error.
 
 ### Halting
 
@@ -94,8 +140,9 @@ subtree:
 - a parallel that ends while a child runs, or a `retry` whose child failed,
   halts what that child left running.
 
-A halted node starts its next activation afresh: a `sequence_star` at its
-first child, a `retry` with no attempt made. A module function keeps its
+A halted node starts its next activation afresh: a `sequence_star` or a
+`fallback_star` at its first child, a `retry` with no attempt made, a
+`timeout` not started. A module function keeps its
 state in its own parameters and the keys it writes: one declaring the
 parameter `activated: bool` (by value), which the node leaves unbound, is
 told `true` on the first tick of each activation, the node not having been

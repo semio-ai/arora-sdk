@@ -19,6 +19,17 @@ activation afresh, as BehaviorTree.CPP halts it.
 - `inverter` (Groot `Inverter`, builder `nodes::inverter`): its child's
   `Success` and `Failure` swapped. Either decorator of more than one child
   fails its tick with an inconsistent-tree error.
+- `fallback_star` (Groot `FallbackStar`, builder `nodes::fallback_star`):
+  as `fallback`, but resumes a `Running` child at the next tick, past the
+  children that failed, as `sequence_star` does for a sequence; its
+  `current_index: u16` goes back to 0 once it finishes or is halted.
+- `timeout` (Groot `Timeout`, builder `nodes::timeout`): ticks its one child
+  until `seconds` have passed by the clock `t` (`{arora/time}`, nanoseconds,
+  or float seconds) since its activation began, then fails without ticking
+  it, which halts it; its `started` is its state, or a key a tree binds.
+- `is_true` (Groot `IsTrue`, builder `nodes::is_true`): `Success` for a
+  `true` value, `Failure` for `false`, an error otherwise: a bool, such as a
+  dataflow comparison's, as a condition.
 - A module function declaring `activated: bool`, left unbound by its node,
   is passed `true` on the first tick of each of the node's activations and
   `false` on the next (`ACTIVATED_PARAM_NAME`).

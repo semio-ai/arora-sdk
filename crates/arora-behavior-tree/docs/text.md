@@ -178,8 +178,9 @@ using either is told so.
   states its type: `b: true`, `b: 3f64`, not `b: 3`. A finite number past
   its type's range (`1e999f64`) is refused, not made infinite.
 - **Natives' own state** is seeded when a node leaves it out:
-  `sequence_star`'s `current_index` at `0u16`, `retry`'s `attempts` at
-  `0u32`, `run_status`'s `latch` at `()`.
+  `sequence_star`'s and `fallback_star`'s `current_index` at `0u16`,
+  `retry`'s `attempts` at `0u32`, `timeout`'s `started` and `run_status`'s
+  `latch` at `()`.
 - **Inputs and outputs.** Which of a node's ports are inputs and which
   outputs, and their types, is its function's signature's to say: its
   parameters are inputs, its return value (`_ret`) and the parameters it
@@ -220,8 +221,11 @@ id):
 | `sequence_star` | `current_index: u16` (its state) | yes |
 | `retry` | `num_attempts: i32` (`-1` when left out: no bound); `attempts: u32` (its state, or a key) | one |
 | `inverter` | — | one |
+| `fallback_star` | `current_index: u16` (its state) | yes |
+| `timeout` | `seconds: f64`; `t`: the clock, `u64` nanoseconds or float seconds; `started` (its state, or a key) | one |
 | `succeed`, `fail`, `running` | — | no |
 | `equal` | `a`, `b`: any value | no |
+| `is_true` | `value`: a bool | no |
 | `unpack` | `values`; `out_0` … `out_63`, written | no |
 | `scatter` | `values`, `keys: str[]`, `within: str?` | no |
 | `set_string` | `variable: str?` (written), `value: str?` | no |

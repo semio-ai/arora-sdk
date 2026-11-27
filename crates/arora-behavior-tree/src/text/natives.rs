@@ -67,6 +67,32 @@ static NATIVES: LazyLock<Vec<Native>> = LazyLock::new(|| {
             ],
         ),
         declare("inverter", INVERTER_FUNCTION_ID, true, &[]),
+        declare(
+            "fallback_star",
+            FALLBACK_STAR_FUNCTION_ID,
+            true,
+            &[(
+                "current_index",
+                FALLBACK_STAR_CURRENT_INDEX_PARAM_ID,
+                Primitive(PrimitiveKind::U16),
+                Written,
+            )],
+        ),
+        declare(
+            "timeout",
+            TIMEOUT_FUNCTION_ID,
+            true,
+            &[
+                (
+                    "seconds",
+                    TIMEOUT_SECONDS_PARAM_ID,
+                    Primitive(PrimitiveKind::F64),
+                    Required,
+                ),
+                ("t", TIMEOUT_T_PARAM_ID, Dynamic, Required),
+                ("started", TIMEOUT_STARTED_PARAM_ID, Dynamic, Written),
+            ],
+        ),
         declare("succeed", SUCCEED_FUNCTION_ID, false, &[]),
         declare("fail", FAIL_FUNCTION_ID, false, &[]),
         declare("running", RUN_FUNCTION_ID, false, &[]),
@@ -78,6 +104,12 @@ static NATIVES: LazyLock<Vec<Native>> = LazyLock::new(|| {
                 ("a", EQUAL_A_PARAM_ID, Dynamic, Required),
                 ("b", EQUAL_B_PARAM_ID, Dynamic, Required),
             ],
+        ),
+        declare(
+            "is_true",
+            IS_TRUE_FUNCTION_ID,
+            false,
+            &[("value", IS_TRUE_VALUE_PARAM_ID, Dynamic, Required)],
         ),
         declare(
             "unpack",
@@ -324,12 +356,15 @@ fn add_parameter(function: &mut Function, id: Uuid, name: &str, ty: FrozenTy, mu
 }
 
 /// The value a native's own state starts from when a node leaves it out:
-/// `sequence_star`'s index, `retry`'s attempts and `run_status`'s latch.
+/// `sequence_star`'s and `fallback_star`'s index, `retry`'s attempts,
+/// `timeout`'s start and `run_status`'s latch.
 pub(crate) fn seed(function: Uuid) -> Option<(Uuid, arora_types::value::Value)> {
     use arora_types::value::Value;
     match function {
         SEQ_STAR_FUNCTION_ID => Some((SEQ_STAR_CURRENT_INDEX_PARAM_ID, Value::U16(0))),
+        FALLBACK_STAR_FUNCTION_ID => Some((FALLBACK_STAR_CURRENT_INDEX_PARAM_ID, Value::U16(0))),
         RETRY_FUNCTION_ID => Some((RETRY_ATTEMPTS_PARAM_ID, Value::U32(0))),
+        TIMEOUT_FUNCTION_ID => Some((TIMEOUT_STARTED_PARAM_ID, Value::Unit)),
         RUN_STATUS_FUNCTION_ID => Some((RUN_STATUS_LATCH_PARAM_ID, Value::Unit)),
         _ => None,
     }
