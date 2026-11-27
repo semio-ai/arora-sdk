@@ -11,9 +11,14 @@ All notable changes to `arora`. The format follows
 - Every device serves Arora's dataflow nodes (`@arora/dataflow`,
   `@arora/geometry`) as host modules, like the native nodes: a tree's text or
   Groot names a comparison, logic or arithmetic node with no module loaded,
-  and one in-process `DataflowNodes` answers it. A dataflow function's own
-  calls to other modules (`external`, `taskrun`, `spawn`) are refused; a host
-  module of one of their ids fails the build.
+  and one in-process `DataflowNodes` answers it. The nodes that call another
+  module (`external`, `taskrun`, `spawn`) are not served; a host module of
+  one of their ids fails the build.
+- `AroraBuilder::with_text` and `Arora::load_text`: a behavior in Arora's
+  text language, as `with_groot` and `load_groot` install a Groot tree; a
+  text with an error is refused, each error at its `line:column`.
+- `Arora::function_index()`: the device's method index, read-only, which
+  both resolve names against.
 
 ### Changed
 
