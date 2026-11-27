@@ -6,8 +6,10 @@
 //! bridge I/O seams, one behavior interpreter, and the step loop that drives
 //! them. The core behavior-tree nodes — the control nodes and the string nodes
 //! (`SetString`, `UnsetString`, `IsStringSet`, `WaitStringSet`, `RegexMatch`)
-//! — are wired natively into [`arora_behavior_tree`], so no module needs to be
-//! loaded to run a tree of them.
+//! — are wired natively into [`arora_behavior_tree`], and Arora's dataflow
+//! nodes (comparisons, logic, arithmetic: `@arora/dataflow`, `@arora/geometry`)
+//! are host modules of every device, so no module needs to be loaded to run a
+//! tree of them.
 //!
 //! Build one with the [`builder`](Arora::builder): pick a data store, a HAL,
 //! zero or more bridges, the modules whose functions behaviors may call, and
@@ -17,6 +19,7 @@
 //! drive it with [`step`](Arora::step) (once per frame) or
 //! [`run`](Arora::run) (the visible loop over `step`).
 
+mod dataflow;
 /// The device a run is: its name, its directory, its local bridge's port.
 #[cfg(feature = "native")]
 pub mod device;
@@ -177,10 +180,10 @@ pub struct Arora {
     /// The task runs started through the interpreter module that have not yet
     /// ended, each step reading whether they did, to log how.
     pub(crate) task_runs: runtime::TaskRuns,
-    /// Set by [`load_groot`](Arora::load_groot) around its load, so the
-    /// interpreter module's `LOAD` logs that the behavior came from a Groot
-    /// tree.
-    pub(crate) loading_groot: Rc<Cell<bool>>,
+    /// Set by [`load_groot`](Arora::load_groot) and
+    /// [`load_text`](Arora::load_text) around their load, so the interpreter
+    /// module's `LOAD` logs where the behavior came from.
+    pub(crate) loading_from: Rc<Cell<Option<&'static str>>>,
     // The HAL, owned by the device; outbound writes go through its
     // non-blocking `try_send`. An implementation that also feeds an observer
     // (a simulator UI, a test) shares its internals and hands a sibling handle
@@ -275,11 +278,41 @@ impl Arora {
         let graph = tree
             .into_graph(&self.function_index)
             .map_err(|e| anyhow::anyhow!("the Groot tree does not lower: {e:?}"))?;
-        self.loading_groot.set(true);
-        let loaded = self.call(interpreter_module::encode_load(&graph));
-        self.loading_groot.set(false);
+        self.load_graph(&graph, "a Groot tree")
+    }
+
+    /// Install a behavior written in Arora's [text
+    /// language](arora_behavior_tree::text) as the device's behavior, as
+    /// [`load_groot`](Self::load_groot) does a Groot tree: its names resolve
+    /// against the device's own method index, and the graph loads through the
+    /// interpreter module. A text with an error is refused with every error,
+    /// each at its `line:column`.
+    pub fn load_text(&mut self, source: &str) -> Result<()> {
+        let graph = arora_behavior_tree::text::load(source, &self.function_index)
+            .map_err(|e| anyhow::anyhow!("the text does not load: {e}"))?;
+        self.load_graph(&graph, "a text")
+    }
+
+    /// Load `graph` through the interpreter module, logging it came from
+    /// `source`.
+    fn load_graph(
+        &mut self,
+        graph: &arora_behavior::graph::Graph,
+        source: &'static str,
+    ) -> Result<()> {
+        self.loading_from.set(Some(source));
+        let loaded = self.call(interpreter_module::encode_load(graph));
+        self.loading_from.set(None);
         loaded.map_err(|e| anyhow::anyhow!("the behavior did not load: {e}"))?;
         Ok(())
+    }
+
+    /// The device's method index: every function a behavior may name, the
+    /// loaded modules' (host and guest) and the dataflow nodes', by id. What
+    /// [`load_groot`](Self::load_groot) and [`load_text`](Self::load_text)
+    /// resolve names against.
+    pub fn function_index(&self) -> &FunctionIndex {
+        &self.function_index
     }
 
     /// Load a guest module into the running device: its functions dispatch
@@ -818,6 +851,7 @@ pub struct AroraBuilder {
     guest_limits: GuestLimits,
     module_limits: Vec<(Uuid, GuestLimits)>,
     groot: Option<String>,
+    text: Option<String>,
     #[cfg(feature = "native")]
     step_period: Option<std::time::Duration>,
     #[cfg(feature = "native")]
@@ -1122,6 +1156,17 @@ impl AroraBuilder {
         self
     }
 
+    /// Install a behavior written in Arora's [text
+    /// language](arora_behavior_tree::text) once the device is built, as
+    /// [`with_groot`](Self::with_groot) does a Groot tree, loading it as
+    /// [`Arora::load_text`] does: the build fails on a text with an error,
+    /// each reported at its `line:column`, or one that does not load. Given
+    /// with a Groot tree, the text loads after it and replaces it.
+    pub fn with_text(mut self, source: impl Into<String>) -> Self {
+        self.text = Some(source.into());
+        self
+    }
+
     /// What every guest module may spend, unless
     /// [`with_module_limits`](Self::with_module_limits) sets its own: the time
     /// of a call outside a step, and its instance's memory
@@ -1321,6 +1366,12 @@ impl AroraBuilder {
                 .into_iter()
                 .map(|module| (host_module_name(&module), module)),
         );
+        // Arora's dataflow nodes, served by every device like the native nodes.
+        let host_modules = host_modules.chain(
+            dataflow::modules()
+                .into_iter()
+                .map(|module| ("the dataflow nodes".to_string(), module)),
+        );
         for (name, module) in host_modules {
             claim_module_id(&mut module_ids, module.id(), name)?;
             for description in module.descriptions() {
@@ -1463,22 +1514,21 @@ impl AroraBuilder {
         // device now runs is what an operator watching it asks first.
         let interpreter: runtime::InterpreterCell = Rc::new(RefCell::new(Some(interpreter)));
         let task_runs: runtime::TaskRuns = Rc::default();
-        let loading_groot: Rc<Cell<bool>> = Rc::default();
+        let loading_from: Rc<Cell<Option<&'static str>>> = Rc::default();
         let module = ModuleBuilder::new(interpreter_module::ID)
             .function(interpreter_module::LOAD, {
                 let cell = interpreter.clone();
-                let loading_groot = loading_groot.clone();
+                let loading_from = loading_from.clone();
                 move |call| {
                     let graph = interpreter_module::decode_load(&call)
                         .map_err(|message| CallError::Guest { message })?;
                     let nodes = graph.nodes.len();
                     let result =
                         runtime::with_interpreter(&cell, |interpreter| interpreter.load(graph))?;
-                    let source = if loading_groot.get() {
-                        " from a Groot tree"
-                    } else {
-                        ""
-                    };
+                    let source = loading_from
+                        .get()
+                        .map(|source| format!(" from {source}"))
+                        .unwrap_or_default();
                     log::info!(
                         "behavior loaded{source}: {nodes} node(s), running from the next step"
                     );
@@ -1668,10 +1718,13 @@ impl AroraBuilder {
             clock: Clock::starting_at(self.start_time),
             behavior_error: watch::Sender::new(None),
             task_runs,
-            loading_groot,
+            loading_from,
         };
         if let Some(xml) = self.groot {
             arora.load_groot(&xml)?;
+        }
+        if let Some(source) = self.text {
+            arora.load_text(&source)?;
         }
         // The runtime's own keys — its clock, its task runs' — are closed to
         // remote writers whatever wider prefix the host opens: a remote that
@@ -1981,7 +2034,7 @@ mod module_loading_tests {
 
         let store = SimpleDataStore::new();
         store
-            .write(StateChange::set("angle", Value::F32(0.0)))
+            .write(StateChange::set("length", Value::U32(3)))
             .expect("seed the input");
         let mut arora = Arora::builder()
             .with_data_store(Box::new(store.clone()))
@@ -1998,17 +2051,17 @@ mod module_loading_tests {
         arora
             .load_groot(
                 r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
-                     <cos angle="{angle}" res="{cosine}"/>
+                     <text length="{length}" res="{word}"/>
                    </BehaviorTree></root>"#,
             )
-            .expect("the tree names the guest's cos by its declared name");
+            .expect("the tree names the guest's text by its declared name");
         arora
             .step(std::time::Duration::from_millis(10))
             .expect("one step ticks the tree");
         assert_eq!(
-            store.read(&[Key::from("cosine")]),
-            vec![Some(Value::F32(1.0))],
-            "cos(0) written back to the bound key"
+            store.read(&[Key::from("word")]),
+            vec![Some(Value::String("xxx".into()))],
+            "text(3) written back to the bound key"
         );
     }
 
@@ -2022,7 +2075,7 @@ mod module_loading_tests {
 
         let store = SimpleDataStore::new();
         store
-            .write(StateChange::set("angle", Value::F32(0.0)))
+            .write(StateChange::set("length", Value::U32(3)))
             .expect("seed the input");
         let mut arora = Arora::builder()
             .with_data_store(Box::new(store.clone()))
@@ -2036,7 +2089,7 @@ mod module_loading_tests {
             )
             .with_groot(
                 r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
-                     <cos angle="{angle}" res="{cosine}"/>
+                     <text length="{length}" res="{word}"/>
                    </BehaviorTree></root>"#,
             )
             .build()
@@ -2045,9 +2098,9 @@ mod module_loading_tests {
             .step(std::time::Duration::from_millis(10))
             .expect("one step ticks the tree");
         assert_eq!(
-            store.read(&[Key::from("cosine")]),
-            vec![Some(Value::F32(1.0))],
-            "cos(0) written back to the bound key"
+            store.read(&[Key::from("word")]),
+            vec![Some(Value::String("xxx".into()))],
+            "text(3) written back to the bound key"
         );
     }
 
@@ -2086,7 +2139,7 @@ mod module_loading_tests {
             arora
                 .function_index
                 .values()
-                .find(|f| f.function_name == name)
+                .find(|f| f.module_id == module_id && f.function_name == name)
                 .cloned()
         };
 
@@ -2541,7 +2594,7 @@ mod module_loading_tests {
             arora
                 .function_index
                 .values()
-                .any(|f| f.function_name == "cos"),
+                .any(|f| f.module_id == test_module_header().id && f.function_name == "cos"),
             "the compiled module's exports join the method index"
         );
 
@@ -2960,6 +3013,122 @@ mod host_module_tests {
 
 #[cfg(all(test, feature = "native"))]
 mod stepping_tests;
+
+/// The dataflow nodes, host modules of every device.
+#[cfg(test)]
+mod dataflow_tests {
+    use super::*;
+    use arora_types::data::{Key, StateChange};
+
+    fn device(store: &SimpleDataStore) -> Arora {
+        Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .build()
+            .expect("build a device")
+    }
+
+    /// A Groot tree names a dataflow comparison by its name, and a native
+    /// `IsTrue` makes its bool a condition.
+    #[test]
+    fn a_groot_tree_runs_a_dataflow_comparison() {
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("top", Value::F64(0.01)))
+            .expect("seed the input");
+        let mut arora = device(&store);
+        arora
+            .load_groot(
+                r#"<root main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree">
+                     <Sequence>
+                       <greaterthan lhs="{top}" rhs="{limit}" _ret="{.above}"/>
+                       <IsTrue value="{.above}"/>
+                       <SetString variable="{verdict}" value="above"/>
+                     </Sequence>
+                   </BehaviorTree></root>"#,
+            )
+            .expect("the tree names greaterthan");
+        store
+            .write(StateChange::set("limit", Value::F64(0.006)))
+            .expect("seed the limit");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one step ticks the tree");
+        assert_eq!(
+            store.read(&[Key::from("verdict")]),
+            vec![Some(Value::String("above".into()))]
+        );
+        store
+            .write(StateChange::set("top", Value::F64(0.001)))
+            .expect("lower the input");
+        store
+            .write(StateChange::set("verdict", Value::String("below".into())))
+            .expect("reset the verdict");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one more step");
+        assert_eq!(
+            store.read(&[Key::from("verdict")]),
+            vec![Some(Value::String("below".into()))],
+            "the condition fails below the limit"
+        );
+    }
+
+    /// A behavior's text names the dataflow nodes as any function: here a
+    /// comparison in a native's arguments, and a detached one.
+    #[test]
+    fn a_text_runs_a_dataflow_comparison() {
+        let store = SimpleDataStore::new();
+        store
+            .write(StateChange::set("top", Value::F64(0.01)))
+            .expect("seed the input");
+        let mut arora = Arora::builder()
+            .with_data_store(Box::new(store.clone()))
+            .with_text(
+                "sequence\n  \
+                   is_true(value: greaterthan(lhs: {top}, rhs: 0.006f64))\n  \
+                   is_true(value: @below._ret)\n  \
+                   set_string(variable: {verdict}, value: \"above\")\n\
+                 \n\
+                 below: lessthan(lhs: {top}, rhs: 0.02f64)\n",
+            )
+            .build()
+            .expect("the text loads at build");
+        arora
+            .step(std::time::Duration::from_millis(10))
+            .expect("one step ticks the tree");
+        assert_eq!(
+            store.read(&[Key::from("verdict")]),
+            vec![Some(Value::String("above".into()))]
+        );
+        assert!(arora
+            .function_index()
+            .values()
+            .any(|function| function.function_name == "greaterthan"));
+    }
+
+    /// A text with an error fails the build, the error at its line and
+    /// column.
+    #[test]
+    fn with_text_fails_the_build_on_an_unknown_name() {
+        let error = Arora::builder()
+            .with_text("sequence\n  nobody()\n")
+            .build()
+            .err()
+            .expect("an unknown name fails the build");
+        assert!(error.to_string().contains("2:3:"), "{error}");
+    }
+
+    /// A device's own host module of a dataflow id fails the build, rather
+    /// than one shadowing the other.
+    #[test]
+    fn a_host_module_of_a_dataflow_id_fails_the_build() {
+        let id = arora_dataflow_nodes::functions::DATAFLOW.id;
+        let built = Arora::builder()
+            .with_host_module(ModuleBuilder::new(id).build())
+            .build();
+        assert!(built.is_err());
+    }
+}
 
 #[cfg(all(test, feature = "native"))]
 mod test_components;

@@ -66,8 +66,11 @@ The runner loads the modules its device directory carries, then each
 native behavior-tree nodes and the functions of those modules. The control
 nodes and the string nodes (`SetString`, `UnsetString`, `IsStringSet`,
 `WaitStringSet`, `RegexMatch`) are native in
-[`arora-behavior-tree`](../arora-behavior-tree): a tree of them runs with no
-module loaded.
+[`arora-behavior-tree`](../arora-behavior-tree), and every device serves Arora's
+[dataflow nodes](../arora-dataflow-nodes) (`@arora/dataflow`,
+`@arora/geometry`), the comparisons, logic and arithmetic a tree calls in its
+arguments (`is_true(value: greaterthan(lhs: {top}, rhs: 0.006f32))`): a tree of
+them runs with no module loaded.
 
 ## Use it as a library
 
@@ -84,6 +87,10 @@ let tree = std::fs::read_to_string("crates/arora/examples/hello_tree.groot.xml")
 device.load_groot(&tree)?;
 device.step(Duration::from_millis(10))?; // the tree ticks once
 ```
+
+A behavior in Arora's [text language](../arora-behavior-tree/docs/text.md)
+loads the same way, with `load_text` (or `with_text` on the builder); a text
+with an error is refused, each error at its `line:column`.
 
 Or hand the device your HAL and let it pace itself. `AroraBuilder::run` picks
 the operator front end, serves the open local bridge when no bridge was given,

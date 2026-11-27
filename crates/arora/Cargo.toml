@@ -50,6 +50,9 @@ studio-bridge = [
 tui = ["native", "dep:ratatui", "dep:sysinfo", "dep:env_filter"]
 
 [dependencies]
+# The dataflow nodes every device serves: comparisons, logic and arithmetic a
+# tree calls in its arguments.
+arora-dataflow-nodes = { path = "../arora-dataflow-nodes", version = "3", default-features = false }
 arora-engine = { path = "../arora-engine", version = "7", default-features = false }
 # 10.1: the interpreter answers `read` and writes the behavior's revision.
 arora-behavior-tree = { path = "../arora-behavior-tree", version = "11" }
